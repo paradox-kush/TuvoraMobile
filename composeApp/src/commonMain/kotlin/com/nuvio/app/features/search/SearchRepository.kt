@@ -10,6 +10,7 @@ import com.nuvio.app.features.catalog.mergeCatalogItems
 import com.nuvio.app.features.catalog.supportsPagination
 import com.nuvio.app.features.home.HomeCatalogSection
 import com.nuvio.app.features.home.MetaPreview
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -386,6 +387,15 @@ object SearchRepository {
                     )
                 },
                 onFailure = { error ->
+                    if (error is CancellationException) {
+                        log.d {
+                            "Discover request cancelled catalogKey=${selectedCatalog.key} addon=${selectedCatalog.addonName} " +
+                                "type=${selectedCatalog.type} catalogId=${selectedCatalog.catalogId} " +
+                                "genre=${current.selectedGenre ?: "<all>"} skip=$requestedSkip"
+                        }
+                        return@fold
+                    }
+
                     val latest = _discoverUiState.value
                     if (latest.selectedCatalogKey != selectedCatalog.key || latest.selectedGenre != current.selectedGenre) {
                         return@fold

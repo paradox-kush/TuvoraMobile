@@ -9,7 +9,7 @@ ANDROID_APP_ID="com.nuvio.app"
 ANDROID_ACTIVITY=".MainActivity"
 IOS_PROJECT="$ROOT_DIR/iosApp/iosApp.xcodeproj"
 IOS_SCHEME="iosApp"
-IOS_DERIVED_DATA="$ROOT_DIR/build/ios-derived"
+IOS_DERIVED_DATA_BASE="$ROOT_DIR/build/ios-derived"
 IOS_APP_NAME="Nuvio.app"
 IOS_BUNDLE_ID="com.nuvio.app.Nuvio"
 IOS_PREFERRED_DEVICE_MODEL="iPhone 14 Pro"
@@ -18,8 +18,7 @@ usage() {
   cat <<'EOF'
 Usage:
   ./scripts/run-mobile.sh android [full|playstore]
-  ./scripts/run-mobile.sh ios s
-  ./scripts/run-mobile.sh ios p
+  ./scripts/run-mobile.sh ios [s|p] [full|appstore]
 
 Builds the debug app for the selected platform, installs it on all available
 Android emulators, a booted iOS simulator, or the configured iOS physical
@@ -87,6 +86,26 @@ physical = [
 if physical:
     print(physical[0].get("identifier", ""))
 '
+}
+
+validate_ios_distribution() {
+  local distribution="$1"
+
+  case "$distribution" in
+    full|appstore)
+      ;;
+    *)
+      echo "Unknown iOS distribution: $distribution" >&2
+      echo "Expected one of: full, appstore" >&2
+      exit 1
+      ;;
+  esac
+}
+
+ios_derived_data_path() {
+  local target="$1"
+  local distribution="$2"
+  echo "$IOS_DERIVED_DATA_BASE-$distribution-$target"
 }
 
 run_android() {
@@ -183,6 +202,9 @@ run_android() {
 }
 
 run_ios_simulator() {
+  local distribution="${1:-appstore}"
+
+  validate_ios_distribution "$distribution"
   require_command xcodebuild
   require_command xcrun
 
@@ -195,16 +217,19 @@ run_ios_simulator() {
     exit 1
   fi
 
-  local simulator_app_path
-  simulator_app_path="$IOS_DERIVED_DATA/Build/Products/Debug-iphonesimulator/$IOS_APP_NAME"
+  local derived_data_path
+  derived_data_path="$(ios_derived_data_path simulator "$distribution")"
 
-  echo "Building iOS debug app for simulator $simulator_id..."
-  xcodebuild \
+  local simulator_app_path
+  simulator_app_path="$derived_data_path/Build/Products/Debug-iphonesimulator/$IOS_APP_NAME"
+
+  echo "Building iOS $distribution debug app for simulator $simulator_id..."
+  env NUVIO_IOS_DISTRIBUTION="$distribution" xcodebuild \
     -project "$IOS_PROJECT" \
     -scheme "$IOS_SCHEME" \
     -configuration Debug \
     -destination "id=$simulator_id" \
-    -derivedDataPath "$IOS_DERIVED_DATA" \
+    -derivedDataPath "$derived_data_path" \
     build
 
   if [[ ! -d "$simulator_app_path" ]]; then
@@ -220,6 +245,9 @@ run_ios_simulator() {
 }
 
 run_ios_physical() {
+  local distribution="${1:-appstore}"
+
+  validate_ios_distribution "$distribution"
   require_command xcodebuild
   require_command xcrun
 
@@ -227,16 +255,19 @@ run_ios_physical() {
   physical_device_id="$(IOS_PREFERRED_DEVICE_MODEL="$IOS_PREFERRED_DEVICE_MODEL" preferred_ios_device)"
 
   if [[ -n "$physical_device_id" ]]; then
-    local device_app_path
-    device_app_path="$IOS_DERIVED_DATA/Build/Products/Debug-iphoneos/$IOS_APP_NAME"
+    local derived_data_path
+    derived_data_path="$(ios_derived_data_path device "$distribution")"
 
-    echo "Building iOS debug app for physical device $physical_device_id..."
-    xcodebuild \
+    local device_app_path
+    device_app_path="$derived_data_path/Build/Products/Debug-iphoneos/$IOS_APP_NAME"
+
+    echo "Building iOS $distribution debug app for physical device $physical_device_id..."
+    env NUVIO_IOS_DISTRIBUTION="$distribution" xcodebuild \
       -project "$IOS_PROJECT" \
       -scheme "$IOS_SCHEME" \
       -configuration Debug \
       -destination "id=$physical_device_id" \
-      -derivedDataPath "$IOS_DERIVED_DATA" \
+      -derivedDataPath "$derived_data_path" \
       build
 
     if [[ ! -d "$device_app_path" ]]; then
@@ -272,17 +303,19 @@ main() {
       run_android "${2:-full}"
       ;;
     ios)
-      if [[ $# -ne 2 ]]; then
+      if [[ $# -lt 2 || $# -gt 3 ]]; then
         usage
         exit 1
       fi
 
+      local ios_distribution="${3:-appstore}"
+
       case "$2" in
         s)
-          run_ios_simulator
+          run_ios_simulator "$ios_distribution"
           ;;
         p)
-          run_ios_physical
+          run_ios_physical "$ios_distribution"
           ;;
         *)
           echo "Unknown iOS target: $2" >&2
