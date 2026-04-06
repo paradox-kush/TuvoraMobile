@@ -361,8 +361,9 @@ internal fun HomescreenCatalogRow(
         ) {
             Column(
                 modifier = Modifier
+                    .weight(1f)
                     .padding(end = 12.dp)
-                    .widthIn(max = if (isTablet) 560.dp else 260.dp),
+                    .then(if (isTablet) Modifier.widthIn(max = 560.dp) else Modifier),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
@@ -370,7 +371,7 @@ internal fun HomescreenCatalogRow(
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
