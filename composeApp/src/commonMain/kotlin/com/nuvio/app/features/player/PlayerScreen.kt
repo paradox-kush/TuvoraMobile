@@ -546,6 +546,15 @@ fun PlayerScreen(
 
         fun switchToEpisodeStream(stream: StreamItem, episode: MetaVideo) {
             val url = stream.directPlaybackUrl ?: return
+            showNextEpisodeCard = false
+            showSourcesPanel = false
+            showEpisodesPanel = false
+            episodeStreamsPanelState = EpisodeStreamsPanelState()
+            nextEpisodeAutoPlayJob?.cancel()
+            nextEpisodeAutoPlaySearching = false
+            nextEpisodeAutoPlaySourceName = null
+            nextEpisodeAutoPlayCountdown = null
+            PlayerStreamsRepository.clearEpisodeStreams()
             flushWatchProgress()
             val epVideoId = episode.id
             val epResumeVideoId = buildPlaybackVideoId(
@@ -587,9 +596,6 @@ fun PlayerScreen(
             activeVideoId = episode.id
             activeInitialPositionMs = epResumePositionMs
             activeInitialProgressFraction = null
-            showEpisodesPanel = false
-            episodeStreamsPanelState = EpisodeStreamsPanelState()
-            PlayerStreamsRepository.clearEpisodeStreams()
             controlsVisible = true
         }
 
@@ -718,6 +724,10 @@ fun PlayerScreen(
             previousIsPlaying = false
             preferredAudioSelectionApplied = false
             preferredSubtitleSelectionApplied = false
+            showSourcesPanel = false
+            showEpisodesPanel = false
+            episodeStreamsPanelState = EpisodeStreamsPanelState()
+            PlayerStreamsRepository.clearEpisodeStreams()
             SubtitleRepository.clear()
             WatchProgressRepository.ensureLoaded()
         }
