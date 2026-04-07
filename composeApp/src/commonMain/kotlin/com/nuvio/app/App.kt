@@ -74,6 +74,7 @@ import com.nuvio.app.core.sync.SyncManager
 import com.nuvio.app.core.ui.NuvioNavigationBar
 import com.nuvio.app.core.ui.NuvioPosterActionSheet
 import com.nuvio.app.core.ui.PlatformBackHandler
+import com.nuvio.app.core.ui.configurePlatformImageLoader
 import com.nuvio.app.core.ui.TraktListPickerDialog
 import com.nuvio.app.core.ui.NuvioTheme
 import com.nuvio.app.features.auth.AuthScreen
@@ -248,6 +249,7 @@ fun App() {
             .crossfade(true)
             .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCachePolicy(CachePolicy.ENABLED)
+            .configurePlatformImageLoader()
             .build()
     }
     val selectedTheme by remember {

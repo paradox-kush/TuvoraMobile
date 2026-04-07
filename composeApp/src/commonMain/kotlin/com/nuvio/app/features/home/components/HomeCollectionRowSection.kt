@@ -1,6 +1,5 @@
 package com.nuvio.app.features.home.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,23 +7,25 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import com.nuvio.app.core.ui.NuvioShelfSection
+import com.nuvio.app.core.ui.posterCardClickable
 import com.nuvio.app.features.collection.Collection
 import com.nuvio.app.features.collection.CollectionFolder
 import com.nuvio.app.features.home.PosterShape
@@ -84,40 +85,55 @@ private fun CollectionFolderCard(
         modifier = modifier.width(cardWidth),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Box(
+        val shapeCorner = RoundedCornerShape(16.dp)
+        val imageUrl = collectionFolderCardImageUrl(folder)
+        Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(aspectRatio)
-                .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .then(
-                    if (onClick != null) Modifier.clickable(onClick = onClick)
-                    else Modifier
-                ),
-            contentAlignment = Alignment.Center,
+                .aspectRatio(aspectRatio),
+            shape = shapeCorner,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+            ),
+            elevation = CardDefaults.cardElevation(
+                defaultElevation = 2.dp,
+            ),
         ) {
-            when {
-                !folder.coverImageUrl.isNullOrBlank() -> {
-                    AsyncImage(
-                        model = folder.coverImageUrl,
-                        contentDescription = folder.title,
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    !imageUrl.isNullOrBlank() -> {
+                        CollectionCardRemoteImage(
+                            imageUrl = imageUrl,
+                            contentDescription = folder.title,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            animateIfPossible = isAnimatedCollectionFolderImage(folder, imageUrl),
+                        )
+                    }
+                    !folder.coverEmoji.isNullOrBlank() -> {
+                        Text(
+                            text = folder.coverEmoji,
+                            fontSize = 36.sp,
+                        )
+                    }
+                    else -> {
+                        Text(
+                            text = folder.title.take(2).uppercase(),
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+
+                if (onClick != null) {
+                    Box(
                         modifier = Modifier
-                            .matchParentSize(),
-                        contentScale = ContentScale.Crop,
-                    )
-                }
-                !folder.coverEmoji.isNullOrBlank() -> {
-                    Text(
-                        text = folder.coverEmoji,
-                        fontSize = 36.sp,
-                    )
-                }
-                else -> {
-                    Text(
-                        text = folder.title.take(2).uppercase(),
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
+                            .fillMaxSize()
+                            .posterCardClickable(onClick = onClick, onLongClick = null),
                     )
                 }
             }
@@ -133,4 +149,24 @@ private fun CollectionFolderCard(
             )
         }
     }
+}
+
+private fun collectionFolderCardImageUrl(folder: CollectionFolder): String? {
+    return if (folder.focusGifEnabled) {
+        firstNonBlank(folder.focusGifUrl, folder.coverImageUrl)
+    } else {
+        firstNonBlank(folder.coverImageUrl)
+    }
+}
+
+private fun firstNonBlank(vararg candidates: String?): String? {
+    return candidates.firstOrNull { !it.isNullOrBlank() }?.trim()
+}
+
+private fun isAnimatedCollectionFolderImage(
+    folder: CollectionFolder,
+    imageUrl: String,
+): Boolean {
+    val gifUrl = firstNonBlank(folder.focusGifUrl) ?: return false
+    return folder.focusGifEnabled && imageUrl == gifUrl
 }
