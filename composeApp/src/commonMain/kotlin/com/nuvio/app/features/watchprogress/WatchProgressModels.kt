@@ -150,6 +150,9 @@ data class ContinueWatchingItem(
     val episodeTitle: String? = null,
     val episodeThumbnail: String? = null,
     val pauseDescription: String? = null,
+    val isNextUp: Boolean = false,
+    val nextUpSeedSeasonNumber: Int? = null,
+    val nextUpSeedEpisodeNumber: Int? = null,
     val resumePositionMs: Long,
     val resumeProgressFraction: Float? = null,
     val durationMs: Long,
@@ -160,7 +163,20 @@ data class ContinueWatchingPreferencesUiState(
     val isVisible: Boolean = true,
     val style: ContinueWatchingSectionStyle = ContinueWatchingSectionStyle.Wide,
     val upNextFromFurthestEpisode: Boolean = true,
+    val dismissedNextUpKeys: Set<String> = emptySet(),
 )
+
+internal fun nextUpDismissKey(
+    contentId: String,
+    seasonNumber: Int?,
+    episodeNumber: Int?,
+): String = buildString {
+    append(contentId.trim())
+    append("|")
+    append(seasonNumber ?: -1)
+    append("|")
+    append(episodeNumber ?: -1)
+}
 
 internal fun WatchProgressEntry.toContinueWatchingItem(): ContinueWatchingItem {
     val normalizedEntry = normalizedCompletion()
@@ -198,6 +214,9 @@ internal fun WatchProgressEntry.toContinueWatchingItem(): ContinueWatchingItem {
         episodeTitle = normalizedEntry.episodeTitle,
         episodeThumbnail = normalizedEntry.episodeThumbnail,
         pauseDescription = normalizedEntry.pauseDescription,
+        isNextUp = false,
+        nextUpSeedSeasonNumber = null,
+        nextUpSeedEpisodeNumber = null,
         resumePositionMs = if (explicitResumeProgressFraction != null) 0L else normalizedEntry.lastPositionMs,
         resumeProgressFraction = explicitResumeProgressFraction,
         durationMs = normalizedEntry.durationMs,
@@ -242,6 +261,9 @@ internal fun WatchProgressEntry.toUpNextContinueWatchingItem(
         episodeTitle = nextEpisode.title,
         episodeThumbnail = nextEpisode.thumbnail,
         pauseDescription = nextEpisode.overview,
+        isNextUp = true,
+        nextUpSeedSeasonNumber = seasonNumber,
+        nextUpSeedEpisodeNumber = episodeNumber,
         resumePositionMs = 0L,
         resumeProgressFraction = null,
         durationMs = 0L,

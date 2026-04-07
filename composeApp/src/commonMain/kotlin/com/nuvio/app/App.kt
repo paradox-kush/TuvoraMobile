@@ -72,6 +72,7 @@ import com.nuvio.app.core.deeplink.AppDeepLink
 import com.nuvio.app.core.deeplink.AppDeepLinkRepository
 import com.nuvio.app.core.sync.SyncManager
 import com.nuvio.app.core.ui.NuvioNavigationBar
+import com.nuvio.app.core.ui.NuvioContinueWatchingActionSheet
 import com.nuvio.app.core.ui.NuvioPosterActionSheet
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.configurePlatformImageLoader
@@ -124,6 +125,7 @@ import com.nuvio.app.features.collection.FolderDetailScreen
 import com.nuvio.app.features.collection.FolderDetailRepository
 import com.nuvio.app.features.streams.StreamContext
 import com.nuvio.app.features.streams.StreamContextStore
+import com.nuvio.app.features.streams.StreamAutoPlayPolicy
 import com.nuvio.app.features.streams.StreamLinkCacheRepository
 import com.nuvio.app.features.streams.StreamsRepository
 import com.nuvio.app.features.streams.StreamsScreen
@@ -134,7 +136,9 @@ import com.nuvio.app.features.trakt.TraktConnectionMode
 import com.nuvio.app.features.trakt.TraktListTab
 import com.nuvio.app.features.watched.WatchedRepository
 import com.nuvio.app.features.watchprogress.ContinueWatchingItem
+import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesRepository
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
+import com.nuvio.app.features.watchprogress.nextUpDismissKey
 import com.nuvio.app.features.watching.application.WatchingActions
 import com.nuvio.app.features.watching.application.WatchingState
 import kotlinx.coroutines.flow.collectLatest
@@ -213,6 +217,7 @@ data class StreamRoute(
     val resumePositionMs: Long? = null,
     val resumeProgressFraction: Float? = null,
     val manualSelection: Boolean = false,
+    val startFromBeginning: Boolean = false,
 )
 
 @Serializable
@@ -391,6 +396,7 @@ private fun MainAppContent(
         val coroutineScope = rememberCoroutineScope()
         var selectedTab by rememberSaveable { mutableStateOf(AppScreenTab.Home) }
         var selectedPosterForActions by remember { mutableStateOf<MetaPreview?>(null) }
+        var selectedContinueWatchingForActions by remember { mutableStateOf<ContinueWatchingItem?>(null) }
         var showLibraryListPicker by remember { mutableStateOf(false) }
         var pickerItem by remember { mutableStateOf<LibraryItem?>(null) }
         var pickerTitle by remember { mutableStateOf("") }
@@ -406,6 +412,10 @@ private fun MainAppContent(
             TraktAuthRepository.ensureLoaded()
             TraktAuthRepository.uiState
         }.collectAsStateWithLifecycle()
+    val playerSettingsUiState by remember {
+        PlayerSettingsRepository.ensureLoaded()
+        PlayerSettingsRepository.uiState
+    }.collectAsStateWithLifecycle()
     val watchedUiState by remember {
         WatchedRepository.ensureLoaded()
         WatchedRepository.uiState
@@ -518,7 +528,7 @@ private fun MainAppContent(
             )
         }
 
-        val onContinueWatchingClick: (ContinueWatchingItem) -> Unit = { item ->
+        val openContinueWatching: (ContinueWatchingItem, Boolean, Boolean) -> Unit = { item, manualSelection, startFromBeginning ->
             val streamContextId = item.pauseDescription
                 ?.takeIf { it.isNotBlank() }
                 ?.let { StreamContextStore.put(StreamContext(pauseDescription = it)) }
@@ -537,19 +547,29 @@ private fun MainAppContent(
                     episodeTitle = item.episodeTitle,
                     episodeThumbnail = item.episodeThumbnail,
                     streamContextId = streamContextId,
-                    resumePositionMs = item.resumePositionMs,
-                    resumeProgressFraction = item.resumeProgressFraction,
+                    resumePositionMs = if (startFromBeginning) 0L else item.resumePositionMs,
+                    resumeProgressFraction = if (startFromBeginning) null else item.resumeProgressFraction,
+                    manualSelection = manualSelection,
+                    startFromBeginning = startFromBeginning,
                 ),
             )
         }
 
+        val onContinueWatchingClick: (ContinueWatchingItem) -> Unit = { item ->
+            openContinueWatching(item, false, false)
+        }
+
+        val onContinueWatchingStartFromBeginning: (ContinueWatchingItem) -> Unit = { item ->
+            openContinueWatching(item, false, true)
+        }
+
+        val onContinueWatchingPlayManually: (ContinueWatchingItem) -> Unit = { item ->
+            openContinueWatching(item, true, false)
+        }
+
         val onContinueWatchingLongPress: (ContinueWatchingItem) -> Unit = { item ->
-            navController.navigate(
-                DetailRoute(
-                    type = item.parentMetaType,
-                    id = item.parentMetaId,
-                ),
-            )
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+            selectedContinueWatchingForActions = item
         }
 
         Box(
@@ -987,6 +1007,7 @@ private fun MainAppContent(
                         resumePositionMs = route.resumePositionMs,
                         resumeProgressFraction = route.resumeProgressFraction,
                         manualSelection = route.manualSelection,
+                        startFromBeginning = route.startFromBeginning,
                         onStreamSelected = { stream, resolvedResumePositionMs, resolvedResumeProgressFraction ->
                             val sourceUrl = stream.directPlaybackUrl
                             if (sourceUrl != null) {
@@ -1256,6 +1277,42 @@ private fun MainAppContent(
                     selectedPosterForActions?.let { preview ->
                         coroutineScope.launch {
                             WatchingActions.togglePosterWatched(preview)
+                        }
+                    }
+                },
+            )
+
+            NuvioContinueWatchingActionSheet(
+                item = selectedContinueWatchingForActions,
+                showManualPlayOption = StreamAutoPlayPolicy.isEffectivelyEnabled(playerSettingsUiState),
+                onDismiss = { selectedContinueWatchingForActions = null },
+                onOpenDetails = {
+                    selectedContinueWatchingForActions?.let { item ->
+                        navController.navigate(
+                            DetailRoute(
+                                type = item.parentMetaType,
+                                id = item.parentMetaId,
+                            ),
+                        )
+                    }
+                },
+                onStartFromBeginning = selectedContinueWatchingForActions
+                    ?.takeIf { !it.isNextUp }
+                    ?.let { item -> { onContinueWatchingStartFromBeginning(item) } },
+                onPlayManually = selectedContinueWatchingForActions
+                    ?.let { item -> { onContinueWatchingPlayManually(item) } },
+                onRemove = {
+                    selectedContinueWatchingForActions?.let { item ->
+                        if (item.isNextUp) {
+                            ContinueWatchingPreferencesRepository.addDismissedNextUpKey(
+                                nextUpDismissKey(
+                                    item.parentMetaId,
+                                    item.nextUpSeedSeasonNumber,
+                                    item.nextUpSeedEpisodeNumber,
+                                ),
+                            )
+                        } else {
+                            WatchProgressRepository.removeProgress(contentId = item.parentMetaId)
                         }
                     }
                 },

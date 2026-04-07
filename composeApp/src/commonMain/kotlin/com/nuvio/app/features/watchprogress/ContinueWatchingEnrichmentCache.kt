@@ -21,6 +21,8 @@ data class CachedNextUpItem(
     val pauseDescription: String? = null,
     val lastWatched: Long,
     val sortTimestamp: Long,
+    val seedSeason: Int? = null,
+    val seedEpisode: Int? = null,
 )
 
 @Serializable

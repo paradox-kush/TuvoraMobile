@@ -2,6 +2,7 @@ package com.nuvio.app.features.trakt
 
 import co.touchlab.kermit.Logger
 import com.nuvio.app.features.addons.httpGetTextWithHeaders
+import com.nuvio.app.features.addons.httpRequestRaw
 import com.nuvio.app.features.details.MetaDetailsRepository
 import com.nuvio.app.features.watchprogress.WatchProgressCompletionPercentThreshold
 import com.nuvio.app.features.watchprogress.WatchProgressEntry
@@ -171,6 +172,105 @@ object TraktProgressRepository {
         if (videoId.isBlank()) return
         val filtered = _uiState.value.entries.filterNot { it.videoId == videoId }
         _uiState.value = _uiState.value.copy(entries = filtered)
+    }
+
+    fun applyOptimisticRemoval(
+        contentId: String,
+        seasonNumber: Int? = null,
+        episodeNumber: Int? = null,
+    ) {
+        if (!TraktAuthRepository.isAuthenticated.value) return
+        val normalizedContentId = contentId.trim()
+        if (normalizedContentId.isBlank()) return
+        val filtered = _uiState.value.entries.filterNot { entry ->
+            if (entry.parentMetaId != normalizedContentId) {
+                false
+            } else if (seasonNumber != null && episodeNumber != null) {
+                entry.seasonNumber == seasonNumber && entry.episodeNumber == episodeNumber
+            } else {
+                true
+            }
+        }
+        _uiState.value = _uiState.value.copy(entries = filtered)
+    }
+
+    suspend fun removeProgress(
+        contentId: String,
+        seasonNumber: Int? = null,
+        episodeNumber: Int? = null,
+    ) {
+        val normalizedContentId = contentId.trim()
+        if (normalizedContentId.isBlank()) return
+        val headers = TraktAuthRepository.authorizedHeaders() ?: return
+
+        applyOptimisticRemoval(
+            contentId = normalizedContentId,
+            seasonNumber = seasonNumber,
+            episodeNumber = episodeNumber,
+        )
+
+        val playbackMovies = runCatching {
+            json.decodeFromString<List<TraktPlaybackItem>>(
+                httpGetTextWithHeaders(
+                    url = "$BASE_URL/sync/playback/movies",
+                    headers = headers,
+                ),
+            )
+        }.getOrDefault(emptyList())
+        val playbackEpisodes = runCatching {
+            json.decodeFromString<List<TraktPlaybackItem>>(
+                httpGetTextWithHeaders(
+                    url = "$BASE_URL/sync/playback/episodes",
+                    headers = headers,
+                ),
+            )
+        }.getOrDefault(emptyList())
+
+        playbackMovies
+            .filter { item -> normalizeTraktContentId(item.movie?.ids, fallback = item.movie?.title) == normalizedContentId }
+            .forEach { item ->
+                item.id?.let { playbackId ->
+                    runCatching {
+                        httpRequestRaw(
+                            method = "DELETE",
+                            url = "$BASE_URL/sync/playback/$playbackId",
+                            headers = headers,
+                            body = "",
+                        )
+                    }.onFailure { error ->
+                        if (error is CancellationException) throw error
+                        log.w { "Failed to delete Trakt movie playback $playbackId: ${error.message}" }
+                    }
+                }
+            }
+
+        playbackEpisodes
+            .filter { item ->
+                val sameContent = normalizeTraktContentId(item.show?.ids, fallback = item.show?.title) == normalizedContentId
+                val sameEpisode = if (seasonNumber != null && episodeNumber != null) {
+                    item.episode?.season == seasonNumber && item.episode.number == episodeNumber
+                } else {
+                    true
+                }
+                sameContent && sameEpisode
+            }
+            .forEach { item ->
+                item.id?.let { playbackId ->
+                    runCatching {
+                        httpRequestRaw(
+                            method = "DELETE",
+                            url = "$BASE_URL/sync/playback/$playbackId",
+                            headers = headers,
+                            body = "",
+                        )
+                    }.onFailure { error ->
+                        if (error is CancellationException) throw error
+                        log.w { "Failed to delete Trakt episode playback $playbackId: ${error.message}" }
+                    }
+                }
+            }
+
+        refreshNow()
     }
 
     private suspend fun fetchPlaybackEntries(headers: Map<String, String>): List<WatchProgressEntry> = withContext(Dispatchers.Default) {

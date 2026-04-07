@@ -236,6 +236,55 @@ object WatchProgressRepository {
         }
     }
 
+    fun removeProgress(
+        contentId: String,
+        seasonNumber: Int? = null,
+        episodeNumber: Int? = null,
+    ) {
+        ensureLoaded()
+        val normalizedContentId = contentId.trim()
+        if (normalizedContentId.isBlank()) return
+
+        val entriesToRemove = currentEntries().filter { entry ->
+            if (entry.parentMetaId != normalizedContentId) {
+                false
+            } else if (seasonNumber != null && episodeNumber != null) {
+                entry.seasonNumber == seasonNumber && entry.episodeNumber == episodeNumber
+            } else {
+                true
+            }
+        }
+        if (entriesToRemove.isEmpty()) return
+
+        if (shouldUseTraktProgress()) {
+            TraktProgressRepository.applyOptimisticRemoval(
+                contentId = normalizedContentId,
+                seasonNumber = seasonNumber,
+                episodeNumber = episodeNumber,
+            )
+            publish()
+            syncScope.launch {
+                runCatching {
+                    TraktProgressRepository.removeProgress(
+                        contentId = normalizedContentId,
+                        seasonNumber = seasonNumber,
+                        episodeNumber = episodeNumber,
+                    )
+                }.onFailure { error ->
+                    log.e(error) { "Failed to remove Trakt watch progress" }
+                }
+            }
+            return
+        }
+
+        entriesToRemove.forEach { entry ->
+            entriesByVideoId.remove(entry.videoId)
+        }
+        publish()
+        persist()
+        pushDeleteToServer(entriesToRemove)
+    }
+
     fun progressForVideo(videoId: String): WatchProgressEntry? {
         ensureLoaded()
         return if (shouldUseTraktProgress()) {
@@ -295,6 +344,10 @@ object WatchProgressRepository {
             lastSourceUrl = session.lastSourceUrl,
             isCompleted = isCompleted,
         ).normalizedCompletion()
+
+        if (entry.parentMetaType.equals("series", ignoreCase = true)) {
+            ContinueWatchingPreferencesRepository.removeDismissedNextUpKeysForContent(entry.parentMetaId)
+        }
 
         entriesByVideoId[session.videoId] = entry
         if (shouldUseTraktProgress()) {

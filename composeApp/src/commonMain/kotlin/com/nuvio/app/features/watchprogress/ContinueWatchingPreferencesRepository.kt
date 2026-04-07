@@ -13,6 +13,7 @@ private data class StoredContinueWatchingPreferences(
     val isVisible: Boolean = true,
     val style: ContinueWatchingSectionStyle = ContinueWatchingSectionStyle.Wide,
     val upNextFromFurthestEpisode: Boolean = true,
+    val dismissedNextUpKeys: Set<String> = emptySet(),
 )
 
 object ContinueWatchingPreferencesRepository {
@@ -58,6 +59,7 @@ object ContinueWatchingPreferencesRepository {
                 isVisible = stored.isVisible,
                 style = stored.style,
                 upNextFromFurthestEpisode = stored.upNextFromFurthestEpisode,
+                dismissedNextUpKeys = stored.dismissedNextUpKeys,
             )
         } else {
             ContinueWatchingPreferencesUiState()
@@ -82,6 +84,27 @@ object ContinueWatchingPreferencesRepository {
         persist()
     }
 
+    fun addDismissedNextUpKey(key: String) {
+        ensureLoaded()
+        val normalizedKey = key.trim()
+        if (normalizedKey.isBlank()) return
+        val current = _uiState.value.dismissedNextUpKeys
+        if (normalizedKey in current) return
+        _uiState.value = _uiState.value.copy(dismissedNextUpKeys = current + normalizedKey)
+        persist()
+    }
+
+    fun removeDismissedNextUpKeysForContent(contentId: String) {
+        ensureLoaded()
+        val normalizedContentId = contentId.trim()
+        if (normalizedContentId.isBlank()) return
+        val prefix = "$normalizedContentId|"
+        val filtered = _uiState.value.dismissedNextUpKeys.filterNot { it.startsWith(prefix) }.toSet()
+        if (filtered == _uiState.value.dismissedNextUpKeys) return
+        _uiState.value = _uiState.value.copy(dismissedNextUpKeys = filtered)
+        persist()
+    }
+
     private fun persist() {
         ContinueWatchingPreferencesStorage.savePayload(
             json.encodeToString(
@@ -89,6 +112,7 @@ object ContinueWatchingPreferencesRepository {
                     isVisible = _uiState.value.isVisible,
                     style = _uiState.value.style,
                     upNextFromFurthestEpisode = _uiState.value.upNextFromFurthestEpisode,
+                    dismissedNextUpKeys = _uiState.value.dismissedNextUpKeys,
                 ),
             ),
         )

@@ -95,6 +95,7 @@ fun StreamsScreen(
     resumePositionMs: Long? = null,
     resumeProgressFraction: Float? = null,
     manualSelection: Boolean = false,
+    startFromBeginning: Boolean = false,
     onStreamSelected: (stream: StreamItem, resumePositionMs: Long?, resumeProgressFraction: Float?) -> Unit = { _, _, _ -> },
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -117,19 +118,31 @@ fun StreamsScreen(
             null
         }
     }
-    val storedProgress = watchProgressUiState.byVideoId[videoId]
-        ?: legacyEpisodeVideoId?.let { legacyId -> watchProgressUiState.byVideoId[legacyId] }
+    val storedProgress = if (startFromBeginning) {
+        null
+    } else {
+        watchProgressUiState.byVideoId[videoId]
+            ?: legacyEpisodeVideoId?.let { legacyId -> watchProgressUiState.byVideoId[legacyId] }
+    }
     val storedProgressFraction = storedProgress?.progressPercent
         ?.takeIf { it > 0f }
         ?.let { explicitPercent -> (explicitPercent / 100f).coerceIn(0f, 1f) }
-    val effectiveResumeProgressFraction = resumeProgressFraction
+    val effectiveResumeProgressFraction = if (startFromBeginning) {
+        null
+    } else {
+        resumeProgressFraction
         ?.takeIf { it > 0f }
         ?.coerceIn(0f, 1f)
         ?: storedProgressFraction
+    }
     val effectiveResumePositionMs = if (effectiveResumeProgressFraction != null) {
         null
     } else {
-        (resumePositionMs ?: storedProgress?.lastPositionMs)?.takeIf { it > 0L }
+        if (startFromBeginning) {
+            null
+        } else {
+            (resumePositionMs ?: storedProgress?.lastPositionMs)?.takeIf { it > 0L }
+        }
     }
 
     LaunchedEffect(type, videoId, manualSelection) {

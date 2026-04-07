@@ -29,6 +29,7 @@ import com.nuvio.app.features.watchprogress.ContinueWatchingEnrichmentCache
 import com.nuvio.app.features.watchprogress.CurrentDateProvider
 import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesRepository
 import com.nuvio.app.features.watchprogress.ContinueWatchingItem
+import com.nuvio.app.features.watchprogress.nextUpDismissKey
 import com.nuvio.app.features.watchprogress.WatchProgressClock
 import com.nuvio.app.features.watchprogress.WatchProgressEntry
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
@@ -118,8 +119,11 @@ fun HomeScreen(
     var nextUpItemsBySeries by remember { mutableStateOf<Map<String, Pair<Long, ContinueWatchingItem>>>(emptyMap()) }
 
     val cachedSnapshots = remember { ContinueWatchingEnrichmentCache.getSnapshots() }
-    val cachedNextUpItems = remember(cachedSnapshots.first) {
+    val cachedNextUpItems = remember(cachedSnapshots.first, continueWatchingPreferences.dismissedNextUpKeys) {
         cachedSnapshots.first.mapNotNull { cached ->
+            if (nextUpDismissKey(cached.contentId, cached.seedSeason, cached.seedEpisode) in continueWatchingPreferences.dismissedNextUpKeys) {
+                return@mapNotNull null
+            }
             val item = cached.toContinueWatchingItem() ?: return@mapNotNull null
             cached.contentId to (cached.sortTimestamp to item)
         }.toMap()
@@ -197,6 +201,9 @@ fun HomeScreen(
                     ) ?: return@withPermit null
                     val item = completedEntry.toContinueWatchingSeed(meta)
                         .toUpNextContinueWatchingItem(nextEpisode)
+                    if (nextUpDismissKey(item.parentMetaId, item.nextUpSeedSeasonNumber, item.nextUpSeedEpisodeNumber) in continueWatchingPreferences.dismissedNextUpKeys) {
+                        return@withPermit null
+                    }
                     completedEntry.content.id to (completedEntry.markedAtEpochMs to item)
                 }
             }
@@ -220,6 +227,8 @@ fun HomeScreen(
                 pauseDescription = item.pauseDescription,
                 lastWatched = pair.first,
                 sortTimestamp = pair.first,
+                seedSeason = item.nextUpSeedSeasonNumber,
+                seedEpisode = item.nextUpSeedEpisodeNumber,
             )
         }
         val inProgressCache = visibleContinueWatchingEntries.map { entry ->
@@ -526,6 +535,9 @@ private fun CachedNextUpItem.toContinueWatchingItem(): ContinueWatchingItem? {
         episodeTitle = episodeTitle,
         episodeThumbnail = episodeThumbnail,
         pauseDescription = pauseDescription,
+        isNextUp = true,
+        nextUpSeedSeasonNumber = seedSeason,
+        nextUpSeedEpisodeNumber = seedEpisode,
         resumePositionMs = 0L,
         resumeProgressFraction = null,
         durationMs = 0L,
