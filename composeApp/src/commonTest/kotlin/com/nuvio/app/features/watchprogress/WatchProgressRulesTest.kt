@@ -1,5 +1,6 @@
 package com.nuvio.app.features.watchprogress
 
+import com.nuvio.app.features.details.MetaVideo
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -142,6 +143,25 @@ class WatchProgressRulesTest {
         assertEquals("show:1:2", buildPlaybackVideoId(parentMetaId = "show", seasonNumber = 1, episodeNumber = 2, fallbackVideoId = "fallback"))
         assertEquals("fallback", buildPlaybackVideoId(parentMetaId = "movie", seasonNumber = null, episodeNumber = null, fallbackVideoId = "fallback"))
         assertEquals("movie", buildPlaybackVideoId(parentMetaId = "movie", seasonNumber = null, episodeNumber = null, fallbackVideoId = null))
+    }
+
+    @Test
+    fun `up next continue watching uses actual episode id when available`() {
+        val item = entry(
+            videoId = "kitsu:244:1",
+            parentMetaId = "kitsu:244",
+            seasonNumber = 1,
+            episodeNumber = 1,
+        ).toUpNextContinueWatchingItem(
+            MetaVideo(
+                id = "kitsu:244:2",
+                title = "Episode 2",
+                season = 1,
+                episode = 2,
+            ),
+        )
+
+        assertEquals("kitsu:244:2", item.videoId)
     }
 
     private fun entry(

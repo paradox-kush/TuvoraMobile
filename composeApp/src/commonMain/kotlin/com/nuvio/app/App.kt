@@ -845,8 +845,7 @@ private fun MainAppContent(
                         }
                     }
                     val shouldResolveEpisodeVideoId =
-                        route.type == "series" &&
-                            route.parentMetaId != null &&
+                        route.parentMetaId != null &&
                             route.seasonNumber != null &&
                             route.episodeNumber != null
                     var effectiveVideoId by rememberSaveable(

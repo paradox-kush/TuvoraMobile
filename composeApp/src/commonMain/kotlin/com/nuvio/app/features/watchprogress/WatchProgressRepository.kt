@@ -288,10 +288,10 @@ object WatchProgressRepository {
     fun progressForVideo(videoId: String): WatchProgressEntry? {
         ensureLoaded()
         return if (shouldUseTraktProgress()) {
-            TraktProgressRepository.uiState.value.entries.firstOrNull { it.videoId == videoId }
+            TraktProgressRepository.uiState.value.entries
         } else {
-            entriesByVideoId[videoId]
-        }
+            entriesByVideoId.values.toList()
+        }.firstOrNull { it.videoId == videoId }
     }
 
     fun resumeEntryForSeries(metaId: String): WatchProgressEntry? {

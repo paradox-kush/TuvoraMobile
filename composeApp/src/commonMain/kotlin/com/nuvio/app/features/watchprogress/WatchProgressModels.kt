@@ -244,7 +244,7 @@ internal fun WatchProgressEntry.toUpNextContinueWatchingItem(
     return ContinueWatchingItem(
         parentMetaId = parentMetaId,
         parentMetaType = parentMetaType,
-        videoId = buildPlaybackVideoId(
+        videoId = nextEpisode.id.takeIf { it.isNotBlank() } ?: buildPlaybackVideoId(
             parentMetaId = parentMetaId,
             seasonNumber = nextEpisode.season,
             episodeNumber = nextEpisode.episode,

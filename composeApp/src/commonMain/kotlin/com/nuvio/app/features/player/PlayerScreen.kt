@@ -255,7 +255,7 @@ fun PlayerScreen(
                 contentType = contentType ?: parentMetaType,
                 parentMetaId = parentMetaId,
                 parentMetaType = parentMetaType,
-                videoId = buildPlaybackVideoId(
+                videoId = activeVideoId?.takeIf { it.isNotBlank() } ?: buildPlaybackVideoId(
                     parentMetaId = parentMetaId,
                     seasonNumber = activeSeasonNumber,
                     episodeNumber = activeEpisodeNumber,
@@ -567,7 +567,9 @@ fun PlayerScreen(
                 episodeNumber = episode.episode,
                 fallbackVideoId = epVideoId,
             )
-            val epEntry = WatchProgressRepository.progressForVideo(epResumeVideoId)
+            val epEntry = WatchProgressRepository.progressForVideo(
+                epVideoId.takeIf { it.isNotBlank() } ?: epResumeVideoId,
+            )
                 ?.takeIf { !it.isCompleted }
             val epResumeFraction = epEntry?.progressPercent
                 ?.takeIf { it > 0f }

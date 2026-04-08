@@ -459,7 +459,7 @@ fun MetaDetailsScreen(
                         fallbackVideoId = video.id,
                     )
                     val streamVideoId = video.id.takeIf { it.isNotBlank() } ?: playbackVideoId
-                    val savedProgress = watchProgressUiState.byVideoId[playbackVideoId]
+                    val savedProgress = watchProgressUiState.byVideoId[streamVideoId]
                         ?.takeUnless { it.isCompleted }
                     onPlay?.invoke(
                         meta.type,
@@ -488,7 +488,7 @@ fun MetaDetailsScreen(
                         fallbackVideoId = video.id,
                     )
                     val streamVideoId = video.id.takeIf { it.isNotBlank() } ?: playbackVideoId
-                    val savedProgress = watchProgressUiState.byVideoId[playbackVideoId]
+                    val savedProgress = watchProgressUiState.byVideoId[streamVideoId]
                         ?.takeUnless { it.isCompleted }
                     onPlayManually?.invoke(
                         meta.type,

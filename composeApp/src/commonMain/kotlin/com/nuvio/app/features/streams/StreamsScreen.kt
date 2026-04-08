@@ -107,22 +107,10 @@ fun StreamsScreen(
     }.collectAsStateWithLifecycle()
     val isEpisode = seasonNumber != null && episodeNumber != null
     var preferredFilterApplied by remember(videoId) { mutableStateOf(false) }
-    val legacyEpisodeVideoId = remember(type, parentMetaId, seasonNumber, episodeNumber, videoId) {
-        if (type == "series" && seasonNumber != null && episodeNumber != null) {
-            buildPlaybackVideoId(
-                parentMetaId = parentMetaId,
-                seasonNumber = seasonNumber,
-                episodeNumber = episodeNumber,
-            ).takeIf { it != videoId }
-        } else {
-            null
-        }
-    }
     val storedProgress = if (startFromBeginning) {
         null
     } else {
         watchProgressUiState.byVideoId[videoId]
-            ?: legacyEpisodeVideoId?.let { legacyId -> watchProgressUiState.byVideoId[legacyId] }
     }
     val storedProgressFraction = storedProgress?.progressPercent
         ?.takeIf { it > 0f }
