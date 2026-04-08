@@ -6,6 +6,7 @@ import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
 import com.nuvio.app.features.addons.AddonRepository
 import com.nuvio.app.features.collection.CollectionSyncService
+import com.nuvio.app.features.home.HomeCatalogSettingsSyncService
 import com.nuvio.app.features.plugins.PluginRepository
 import com.nuvio.app.features.library.LibraryRepository
 import com.nuvio.app.features.profiles.ProfileRepository
@@ -60,6 +61,10 @@ object SyncManager {
             launch {
                 runCatching { CollectionSyncService.pullFromServer(profileId) }
                     .onFailure { log.e(it) { "Collections pull failed" } }
+            }
+            launch {
+                runCatching { HomeCatalogSettingsSyncService.pullFromServer(profileId) }
+                    .onFailure { log.e(it) { "HomeCatalogSettings pull failed" } }
             }
 
             log.i { "pullAllForProfile($profileId) — all pulls launched" }

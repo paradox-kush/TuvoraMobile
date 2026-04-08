@@ -378,6 +378,60 @@ object HomeCatalogSettingsRepository {
         HomeRepository.applyCurrentSettings()
     }
 
+    fun exportToSyncPayload(): SyncHomeCatalogPayload {
+        ensureLoaded()
+        val items = preferences.values.sortedBy { it.order }.map { pref ->
+            val parts = pref.key.split(":")
+            val isCollection = pref.key.startsWith("collection_")
+            if (isCollection) {
+                SyncCatalogItem(
+                    addonId = "",
+                    type = "",
+                    catalogId = "",
+                    enabled = pref.enabled,
+                    order = pref.order,
+                    customTitle = pref.customTitle,
+                    isCollection = true,
+                    collectionId = pref.key.removePrefix("collection_"),
+                )
+            } else {
+                SyncCatalogItem(
+                    addonId = parts.getOrElse(0) { "" },
+                    type = parts.getOrElse(1) { "" },
+                    catalogId = parts.getOrElse(2) { "" },
+                    enabled = pref.enabled,
+                    order = pref.order,
+                    customTitle = pref.customTitle,
+                    isCollection = false,
+                )
+            }
+        }
+        return SyncHomeCatalogPayload(items = items)
+    }
+
+    fun applyFromRemote(payload: SyncHomeCatalogPayload) {
+        ensureLoaded()
+        val existingHeroState = preferences.mapValues { it.value.heroSourceEnabled }
+        preferences = payload.items.associate { item ->
+            val key = if (item.isCollection) {
+                "collection_${item.collectionId}"
+            } else {
+                "${item.addonId}:${item.type}:${item.catalogId}"
+            }
+            key to StoredHomeCatalogPreference(
+                key = key,
+                customTitle = item.customTitle,
+                enabled = item.enabled,
+                heroSourceEnabled = existingHeroState[key] ?: true,
+                order = item.order,
+            )
+        }.toMutableMap()
+        hasLoaded = true
+        publish()
+        persist()
+        HomeRepository.applyCurrentSettings()
+    }
+
     private fun allOrderedKeys(): List<String> {
         val catalogKeys = definitions.map { it.key }
         val collectionKeys = collectionDefinitions.map { it.key }
