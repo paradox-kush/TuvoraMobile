@@ -180,7 +180,9 @@ internal object PluginRuntime {
                 
                 deferred.await()
             }
-            return parseJsonResults(resultJson)
+            
+            // Result is captured inside use block, but returned outside to satisfy compiler
+            return parseJsonResults(deferred.await())
         } finally {
             domBridge.clear()
         }
