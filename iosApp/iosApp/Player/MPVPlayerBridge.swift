@@ -16,13 +16,41 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge {
     }
 
     func loadFile(url: String) { playerVC?.loadFile(url) }
-    func loadFileWithAudio(videoUrl: String, audioUrl: String?, headersJson: String?) {
+    func loadFileWithAudio(videoUrl: String, audioUrl: String?, headersJson: String?, subtitlesJson: String?) {
         playerVC?.loadFile(
             videoUrl,
             audioUrl: audioUrl,
-            requestHeaders: parseRequestHeaders(headersJson)
+            requestHeaders: parseRequestHeaders(headersJson),
+            subtitles: parseSubtitles(subtitlesJson)
         )
     }
+
+    private func parseSubtitles(_ json: String?) -> [PluginSubtitle] {
+        guard
+            let json,
+            let data = json.data(using: .utf8),
+            let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else {
+            return []
+        }
+        return raw.compactMap { dict in
+            guard let url = dict["url"] as? String else { return nil }
+            return PluginSubtitle(
+                url: url,
+                language: dict["language"] as? String ?? "Unknown",
+                name: dict["name"] as? String,
+                headers: dict["headers"] as? [String: String]
+            )
+        }
+    }
+}
+
+struct PluginSubtitle {
+    val url: String
+    val language: String
+    val name: String?
+    val headers: [String: String]?
+}
     func play() { playerVC?.playPlayback() }
     func pause() { playerVC?.pausePlayback() }
     func seekTo(positionMs: Int64) { playerVC?.seekToMs(positionMs) }
@@ -172,6 +200,7 @@ private struct PendingLoadRequest {
     let urlString: String
     let audioUrl: String?
     let requestHeaders: [String: String]
+    let subtitles: [PluginSubtitle]
     let queuedAtUptime: TimeInterval
 }
 
@@ -357,11 +386,12 @@ final class MPVPlayerViewController: UIViewController {
 
     // MARK: - Playback API
 
-    func loadFile(_ urlString: String, audioUrl: String? = nil, requestHeaders: [String: String] = [:]) {
+    func loadFile(_ urlString: String, audioUrl: String? = nil, requestHeaders: [String: String] = [:], subtitles: [PluginSubtitle] = []) {
         let request = PendingLoadRequest(
             urlString: urlString,
             audioUrl: audioUrl,
             requestHeaders: requestHeaders,
+            subtitles: subtitles,
             queuedAtUptime: ProcessInfo.processInfo.systemUptime
         )
 
@@ -407,6 +437,13 @@ final class MPVPlayerViewController: UIViewController {
         if let audioUrl = request.audioUrl, !audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 self?.command("audio-add", args: [audioUrl, "select"], checkForErrors: false)
+            }
+        }
+
+        // Add external subtitles
+        for subtitle in request.subtitles {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.command("sub-add", args: [subtitle.url, "auto", subtitle.name ?? subtitle.language, subtitle.language], checkForErrors: false)
             }
         }
     }

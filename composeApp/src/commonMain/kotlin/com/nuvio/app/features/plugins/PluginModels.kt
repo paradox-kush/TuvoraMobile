@@ -78,6 +78,15 @@ data class PluginRuntimeResult(
     val peers: Int? = null,
     val infoHash: String? = null,
     val headers: Map<String, String>? = null,
+    val subtitles: List<PluginSubtitleResult>? = null,
+)
+
+@Serializable
+data class PluginSubtitleResult(
+    val url: String,
+    val language: String,
+    val name: String? = null,
+    val headers: Map<String, String>? = null
 )
 
 data class PluginsUiState(

@@ -13,6 +13,7 @@ data class PlayerLaunch(
     val sourceAudioUrl: String? = null,
     val sourceHeaders: Map<String, String> = emptyMap(),
     val sourceResponseHeaders: Map<String, String> = emptyMap(),
+    val externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle> = emptyList(),
     val logo: String? = null,
     val poster: String? = null,
     val background: String? = null,

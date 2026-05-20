@@ -401,5 +401,13 @@ private fun PluginRuntimeResult.toStreamItem(scraper: PluginScraper): StreamItem
                 proxyHeaders = com.nuvio.app.features.streams.StreamProxyHeaders(request = requestHeaders),
             )
         },
+        externalSubtitles = subtitles?.map {
+            com.nuvio.app.features.streams.StreamSubtitle(
+                url = it.url,
+                language = it.language,
+                name = it.name,
+                headers = it.headers
+            )
+        } ?: emptyList()
     )
 }

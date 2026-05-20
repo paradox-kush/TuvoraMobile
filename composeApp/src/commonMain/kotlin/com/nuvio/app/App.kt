@@ -872,6 +872,7 @@ private fun MainAppContent(
                             sourceUrl = localSourceUrl,
                             sourceHeaders = emptyMap(),
                             sourceResponseHeaders = emptyMap(),
+                            externalSubtitles = emptyList(),
                             logo = logo,
                             poster = poster,
                             background = background,
@@ -1457,6 +1458,7 @@ private fun MainAppContent(
                                     sourceUrl = cached.url,
                                     sourceHeaders = sanitizePlaybackHeaders(cached.requestHeaders),
                                     sourceResponseHeaders = sanitizePlaybackResponseHeaders(cached.responseHeaders),
+                                    externalSubtitles = emptyList(),
                                     logo = launch.logo,
                                     poster = launch.poster,
                                     background = launch.background,
@@ -1563,6 +1565,7 @@ private fun MainAppContent(
                                 sourceUrl = sourceUrl,
                                 sourceHeaders = sanitizePlaybackHeaders(stream.behaviorHints.proxyHeaders?.request),
                                 sourceResponseHeaders = sanitizePlaybackResponseHeaders(stream.behaviorHints.proxyHeaders?.response),
+                                externalSubtitles = stream.externalSubtitles,
                                 logo = launch.logo,
                                 poster = launch.poster,
                                 background = launch.background,
@@ -1582,8 +1585,7 @@ private fun MainAppContent(
                                 parentMetaType = launch.parentMetaType ?: launch.type,
                                 initialPositionMs = launch.resumePositionMs ?: 0L,
                                 initialProgressFraction = launch.resumeProgressFraction,
-                            )
-                        StreamsRepository.consumeAutoPlay()
+                            )                        StreamsRepository.consumeAutoPlay()
                         StreamsRepository.cancelLoading()
                         if (playerSettings.externalPlayerEnabled) {
                             openExternalPlayback(playerLaunch)
@@ -1673,6 +1675,7 @@ private fun MainAppContent(
                             sourceUrl = sourceUrl,
                             sourceHeaders = sanitizePlaybackHeaders(stream.behaviorHints.proxyHeaders?.request),
                             sourceResponseHeaders = sanitizePlaybackResponseHeaders(stream.behaviorHints.proxyHeaders?.response),
+                            externalSubtitles = stream.externalSubtitles,
                             logo = launch.logo,
                             poster = launch.poster,
                             background = launch.background,
@@ -1803,6 +1806,7 @@ private fun MainAppContent(
                         sourceAudioUrl = launch.sourceAudioUrl,
                         sourceHeaders = launch.sourceHeaders,
                         sourceResponseHeaders = launch.sourceResponseHeaders,
+                        externalSubtitles = launch.externalSubtitles,
                         logo = launch.logo,
                         poster = launch.poster,
                         background = launch.background,
@@ -1908,6 +1912,7 @@ private fun MainAppContent(
                                     sourceUrl = sourceUrl,
                                     sourceHeaders = emptyMap(),
                                     sourceResponseHeaders = emptyMap(),
+                                    externalSubtitles = emptyList(),
                                     logo = item.logo,
                                     poster = item.poster,
                                     background = item.background,

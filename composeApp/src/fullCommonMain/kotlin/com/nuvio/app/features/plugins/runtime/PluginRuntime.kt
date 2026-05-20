@@ -206,6 +206,25 @@ internal object PluginRuntime {
                     ?.toMap()
                     ?.takeIf { it.isNotEmpty() }
 
+                val subtitles = (item["subtitles"] as? JsonArray)?.mapNotNull { subElement ->
+                    val subObj = subElement as? JsonObject ?: return@mapNotNull null
+                    val subUrl = subObj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    val subLang = subObj["language"]?.jsonPrimitive?.contentOrNull ?: "Unknown"
+                    val subName = subObj["name"]?.jsonPrimitive?.contentOrNull
+                    val subHeaders = (subObj["headers"] as? JsonObject)
+                        ?.mapNotNull { (key, value) ->
+                            value.jsonPrimitive.contentOrNull?.let { key to it }
+                        }
+                        ?.toMap()
+                        ?.takeIf { it.isNotEmpty() }
+                    com.nuvio.app.features.plugins.PluginSubtitleResult(
+                        url = subUrl,
+                        language = subLang,
+                        name = subName,
+                        headers = subHeaders
+                    )
+                }?.takeIf { it.isNotEmpty() }
+
                 PluginRuntimeResult(
                     title = item.stringOrNull("title") ?: item.stringOrNull("name") ?: "Unknown",
                     name = item.stringOrNull("name"),
@@ -219,6 +238,7 @@ internal object PluginRuntime {
                     peers = item["peers"]?.jsonPrimitive?.intOrNull,
                     infoHash = item.stringOrNull("infoHash"),
                     headers = headers,
+                    subtitles = subtitles,
                 )
             }.filter { it.url.isNotBlank() }
         }.getOrElse { emptyList() }

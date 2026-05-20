@@ -4,6 +4,14 @@ import kotlinx.coroutines.runBlocking
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
 
+@Serializable
+data class StreamSubtitle(
+    val url: String,
+    val language: String,
+    val name: String? = null,
+    val headers: Map<String, String>? = null
+)
+
 data class StreamItem(
     val name: String? = null,
     val title: String? = null,
@@ -18,6 +26,7 @@ data class StreamItem(
     val addonId: String,
     val behaviorHints: StreamBehaviorHints = StreamBehaviorHints(),
     val clientResolve: StreamClientResolve? = null,
+    val externalSubtitles: List<StreamSubtitle> = emptyList(),
 ) {
     val streamLabel: String
         get() = name ?: runBlocking { getString(Res.string.stream_default_name) }
