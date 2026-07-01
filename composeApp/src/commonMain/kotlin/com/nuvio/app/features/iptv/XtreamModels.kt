@@ -42,8 +42,10 @@ object FlexIntSerializer : KSerializer<Int?> {
 
 @Serializable
 data class XtreamAccountDto(
-    @SerialName("user_info") val userInfo: XtreamUserInfoDto? = null,
-    @SerialName("server_info") val serverInfo: XtreamServerInfoDto? = null
+    @SerialName("user_info") val userInfo: XtreamUserInfoDto? = null
+    // ponytail: server_info is skipped via ignoreUnknownKeys — its fields were never read,
+    // and panels send `port` as a bare int which broke String decoding. Re-add a DTO
+    // (with FlexIntSerializer on port) only if something actually needs server_info.
 )
 
 @Serializable
@@ -54,13 +56,6 @@ data class XtreamUserInfoDto(
     @SerialName("max_connections") val maxConnections: String? = null,
     @SerialName("active_cons") val activeCons: String? = null,
     @SerialName("is_trial") val isTrial: String? = null
-)
-
-@Serializable
-data class XtreamServerInfoDto(
-    val url: String? = null,
-    val port: String? = null,
-    @SerialName("server_protocol") val serverProtocol: String? = null
 )
 
 @Serializable
