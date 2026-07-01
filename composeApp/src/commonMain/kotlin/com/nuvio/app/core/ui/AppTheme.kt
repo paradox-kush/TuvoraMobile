@@ -4,6 +4,7 @@ import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.theme_amber
 import nuvio.composeapp.generated.resources.theme_crimson
 import nuvio.composeapp.generated.resources.theme_emerald
+import nuvio.composeapp.generated.resources.theme_marigold
 import nuvio.composeapp.generated.resources.theme_ocean
 import nuvio.composeapp.generated.resources.theme_rose
 import nuvio.composeapp.generated.resources.theme_violet
@@ -11,6 +12,7 @@ import nuvio.composeapp.generated.resources.theme_white
 import org.jetbrains.compose.resources.StringResource
 
 enum class AppTheme {
+    MARIGOLD,
     CRIMSON,
     OCEAN,
     VIOLET,
@@ -22,6 +24,7 @@ enum class AppTheme {
 
 val AppTheme.labelRes: StringResource
     get() = when (this) {
+        AppTheme.MARIGOLD -> Res.string.theme_marigold
         AppTheme.CRIMSON -> Res.string.theme_crimson
         AppTheme.OCEAN -> Res.string.theme_ocean
         AppTheme.VIOLET -> Res.string.theme_violet

@@ -96,7 +96,21 @@ object ThemeColors {
         backgroundCard = Color(0xFF222222),
     )
 
+    val Marigold = ThemeColorPalette(
+        secondary = Color(0xFFF5B301),
+        secondaryVariant = Color(0xFFD99A00),
+        nativeAccentHex = "#F5B301",
+        onSecondary = Color(0xFF0E0E10),
+        onSecondaryVariant = Color(0xFF0E0E10),
+        focusRing = Color(0xFFF5B301),
+        focusBackground = Color(0xFF3D2E0A),
+        background = Color(0xFF0E0E10),
+        backgroundElevated = Color(0xFF1A1712),
+        backgroundCard = Color(0xFF201C14),
+    )
+
     fun getColorPalette(theme: AppTheme): ThemeColorPalette = when (theme) {
+        AppTheme.MARIGOLD -> Marigold
         AppTheme.CRIMSON -> Crimson
         AppTheme.OCEAN -> Ocean
         AppTheme.VIOLET -> Violet

@@ -86,7 +86,7 @@ object SyncBackendDefaults {
     fun nuvio(): SyncBackendConfig =
         SyncBackendConfig(
             id = SYNC_BACKEND_NUVIO_ID,
-            displayName = "Nuvio",
+            displayName = "Tuvora",
             supabaseUrl = SupabaseConfig.NUVIO_URL,
             anonKey = SupabaseConfig.NUVIO_ANON_KEY,
             avatarPublicBaseUrl = "${SupabaseConfig.NUVIO_URL.trim().trimEnd('/')}/storage/v1/object/public/avatars",

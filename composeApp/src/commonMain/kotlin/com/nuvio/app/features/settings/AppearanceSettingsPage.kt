@@ -97,7 +97,7 @@ internal fun LazyListScope.appearanceSettingsContent(
             isTablet = isTablet,
         ) {
             SettingsGroup(isTablet = isTablet) {
-                val themes = listOf(AppTheme.WHITE) + AppTheme.entries.filterNot { it == AppTheme.WHITE }
+                val themes = listOf(AppTheme.MARIGOLD) + AppTheme.entries.filterNot { it == AppTheme.MARIGOLD }
                 val horizontalPadding = if (isTablet) 20.dp else 16.dp
                 val verticalPadding = if (isTablet) 18.dp else 14.dp
                 val themeSpacing = if (isTablet) 16.dp else 12.dp

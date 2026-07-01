@@ -30,7 +30,7 @@
     <string name="addons_badge_unavailable">Nem érhető el</string>
     <string name="addons_configure">Kiegészítő konfigurálása</string>
     <string name="addons_delete">Kiegészítő törlése</string>
-    <string name="addons_empty_subtitle">Adj meg egy manifest URL-t, hogy elkezdhesd betölteni a katalógusokat, metaadatokat, streameket vagy feliratokat a Nuvio-ba.</string>
+    <string name="addons_empty_subtitle">Adj meg egy manifest URL-t, hogy elkezdhesd betölteni a katalógusokat, metaadatokat, streameket vagy feliratokat a Tuvora-ba.</string>
     <string name="addons_empty_title">Még nincsenek kiegészítők telepítve.</string>
     <string name="addons_error_enter_url">Adj meg egy kiegészítő URL-t.</string>
     <string name="addons_input_placeholder">Kiegészítő URL</string>
@@ -141,7 +141,7 @@
     <string name="collections_editor_tmdb_list_helper">Példa: https://www.themoviedb.org/list/8504994 vagy 8504994.</string>
     <string name="collections_editor_tmdb_person_helper">Példa: https://www.themoviedb.org/person/31-tom-hanks vagy 31.</string>
     <string name="collections_editor_tmdb_display_title">Megjelenítendő név</string>
-    <string name="collections_editor_tmdb_title_helper">A sor vagy fül neveként jelenik meg. Ha üres, a Nuvio automatikusan létrehoz egyet a forrásból.</string>
+    <string name="collections_editor_tmdb_title_helper">A sor vagy fül neveként jelenik meg. Ha üres, a Tuvora automatikusan létrehoz egyet a forrásból.</string>
     <string name="collections_editor_tmdb_title_placeholder">Marvel filmek, Netflix saját gyártás, Pixar</string>
     <string name="collections_editor_tmdb_person_title_placeholder">Tom Hanks filmek, Kedvenc színészek</string>
     <string name="collections_editor_tmdb_director_title_placeholder">Christopher Nolan filmek, Kedvenc rendezők</string>
@@ -666,7 +666,7 @@
     <string name="settings_notifications_disabled_in_app">Az értesítések jelenleg ki vannak kapcsolva a Nuvióban.</string>
     <string name="settings_notifications_episode_release_alerts">Epizódmegjelenési riasztások</string>
     <string name="settings_notifications_episode_release_alerts_description">Helyi értesítések ütemezése, amikor egy elmentett sorozathoz új epizód válik elérhetővé.</string>
-    <string name="settings_notifications_permission_disabled">A rendszerértesítések le vannak tiltva a Nuvio számára. Engedélyezd őket a riasztások és tesztértesítések fogadásához.</string>
+    <string name="settings_notifications_permission_disabled">A rendszerértesítések le vannak tiltva a Tuvora számára. Engedélyezd őket a riasztások és tesztértesítések fogadásához.</string>
     <string name="settings_notifications_scheduled_count">Jelenleg %1$d megjelenési riasztás van ütemezve ezen az eszközön.</string>
     <string name="settings_notifications_section_alerts">RIASZTÁSOK</string>
     <string name="settings_notifications_section_test">TESZT</string>
@@ -884,17 +884,17 @@
     <string name="trakt_library_source_dialog_title">Könyvtár forrása</string>
     <string name="trakt_library_source_dialog_subtitle">Válaszd ki, hol szeretnéd menteni és kezelni a könyvtárad elemeit</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">Nuvio Könyvtár</string>
+    <string name="trakt_library_source_nuvio">Tuvora Könyvtár</string>
     <string name="trakt_library_source_trakt_selected">Trakt könyvtár kiválasztva</string>
-    <string name="trakt_library_source_nuvio_selected">Nuvio könyvtár kiválasztva</string>
+    <string name="trakt_library_source_nuvio_selected">Tuvora könyvtár kiválasztva</string>
     <string name="trakt_watch_progress_title">Megtekintési előrehaladás</string>
     <string name="trakt_watch_progress_subtitle">Válaszd ki, melyik forrás vezérelje a lejátszás folytatását</string>
     <string name="trakt_watch_progress_dialog_title">Megtekintési előrehaladás</string>
-    <string name="trakt_watch_progress_dialog_subtitle">Válaszd ki, hogy a lejátszás folytatása a Traktot vagy a Nuvio Sync-et használja, miközben a Trakt scrobbling (lejátszáskövetés) aktív marad.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Válaszd ki, hogy a lejátszás folytatása a Traktot vagy a Tuvora Sync-et használja, miközben a Trakt scrobbling (lejátszáskövetés) aktív marad.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">Nuvio Sync</string>
+    <string name="trakt_watch_progress_source_nuvio">Tuvora Sync</string>
     <string name="trakt_watch_progress_trakt_selected">Megtekintési előrehaladás forrása: Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Megtekintési előrehaladás forrása: Nuvio Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">Megtekintési előrehaladás forrása: Tuvora Sync</string>
     <string name="trakt_continue_watching_window">Folyamatos megtekintési időablak</string>
     <string name="trakt_continue_watching_subtitle">A lejátszás folytatásánál figyelembe vett Trakt előzmények</string>
     <string name="trakt_cw_window_title">Folyamatos megtekintési időablak</string>
@@ -1024,7 +1024,7 @@
     <string name="details_series_missing_numbers">Ez a kiegészítő adott vissza videókat a sorozathoz, de egyik sem tartalmazott évad- vagy epizódszámot.</string>
     <string name="details_series_no_metadata">Ez a kiegészítő nem szolgáltatott epizód-metaadatokat ehhez a sorozathoz.</string>
     <string name="details_series_unpublished">A kiegészítő még nem tette közzé ezeket az epizódokat.</string>
-    <string name="details_servers_unreachable">Az eszközöd online, de a Nuvio nem érte el a szükséges szervereket.</string>
+    <string name="details_servers_unreachable">Az eszközöd online, de a Tuvora nem érte el a szükséges szervereket.</string>
     <string name="details_show_less">Kevesebb</string>
     <string name="details_show_more">Több ▾</string>
     <string name="details_writer">Író</string>
@@ -1168,7 +1168,7 @@
     <string name="updates_downloading_progress">Letöltés: %1$d%</string>
     <string name="updates_install_failed">Nem sikerült elindítani a telepítést</string>
     <string name="updates_latest_version">A legfrissebb verziót használod.</string>
-    <string name="updates_message_allow_installs">Engedélyezd az alkalmazások telepítését a Nuvio számára, majd térj vissza és folytasd.</string>
+    <string name="updates_message_allow_installs">Engedélyezd az alkalmazások telepítését a Tuvora számára, majd térj vissza és folytasd.</string>
     <string name="updates_message_downloading">Frissítés letöltése...</string>
     <string name="updates_message_no_updates">Nem találhatók frissítések.</string>
     <string name="updates_message_ready">Az új verzió készen áll a telepítésre.</string>
@@ -1181,7 +1181,7 @@
     <string name="addon_already_installed">Ez a kiegészítő már telepítve van.</string>
     <string name="addon_invalid_url">Kérjük, érvényes kiegészítő URL-t adj meg</string>
     <string name="addon_load_manifest_failed">Nem sikerült betölteni a manifest fájlt</string>
-    <string name="app_brand_name">Nuvio</string>
+    <string name="app_brand_name">Tuvora</string>
     <string name="auth_account_deletion_failed">A fiók törlése sikertelen</string>
     <string name="auth_sign_in_failed">Bejelentkezés sikertelen</string>
     <string name="auth_sign_out_failed">Kijelentkezés sikertelen</string>

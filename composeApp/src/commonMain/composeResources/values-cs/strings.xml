@@ -138,7 +138,7 @@
     <string name="collections_editor_tmdb_list_helper">Příklad: https://www.themoviedb.org/list/8504994 nebo 8504994.</string>
     <string name="collections_editor_tmdb_person_helper">Příklad: https://www.themoviedb.org/person/31-tom-hanks nebo 31.</string>
     <string name="collections_editor_tmdb_display_title">Zobrazovaný název</string>
-    <string name="collections_editor_tmdb_title_helper">Zobrazí se jako název řádku/karty. Pokud je prázdné, Nuvio jej vytvoří ze zdroje.</string>
+    <string name="collections_editor_tmdb_title_helper">Zobrazí se jako název řádku/karty. Pokud je prázdné, Tuvora jej vytvoří ze zdroje.</string>
     <string name="collections_editor_tmdb_title_placeholder">Filmy Marvel, Netflix Originals, Pixar</string>
     <string name="collections_editor_tmdb_person_title_placeholder">Filmy s Tomem Hanksem, Oblíbení herci</string>
     <string name="collections_editor_tmdb_director_title_placeholder">Filmy od Christophera Nolana, Oblíbení režiséři</string>
@@ -590,7 +590,7 @@
     <string name="settings_notifications_disabled_in_app">Oznámení jsou v Nuviu momentálně zakázána.</string>
     <string name="settings_notifications_episode_release_alerts">Upozornění na vydání epizod</string>
     <string name="settings_notifications_episode_release_alerts_description">Naplánovat lokální oznámení, když bude dostupná nová epizoda pro uložený seriál.</string>
-    <string name="settings_notifications_permission_disabled">Systémová oznámení jsou pro Nuvio zakázána. Povolte je pro přijímání upozornění a zkušebních oznámení.</string>
+    <string name="settings_notifications_permission_disabled">Systémová oznámení jsou pro Tuvora zakázána. Povolte je pro přijímání upozornění a zkušebních oznámení.</string>
     <string name="settings_notifications_scheduled_count">Na tomto zařízení je aktuálně naplánováno %1$d upozornění na vydání.</string>
     <string name="settings_notifications_section_alerts">UPOZORNĚNÍ</string>
     <string name="settings_notifications_section_test">TEST</string>
@@ -600,7 +600,7 @@
     <string name="settings_notifications_test_requires_saved_show">Pro otestování oznámení nejprve uložte nějaký seriál do knihovny.</string>
     <string name="settings_notifications_test_title">Zkušební oznámení</string>
     <string name="community_section_title">Komunita</string>
-    <string name="community_section_description">Podívejte se na lidi, kteří budují a podporují Nuvio napříč Mobilem, TV a Webem.</string>
+    <string name="community_section_description">Podívejte se na lidi, kteří budují a podporují Tuvora napříč Mobilem, TV a Webem.</string>
     <string name="community_supporters_not_configured">API pro podporovatele není nakonfigurováno. Přidejte DONATIONS_BASE_URL do local.properties.</string>
     <string name="community_tab_contributors">Přispěvatelé</string>
     <string name="community_tab_supporters">Podporovatelé</string>
@@ -803,17 +803,17 @@
     <string name="trakt_library_source_dialog_title">Zdroj knihovny</string>
     <string name="trakt_library_source_dialog_subtitle">Vyberte, kam ukládat a spravovat položky vaší knihovny</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">Knihovna Nuvio</string>
+    <string name="trakt_library_source_nuvio">Knihovna Tuvora</string>
     <string name="trakt_library_source_trakt_selected">Vybrána knihovna Trakt</string>
-    <string name="trakt_library_source_nuvio_selected">Vybrána knihovna Nuvio</string>
+    <string name="trakt_library_source_nuvio_selected">Vybrána knihovna Tuvora</string>
     <string name="trakt_watch_progress_title">Postup sledování</string>
     <string name="trakt_watch_progress_subtitle">Vyberte, který zdroj postupu pohání obnovení a pokračování ve sledování</string>
     <string name="trakt_watch_progress_dialog_title">Postup sledování</string>
-    <string name="trakt_watch_progress_dialog_subtitle">Vyberte, zda by obnovení a pokračování ve sledování mělo využívat Trakt nebo Nuvio Sync, zatímco Trakt scrobbling zůstane aktivní.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Vyberte, zda by obnovení a pokračování ve sledování mělo využívat Trakt nebo Tuvora Sync, zatímco Trakt scrobbling zůstane aktivní.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">Nuvio Sync</string>
+    <string name="trakt_watch_progress_source_nuvio">Tuvora Sync</string>
     <string name="trakt_watch_progress_trakt_selected">Zdroj postupu sledování nastaven na Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Zdroj postupu sledování nastaven na Nuvio Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">Zdroj postupu sledování nastaven na Tuvora Sync</string>
     <string name="trakt_continue_watching_window">Okno pro pokračování ve sledování</string>
     <string name="trakt_continue_watching_subtitle">Historie Traktu zohledněná pro pokračování ve sledování</string>
     <string name="trakt_cw_window_title">Okno pro pokračování ve sledování</string>
@@ -943,7 +943,7 @@
     <string name="details_series_missing_numbers">Tento doplněk vrátil videa pro seriál, ale žádné neobsahovalo čísla série nebo epizody.</string>
     <string name="details_series_no_metadata">Tento doplněk neposkytl metadata epizod pro tento seriál.</string>
     <string name="details_series_unpublished">Epizody ještě nebyly tímto doplňkem zveřejněny.</string>
-    <string name="details_servers_unreachable">Vaše zařízení je online, ale Nuvio se nemohlo spojit s požadovanými servery.</string>
+    <string name="details_servers_unreachable">Vaše zařízení je online, ale Tuvora se nemohlo spojit s požadovanými servery.</string>
     <string name="details_show_less">Zobrazit méně</string>
     <string name="details_show_more">Zobrazit více ▾</string>
     <string name="details_writer">Scénárista</string>
@@ -1079,7 +1079,7 @@
     <string name="updates_downloading_progress">Stahování %1$d%%</string>
     <string name="updates_install_failed">Nelze zahájit instalaci</string>
     <string name="updates_latest_version">Používáte nejnovější verzi.</string>
-    <string name="updates_message_allow_installs">Povolte instalace aplikací pro Nuvio, poté se vraťte a pokračujte.</string>
+    <string name="updates_message_allow_installs">Povolte instalace aplikací pro Tuvora, poté se vraťte a pokračujte.</string>
     <string name="updates_message_downloading">Stahování aktualizace...</string>
     <string name="updates_message_no_updates">Nebyly nalezeny žádné aktualizace.</string>
     <string name="updates_message_ready">Nová verze je připravena k instalaci.</string>
@@ -1092,7 +1092,7 @@
     <string name="addon_already_installed">Tento doplněk je již nainstalován.</string>
     <string name="addon_invalid_url">Zadejte platnou URL doplňku</string>
     <string name="addon_load_manifest_failed">Nelze načíst manifest</string>
-    <string name="app_brand_name">Nuvio</string>
+    <string name="app_brand_name">Tuvora</string>
     <string name="auth_account_deletion_failed">Smazání účtu selhalo</string>
     <string name="auth_sign_in_failed">Přihlášení selhalo</string>
     <string name="auth_sign_out_failed">Odhlášení selhalo</string>

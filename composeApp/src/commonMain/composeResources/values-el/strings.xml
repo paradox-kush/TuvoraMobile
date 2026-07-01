@@ -27,7 +27,7 @@
     <string name="addons_badge_unavailable">Μη διαθέσιμο</string>
     <string name="addons_configure">Διαμόρφωση πρόσθετου</string>
     <string name="addons_delete">Διαγραφή πρόσθετου</string>
-    <string name="addons_empty_subtitle">Προσθέστε μια διεύθυνση URL manifest για να ξεκινήσετε τη φόρτωση καταλόγων, μεταδεδομένων, ροών ή υποτίτλων στο Nuvio.</string>
+    <string name="addons_empty_subtitle">Προσθέστε μια διεύθυνση URL manifest για να ξεκινήσετε τη φόρτωση καταλόγων, μεταδεδομένων, ροών ή υποτίτλων στο Tuvora.</string>
     <string name="addons_empty_title">Δεν έχουν εγκατασταθεί πρόσθετα ακόμα.</string>
     <string name="addons_error_enter_url">Εισάγετε μια διεύθυνση URL πρόσθετου.</string>
     <string name="addons_input_placeholder">URL πρόσθετου</string>
@@ -419,10 +419,10 @@
     <string name="settings_meta_tab_layout_description">Ομαδοποίηση ενοτήτων σε καρτέλες όπως η εφαρμογή TV. Αντιστοιχίστε έως 3 ενότητες ανά ομάδα καρτελών.</string>
     <string name="settings_meta_trailers">Τρέιλερ</string>
     <string name="settings_meta_trailers_description">Ράγα τρέιλερ και συντομεύσεις αναπαραγωγής.</string>
-    <string name="settings_notifications_disabled_in_app">Οι ειδοποιήσεις είναι απενεργοποιημένες αυτή τη στιγμή στο Nuvio.</string>
+    <string name="settings_notifications_disabled_in_app">Οι ειδοποιήσεις είναι απενεργοποιημένες αυτή τη στιγμή στο Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Ειδοποιήσεις κυκλοφορίας επεισοδίων</string>
     <string name="settings_notifications_episode_release_alerts_description">Προγραμματισμός τοπικών ειδοποιήσεων όταν ένα νέο επεισόδιο αποθηκευμένης σειράς γίνει διαθέσιμο.</string>
-    <string name="settings_notifications_permission_disabled">Οι ειδοποιήσεις συστήματος είναι απενεργοποιημένες για το Nuvio. Ενεργοποιήστε τες για να λαμβάνετε ειδοποιήσεις και δοκιμαστικές ειδοποιήσεις.</string>
+    <string name="settings_notifications_permission_disabled">Οι ειδοποιήσεις συστήματος είναι απενεργοποιημένες για το Tuvora. Ενεργοποιήστε τες για να λαμβάνετε ειδοποιήσεις και δοκιμαστικές ειδοποιήσεις.</string>
     <string name="settings_notifications_scheduled_count">%1$d ειδοποιήσεις κυκλοφορίας είναι προγραμματισμένες αυτήν τη στιγμή σε αυτήν τη συσκευή.</string>
     <string name="settings_notifications_section_alerts">ΕΙΔΟΠΟΙΗΣΕΙΣ</string>
     <string name="settings_notifications_section_test">ΔΟΚΙΜΗ</string>
@@ -432,7 +432,7 @@
     <string name="settings_notifications_test_requires_saved_show">Αποθηκεύστε πρώτα μια σειρά στη βιβλιοθήκη σας για να δοκιμάσετε τις ειδοποιήσεις.</string>
     <string name="settings_notifications_test_title">Δοκιμαστική ειδοποίηση</string>
     <string name="community_section_title">Κοινότητα</string>
-    <string name="community_section_description">Δείτε τους ανθρώπους που κατασκευάζουν και υποστηρίζουν το Nuvio σε Mobile, TV και Web.</string>
+    <string name="community_section_description">Δείτε τους ανθρώπους που κατασκευάζουν και υποστηρίζουν το Tuvora σε Mobile, TV και Web.</string>
     <string name="community_supporters_not_configured">Το API υποστηρικτών δεν έχει διαμορφωθεί. Προσθέστε DONATIONS_BASE_URL στο local.properties.</string>
     <string name="community_tab_contributors">Συνεισφέροντες</string>
     <string name="community_tab_supporters">Υποστηρικτές</string>
@@ -749,7 +749,7 @@
     <string name="details_series_missing_numbers">Αυτό το πρόσθετο επέστρεψε βίντεο για τη σειρά, αλλά κανένα δεν περιελάμβανε αριθμούς σεζόν ή επεισοδίου.</string>
     <string name="details_series_no_metadata">Αυτό το πρόσθετο δεν παρείχε μεταδεδομένα επεισοδίων για αυτή τη σειρά.</string>
     <string name="details_series_unpublished">Τα επεισόδια δεν έχουν δημοσιευτεί ακόμα από αυτό το πρόσθετο.</string>
-    <string name="details_servers_unreachable">Η συσκευή σας είναι συνδεδεμένη στο διαδίκτυο, αλλά το Nuvio δεν μπόρεσε να φτάσει τους απαιτούμενους διακομιστές.</string>
+    <string name="details_servers_unreachable">Η συσκευή σας είναι συνδεδεμένη στο διαδίκτυο, αλλά το Tuvora δεν μπόρεσε να φτάσει τους απαιτούμενους διακομιστές.</string>
     <string name="details_show_less">Εμφάνιση λιγότερων</string>
     <string name="details_show_more">Εμφάνιση περισσότερων ▾</string>
     <string name="details_writer">Σεναριογράφος</string>
@@ -879,7 +879,7 @@
     <string name="updates_downloading_progress">Λήψη %1$d%</string>
     <string name="updates_install_failed">Αδυναμία εκκίνησης εγκατάστασης</string>
     <string name="updates_latest_version">Χρησιμοποιείτε την τελευταία έκδοση.</string>
-    <string name="updates_message_allow_installs">Ενεργοποιήστε τις εγκαταστάσεις εφαρμογών για το Nuvio και επιστρέψτε για να συνεχίσετε.</string>
+    <string name="updates_message_allow_installs">Ενεργοποιήστε τις εγκαταστάσεις εφαρμογών για το Tuvora και επιστρέψτε για να συνεχίσετε.</string>
     <string name="updates_message_downloading">Εγκατάσταση ενημέρωσης...</string>
     <string name="updates_message_no_updates">Δεν βρέθηκαν ενημερώσεις.</string>
     <string name="updates_message_ready">Μια νέα έκδοση είναι έτοιμη για εγκατάσταση.</string>
@@ -892,7 +892,7 @@
     <string name="addon_already_installed">Αυτό το πρόσθετο είναι ήδη εγκατεστημένο.</string>
     <string name="addon_invalid_url">Εισάγετε μια έγκυρη διεύθυνση URL πρόσθετου</string>
     <string name="addon_load_manifest_failed">Αδυναμία φόρτωσης manifest</string>
-    <string name="app_brand_name">Nuvio</string>
+    <string name="app_brand_name">Tuvora</string>
     <string name="auth_account_deletion_failed">Η διαγραφή λογαριασμού απέτυχε</string>
     <string name="auth_sign_in_failed">Η σύνδεση απέτυχε</string>
     <string name="auth_sign_out_failed">Η αποσύνδεση απέτυχε</string>

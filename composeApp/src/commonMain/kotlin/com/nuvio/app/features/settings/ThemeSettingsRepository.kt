@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 object ThemeSettingsRepository {
-    private val _selectedTheme = MutableStateFlow(AppTheme.WHITE)
+    private val _selectedTheme = MutableStateFlow(AppTheme.MARIGOLD)
     val selectedTheme: StateFlow<AppTheme> = _selectedTheme.asStateFlow()
 
     private val _amoledEnabled = MutableStateFlow(false)
@@ -33,10 +33,10 @@ object ThemeSettingsRepository {
 
     fun clearLocalState() {
         hasLoaded = false
-        _selectedTheme.value = AppTheme.WHITE
+        _selectedTheme.value = AppTheme.MARIGOLD
         _amoledEnabled.value = false
         _liquidGlassNativeTabBarEnabled.value = false
-        NativeTabBridge.publishAccentColor(AppTheme.WHITE.nativeTabAccentHex())
+        NativeTabBridge.publishAccentColor(AppTheme.MARIGOLD.nativeTabAccentHex())
         NativeTabBridge.publishLiquidGlassEnabled(false)
         _selectedAppLanguage.value = AppLanguage.DEVICE
     }
@@ -48,10 +48,10 @@ object ThemeSettingsRepository {
             try {
                 AppTheme.valueOf(stored)
             } catch (_: IllegalArgumentException) {
-                AppTheme.WHITE
+                AppTheme.MARIGOLD
             }
         } else {
-            AppTheme.WHITE
+            AppTheme.MARIGOLD
         }
         _selectedTheme.value = theme
         NativeTabBridge.publishAccentColor(theme.nativeTabAccentHex())

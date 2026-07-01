@@ -31,7 +31,7 @@
     <string name="addons_badge_unavailable">Nedostupný</string>
     <string name="addons_configure">Konfigurovať doplnok</string>
     <string name="addons_delete">Odstrániť doplnok</string>
-    <string name="addons_empty_subtitle">Pridajte URL manifestu a začnite načítavať katalógy, metadáta, streamy alebo titulky do Nuvio.</string>
+    <string name="addons_empty_subtitle">Pridajte URL manifestu a začnite načítavať katalógy, metadáta, streamy alebo titulky do Tuvora.</string>
     <string name="addons_empty_title">Zatiaľ nie sú nainštalované žiadne doplnky.</string>
     <string name="addons_error_enter_url">Zadajte URL doplnku.</string>
     <string name="addons_input_placeholder">URL doplnku</string>
@@ -142,7 +142,7 @@
     <string name="collections_editor_tmdb_list_helper">Príklad: https://www.themoviedb.org/list/8504994 alebo 8504994.</string>
     <string name="collections_editor_tmdb_person_helper">Príklad: https://www.themoviedb.org/person/31-tom-hanks alebo 31.</string>
     <string name="collections_editor_tmdb_display_title">Zobrazovaný názov</string>
-    <string name="collections_editor_tmdb_title_helper">Zobrazuje sa ako názov riadku/záložky. Ak je prázdne, Nuvio ho vytvorí zo zdroja.</string>
+    <string name="collections_editor_tmdb_title_helper">Zobrazuje sa ako názov riadku/záložky. Ak je prázdne, Tuvora ho vytvorí zo zdroja.</string>
     <string name="collections_editor_tmdb_title_placeholder">Filmy Marvel, Netflix Originals, Pixar</string>
     <string name="collections_editor_tmdb_person_title_placeholder">Filmy Toma Hanksa, Obľúbení herci</string>
     <string name="collections_editor_tmdb_director_title_placeholder">Filmy Christophera Nolana, Obľúbení režiséri</string>
@@ -660,7 +660,7 @@
     <string name="settings_debrid_disconnect">Odpojiť</string>
     <string name="settings_debrid_device_auth_connected">%1$s je pripojený na tomto zariadení.</string>
     <string name="settings_debrid_device_auth_starting">Spúšťa sa bezpečné prihlásenie...</string>
-    <string name="settings_debrid_device_auth_instructions">Otvorte odkaz a zadajte tento kód na schválenie Nuvio.</string>
+    <string name="settings_debrid_device_auth_instructions">Otvorte odkaz a zadajte tento kód na schválenie Tuvora.</string>
     <string name="settings_debrid_device_auth_code_copied">Kód skopírovaný.</string>
     <string name="settings_debrid_device_auth_open">Otvoriť odkaz</string>
     <string name="settings_debrid_device_auth_waiting">Čaká sa na schválenie...</string>
@@ -763,10 +763,10 @@
     <string name="settings_meta_tab_layout_description">Zoskupiť sekcie do záložiek ako v TV aplikácii. Priradiť až 3 sekcie na skupinu záložiek.</string>
     <string name="settings_meta_trailers">Trailery</string>
     <string name="settings_meta_trailers_description">Rad trailerov a skratky prehrávania.</string>
-    <string name="settings_notifications_disabled_in_app">Oznámenia sú momentálne vypnuté v Nuvio.</string>
+    <string name="settings_notifications_disabled_in_app">Oznámenia sú momentálne vypnuté v Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Upozornenia na vydanie epizód</string>
     <string name="settings_notifications_episode_release_alerts_description">Naplánovať lokálne oznámenia, keď bude dostupná nová epizóda uloženého seriálu.</string>
-    <string name="settings_notifications_permission_disabled">Systémové oznámenia sú pre Nuvio vypnuté. Povoľte ich, aby ste dostávali upozornenia a testovacie oznámenia.</string>
+    <string name="settings_notifications_permission_disabled">Systémové oznámenia sú pre Tuvora vypnuté. Povoľte ich, aby ste dostávali upozornenia a testovacie oznámenia.</string>
     <string name="settings_notifications_scheduled_count">%1$d upozornení na vydanie je momentálne naplánovaných na tomto zariadení.</string>
     <string name="settings_notifications_section_alerts">UPOZORNENIA</string>
     <string name="settings_notifications_section_test">TEST</string>
@@ -776,7 +776,7 @@
     <string name="settings_notifications_test_requires_saved_show">Najprv uložte seriál do knižnice, aby ste mohli testovať oznámenia.</string>
     <string name="settings_notifications_test_title">Testovacie oznámenie</string>
     <string name="community_section_title">Komunita</string>
-    <string name="community_section_description">Pozrite sa na ľudí, ktorí budujú a podporujú Nuvio na Mobile, TV a Webe.</string>
+    <string name="community_section_description">Pozrite sa na ľudí, ktorí budujú a podporujú Tuvora na Mobile, TV a Webe.</string>
     <string name="community_donation_progress_title">Server a údržba tohto mesiaca</string>
     <string name="community_donation_progress_complete">Pokryté. Ďalšia podpora ide na vývoj.</string>
     <string name="community_donation_progress_remaining">Po 100 %% ide ďalšia podpora na vývoj.</string>
@@ -1019,17 +1019,17 @@
     <string name="trakt_library_source_dialog_title">Zdroj knižnice</string>
     <string name="trakt_library_source_dialog_subtitle">Vyberte, kde ukladať a spravovať položky knižnice</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">Knižnica Nuvio</string>
+    <string name="trakt_library_source_nuvio">Knižnica Tuvora</string>
     <string name="trakt_library_source_trakt_selected">Vybraná knižnica Trakt</string>
-    <string name="trakt_library_source_nuvio_selected">Vybraná knižnica Nuvio</string>
+    <string name="trakt_library_source_nuvio_selected">Vybraná knižnica Tuvora</string>
     <string name="trakt_watch_progress_title">Postup sledovania</string>
     <string name="trakt_watch_progress_subtitle">Vyberte, ktorý zdroj postupu poháňa pokračovanie a sledovanie</string>
     <string name="trakt_watch_progress_dialog_title">Postup sledovania</string>
-    <string name="trakt_watch_progress_dialog_subtitle">Vyberte, či má pokračovanie a sledovanie používať Trakt alebo Nuvio Sync, kým zostáva aktívne scrobbling Trakt.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Vyberte, či má pokračovanie a sledovanie používať Trakt alebo Tuvora Sync, kým zostáva aktívne scrobbling Trakt.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">Nuvio Sync</string>
+    <string name="trakt_watch_progress_source_nuvio">Tuvora Sync</string>
     <string name="trakt_watch_progress_trakt_selected">Zdroj postupu sledovania nastavený na Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Zdroj postupu sledovania nastavený na Nuvio Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">Zdroj postupu sledovania nastavený na Tuvora Sync</string>
     <string name="trakt_more_like_this_source_title">Zdroj podobných titulov</string>
     <string name="trakt_more_like_this_source_subtitle">Vyberte, odkiaľ pochádzajú odporúčania na stránkach s podrobnosťami</string>
     <string name="trakt_more_like_this_source_dialog_title">Zdroj podobných titulov</string>
@@ -1168,7 +1168,7 @@
     <string name="details_series_missing_numbers">Tento doplnok vrátil videá pre seriál, ale žiadne neobsahovalo čísla série alebo epizódy.</string>
     <string name="details_series_no_metadata">Tento doplnok neposkytol metadáta epizód pre tento seriál.</string>
     <string name="details_series_unpublished">Epizódy ešte neboli zverejnené týmto doplnkom.</string>
-    <string name="details_servers_unreachable">Vaše zariadenie je online, ale Nuvio nemohlo dosiahnuť požadované servery.</string>
+    <string name="details_servers_unreachable">Vaše zariadenie je online, ale Tuvora nemohlo dosiahnuť požadované servery.</string>
     <string name="details_show_less">Zobraziť menej</string>
     <string name="details_show_more">Zobraziť viac ▾</string>
     <string name="details_writer">Scenárista</string>
@@ -1321,7 +1321,7 @@
     <string name="updates_downloading_progress">Sťahovanie %1$d%%</string>
     <string name="updates_install_failed">Nepodarilo sa spustiť inštaláciu</string>
     <string name="updates_latest_version">Používate najnovšiu verziu.</string>
-    <string name="updates_message_allow_installs">Povoľte inštalácie aplikácií pre Nuvio a potom sa vráťte a pokračujte.</string>
+    <string name="updates_message_allow_installs">Povoľte inštalácie aplikácií pre Tuvora a potom sa vráťte a pokračujte.</string>
     <string name="updates_message_downloading">Sťahovanie aktualizácie...</string>
     <string name="updates_message_no_updates">Nenašli sa žiadne aktualizácie.</string>
     <string name="updates_message_ready">Nová verzia je pripravená na inštaláciu.</string>
@@ -1334,7 +1334,7 @@
     <string name="addon_already_installed">Tento doplnok je už nainštalovaný.</string>
     <string name="addon_invalid_url">Zadajte platnú URL doplnku</string>
     <string name="addon_load_manifest_failed">Nepodarilo sa načítať manifest</string>
-    <string name="app_brand_name">Nuvio</string>
+    <string name="app_brand_name">Tuvora</string>
     <string name="auth_account_deletion_failed">Odstránenie účtu zlyhalo</string>
     <string name="auth_sign_in_failed">Prihlásenie zlyhalo</string>
     <string name="auth_sign_out_failed">Odhlásenie zlyhalo</string>
@@ -1782,7 +1782,7 @@
     <string name="downloads_error_open_partial_file_failed">Nepodarilo sa otvoriť čiastočný súbor na stiahnutie</string>
     <string name="downloads_error_partial_file_not_open">Čiastočný súbor na stiahnutie nie je otvorený</string>
     <string name="downloads_error_write_partial_file_failed">Nepodarilo sa zapísať čiastočný súbor na stiahnutie</string>
-    <string name="library_local_tab_title">Nuvio Knižnica</string>
+    <string name="library_local_tab_title">Tuvora Knižnica</string>
     <string name="network_connection_issue">Problém s pripojením</string>
     <string name="network_empty_response_body">Prázdne telo odpovede</string>
     <string name="network_please_check_connection">Skontrolujte prosím svoje pripojenie a skúste to znova.</string>
@@ -1881,7 +1881,7 @@
     <string name="collections_editor_trakt_list_title_format">Trakt Zoznam %1$s</string>
     <string name="external_player_android_system">Systémový prehrávač Android</string>
     <string name="p2p_consent_title">P2P Streamovanie</string>
-    <string name="p2p_consent_body">Tento stream používa peer-to-peer (P2P) technológiu. Povolením P2P potvrdzujete a súhlasíte s tým, že:\n\n• Vaša IP adresa bude viditeľná pre ostatných účastníkov v sieti\n• Ste výhradne zodpovední za obsah, ku ktorému pristupujete\n• Potvrdzujete, že máte zákonné právo streamovať tento obsah vo vašej jurisdikcii\n• Nuvio nehostuje, nedistribuuje ani nekontroluje žiadny P2P obsah\n• Nuvio nenesie žiadnu zodpovednosť za akékoľvek právne dôsledky vyplývajúce z vášho používania P2P streamovania\n\nTúto funkciu používate výhradne na vlastné riziko. P2P môžete kedykoľvek vypnúť v Nastaveniach.</string>
+    <string name="p2p_consent_body">Tento stream používa peer-to-peer (P2P) technológiu. Povolením P2P potvrdzujete a súhlasíte s tým, že:\n\n• Vaša IP adresa bude viditeľná pre ostatných účastníkov v sieti\n• Ste výhradne zodpovední za obsah, ku ktorému pristupujete\n• Potvrdzujete, že máte zákonné právo streamovať tento obsah vo vašej jurisdikcii\n• Tuvora nehostuje, nedistribuuje ani nekontroluje žiadny P2P obsah\n• Tuvora nenesie žiadnu zodpovednosť za akékoľvek právne dôsledky vyplývajúce z vášho používania P2P streamovania\n\nTúto funkciu používate výhradne na vlastné riziko. P2P môžete kedykoľvek vypnúť v Nastaveniach.</string>
     <string name="p2p_consent_enable">Povoliť P2P</string>
     <string name="p2p_consent_cancel">Zrušiť</string>
     <string name="p2p_error_unknown">Neznáma chyba torrentu</string>
@@ -1900,7 +1900,7 @@
     <!-- Current cmp-rewrite string additions -->
     <string name="action_switch">Prepnúť</string>
     <string name="addons_appstore_add_description">Pripojte vlastný mediálny server na prehliadanie a prehrávanie z vašej osobnej knižnice.</string>
-    <string name="addons_appstore_empty_subtitle">Pridajte URL servera vyššie, ak chcete, aby Nuvio zobrazovalo vašu súkromnú knižnicu.</string>
+    <string name="addons_appstore_empty_subtitle">Pridajte URL servera vyššie, ak chcete, aby Tuvora zobrazovalo vašu súkromnú knižnicu.</string>
     <string name="addons_appstore_empty_title">Nie sú pripojené žiadne osobné knižnice.</string>
     <string name="addons_appstore_input_placeholder">URL servera</string>
     <string name="addons_appstore_install_button">Pridať</string>

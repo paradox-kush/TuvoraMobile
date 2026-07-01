@@ -31,7 +31,7 @@
     <string name="addons_badge_unavailable">Indisponível</string>
     <string name="addons_configure">Configurar addon</string>
     <string name="addons_delete">Eliminar addon</string>
-    <string name="addons_empty_subtitle">Adiciona um URL de manifesto para começares a carregar catálogos, metadados, streams ou legendas no Nuvio.</string>
+    <string name="addons_empty_subtitle">Adiciona um URL de manifesto para começares a carregar catálogos, metadados, streams ou legendas no Tuvora.</string>
     <string name="addons_empty_title">Ainda não tens addons instalados.</string>
     <string name="addons_error_enter_url">Introduz o URL de um addon.</string>
     <string name="addons_input_placeholder">URL do addon</string>
@@ -142,7 +142,7 @@
     <string name="collections_editor_tmdb_list_helper">Exemplo: https://www.themoviedb.org/list/8504994 ou 8504994.</string>
     <string name="collections_editor_tmdb_person_helper">Exemplo: https://www.themoviedb.org/person/31-tom-hanks ou 31.</string>
     <string name="collections_editor_tmdb_display_title">Título a apresentar</string>
-    <string name="collections_editor_tmdb_title_helper">Aparece como o nome da linha/separador. Se ficar em branco, o Nuvio cria um automaticamente a partir da fonte.</string>
+    <string name="collections_editor_tmdb_title_helper">Aparece como o nome da linha/separador. Se ficar em branco, o Tuvora cria um automaticamente a partir da fonte.</string>
     <string name="collections_editor_tmdb_title_placeholder">Filmes da Marvel, Originais Netflix, Pixar</string>
     <string name="collections_editor_tmdb_person_title_placeholder">Filmes com Tom Hanks, Atores favoritos</string>
     <string name="collections_editor_tmdb_director_title_placeholder">Filmes de Christopher Nolan, Realizadores favoritos</string>
@@ -657,7 +657,7 @@
     <string name="settings_debrid_disconnect">Desligar</string>
     <string name="settings_debrid_device_auth_connected">O %1$s está ligado neste dispositivo.</string>
     <string name="settings_debrid_device_auth_starting">A iniciar início de sessão seguro...</string>
-    <string name="settings_debrid_device_auth_instructions">Abre o link e introduz este código para aprovares o Nuvio.</string>
+    <string name="settings_debrid_device_auth_instructions">Abre o link e introduz este código para aprovares o Tuvora.</string>
     <string name="settings_debrid_device_auth_code_copied">Código copiado.</string>
     <string name="settings_debrid_device_auth_open">Abrir link</string>
     <string name="settings_debrid_device_auth_waiting">A aguardar aprovação...</string>
@@ -756,10 +756,10 @@
     <string name="settings_meta_tab_layout_description">Agrupa as secções em separadores como na app para TV. Atribui até 3 secções por grupo.</string>
     <string name="settings_meta_trailers">Trailers</string>
     <string name="settings_meta_trailers_description">Linha de trailers e atalhos de reprodução.</string>
-    <string name="settings_notifications_disabled_in_app">As notificações estão atualmente desativadas no Nuvio.</string>
+    <string name="settings_notifications_disabled_in_app">As notificações estão atualmente desativadas no Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Alertas de lançamento de episódios</string>
     <string name="settings_notifications_episode_release_alerts_description">Agenda notificações locais para quando um novo episódio de uma série guardada ficar disponível.</string>
-    <string name="settings_notifications_permission_disabled">As notificações do sistema estão desativadas para o Nuvio. Ativa-as para receberes alertas e notificações de teste.</string>
+    <string name="settings_notifications_permission_disabled">As notificações do sistema estão desativadas para o Tuvora. Ativa-as para receberes alertas e notificações de teste.</string>
     <string name="settings_notifications_scheduled_count">Existem atualmente %1$d alertas de lançamento agendados neste dispositivo.</string>
     <string name="settings_notifications_section_alerts">ALERTAS</string>
     <string name="settings_notifications_section_test">TESTE</string>
@@ -769,7 +769,7 @@
     <string name="settings_notifications_test_requires_saved_show">Guarda primeiro uma série na tua biblioteca para poderes testar as notificações.</string>
     <string name="settings_notifications_test_title">Notificação de teste</string>
     <string name="community_section_title">Comunidade</string>
-    <string name="community_section_description">Vê as pessoas que constroem e apoiam o Nuvio em versões Mobile, TV e Web.</string>
+    <string name="community_section_description">Vê as pessoas que constroem e apoiam o Tuvora em versões Mobile, TV e Web.</string>
     <string name="community_supporters_not_configured">A API de Apoiantes não está configurada. Adiciona DONATIONS_BASE_URL ao local.properties.</string>
     <string name="community_tab_contributors">Colaboradores</string>
     <string name="community_tab_supporters">Apoiantes</string>
@@ -1008,17 +1008,17 @@
     <string name="trakt_library_source_dialog_title">Fonte da biblioteca</string>
     <string name="trakt_library_source_dialog_subtitle">Escolhe onde guardar e gerir os itens da tua biblioteca.</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">Biblioteca Nuvio</string>
+    <string name="trakt_library_source_nuvio">Biblioteca Tuvora</string>
     <string name="trakt_library_source_trakt_selected">Biblioteca do Trakt selecionada</string>
-    <string name="trakt_library_source_nuvio_selected">Biblioteca do Nuvio selecionada</string>
+    <string name="trakt_library_source_nuvio_selected">Biblioteca do Tuvora selecionada</string>
     <string name="trakt_watch_progress_title">Progresso de visualização</string>
     <string name="trakt_watch_progress_subtitle">Define a fonte de progresso utilizada para retomar e continuar a ver.</string>
     <string name="trakt_watch_progress_dialog_title">Progresso de visualização</string>
-    <string name="trakt_watch_progress_dialog_subtitle">Escolhe se Retomar e Continuar a Ver devem utilizar o Trakt ou o Nuvio Sync enquanto o scrobbling do Trakt permanece ativo.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Escolhe se Retomar e Continuar a Ver devem utilizar o Trakt ou o Tuvora Sync enquanto o scrobbling do Trakt permanece ativo.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">Nuvio Sync</string>
+    <string name="trakt_watch_progress_source_nuvio">Tuvora Sync</string>
     <string name="trakt_watch_progress_trakt_selected">Fonte de progresso de visualização definida para Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Fonte de progresso de visualização definida para Nuvio Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">Fonte de progresso de visualização definida para Tuvora Sync</string>
     <string name="trakt_more_like_this_source_title">Fonte dos títulos semelhantes</string>
     <string name="trakt_more_like_this_source_subtitle">Escolhe a origem das recomendações nas páginas de detalhes.</string>
     <string name="trakt_more_like_this_source_dialog_title">Fonte dos títulos semelhantes</string>
@@ -1156,7 +1156,7 @@
     <string name="details_series_missing_numbers">Este addon devolveu vídeos para a série, mas nenhum incluía números de temporada ou episódio.</string>
     <string name="details_series_no_metadata">Este addon não forneceu metadados de episódios para esta série.</string>
     <string name="details_series_unpublished">Os episódios ainda não foram publicados por este addon.</string>
-    <string name="details_servers_unreachable">O teu dispositivo está online, mas o Nuvio não conseguiu contactar os servidores necessários.</string>
+    <string name="details_servers_unreachable">O teu dispositivo está online, mas o Tuvora não conseguiu contactar os servidores necessários.</string>
     <string name="details_show_less">Mostrar menos</string>
     <string name="details_show_more">Mostrar mais ▾</string>
     <string name="details_writer">Argumento</string>
@@ -1309,7 +1309,7 @@
     <string name="updates_downloading_progress">A transferir %1$d%%</string>
     <string name="updates_install_failed">Não foi possível iniciar a instalação</string>
     <string name="updates_latest_version">Estás a utilizar a versão mais recente.</string>
-    <string name="updates_message_allow_installs">Ativa a instalação de apps para o Nuvio e depois volta para continuar.</string>
+    <string name="updates_message_allow_installs">Ativa a instalação de apps para o Tuvora e depois volta para continuar.</string>
     <string name="updates_message_downloading">A transferir atualização...</string>
     <string name="updates_message_no_updates">Nenhuma atualização encontrada.</string>
     <string name="updates_message_ready">Uma nova versão está pronta para ser instalada.</string>
@@ -1322,7 +1322,7 @@
     <string name="addon_already_installed">Esse addon já está instalado.</string>
     <string name="addon_invalid_url">Introduz um URL de addon válido</string>
     <string name="addon_load_manifest_failed">Não foi possível carregar o manifesto</string>
-    <string name="app_brand_name">Nuvio</string>
+    <string name="app_brand_name">Tuvora</string>
     <string name="auth_account_deletion_failed">Falha ao eliminar a conta</string>
     <string name="auth_sign_in_failed">Falha ao iniciar sessão</string>
     <string name="auth_sign_out_failed">Falha ao terminar sessão</string>
@@ -1732,7 +1732,7 @@
     <string name="downloads_error_open_partial_file_failed">Falha ao abrir o ficheiro parcial da transferência</string>
     <string name="downloads_error_partial_file_not_open">O ficheiro parcial da transferência não está aberto</string>
     <string name="downloads_error_write_partial_file_failed">Falha ao escrever no ficheiro parcial da transferência</string>
-    <string name="library_local_tab_title">Biblioteca Nuvio</string>
+    <string name="library_local_tab_title">Biblioteca Tuvora</string>
     <string name="network_connection_issue">Problema de ligação</string>
     <string name="network_empty_response_body">Corpo da resposta vazio</string>
     <string name="network_please_check_connection">Verifica a tua ligação e tenta novamente.</string>
@@ -1829,7 +1829,7 @@
     <string name="collections_editor_trakt_list_title_format">Lista do Trakt %1$s</string>
     <string name="external_player_android_system">Leitor do sistema Android</string>
     <string name="p2p_consent_title">Streaming P2P</string>
-    <string name="p2p_consent_body">Este stream utiliza tecnologia ponto a ponto (P2P). Ao ativar o P2P, reconheces e aceitas que:\n\n• O teu endereço IP ficará visível para outros peers na rede\n• És o único responsável pelo conteúdo a que acedes\n• Confirmas que tens o direito legal de transmitir este conteúdo na tua jurisdição\n• O Nuvio não aloja, distribui nem controla qualquer conteúdo P2P\n• O Nuvio não assume responsabilidade por quaisquer consequências legais resultantes da utilização de streaming P2P\n\nUtilizas esta funcionalidade inteiramente por tua conta e risco. O P2P pode ser desativado a qualquer momento nas Definições.</string>
+    <string name="p2p_consent_body">Este stream utiliza tecnologia ponto a ponto (P2P). Ao ativar o P2P, reconheces e aceitas que:\n\n• O teu endereço IP ficará visível para outros peers na rede\n• És o único responsável pelo conteúdo a que acedes\n• Confirmas que tens o direito legal de transmitir este conteúdo na tua jurisdição\n• O Tuvora não aloja, distribui nem controla qualquer conteúdo P2P\n• O Tuvora não assume responsabilidade por quaisquer consequências legais resultantes da utilização de streaming P2P\n\nUtilizas esta funcionalidade inteiramente por tua conta e risco. O P2P pode ser desativado a qualquer momento nas Definições.</string>
     <string name="p2p_consent_enable">Ativar P2P</string>
     <string name="p2p_consent_cancel">Cancelar</string>
     <string name="settings_p2p_title">Streaming P2P</string>
