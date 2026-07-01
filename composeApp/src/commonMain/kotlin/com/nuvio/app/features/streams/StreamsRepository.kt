@@ -178,12 +178,42 @@ object StreamsRepository {
                     isAnyLoading = false,
                 )
             } else {
-                log.w { "Xtream stream short-circuit: no registered item for id=$videoId" }
-                _uiState.value = StreamsUiState(
-                    requestToken = requestToken,
-                    isAnyLoading = false,
-                    emptyStateReason = StreamsEmptyStateReason.NoStreamsFound,
-                )
+                // Registry miss: a persisted id (Continue Watching / Library) wasn't browsed this
+                // session. Rebuild + re-register it via MetaDetailsRepository (which fetches vodInfo
+                // for the correct container extension), then retry, before giving up.
+                _uiState.value = StreamsUiState(requestToken = requestToken, isAnyLoading = true)
+                activeJob?.cancel()
+                activeJob = scope.launch {
+                    val rebuilt = runCatchingUnlessCancelled {
+                        MetaDetailsRepository.ensureXtreamStreamRegistered(videoId)
+                    }.getOrDefault(false)
+                    val retried = if (rebuilt) XtreamItemRegistry.streamItemFor(videoId) else null
+                    if (retried != null) {
+                        val group = AddonStreamGroup(
+                            addonName = retried.addonName,
+                            addonId = "xtream",
+                            streams = listOf(retried),
+                            isLoading = false,
+                        )
+                        val presentedGroup = StreamBadgePresentation.apply(
+                            groups = listOf(group),
+                            rules = streamBadgeRules,
+                        ).firstOrNull() ?: group
+                        _uiState.value = StreamsUiState(
+                            requestToken = requestToken,
+                            groups = listOf(presentedGroup),
+                            activeAddonIds = setOf("xtream"),
+                            isAnyLoading = false,
+                        )
+                    } else {
+                        log.w { "Xtream stream short-circuit: no registered item for id=$videoId" }
+                        _uiState.value = StreamsUiState(
+                            requestToken = requestToken,
+                            isAnyLoading = false,
+                            emptyStateReason = StreamsEmptyStateReason.NoStreamsFound,
+                        )
+                    }
+                }
             }
             return
         }

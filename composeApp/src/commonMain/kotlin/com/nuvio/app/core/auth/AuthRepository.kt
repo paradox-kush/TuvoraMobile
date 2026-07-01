@@ -121,6 +121,8 @@ object AuthRepository {
             this.email = email
             this.password = password
         }
+        // Clear any lingering anonymous id so the sessionStatus collector honors the real session.
+        AuthStorage.clearAnonymousUserId()
         Unit
     }.onFailure { e ->
         log.e(e) { "Email sign-up failed" }
@@ -133,6 +135,8 @@ object AuthRepository {
             this.email = email
             this.password = password
         }
+        // Clear any lingering anonymous id so the sessionStatus collector honors the real session.
+        AuthStorage.clearAnonymousUserId()
     }.onFailure { e ->
         log.e(e) { "Email sign-in failed" }
         _error.value = e.message ?: getString(Res.string.auth_sign_in_failed)

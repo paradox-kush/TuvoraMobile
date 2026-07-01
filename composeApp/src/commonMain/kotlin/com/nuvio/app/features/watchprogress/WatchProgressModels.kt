@@ -3,6 +3,7 @@ package com.nuvio.app.features.watchprogress
 import com.nuvio.app.features.cloud.CloudLibraryContentType
 import com.nuvio.app.features.cloud.cloudLibraryProviderPosterUrl
 import com.nuvio.app.features.details.MetaVideo
+import com.nuvio.app.features.iptv.XtreamItemRegistry
 import com.nuvio.app.features.watching.domain.WatchingContentRef
 import kotlinx.serialization.Serializable
 
@@ -206,6 +207,12 @@ internal fun nextUpDismissKey(
 internal fun WatchProgressEntry.toContinueWatchingItem(): ContinueWatchingItem {
     val normalizedEntry = normalizedCompletion()
     val cloudPosterUrl = normalizedEntry.cloudLibraryPosterFallbackUrl()
+    // ponytail: an Xtream movie's persisted poster can be null (direct-play never enriched it) —
+    // fall back to the in-memory registry poster so Continue Watching shows art, not an empty frame.
+    val xtreamPoster = if (normalizedEntry.poster.isNullOrBlank()) {
+        XtreamItemRegistry.get(normalizedEntry.videoId)?.let { it.poster ?: it.logo }
+    } else null
+    val effectivePoster = normalizedEntry.poster ?: xtreamPoster
     val explicitResumeProgressFraction = normalizedEntry.normalizedProgressPercent
         ?.takeIf { durationMs <= 0L && it > 0f }
         ?.let { explicitPercent -> (explicitPercent / 100f).coerceIn(0f, 1f) }
@@ -220,9 +227,9 @@ internal fun WatchProgressEntry.toContinueWatchingItem(): ContinueWatchingItem {
             episodeNumber = normalizedEntry.episodeNumber,
             episodeTitle = normalizedEntry.episodeTitle,
         ),
-        imageUrl = normalizedEntry.episodeThumbnail ?: normalizedEntry.background ?: normalizedEntry.poster ?: cloudPosterUrl,
+        imageUrl = normalizedEntry.episodeThumbnail ?: normalizedEntry.background ?: effectivePoster ?: cloudPosterUrl,
         logo = normalizedEntry.logo,
-        poster = normalizedEntry.poster ?: cloudPosterUrl,
+        poster = effectivePoster ?: cloudPosterUrl,
         background = normalizedEntry.background,
         seasonNumber = normalizedEntry.seasonNumber,
         episodeNumber = normalizedEntry.episodeNumber,

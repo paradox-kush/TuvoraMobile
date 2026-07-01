@@ -132,10 +132,12 @@ private fun AccountSettingsBody(
             }
         }
 
-        NuvioPrimaryButton(
-            text = stringResource(Res.string.settings_account_sign_out),
-            onClick = { showSignOutConfirm = true },
-        )
+        if (authState is AuthState.Authenticated) {
+            NuvioPrimaryButton(
+                text = stringResource(Res.string.settings_account_sign_out),
+                onClick = { showSignOutConfirm = true },
+            )
+        }
 
         if (canDeleteAccount) {
             DeleteAccountCard(

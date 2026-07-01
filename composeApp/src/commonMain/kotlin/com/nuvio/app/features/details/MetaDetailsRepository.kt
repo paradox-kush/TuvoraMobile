@@ -582,8 +582,13 @@ object MetaDetailsRepository {
         val detail = XtreamClient.vodInfo(account, streamId).getOrNull()
         val name = detail?.name ?: registered?.name ?: "Movie"
         val poster = registered?.poster
-        val streamUrl = registered?.streamUrl
-            ?: XtreamClient.movieStreamUrl(account, streamId, detail?.containerExtension ?: "mp4")
+        // ponytail: prefer the real container_extension from vod_info over a stale registered URL.
+        // The browse/list flow registers a ".mp4" URL (the list endpoint omits container_extension);
+        // a wrong ".mp4" makes the Download save a mis-named/broken file the local player can't load (B11).
+        val streamUrl = detail?.containerExtension?.takeIf { it.isNotBlank() }
+            ?.let { XtreamClient.movieStreamUrl(account, streamId, it) }
+            ?: registered?.streamUrl
+            ?: XtreamClient.movieStreamUrl(account, streamId, "mp4")
         XtreamItemRegistry.register(XtreamResolvedItem(id, accountId, XtreamKind.VOD, name, streamUrl, poster))
 
         var meta = MetaDetails(
@@ -598,6 +603,30 @@ object MetaDetailsRepository {
         )
         detail?.tmdbId?.let { meta = enrichXtreamMeta(meta, it) }
         return meta
+    }
+
+    /**
+     * Rebuilds and re-registers the direct VOD stream item for a persisted `xtream:...:vod:...`
+     * id whose in-memory registry entry was lost (e.g. Continue Watching / Library after a fresh
+     * launch). Fetches vodInfo so the real container_extension is used instead of the "mp4"
+     * default. Returns true once a playable item is registered. Called from the direct-play path
+     * (StreamsRepository) so it doesn't have to go through the detail screen first.
+     */
+    suspend fun ensureXtreamStreamRegistered(id: String): Boolean {
+        if (XtreamItemRegistry.get(id) != null) return true
+        XtreamRepository.ensureLoaded()
+        val parsed = XtreamItemRegistry.parseId(id) ?: return false
+        if (parsed.kind != XtreamKind.VOD) return false
+        val streamId = parsed.id.toIntOrNull() ?: return false
+        val account = XtreamRepository.uiState.value.accounts
+            .firstOrNull { it.id == parsed.accountId } ?: return false
+        val detail = XtreamClient.vodInfo(account, streamId).getOrNull()
+        // ponytail: vodInfo gives the correct container_extension; fall back to mp4 only if absent.
+        val streamUrl = XtreamClient.movieStreamUrl(account, streamId, detail?.containerExtension ?: "mp4")
+        XtreamItemRegistry.register(
+            XtreamResolvedItem(id, parsed.accountId, XtreamKind.VOD, detail?.name ?: "Movie", streamUrl)
+        )
+        return true
     }
 
     private suspend fun buildXtreamSeriesMeta(
