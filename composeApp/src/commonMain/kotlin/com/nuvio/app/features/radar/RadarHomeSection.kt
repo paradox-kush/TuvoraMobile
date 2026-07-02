@@ -50,6 +50,10 @@ fun RadarHomeSection(
     val nowMs = RadarTime.nowMs()
     val featured = state.activeFeatured(nowMs).firstOrNull()
     var sheetFixture by remember { mutableStateOf<RadarFixture?>(null) }
+    // Outside-tap/back is NOT an answer: hide for this session only, ask again next launch.
+    // (Another dialog stacking above ours — e.g. the updater — would otherwise silently
+    // persist "declined" when the user taps through to it.)
+    var optInHiddenThisSession by remember { mutableStateOf(false) }
 
     val optInPending = featured != null &&
         (state.prefs.featuredEventId != featured.id || state.prefs.optInState == RadarOptIn.UNSET)
@@ -131,9 +135,9 @@ fun RadarHomeSection(
         }
     }
 
-    if (optInPending && featured != null) {
+    if (optInPending && !optInHiddenThisSession && featured != null) {
         AlertDialog(
-            onDismissRequest = { RadarRepository.setOptIn(featured.id, accepted = false) },
+            onDismissRequest = { optInHiddenThisSession = true },
             title = { Text(featured.title) },
             text = {
                 Text(
