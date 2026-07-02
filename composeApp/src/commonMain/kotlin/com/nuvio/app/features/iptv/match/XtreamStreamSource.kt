@@ -40,11 +40,14 @@ internal object XtreamStreamSource {
                 val editions = XtreamMatchIndex.byTmdb(acc.id, kind, tmdbId)
                     .ifEmpty { sameNameEditions(acc.id, kind, match.item, titles.year) }
                 editions.map { item ->
+                    // items synthesized from a synced mapping have no container ext — look it
+                    // up so the stream URL is right on panels that don't use mp4
+                    val ext = item.ext ?: XtreamClient.vodInfo(acc, item.sid).getOrNull()?.containerExtension ?: "mp4"
                     StreamItem(
                         // the panel's own catalog name — carries the useful bits (4K/NF/language)
                         name = item.name,
                         title = null,
-                        url = XtreamClient.movieStreamUrl(acc, item.sid, item.ext ?: "mp4"),
+                        url = XtreamClient.movieStreamUrl(acc, item.sid, ext),
                         addonName = acc.name,
                         addonId = groupId(acc),
                     )

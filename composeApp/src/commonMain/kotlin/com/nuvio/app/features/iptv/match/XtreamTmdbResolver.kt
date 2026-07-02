@@ -59,7 +59,15 @@ internal object XtreamTmdbResolver {
         XtreamMatchIndex.cachedMapping(provider, kind, tmdbId)?.let { cached ->
             if (cached.sid != null) {
                 XtreamMatchIndex.item(provider, kind, cached.sid)?.let { return XtreamMatch(it, "cache") }
-                // sid vanished from the catalog — stale mapping, fall through to re-match
+                // Item not in the local index. If this provider isn't indexed on THIS device,
+                // trust the synced mapping (another device verified it) and resolve straight
+                // from the sid — that's the whole point of cross-device sync: a match made on
+                // the TV must play on the phone without re-downloading a huge catalog. Only
+                // treat a missing sid as stale-vanished when we actually have the index to check.
+                if (!indexExists) {
+                    return XtreamMatch(IndexedItem(cached.sid, cached.matchedName ?: "", null, tmdbId, null), "cache-synced")
+                }
+                // else: sid vanished from a built catalog — fall through to re-match
             } else if (now() - cached.updatedAtMs < NEGATIVE_TTL_MS) {
                 return null // fresh "not on this provider"
             }
