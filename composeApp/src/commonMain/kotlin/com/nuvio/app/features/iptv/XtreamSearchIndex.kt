@@ -120,6 +120,10 @@ object XtreamSearchIndex {
         return mutex.withLock { channelCache[account.id] } ?: emptyList()
     }
 
+    /** All live channels of one account from the session cache (fetching on first use) — the
+     *  Sports Centre channel matcher's candidate pool. */
+    suspend fun liveChannelsFor(account: XtreamAccount): List<XtreamChannel> = ensureChannels(account)
+
     fun resetForProfile() {
         channelCache.clear()
         channelJobs.clear()

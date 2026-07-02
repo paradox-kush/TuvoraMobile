@@ -166,6 +166,8 @@ object ProfileRepository {
         com.nuvio.app.features.iptv.XtreamHubRepository.resetForProfile()
         com.nuvio.app.features.iptv.XtreamSearchIndex.resetForProfile()
         com.nuvio.app.features.iptv.match.XtreamMatchSyncService.reset()
+        // Sports Centre: reload follows/prefs + fixtures cache for the new profile.
+        com.nuvio.app.features.radar.RadarRepository.onProfileChanged(profileIndex)
         ThemeSettingsRepository.onProfileChanged()
         PosterCardStyleRepository.onProfileChanged()
         PlayerSettingsRepository.onProfileChanged()

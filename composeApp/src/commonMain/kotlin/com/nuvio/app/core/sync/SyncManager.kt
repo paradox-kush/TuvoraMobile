@@ -11,6 +11,7 @@ import com.nuvio.app.features.iptv.XtreamAccountSyncService
 import com.nuvio.app.features.library.LibraryRepository
 import com.nuvio.app.features.plugins.PluginRepository
 import com.nuvio.app.features.profiles.ProfileRepository
+import com.nuvio.app.features.radar.RadarSyncService
 import com.nuvio.app.features.trakt.TraktPlatformClock
 import com.nuvio.app.features.watched.WatchedRepository
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
@@ -78,6 +79,10 @@ object SyncManager {
             launch {
                 runCatching { XtreamAccountSyncService.pullFromServer(profileId) }
                     .onFailure { log.e(it) { "Xtream accounts pull failed" } }
+            }
+            launch {
+                runCatching { RadarSyncService.pullFromServer(profileId) }
+                    .onFailure { log.e(it) { "Radar follows pull failed" } }
             }
 
             log.i { "pullAllForProfile($profileId) — all pulls launched" }
