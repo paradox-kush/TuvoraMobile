@@ -373,6 +373,10 @@ kotlin {
             defaultSourceSet.kotlin.srcDir(project.file(iosDistributionSourceDir))
             defaultSourceSet.dependencies {
                 implementation(libs.ktor.client.darwin)
+                // BundledSQLiteDriver: SQLite compiled into the framework, so the match-index
+                // db needs no system libsqlite3 link in the Xcode app (NativeSQLiteDriver's
+                // -lsqlite3 doesn't reliably propagate from a static framework to the app link).
+                implementation(libs.androidx.sqlite.bundled)
                 if (iosDistribution == "full") {
                     implementation(libs.quickjs.kt)
                     implementation(libs.ksoup)
@@ -384,8 +388,6 @@ kotlin {
             baseName = "ComposeApp"
             isStatic = true
             freeCompilerArgs += listOf("-Xbinary=bundleId=$iosFrameworkBundleId")
-            // NativeSQLiteDriver links against the OS sqlite3 (match index storage)
-            linkerOpts("-lsqlite3")
         }
     }
     

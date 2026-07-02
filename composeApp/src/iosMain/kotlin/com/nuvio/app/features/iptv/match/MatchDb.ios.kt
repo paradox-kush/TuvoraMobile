@@ -1,7 +1,7 @@
 package com.nuvio.app.features.iptv.match
 
 import androidx.sqlite.SQLiteConnection
-import androidx.sqlite.driver.NativeSQLiteDriver
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.Foundation.NSApplicationSupportDirectory
 import platform.Foundation.NSFileManager
@@ -20,6 +20,7 @@ internal actual object MatchDbDriver {
             error = null,
         ) ?: NSURL.fileURLWithPath(".")
         val path = support.URLByAppendingPathComponent("xtream_match.db")?.path ?: "xtream_match.db"
-        return NativeSQLiteDriver().open(path)
+        // BundledSQLiteDriver compiles SQLite in — no system libsqlite3 dependency.
+        return BundledSQLiteDriver().open(path)
     }
 }
