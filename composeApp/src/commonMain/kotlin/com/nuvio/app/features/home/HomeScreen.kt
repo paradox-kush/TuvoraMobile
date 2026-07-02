@@ -78,6 +78,8 @@ import com.nuvio.app.features.watching.domain.WatchingContentRef
 import com.nuvio.app.features.watching.domain.isReleasedBy
 import com.nuvio.app.features.collection.CollectionRepository
 import com.nuvio.app.features.profiles.ProfileRepository
+import com.nuvio.app.features.radar.RadarHomeSection
+import com.nuvio.app.features.radar.RadarRepository
 import com.nuvio.app.features.home.components.HomeCollectionRowSection
 import com.nuvio.app.features.watchprogress.ContinueWatchingSectionStyle
 import kotlinx.coroutines.Dispatchers
@@ -110,6 +112,9 @@ fun HomeScreen(
     onContinueWatchingLongPress: ((ContinueWatchingItem) -> Unit)? = null,
     onFolderClick: ((collectionId: String, folderId: String) -> Unit)? = null,
     onFirstCatalogRendered: (() -> Unit)? = null,
+    onOpenSportsTab: () -> Unit = {},
+    onPlaySportsChannel: (String) -> Unit = {},
+    onAddIptvPlaylist: () -> Unit = {},
 ) {
     LaunchedEffect(Unit) {
         AddonRepository.initialize()
@@ -117,6 +122,7 @@ fun HomeScreen(
         ContinueWatchingPreferencesRepository.ensureLoaded()
         WatchedRepository.ensureLoaded()
         WatchProgressRepository.ensureLoaded()
+        RadarRepository.ensureLoaded()
     }
 
     val addonsUiState by AddonRepository.uiState.collectAsStateWithLifecycle()
@@ -764,6 +770,15 @@ fun HomeScreen(
                         )
                     }
                 }
+            }
+
+            // Sports Centre home presence: featured-event rail (opt-in) + set-up-Radar promo.
+            item(key = "radar-home-section") {
+                RadarHomeSection(
+                    onOpenSportsTab = onOpenSportsTab,
+                    onPlayChannel = onPlaySportsChannel,
+                    onAddPlaylist = onAddIptvPlaylist,
+                )
             }
 
             when {

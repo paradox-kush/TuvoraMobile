@@ -1613,6 +1613,7 @@ private fun MainAppContent(
                                             requestedSettingsPageName = "Iptv"
                                             selectedTab = AppScreenTab.Settings
                                         },
+                                        onOpenSportsTab = { selectedTab = AppScreenTab.Sports },
                                         onPlayLiveChannel = { contentId ->
                                             val item = XtreamItemRegistry.get(contentId)
                                             playLiveXtreamChannel(
@@ -3122,6 +3123,7 @@ private fun AppTabHost(
     onIptvAddProvider: () -> Unit = {},
     onPlayLiveChannel: (String) -> Unit = {},
     onIptvFavoriteChannel: (String) -> Unit = {},
+    onOpenSportsTab: () -> Unit = {},
     onLibraryPosterClick: ((LibraryItem) -> Unit)? = null,
     onLibraryPosterLongClick: ((LibraryItem, LibrarySection) -> Unit)? = null,
     onLibrarySectionViewAllClick: ((LibrarySection) -> Unit)? = null,
@@ -3163,6 +3165,9 @@ private fun AppTabHost(
                         onContinueWatchingLongPress = onContinueWatchingLongPress,
                         onFolderClick = onFolderClick,
                         onFirstCatalogRendered = onInitialHomeContentRendered,
+                        onOpenSportsTab = onOpenSportsTab,
+                        onPlaySportsChannel = onPlayLiveChannel,
+                        onAddIptvPlaylist = onIptvAddProvider,
                     )
                 }
 

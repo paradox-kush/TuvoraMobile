@@ -405,7 +405,7 @@ private fun FeaturedBannerCard(event: RadarFeaturedEvent, matchCount: Int) {
 }
 
 @Composable
-private fun MatchCard(fixture: RadarFixture, live: Boolean, onClick: () -> Unit) {
+internal fun MatchCard(fixture: RadarFixture, live: Boolean, onClick: () -> Unit) {
     Card(
         modifier = Modifier.width(240.dp),
         onClick = onClick,
@@ -443,7 +443,7 @@ private fun MatchCard(fixture: RadarFixture, live: Boolean, onClick: () -> Unit)
 }
 
 @Composable
-private fun LiveBadge() {
+internal fun LiveBadge() {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -472,7 +472,7 @@ private fun SectionTitle(text: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MatchChannelsSheet(
+internal fun MatchChannelsSheet(
     fixture: RadarFixture,
     league: RadarLeague?,
     isLive: Boolean,
