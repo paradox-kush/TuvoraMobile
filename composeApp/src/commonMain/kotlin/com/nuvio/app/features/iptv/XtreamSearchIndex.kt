@@ -44,41 +44,51 @@ object XtreamSearchIndex {
         val series = mutableListOf<MetaPreview>()
         val movies = mutableListOf<MetaPreview>()
         for (account in accounts) {
-            ensureChannels(account).asSequence()
-                .filter { it.name.contains(q, ignoreCase = true) }.take(PER_TYPE_CAP).forEach {
-                    XtreamItemRegistry.registerChannel(account.id, it); channels += it.toMetaPreview(account.id)
-                }
-
-            withTimeoutOrNull(INDEX_WAIT_MS) { XtreamTmdbResolver.ensureIndexed(account, MatchKind.MOVIE) }
-            XtreamMatchIndex.searchByName(account.id, MatchKind.MOVIE, q, PER_TYPE_CAP).forEach { item ->
-                val movie = XtreamMovie(
-                    streamId = item.sid,
-                    name = item.name,
-                    poster = item.poster,
-                    categoryId = null,
-                    rating = null,
-                    streamUrl = XtreamClient.movieStreamUrl(account, item.sid, item.ext ?: "mp4"),
-                    tmdb = item.tmdb,
-                    containerExtension = item.ext,
-                )
-                XtreamItemRegistry.registerMovie(account.id, movie)
-                movies += movie.toMetaPreview(account.id)
+            // Disabled content types are skipped per playlist; live channels carry a category id,
+            // so category selections filter them too. (Match-index movie/series rows carry no
+            // category id — selections can't filter those here.)
+            if (account.typeEnabled(CONTENT_TYPE_LIVE)) {
+                ensureChannels(account).asSequence()
+                    .filter { account.allowsCategory(CONTENT_TYPE_LIVE, it.categoryId) }
+                    .filter { it.name.contains(q, ignoreCase = true) }.take(PER_TYPE_CAP).forEach {
+                        XtreamItemRegistry.registerChannel(account.id, it); channels += it.toMetaPreview(account.id)
+                    }
             }
 
-            withTimeoutOrNull(INDEX_WAIT_MS) { XtreamTmdbResolver.ensureIndexed(account, MatchKind.SERIES) }
-            XtreamMatchIndex.searchByName(account.id, MatchKind.SERIES, q, PER_TYPE_CAP).forEach { item ->
-                val seriesItem = XtreamSeriesItem(
-                    seriesId = item.sid,
-                    name = item.name,
-                    poster = item.poster,
-                    categoryId = null,
-                    plot = null,
-                    rating = null,
-                    tmdb = item.tmdb,
-                    year = item.year,
-                )
-                XtreamItemRegistry.registerSeries(account.id, seriesItem)
-                series += seriesItem.toMetaPreview(account.id)
+            if (account.typeEnabled(CONTENT_TYPE_MOVIES)) {
+                withTimeoutOrNull(INDEX_WAIT_MS) { XtreamTmdbResolver.ensureIndexed(account, MatchKind.MOVIE) }
+                XtreamMatchIndex.searchByName(account.id, MatchKind.MOVIE, q, PER_TYPE_CAP).forEach { item ->
+                    val movie = XtreamMovie(
+                        streamId = item.sid,
+                        name = item.name,
+                        poster = item.poster,
+                        categoryId = null,
+                        rating = null,
+                        streamUrl = XtreamClient.movieStreamUrl(account, item.sid, item.ext ?: "mp4"),
+                        tmdb = item.tmdb,
+                        containerExtension = item.ext,
+                    )
+                    XtreamItemRegistry.registerMovie(account.id, movie)
+                    movies += movie.toMetaPreview(account.id)
+                }
+            }
+
+            if (account.typeEnabled(CONTENT_TYPE_SERIES)) {
+                withTimeoutOrNull(INDEX_WAIT_MS) { XtreamTmdbResolver.ensureIndexed(account, MatchKind.SERIES) }
+                XtreamMatchIndex.searchByName(account.id, MatchKind.SERIES, q, PER_TYPE_CAP).forEach { item ->
+                    val seriesItem = XtreamSeriesItem(
+                        seriesId = item.sid,
+                        name = item.name,
+                        poster = item.poster,
+                        categoryId = null,
+                        plot = null,
+                        rating = null,
+                        tmdb = item.tmdb,
+                        year = item.year,
+                    )
+                    XtreamItemRegistry.registerSeries(account.id, seriesItem)
+                    series += seriesItem.toMetaPreview(account.id)
+                }
             }
         }
         return listOfNotNull(

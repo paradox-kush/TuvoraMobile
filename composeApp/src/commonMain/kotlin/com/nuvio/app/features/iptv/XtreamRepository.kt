@@ -116,7 +116,16 @@ object XtreamRepository {
             onResult(false)
             return
         }
-        val account = candidate.copy(enabled = old.enabled)
+        // Carry every option over — a credential/URL edit must not wipe content-type or
+        // category choices (nor the other playlist options).
+        val account = candidate.copy(
+            enabled = old.enabled,
+            epgUrl = old.epgUrl,
+            dnsProvider = old.dnsProvider,
+            autoRefreshHours = old.autoRefreshHours,
+            contentTypes = old.contentTypes,
+            categorySelections = old.categorySelections,
+        )
         scope.launch {
             _uiState.update { it.copy(isValidating = true, error = null) }
             XtreamClient.verify(account)
@@ -158,6 +167,17 @@ object XtreamRepository {
         WatchProgressRepository.migrateIdPrefix(oldPrefix, newPrefix)
         WatchedRepository.migrateIdPrefix(oldPrefix, newPrefix)
         XtreamLiveRecents.migrateIdPrefix(oldPrefix, newPrefix)
+    }
+
+    /**
+     * Option-only edit (content types, category selections, …): swap the account in place and
+     * persist + sync-push. No credential re-verify — the identity fields don't change.
+     */
+    fun updateOptions(id: String, transform: (XtreamAccount) -> XtreamAccount) {
+        _uiState.update { st ->
+            st.copy(accounts = st.accounts.map { if (it.id == id) transform(it) else it })
+        }
+        persist()
     }
 
     fun setEnabled(id: String, enabled: Boolean) {

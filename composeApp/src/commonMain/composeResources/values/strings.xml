@@ -420,6 +420,7 @@
     <string name="compose_settings_page_continue_watching">Continue Watching</string>
     <string name="compose_settings_page_debrid">Connected Services</string>
     <string name="compose_settings_page_iptv">IPTV (Xtream Codes)</string>
+    <string name="compose_settings_page_iptv_content">Content &amp; Categories</string>
     <string name="compose_settings_page_homescreen">Home Layout</string>
     <string name="compose_settings_page_integrations">Integrations</string>
     <string name="compose_settings_page_licenses_attributions">Licenses &amp; Attribution</string>

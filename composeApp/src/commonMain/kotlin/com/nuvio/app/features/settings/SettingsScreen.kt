@@ -46,8 +46,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.app.features.iptv.XtreamContentPage
 import com.nuvio.app.features.iptv.XtreamRepository
 import com.nuvio.app.features.iptv.XtreamUiState
+import com.nuvio.app.features.iptv.xtreamContentSettingsContent
 import com.nuvio.app.features.iptv.xtreamSettingsContent
 import com.nuvio.app.core.ui.AppTheme
 import com.nuvio.app.core.ui.LocalNuvioBottomNavigationOverlayPadding
@@ -688,6 +690,14 @@ private fun MobileSettingsScreen(
                 SettingsPage.Iptv -> xtreamSettingsContent(
                     isTablet = false,
                     state = xtreamState,
+                    onOpenContent = { account ->
+                        XtreamContentPage.open(account.id)
+                        onPageChange(SettingsPage.IptvContent)
+                    },
+                )
+                SettingsPage.IptvContent -> xtreamContentSettingsContent(
+                    isTablet = false,
+                    state = xtreamState,
                 )
                 SettingsPage.TraktAuthentication -> traktSettingsContent(
                     isTablet = false,
@@ -1094,6 +1104,14 @@ private fun TabletSettingsScreen(
                         settings = debridSettings,
                     )
                     SettingsPage.Iptv -> xtreamSettingsContent(
+                        isTablet = true,
+                        state = xtreamState,
+                        onOpenContent = { account ->
+                            XtreamContentPage.open(account.id)
+                            onPageChange(SettingsPage.IptvContent)
+                        },
+                    )
+                    SettingsPage.IptvContent -> xtreamContentSettingsContent(
                         isTablet = true,
                         state = xtreamState,
                     )

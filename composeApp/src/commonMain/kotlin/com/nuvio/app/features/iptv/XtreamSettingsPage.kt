@@ -39,6 +39,7 @@ import com.nuvio.app.features.settings.SettingsSection
 internal fun LazyListScope.xtreamSettingsContent(
     isTablet: Boolean,
     state: XtreamUiState,
+    onOpenContent: (XtreamAccount) -> Unit = {},
 ) {
     item {
         var showAddDialog by remember { mutableStateOf(false) }
@@ -91,6 +92,10 @@ internal fun LazyListScope.xtreamSettingsContent(
                             actionsFor = null
                             editFor = account
                         }) { Text("Edit URL / credentials") }
+                        TextButton(onClick = {
+                            actionsFor = null
+                            onOpenContent(account)
+                        }) { Text("Content & Categories") }
                     }
                 },
                 confirmButton = {

@@ -42,17 +42,19 @@ object XtreamHubRepository {
         val current = _uiState.value
         val selected = current.selectedAccountId?.takeIf { id -> accounts.any { it.id == id } }
             ?: accounts.firstOrNull()?.id
-        _uiState.update { it.copy(accounts = accounts, selectedAccountId = selected) }
+        val section = clampSection(accounts.firstOrNull { it.id == selected }, current.section)
+        _uiState.update { it.copy(accounts = accounts, selectedAccountId = selected, section = section) }
         if (selected != null) {
-            showSection(selected, current.section)
+            showSection(selected, section)
             maybePrefetch(selected)
         }
     }
 
     fun selectAccount(accountId: String) {
         if (_uiState.value.selectedAccountId == accountId) return
-        _uiState.update { it.copy(selectedAccountId = accountId) }
-        showSection(accountId, _uiState.value.section)
+        val section = clampSection(accountFor(accountId), _uiState.value.section)
+        _uiState.update { it.copy(selectedAccountId = accountId, section = section) }
+        showSection(accountId, section)
         maybePrefetch(accountId)
     }
 
@@ -65,6 +67,11 @@ object XtreamHubRepository {
 
     /** Show cached categories instantly, else fetch the (cheap) category list. */
     private fun showSection(accountId: String, section: XtreamHubSection) {
+        if (accountFor(accountId)?.typeEnabled(section.contentKey) == false) {
+            // Disabled content type: never fetched, nothing shown.
+            _uiState.update { it.copy(categories = emptyList(), loadingCategories = false) }
+            return
+        }
         val cached = cache[accountId to section]
         if (cached != null) {
             _uiState.update { it.copy(categories = cached, loadingCategories = false) }
@@ -124,11 +131,22 @@ object XtreamHubRepository {
         if (mark != null && mark.elapsedNow() < REFRESH_TTL) return
         lastPrefetchMark = TimeSource.Monotonic.markNow()
         scope.launch {
+            val account = accountFor(accountId)
             for (section in XtreamHubSection.entries) {
+                if (account?.typeEnabled(section.contentKey) == false) continue  // disabled type: skip fetch
                 fetchCategoryList(accountId, section)
             }
         }
     }
+
+    /** Keep the shown section one the account actually has enabled. */
+    private fun clampSection(account: XtreamAccount?, wanted: XtreamHubSection): XtreamHubSection {
+        if (account == null || account.typeEnabled(wanted.contentKey)) return wanted
+        return XtreamHubSection.entries.firstOrNull { account.typeEnabled(it.contentKey) } ?: wanted
+    }
+
+    private fun accountFor(accountId: String?): XtreamAccount? =
+        XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }
 
     /** Lazily fetch now/next EPG for a live channel (called when its tile scrolls into view). */
     fun ensureEpg(contentId: String) {

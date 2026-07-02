@@ -14,6 +14,14 @@ data class XtreamHubUiState(
 
 enum class XtreamHubSection { LIVE, MOVIES, SERIES }
 
+/** The account.contentTypes / categorySelections key this hub section corresponds to. */
+val XtreamHubSection.contentKey: String
+    get() = when (this) {
+        XtreamHubSection.LIVE -> CONTENT_TYPE_LIVE
+        XtreamHubSection.MOVIES -> CONTENT_TYPE_MOVIES
+        XtreamHubSection.SERIES -> CONTENT_TYPE_SERIES
+    }
+
 /** Now/next program titles for a live channel (from get_short_epg). */
 data class ChannelEpg(val now: String?, val next: String?)
 

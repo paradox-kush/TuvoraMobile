@@ -117,6 +117,41 @@ data class XtreamEpgEntryDto(
 
 // --- Domain models ----------------------------------------------------------
 
+const val CONTENT_TYPE_LIVE = "live"
+const val CONTENT_TYPE_MOVIES = "movies"
+const val CONTENT_TYPE_SERIES = "series"
+val ALL_CONTENT_TYPES: Set<String> = setOf(CONTENT_TYPE_LIVE, CONTENT_TYPE_MOVIES, CONTENT_TYPE_SERIES)
+
+/**
+ * Per-content-type category include lists (playlist manager P1).
+ * null = ALL categories including ones the provider adds later; a list = only those ids
+ * (new provider categories arrive unselected); empty list = none.
+ */
+@Serializable
+data class CategorySelections(
+    val live: List<String>? = null,
+    val movies: List<String>? = null,
+    val series: List<String>? = null,
+) {
+    fun forType(type: String): List<String>? = when (type) {
+        CONTENT_TYPE_LIVE -> live
+        CONTENT_TYPE_MOVIES -> movies
+        CONTENT_TYPE_SERIES -> series
+        else -> null
+    }
+
+    fun withType(type: String, selection: List<String>?): CategorySelections = when (type) {
+        CONTENT_TYPE_LIVE -> copy(live = selection)
+        CONTENT_TYPE_MOVIES -> copy(movies = selection)
+        CONTENT_TYPE_SERIES -> copy(series = selection)
+        else -> this
+    }
+
+    val allNull: Boolean get() = live == null && movies == null && series == null
+}
+
+// Playlist-manager option fields are ADDITIVE with defaults so JSON persisted by older
+// builds (and legacy sync rows) decodes unchanged — same storage keys, no migration.
 @Serializable
 data class XtreamAccount(
     val id: String,
@@ -124,8 +159,22 @@ data class XtreamAccount(
     val baseUrl: String,      // http://host:port (no trailing slash, no path)
     val username: String,
     val password: String,
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val sourceType: String = "xtream",                        // xtream | m3u_url | m3u_file | stalker (P1: xtream only)
+    val epgUrl: String? = null,                               // custom XMLTV override (P2 uses it; synced now)
+    val dnsProvider: String = "system",                       // system|cloudflare|google|mullvad|quad9|dnssb (P3)
+    val autoRefreshHours: Int = 0,                            // 0 = off (P3)
+    val contentTypes: Set<String> = ALL_CONTENT_TYPES,
+    val categorySelections: CategorySelections = CategorySelections(),
 )
+
+fun XtreamAccount.typeEnabled(type: String): Boolean = type in contentTypes
+
+/** null selection = every category incl. future ones; a list = only those ids. */
+fun XtreamAccount.allowsCategory(type: String, categoryId: String?): Boolean {
+    val selection = categorySelections.forType(type) ?: return true
+    return categoryId != null && categoryId in selection
+}
 
 data class XtreamCategory(val id: String, val name: String)
 
