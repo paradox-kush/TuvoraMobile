@@ -2,10 +2,10 @@
 
 TEAM_ID=
 
-PRODUCT_NAME=Nuvio
+PRODUCT_NAME=Tuvora
 PRODUCT_BUNDLE_IDENTIFIER=com.nuvio.app.Nuvio$(TEAM_ID)
 
-// ComposeApp's androidx.sqlite cinterop needs the system sqlite3 at link time.
-// (sqlite3_load_extension, which Apple omits, is stubbed in sqlite3_load_extension_stub.c —
-// a -Wl,-U escape passes the link but dyld aborts at launch.)
-OTHER_LDFLAGS=$(inherited) -lsqlite3
+// ComposeApp uses BundledSQLiteDriver — SQLite is compiled into the Kotlin framework, so the
+// app must NOT also link the system libsqlite3 (that would duplicate every sqlite3_* symbol).
+// The old sqlite3_load_extension_stub.c is removed too — bundled SQLite exports the real one.
+OTHER_LDFLAGS=$(inherited)
