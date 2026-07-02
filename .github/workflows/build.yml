@@ -35,6 +35,7 @@ jobs:
           {
             echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}"
             echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}"
+            echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}"
           } >> local.properties
 
       - name: Build debug APK (arm64-v8a only — fast per-push validation)

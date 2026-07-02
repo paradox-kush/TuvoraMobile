@@ -142,8 +142,11 @@ object TmdbService {
         }.getOrNull()
     }
 
+    // user-entered key wins; the build-time default keeps TMDB-dependent features
+    // (IPTV matching, id conversion) working on installs that never configured one
     private fun currentApiKey(): String? =
         TmdbSettingsRepository.snapshot().apiKey.trim().takeIf(String::isNotBlank)
+            ?: TmdbConfig.DEFAULT_API_KEY.takeIf(String::isNotBlank)
 
     internal fun normalizeMediaType(mediaType: String): String =
         when (mediaType.trim().lowercase()) {

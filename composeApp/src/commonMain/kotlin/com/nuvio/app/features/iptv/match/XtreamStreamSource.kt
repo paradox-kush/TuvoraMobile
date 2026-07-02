@@ -1,5 +1,6 @@
 package com.nuvio.app.features.iptv.match
 
+import co.touchlab.kermit.Logger
 import com.nuvio.app.features.iptv.XtreamAccount
 import com.nuvio.app.features.iptv.XtreamClient
 import com.nuvio.app.features.streams.StreamItem
@@ -11,6 +12,7 @@ import com.nuvio.app.features.tmdb.TmdbService
  * detail screens. Returns empty (never throws) when the account doesn't carry the title.
  */
 internal object XtreamStreamSource {
+    private val log = Logger.withTag("XtreamStreamSource")
 
     fun groupId(acc: XtreamAccount): String = "xtream-match:${acc.id}"
 
@@ -20,8 +22,14 @@ internal object XtreamStreamSource {
             "tv" -> MatchKind.SERIES
             else -> return emptyList()
         }
-        val tmdbId = TmdbService.ensureTmdbId(videoId, type)?.toIntOrNull() ?: return emptyList()
-        val titles = TmdbService.titleBundle(tmdbId, type) ?: return emptyList()
+        val tmdbId = TmdbService.ensureTmdbId(videoId, type)?.toIntOrNull() ?: run {
+            log.w { "skip $videoId: no TMDB id (missing API key or unknown id)" }
+            return emptyList()
+        }
+        val titles = TmdbService.titleBundle(tmdbId, type) ?: run {
+            log.w { "skip tmdb=$tmdbId: title bundle unavailable (API key/network)" }
+            return emptyList()
+        }
         val match = XtreamTmdbResolver.resolve(acc, kind, tmdbId, titles) ?: return emptyList()
 
         return when (kind) {
@@ -31,8 +39,9 @@ internal object XtreamStreamSource {
                 val editions = XtreamMatchIndex.byTmdb(acc.id, kind, tmdbId).ifEmpty { listOf(match.item) }
                 editions.map { item ->
                     StreamItem(
-                        name = "Direct",
-                        title = item.name,
+                        // the panel's own catalog name — carries the useful bits (4K/NF/language)
+                        name = item.name,
+                        title = null,
                         url = XtreamClient.movieStreamUrl(acc, item.sid, item.ext ?: "mp4"),
                         addonName = acc.name,
                         addonId = groupId(acc),
@@ -45,8 +54,8 @@ internal object XtreamStreamSource {
                 val detail = XtreamClient.seriesInfo(acc, match.item.sid).getOrNull() ?: return emptyList()
                 detail.episodes.filter { it.season == s && it.episodeNum == e }.map { ep ->
                     StreamItem(
-                        name = "Direct",
-                        title = "${detail.name ?: match.item.name} · ${ep.title}",
+                        name = "S${s}E${e} · ${ep.title}",
+                        title = detail.name ?: match.item.name,
                         url = XtreamClient.episodeStreamUrl(acc, ep.episodeId, ep.containerExtension ?: "mp4"),
                         addonName = acc.name,
                         addonId = groupId(acc),

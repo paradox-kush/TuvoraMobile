@@ -41,6 +41,9 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
     abstract val syncBackendManifestUrl: Property<String>
 
     @get:Input
+    abstract val tmdbApiKey: Property<String>
+
+    @get:Input
     abstract val debugBuild: Property<Boolean>
 
     @TaskAction
@@ -74,7 +77,20 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
-        outDir.resolve("com/nuvio/app/features/tmdb/TmdbConfig.kt").delete()
+        outDir.resolve("com/nuvio/app/features/tmdb").apply {
+            mkdirs()
+            // Default TMDB key so TMDB-dependent features (IPTV stream matching, id
+            // conversion) work out of the box; a user-entered key in settings overrides it.
+            resolve("TmdbConfig.kt").writeText(
+                """
+                |package com.nuvio.app.features.tmdb
+                |
+                |internal object TmdbConfig {
+                |    const val DEFAULT_API_KEY = "${tmdbApiKey.get()}"
+                |}
+                """.trimMargin()
+            )
+        }
 
         outDir.resolve("com/nuvio/app/features/trakt").apply {
             mkdirs()
@@ -311,6 +327,7 @@ val generateRuntimeConfigs = tasks.register<GenerateRuntimeConfigsTask>("generat
     nuvioSupabaseUrl.set(runtimeConfigValue("NUVIO_SUPABASE_URL"))
     nuvioSupabaseAnonKey.set(runtimeConfigValue("NUVIO_SUPABASE_ANON_KEY"))
     syncBackendManifestUrl.set(runtimeConfigValue("SYNC_BACKEND_MANIFEST_URL"))
+    tmdbApiKey.set(runtimeConfigValue("TMDB_API_KEY"))
     debugBuild.set(isDebugBuild)
 }
 

@@ -239,6 +239,7 @@ object StreamsRepository {
         } else {
             emptyList()
         }
+        log.d { "Xtream match targets: ${xtreamTargets.size} (accounts=${XtreamRepository.uiState.value.accounts.size}) type=$type" }
 
         if (installedAddons.isEmpty() && pluginProviderGroups.isEmpty() && xtreamTargets.isEmpty()) {
             _uiState.value = StreamsUiState(

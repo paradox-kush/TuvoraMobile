@@ -6,6 +6,10 @@ import com.nuvio.app.features.iptv.XtreamClient
 import com.nuvio.app.features.tmdb.TmdbTitleBundle
 import com.nuvio.app.features.trakt.TraktPlatformClock
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -32,6 +36,11 @@ internal object XtreamTmdbResolver {
     private val buildLock = Mutex()
     private val inFlightBuilds = mutableMapOf<String, CompletableDeferred<Unit>>()
     private val lastFailedBuildMs = mutableMapOf<String, Long>()
+
+    // index builds outlive the stream request that triggered them: a 175k-item catalog
+    // takes ~a minute on-device, and users navigate away — cancelling the request must
+    // not kill (and backoff-poison) the build
+    private val buildScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private fun now() = TraktPlatformClock.nowEpochMs()
 
@@ -170,28 +179,30 @@ internal object XtreamTmdbResolver {
             d to true
         }
 
-        if (!isOwner) {
-            deferred.await()
-            return
-        }
-        try {
-            val items = when (kind) {
-                MatchKind.MOVIE -> XtreamClient.vodMovies(acc).getOrThrow().map {
-                    IndexedItem(it.streamId, it.name, TitleNormalizer.yearOf(it.name), it.tmdb, it.containerExtension)
-                }
-                MatchKind.SERIES -> XtreamClient.series(acc).getOrThrow().map {
-                    IndexedItem(it.seriesId, it.name, it.year ?: TitleNormalizer.yearOf(it.name), it.tmdb, null)
+        if (isOwner) {
+            buildScope.launch {
+                try {
+                    val items = when (kind) {
+                        MatchKind.MOVIE -> XtreamClient.vodMovies(acc).getOrThrow().map {
+                            IndexedItem(it.streamId, it.name, TitleNormalizer.yearOf(it.name), it.tmdb, it.containerExtension)
+                        }
+                        MatchKind.SERIES -> XtreamClient.series(acc).getOrThrow().map {
+                            IndexedItem(it.seriesId, it.name, it.year ?: TitleNormalizer.yearOf(it.name), it.tmdb, null)
+                        }
+                    }
+                    XtreamMatchIndex.rebuild(acc.id, kind, items)
+                    log.i { "indexed ${items.size} ${kind.slug} items for ${acc.name}" }
+                    buildLock.withLock { lastFailedBuildMs.remove(key) }
+                } catch (t: Throwable) {
+                    log.w(t) { "index build failed for ${acc.name} ${kind.slug}" }
+                    buildLock.withLock { lastFailedBuildMs[key] = now() }
+                } finally {
+                    buildLock.withLock { inFlightBuilds.remove(key) }
+                    deferred.complete(Unit)
                 }
             }
-            XtreamMatchIndex.rebuild(acc.id, kind, items)
-            log.i { "indexed ${items.size} ${kind.slug} items for ${acc.name}" }
-            buildLock.withLock { lastFailedBuildMs.remove(key) }
-        } catch (t: Throwable) {
-            log.w(t) { "index build failed for ${acc.name} ${kind.slug}" }
-            buildLock.withLock { lastFailedBuildMs[key] = now() }
-        } finally {
-            buildLock.withLock { inFlightBuilds.remove(key) }
-            deferred.complete(Unit)
         }
+        // await is cancellable (the caller's request may die); the build itself is not
+        deferred.await()
     }
 }
