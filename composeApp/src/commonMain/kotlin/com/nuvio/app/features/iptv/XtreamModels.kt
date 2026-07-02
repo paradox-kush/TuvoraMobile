@@ -163,7 +163,7 @@ data class XtreamAccount(
     val sourceType: String = "xtream",                        // xtream | m3u_url | m3u_file | stalker (P1: xtream only)
     val epgUrl: String? = null,                               // custom XMLTV override (P2 uses it; synced now)
     val dnsProvider: String = "system",                       // system|cloudflare|google|mullvad|quad9|dnssb (P3)
-    val autoRefreshHours: Int = 0,                            // 0 = off (P3)
+    val autoRefreshHours: Int = 24,                           // 0 = off; 24 = default (P3 uses it)
     val contentTypes: Set<String> = ALL_CONTENT_TYPES,
     val categorySelections: CategorySelections = CategorySelections(),
 )

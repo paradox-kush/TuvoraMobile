@@ -41,7 +41,8 @@ class XtreamPlaylistModelTest {
         assertEquals("xtream", acc.sourceType)
         assertNull(acc.epgUrl)
         assertEquals("system", acc.dnsProvider)
-        assertEquals(0, acc.autoRefreshHours)
+        // missing field → the 24h product default
+        assertEquals(24, acc.autoRefreshHours)
         assertEquals(setOf("live", "movies", "series"), acc.contentTypes)
         assertTrue(acc.categorySelections.allNull)
         assertFalse(acc.enabled)
@@ -85,7 +86,7 @@ class XtreamPlaylistModelTest {
         assertEquals("u", first["username"]!!.jsonPrimitive.content)
         assertEquals("p", first["password"]!!.jsonPrimitive.content)
         assertEquals("system", first["dns_provider"]!!.jsonPrimitive.content)
-        assertEquals(0, first["auto_refresh_hours"]!!.jsonPrimitive.int)
+        assertEquals(24, first["auto_refresh_hours"]!!.jsonPrimitive.int)   // default
         assertEquals(
             setOf("live", "movies", "series"),
             first["content_types"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet(),
