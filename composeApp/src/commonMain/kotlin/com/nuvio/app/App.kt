@@ -1028,12 +1028,14 @@ private fun MainAppContent(
     }
 
     fun playLiveXtreamChannel(contentId: String, name: String, logo: String?, url: String?) {
-        val immediate = url ?: XtreamItemRegistry.liveStreamUrlFor(contentId)
+        // A BLANK url is a placeholder, not a real stream: M3U keeps the URL only in the content DB,
+        // and Stalker resolves a fresh single-use create_link at play time. Both must fall through to
+        // the async resolve — treating "" as present would hand mpv an empty URL.
+        val immediate = url?.takeIf { it.isNotBlank() } ?: XtreamItemRegistry.liveStreamUrlFor(contentId)
         if (immediate != null) {
             launchLiveChannel(contentId, name, logo, immediate)
             return
         }
-        // M3U live: the URL lives only in the content DB (arbitrary line) — resolve off the main thread.
         coroutineScope.launch {
             val resolved = XtreamItemRegistry.liveStreamUrlForAsync(contentId) ?: return@launch
             launchLiveChannel(contentId, name, logo, resolved)
