@@ -105,6 +105,43 @@ internal fun m3uAccountFromForm(input: XtreamFormInput): XtreamAccount? {
 }
 
 /**
+ * Builds a Stalker (MAG/Ministra) playlist account from the form. Stalker auths by MAC (not creds),
+ * so the identity is portal base + MAC: id = "stalker|$base|$mac" (matches NuvioTV so a playlist
+ * added on one app resolves to the same id on the other), baseUrl carries the portal base, and
+ * username/password stay empty. Returns null if the portal URL is blank/unparseable or the MAC is
+ * missing. internal for unit tests.
+ */
+internal fun stalkerAccountFromForm(input: XtreamFormInput): XtreamAccount? {
+    val mac = input.macAddress.trim()
+    if (mac.isEmpty()) return null
+    val raw = input.serverUrl.trim()
+    if (raw.isEmpty()) return null
+    val withScheme = if (raw.startsWith("http://", true) || raw.startsWith("https://", true)) raw else "http://$raw"
+    val url = try { Url(withScheme) } catch (e: Exception) { return null }
+    if (url.host.isBlank()) return null
+    val base = buildString {
+        append(url.protocol.name).append("://").append(url.host)
+        if (url.port != url.protocol.defaultPort) append(":").append(url.port)
+    }
+    return XtreamAccount(
+        id = "stalker|$base|$mac",
+        name = input.name?.trim()?.takeIf { it.isNotEmpty() } ?: url.host,
+        baseUrl = base,
+        username = "",
+        password = "",
+        sourceType = SOURCE_TYPE_STALKER,
+        dnsProvider = input.dnsProvider,
+        autoRefreshHours = input.autoRefreshHours,
+        macAddress = mac,
+        stalkerUsername = input.stalkerUsername?.trim()?.takeIf { it.isNotEmpty() },
+        stalkerPassword = input.stalkerPassword?.trim()?.takeIf { it.isNotEmpty() },
+        serialNumber = input.serialNumber?.trim()?.takeIf { it.isNotEmpty() },
+        deviceId = input.deviceId?.trim()?.takeIf { it.isNotEmpty() },
+        sendDeviceId = input.sendDeviceId,
+    )
+}
+
+/**
  * Builds an M3U-FILE playlist account from the "Add Playlist" form. The local file IS the source —
  * there's no URL — so baseUrl stays empty (the ingest reads `filesDir/playlists/{id}.m3u`). The id
  * must be stable per playlist: [existingId] is reused when editing (so the same local copy + saved

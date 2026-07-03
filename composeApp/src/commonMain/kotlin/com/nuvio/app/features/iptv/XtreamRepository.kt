@@ -76,6 +76,7 @@ object XtreamRepository {
         when (input.sourceType) {
             SOURCE_TYPE_M3U_FILE -> addFileFromForm(input, existingId = null, onResult = onResult)
             SOURCE_TYPE_M3U_URL -> verifyAndSave(m3uAccountFromForm(input), "Enter an M3U playlist URL", onResult)
+            SOURCE_TYPE_STALKER -> verifyAndSave(stalkerAccountFromForm(input), "Enter a portal URL and MAC address", onResult)
             else -> verifyAndSave(xtreamAccountFromForm(input), "Enter a server URL, username and password", onResult)
         }
     }
@@ -137,11 +138,19 @@ object XtreamRepository {
             addFileFromForm(input, existingId = oldId, onResult = onResult)
             return
         }
-        val candidate = if (input.sourceType == SOURCE_TYPE_M3U_URL) m3uAccountFromForm(input) else xtreamAccountFromForm(input)
+        val candidate = when (input.sourceType) {
+            SOURCE_TYPE_M3U_URL -> m3uAccountFromForm(input)
+            SOURCE_TYPE_STALKER -> stalkerAccountFromForm(input)
+            else -> xtreamAccountFromForm(input)
+        }
         verifyAndReplace(
             oldId,
             candidate,
-            if (input.sourceType == SOURCE_TYPE_M3U_URL) "Enter an M3U playlist URL" else "Enter a server URL, username and password",
+            when (input.sourceType) {
+                SOURCE_TYPE_M3U_URL -> "Enter an M3U playlist URL"
+                SOURCE_TYPE_STALKER -> "Enter a portal URL and MAC address"
+                else -> "Enter a server URL, username and password"
+            },
             onResult,
             // The form shows EPG/DNS/auto-refresh, so its candidate already carries the user's choices —
             // don't let carry-over revert them to the old account's values.

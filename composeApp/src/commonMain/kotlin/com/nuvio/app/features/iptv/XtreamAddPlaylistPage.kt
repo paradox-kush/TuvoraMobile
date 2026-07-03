@@ -81,18 +81,27 @@ internal data class XtreamFormInput(
     // the user didn't re-pick (the existing local copy is reused).
     val fileName: String? = null,
     val pickedFile: PickedM3UFile? = null,
+    // Stalker source (sourceType = stalker): the portal base reuses [serverUrl]; the rest are
+    // Stalker-only. Auth is by MAC, so username/password stay blank; stalkerUsername/Password are
+    // the rare optional portal login. sendDeviceId defaults on (virtually every portal wants it).
+    val macAddress: String = "",
+    val stalkerUsername: String? = null,
+    val stalkerPassword: String? = null,
+    val serialNumber: String? = null,
+    val deviceId: String? = null,
+    val sendDeviceId: Boolean = true,
 )
 
 /**
- * The four playlist source types from the reference design. [XTREAM], [URL] (M3U) and [FILE] (local
- * M3U) are functional (P1/P2); [STALKER] renders with a "Soon" badge and can't be selected. Flip
- * [enabled] per phase as each source type's field-set + parsing lands (STALKER = P4).
+ * The four playlist source types from the reference design. All are functional: [XTREAM], [URL] (M3U)
+ * and [FILE] (local M3U) landed in P1/P2; [STALKER] (MAG/Ministra portal) is P4. A disabled type
+ * renders with a "· Soon" suffix and can't be selected — flip [enabled] as each field-set lands.
  */
 internal enum class XtreamSourceType(val label: String, val enabled: Boolean) {
     URL("URL", enabled = true),
     FILE("File", enabled = true),
     XTREAM("Xtream", enabled = true),
-    STALKER("Stalker", enabled = false),
+    STALKER("Stalker", enabled = true),
 }
 
 // DNS-over-HTTPS providers offered per playlist (Android only — iOS can't do per-playlist DNS).
@@ -137,11 +146,13 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
         // Prefilled once per target playlist (add mode -> blank). Fields are plain remembered state.
         val editingIsM3uUrl = editing?.sourceType == SOURCE_TYPE_M3U_URL
         val editingIsM3uFile = editing?.sourceType == SOURCE_TYPE_M3U_FILE
+        val editingIsStalker = editing?.sourceType == SOURCE_TYPE_STALKER
         var sourceType by remember(editing?.id) {
             mutableStateOf(
                 when {
                     editingIsM3uUrl -> XtreamSourceType.URL
                     editingIsM3uFile -> XtreamSourceType.FILE
+                    editingIsStalker -> XtreamSourceType.STALKER
                     else -> XtreamSourceType.XTREAM
                 }
             )
@@ -160,6 +171,13 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
         // from the edited account so its "re-import" state and name survive without a new pick).
         var pickedFile by remember(editing?.id) { mutableStateOf<PickedM3UFile?>(null) }
         var pickedFileName by remember(editing?.id) { mutableStateOf(editing?.fileName) }
+        // Stalker (MAG/Ministra): portal base reuses `server`; MAC is required (pre-seeded with the
+        // common IPTV OUI prefix); serial/deviceId/login are optional overrides for strict portals.
+        var mac by remember(editing?.id) { mutableStateOf(editing?.macAddress?.takeIf { it.isNotBlank() } ?: "00:1A:79:") }
+        var stalkerUser by remember(editing?.id) { mutableStateOf(editing?.stalkerUsername ?: "") }
+        var stalkerPass by remember(editing?.id) { mutableStateOf(editing?.stalkerPassword ?: "") }
+        var serial by remember(editing?.id) { mutableStateOf(editing?.serialNumber ?: "") }
+        var deviceId by remember(editing?.id) { mutableStateOf(editing?.deviceId ?: "") }
         // A file playlist synced from another device has a fileName but no local copy here.
         val fileMissingOnThisDevice = editingIsM3uFile && editing != null && !M3UFileStore.hasLocalCopy(editing)
 
@@ -220,8 +238,23 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
                 name = name,
                 onNameChange = { name = it },
             )
-            // Stalker field-set is P4 — that tile stays disabled so this branch is never reached.
-            else -> Unit
+            XtreamSourceType.STALKER -> StalkerFieldsSection(
+                isTablet = isTablet,
+                portalUrl = server,
+                onPortalUrlChange = { server = it },
+                mac = mac,
+                onMacChange = { mac = it },
+                serial = serial,
+                onSerialChange = { serial = it },
+                deviceId = deviceId,
+                onDeviceIdChange = { deviceId = it },
+                stalkerUser = stalkerUser,
+                onStalkerUserChange = { stalkerUser = it },
+                stalkerPass = stalkerPass,
+                onStalkerPassChange = { stalkerPass = it },
+                name = name,
+                onNameChange = { name = it },
+            )
         }
 
         EpgUrlSection(
@@ -250,12 +283,15 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
                 XtreamSourceType.URL -> m3uUrl.isNotBlank()
                 // A file playlist can save when a new file was picked, OR (edit) an on-device copy exists.
                 XtreamSourceType.FILE -> pickedFile != null || (editingIsM3uFile && !fileMissingOnThisDevice)
+                // Stalker auths by MAC, not creds — a portal URL + MAC is enough.
+                XtreamSourceType.STALKER -> server.isNotBlank() && mac.isNotBlank()
                 else -> server.isNotBlank() && username.isNotBlank() && password.isNotBlank()
             },
             onSave = {
                 val resolvedSourceType = when (sourceType) {
                     XtreamSourceType.URL -> SOURCE_TYPE_M3U_URL
                     XtreamSourceType.FILE -> SOURCE_TYPE_M3U_FILE
+                    XtreamSourceType.STALKER -> SOURCE_TYPE_STALKER
                     else -> SOURCE_TYPE_XTREAM
                 }
                 val input = XtreamFormInput(
@@ -271,6 +307,11 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
                     userAgent = userAgent.trim().ifEmpty { null },
                     fileName = pickedFileName,
                     pickedFile = pickedFile,
+                    macAddress = mac.trim(),
+                    stalkerUsername = stalkerUser.trim().ifEmpty { null },
+                    stalkerPassword = stalkerPass.trim().ifEmpty { null },
+                    serialNumber = serial.trim().ifEmpty { null },
+                    deviceId = deviceId.trim().ifEmpty { null },
                 )
                 val editId = XtreamAddPage.editId
                 if (editId != null) {
@@ -367,6 +408,81 @@ private fun XtreamFieldsSection(
                 value = name,
                 onValueChange = onNameChange,
                 label = "Name (optional)",
+            )
+        }
+    }
+}
+
+@Composable
+private fun StalkerFieldsSection(
+    isTablet: Boolean,
+    portalUrl: String,
+    onPortalUrlChange: (String) -> Unit,
+    mac: String,
+    onMacChange: (String) -> Unit,
+    serial: String,
+    onSerialChange: (String) -> Unit,
+    deviceId: String,
+    onDeviceIdChange: (String) -> Unit,
+    stalkerUser: String,
+    onStalkerUserChange: (String) -> Unit,
+    stalkerPass: String,
+    onStalkerPassChange: (String) -> Unit,
+    name: String,
+    onNameChange: (String) -> Unit,
+) {
+    val tokens = MaterialTheme.nuvio
+    SettingsSection(title = "Stalker Portal", isTablet = isTablet) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = NuvioTokens.Space.s2),
+            verticalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12),
+        ) {
+            FormOutlinedField(
+                value = portalUrl,
+                onValueChange = onPortalUrlChange,
+                label = "Portal URL",
+                placeholder = "http://host:port/c/",
+            )
+            FormOutlinedField(
+                value = mac,
+                onValueChange = onMacChange,
+                label = "MAC Address",
+                placeholder = "00:1A:79:xx:xx:xx",
+            )
+            FormOutlinedField(
+                value = name,
+                onValueChange = onNameChange,
+                label = "Name (optional)",
+            )
+            Text(
+                text = "Stalker portals sign in with the MAC address — no username or password. The " +
+                    "device serial and ID are derived from the MAC; only override them below if your " +
+                    "provider gave you specific values.",
+                style = MaterialTheme.typography.bodySmall,
+                color = tokens.colors.textMuted,
+            )
+            FormOutlinedField(
+                value = serial,
+                onValueChange = onSerialChange,
+                label = "Serial number (optional)",
+            )
+            FormOutlinedField(
+                value = deviceId,
+                onValueChange = onDeviceIdChange,
+                label = "Device ID (optional)",
+            )
+            FormOutlinedField(
+                value = stalkerUser,
+                onValueChange = onStalkerUserChange,
+                label = "Portal username (optional)",
+            )
+            SettingsSecretTextField(
+                value = stalkerPass,
+                onValueChange = onStalkerPassChange,
+                label = "Portal password (optional)",
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }

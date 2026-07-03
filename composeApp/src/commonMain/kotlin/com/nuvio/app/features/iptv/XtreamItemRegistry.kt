@@ -84,7 +84,8 @@ object XtreamItemRegistry {
         if (parsed.kind != XtreamKind.LIVE) return null
         val streamId = parsed.id.toIntOrNull() ?: return null
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return null
-        if (account.sourceType == SOURCE_TYPE_M3U_URL) return null   // DB-backed; caller falls to the async path
+        // M3U (DB-backed) and Stalker (single-use create_link) resolve on the async path.
+        if (account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_STALKER) return null
         return XtreamClient.liveStreamUrl(account, streamId)
     }
 
@@ -99,9 +100,14 @@ object XtreamItemRegistry {
         if (parsed.kind != XtreamKind.LIVE) return null
         val streamId = parsed.id.toIntOrNull() ?: return null
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return null
-        if (account.sourceType != SOURCE_TYPE_M3U_URL) return null
-        M3UClient.ensureIngested(account)
-        return M3UClient.liveUrlFor(account, streamId)
+        return when (account.sourceType) {
+            SOURCE_TYPE_M3U_URL -> {
+                M3UClient.ensureIngested(account)
+                M3UClient.liveUrlFor(account, streamId)
+            }
+            SOURCE_TYPE_STALKER -> com.nuvio.app.features.iptv.stalker.StalkerClient.resolveLiveUrl(account, streamId)
+            else -> null
+        }
     }
 
     fun accountNameFor(contentId: String): String? {
@@ -154,7 +160,9 @@ data class XtreamResolvedItem(
 )
 
 fun XtreamResolvedItem.toStreamItem(accountName: String): StreamItem? {
-    val url = streamUrl ?: return null
+    // Blank == a Stalker placeholder (create_link not yet resolved) -> treat as "no direct item" so the
+    // streams flow rebuilds it fresh via ensureXtreamStreamRegistered. A real URL is never blank.
+    val url = streamUrl?.takeIf { it.isNotBlank() } ?: return null
     return StreamItem(
         name = "Direct",
         title = name,

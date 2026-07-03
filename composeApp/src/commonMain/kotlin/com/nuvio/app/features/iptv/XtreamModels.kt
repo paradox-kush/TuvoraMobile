@@ -170,6 +170,17 @@ data class XtreamAccount(
     val autoRefreshHours: Int = 24,                           // 0 = off; 24 = default (P3 uses it)
     val contentTypes: Set<String> = ALL_CONTENT_TYPES,
     val categorySelections: CategorySelections = CategorySelections(),
+    // --- Stalker (MAG/Ministra) source fields (sourceType = stalker; P4) ------------------------
+    // All additive with defaults so JSON written by older builds decodes unchanged. For a Stalker
+    // playlist baseUrl == the entered portal base (e.g. http://host:port) and username/password stay
+    // blank (Stalker auths by MAC, not creds); stalkerUsername/stalkerPassword are only sent when a
+    // strict portal demands them.
+    val macAddress: String = "",                              // 00:1A:79:xx:xx:xx
+    val stalkerUsername: String? = null,                      // optional portal login (rare)
+    val stalkerPassword: String? = null,                      // optional portal login (rare)
+    val serialNumber: String? = null,                         // optional STB serial override (else derived from MAC)
+    val deviceId: String? = null,                             // optional STB device id override (else derived from MAC)
+    val sendDeviceId: Boolean = true,                         // send derived/overridden device identity on get_profile
 )
 
 fun XtreamAccount.typeEnabled(type: String): Boolean = type in contentTypes

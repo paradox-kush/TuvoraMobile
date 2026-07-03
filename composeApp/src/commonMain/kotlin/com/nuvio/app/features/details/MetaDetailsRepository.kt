@@ -590,13 +590,19 @@ object MetaDetailsRepository {
         // registered URL, then the DB read — never a synthesized Xtream-shaped URL.
         val templated = detail?.containerExtension?.takeIf { it.isNotBlank() }
             ?.let { client.movieStreamUrl(account, streamId, it) }?.takeIf { it.isNotBlank() }
-        val streamUrl = templated
-            ?: registered?.streamUrl
-            ?: (if (account.sourceType == com.nuvio.app.features.iptv.SOURCE_TYPE_M3U_URL)
-                    com.nuvio.app.features.iptv.M3UClient.movieUrlFor(account, streamId)
-                else null)
-            ?: client.movieStreamUrl(account, streamId, "mp4").takeIf { it.isNotBlank() }
-            ?: return null
+        // Stalker registers a blank placeholder — create_link is single-use, so the real URL is
+        // resolved fresh at play via ensureXtreamStreamRegistered (mirrors the live async seam).
+        val streamUrl = if (account.sourceType == com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER) {
+            ""
+        } else {
+            templated
+                ?: registered?.streamUrl
+                ?: (if (account.sourceType == com.nuvio.app.features.iptv.SOURCE_TYPE_M3U_URL)
+                        com.nuvio.app.features.iptv.M3UClient.movieUrlFor(account, streamId)
+                    else null)
+                ?: client.movieStreamUrl(account, streamId, "mp4").takeIf { it.isNotBlank() }
+                ?: return null
+        }
         XtreamItemRegistry.register(XtreamResolvedItem(id, accountId, XtreamKind.VOD, name, streamUrl, poster))
 
         var meta = MetaDetails(
@@ -621,13 +627,37 @@ object MetaDetailsRepository {
      * (StreamsRepository) so it doesn't have to go through the detail screen first.
      */
     suspend fun ensureXtreamStreamRegistered(id: String): Boolean {
-        if (XtreamItemRegistry.get(id) != null) return true
+        // A blank registered URL is a Stalker placeholder — fall through to resolve it fresh.
+        val existing = XtreamItemRegistry.get(id)
+        if (existing != null && !existing.streamUrl.isNullOrBlank()) return true
         XtreamRepository.ensureLoaded()
         val parsed = XtreamItemRegistry.parseId(id) ?: return false
-        if (parsed.kind != XtreamKind.VOD) return false
-        val streamId = parsed.id.toIntOrNull() ?: return false
         val account = XtreamRepository.uiState.value.accounts
             .firstOrNull { it.id == parsed.accountId } ?: return false
+
+        // Stalker resolves a FRESH single-use create_link at play time for both movies and episodes
+        // (the episode id is "{seriesId}_{episodeNum}"). Registered blank -> real URL, then play.
+        if (account.sourceType == com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER) {
+            val stalker = com.nuvio.app.features.iptv.stalker.StalkerClient
+            val url = when (parsed.kind) {
+                XtreamKind.VOD -> parsed.id.toIntOrNull()?.let { stalker.resolveMovieUrl(account, it) }
+                XtreamKind.EPISODE -> {
+                    val parts = parsed.id.split("_")
+                    val seriesId = parts.getOrNull(0)?.toIntOrNull()
+                    val episodeNum = parts.getOrNull(1)?.toIntOrNull()
+                    if (seriesId != null && episodeNum != null) stalker.resolveEpisodeUrl(account, seriesId, episodeNum) else null
+                }
+                else -> null
+            } ?: return false
+            XtreamItemRegistry.register(
+                XtreamResolvedItem(id, parsed.accountId, parsed.kind, existing?.name ?: "Video", url, existing?.poster)
+            )
+            return true
+        }
+
+        // Xtream / M3U: VOD only (episodes carry stable URLs registered at detail build).
+        if (parsed.kind != XtreamKind.VOD) return false
+        val streamId = parsed.id.toIntOrNull() ?: return false
         val client = com.nuvio.app.features.iptv.IptvClient.forAccount(account)
         val detail = client.vodInfo(account, streamId).getOrNull()
         // ponytail: vodInfo gives the correct container_extension; fall back to mp4 only if absent.
@@ -673,7 +703,10 @@ object MetaDetailsRepository {
                 episode = ep.episodeNum,
                 overview = ep.plot,
                 thumbnail = ep.still,
-                streams = listOf(
+                // A blank URL (Stalker placeholder, or an M3U episode with no stored line) means "no
+                // direct stream" — leave streams empty so the play flow resolves it via the xtream-id
+                // miss path (ensureXtreamStreamRegistered) instead of trying to play "".
+                streams = if (episodeUrl.isBlank()) emptyList() else listOf(
                     StreamItem(name = "Direct", title = ep.title, url = episodeUrl, addonName = account.name, addonId = "xtream")
                 ),
             )
