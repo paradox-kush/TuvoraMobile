@@ -79,21 +79,31 @@ fun SportsHubScreen(
     var browseCategory by remember { mutableStateOf<RadarCategory?>(null) }
     var browsing by remember { mutableStateOf(false) }
     var sheetFixture by remember { mutableStateOf<RadarFixture?>(null) }
+    // Discovery drill-in: a league/event page listing everything happening in it.
+    var leaguePage by remember { mutableStateOf<RadarLeague?>(null) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val tabletTopInset = if (maxWidth >= 768.dp) TABLET_TOP_BAR_INSET else 0.dp
         val isWide = maxWidth >= 768.dp
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(top = tabletTopInset)) {
             when {
+                leaguePage != null -> LeagueFixturesPage(
+                    state = state,
+                    league = leaguePage!!,
+                    onBack = { leaguePage = null },
+                    onFixtureClick = { sheetFixture = it },
+                )
                 browsing && isWide -> BrowseTwoPane(
                     state = state,
                     selected = browseCategory,
                     onSelect = { browseCategory = it },
+                    onOpenLeague = { leaguePage = it },
                     onBack = { browsing = false; browseCategory = null },
                 )
                 browsing && browseCategory != null -> BrowseLeagues(
                     state = state,
                     category = browseCategory!!,
+                    onOpenLeague = { leaguePage = it },
                     onBack = { browseCategory = null },
                 )
                 browsing -> BrowseCategories(
@@ -104,6 +114,7 @@ fun SportsHubScreen(
                 else -> SportsOverview(
                     state = state,
                     onOpenBrowse = { browsing = true },
+                    onOpenLeague = { leaguePage = it },
                     onFixtureClick = { sheetFixture = it },
                 )
             }
@@ -128,6 +139,7 @@ fun SportsHubScreen(
 private fun SportsOverview(
     state: RadarUiState,
     onOpenBrowse: () -> Unit,
+    onOpenLeague: (RadarLeague) -> Unit,
     onFixtureClick: (RadarFixture) -> Unit,
 ) {
     val nowMs = RadarTime.nowMs()
@@ -152,6 +164,10 @@ private fun SportsOverview(
                         FeaturedBannerCard(
                             event = event,
                             matchCount = fixtures.count { (it.startEpochMs ?: 0) >= nowMs - 4 * 60 * 60 * 1000L },
+                            onClick = {
+                                // Into the event: every match, live + recent — discovery first.
+                                state.leagueById(event.leagueId)?.let(onOpenLeague)
+                            },
                         )
                     }
                 }
@@ -183,7 +199,7 @@ private fun SportsOverview(
                 val league = state.leagueById(follow.leagueId) ?: return@items
                 val fixtures = state.upcoming(listOf(league.id), nowMs, cap = 12)
                 if (fixtures.isNotEmpty()) {
-                    SectionTitle(league.name)
+                    SectionTitle(league.name, onClick = { onOpenLeague(league) })
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = NuvioTokens.Space.s16),
                         horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s10),
@@ -271,10 +287,15 @@ private fun BrowseCategories(state: RadarUiState, onSelect: (RadarCategory) -> U
 }
 
 @Composable
-private fun BrowseLeagues(state: RadarUiState, category: RadarCategory, onBack: () -> Unit) {
+private fun BrowseLeagues(
+    state: RadarUiState,
+    category: RadarCategory,
+    onOpenLeague: (RadarLeague) -> Unit,
+    onBack: () -> Unit,
+) {
     Column(Modifier.fillMaxSize()) {
         BrowseHeader(category.name, onBack)
-        LeagueToggleList(state, category)
+        LeagueToggleList(state, category, onOpenLeague)
     }
 }
 
@@ -283,6 +304,7 @@ private fun BrowseTwoPane(
     state: RadarUiState,
     selected: RadarCategory?,
     onSelect: (RadarCategory?) -> Unit,
+    onOpenLeague: (RadarLeague) -> Unit,
     onBack: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
@@ -300,20 +322,25 @@ private fun BrowseTwoPane(
             }
             Box(Modifier.weight(1f)) {
                 val category = selected ?: state.catalog.categories.firstOrNull()
-                if (category != null) LeagueToggleList(state, category)
+                if (category != null) LeagueToggleList(state, category, onOpenLeague)
             }
         }
     }
 }
 
 @Composable
-private fun LeagueToggleList(state: RadarUiState, category: RadarCategory) {
+private fun LeagueToggleList(
+    state: RadarUiState,
+    category: RadarCategory,
+    onOpenLeague: (RadarLeague) -> Unit,
+) {
     LazyColumn(contentPadding = PaddingValues(bottom = NuvioTokens.Space.s24)) {
         items(category.leagues, key = { it.id }) { league ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { RadarRepository.toggleFollow(league) }
+                    // Tap = go INSIDE the league (discovery); the switch is just for following.
+                    .clickable { onOpenLeague(league) }
                     .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s10),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -383,15 +410,119 @@ private fun CategoryRowItem(
     }
 }
 
+// --- league / event page (discovery drill-in) -----------------------------------
+
+@Composable
+private fun LeagueFixturesPage(
+    state: RadarUiState,
+    league: RadarLeague,
+    onBack: () -> Unit,
+    onFixtureClick: (RadarFixture) -> Unit,
+) {
+    // Browsing must not require following — fetch this league on demand.
+    LaunchedEffect(league.id) { RadarRepository.ensureLeagueLoaded(league.id) }
+    val nowMs = RadarTime.nowMs()
+    val upcoming = state.upcoming(listOf(league.id), nowMs, cap = 40)
+    val recent = state.recent(league.id, nowMs)
+    val loaded = state.fixturesByLeague.containsKey(league.id)
+
+    Column(Modifier.fillMaxSize()) {
+        BrowseHeader(league.name, onBack)
+        LazyColumn(contentPadding = PaddingValues(bottom = NuvioTokens.Space.s24)) {
+            item(key = "league-header") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s4),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AsyncImage(model = league.badge, contentDescription = null, modifier = Modifier.size(48.dp))
+                    Spacer(Modifier.width(NuvioTokens.Space.s12))
+                    Column(Modifier.weight(1f)) {
+                        league.sport?.let {
+                            Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text(
+                            if (upcoming.any { state.isLive(it, nowMs) }) "Live now" else "${upcoming.size} upcoming",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    Text(
+                        if (league.id in state.followedLeagueIds) "Following" else "Follow",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Switch(
+                        checked = league.id in state.followedLeagueIds,
+                        onCheckedChange = { RadarRepository.toggleFollow(league) },
+                        modifier = Modifier.padding(start = NuvioTokens.Space.s8),
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.nuvio.colors.onAccent,
+                            checkedTrackColor = MaterialTheme.nuvio.colors.accent,
+                            uncheckedThumbColor = MaterialTheme.nuvio.colors.textMuted,
+                            uncheckedTrackColor = MaterialTheme.nuvio.colors.borderDefault,
+                        ),
+                    )
+                }
+            }
+            if (!loaded) {
+                item(key = "loading") {
+                    Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(strokeWidth = 2.dp)
+                    }
+                }
+            }
+            if (upcoming.isNotEmpty()) {
+                item(key = "up-title") { SectionTitle("Live & Upcoming") }
+                items(upcoming, key = { "up-${it.id ?: it.hashCode()}" }) { fx ->
+                    MatchCard(
+                        fx,
+                        live = state.isLive(fx, nowMs),
+                        onClick = { onFixtureClick(fx) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s4),
+                    )
+                }
+            }
+            if (recent.isNotEmpty()) {
+                item(key = "recent-title") { SectionTitle("Recent results") }
+                items(recent, key = { "rec-${it.id ?: it.hashCode()}" }) { fx ->
+                    MatchCard(
+                        fx,
+                        live = false,
+                        onClick = { onFixtureClick(fx) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s4),
+                    )
+                }
+            }
+            if (loaded && upcoming.isEmpty() && recent.isEmpty()) {
+                item(key = "empty") {
+                    Text(
+                        "No scheduled matches right now.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(NuvioTokens.Space.s16),
+                    )
+                }
+            }
+        }
+    }
+}
+
 // --- cards ---------------------------------------------------------------------
 
 @Composable
-private fun FeaturedBannerCard(event: RadarFeaturedEvent, matchCount: Int) {
+private fun FeaturedBannerCard(event: RadarFeaturedEvent, matchCount: Int, onClick: () -> Unit = {}) {
     Box(
         modifier = Modifier
             .width(300.dp)
             .height(120.dp)
-            .clip(RoundedCornerShape(NuvioTokens.Space.s12)),
+            .clip(RoundedCornerShape(NuvioTokens.Space.s12))
+            .clickable(onClick = onClick),
     ) {
         AsyncImage(
             model = event.banner ?: event.badge,
@@ -423,9 +554,14 @@ private fun FeaturedBannerCard(event: RadarFeaturedEvent, matchCount: Int) {
 }
 
 @Composable
-internal fun MatchCard(fixture: RadarFixture, live: Boolean, onClick: () -> Unit) {
+internal fun MatchCard(
+    fixture: RadarFixture,
+    live: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier.width(240.dp),
+) {
     Card(
-        modifier = Modifier.width(240.dp),
+        modifier = modifier,
         onClick = onClick,
         colors = CardDefaults.cardColors(),
     ) {
@@ -451,11 +587,23 @@ internal fun MatchCard(fixture: RadarFixture, live: Boolean, onClick: () -> Unit
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(NuvioTokens.Space.s6))
-            Text(
-                fixture.startEpochMs?.let { radarWhenLabel(it) } ?: "Time TBC",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    fixture.startEpochMs?.let { radarWhenLabel(it) } ?: "Time TBC",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                fixture.scoreLabel?.let { score ->
+                    Spacer(Modifier.width(NuvioTokens.Space.s8))
+                    Text(
+                        score,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
         }
     }
 }
@@ -476,14 +624,27 @@ internal fun LiveBadge() {
 }
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s8),
-    )
+private fun SectionTitle(text: String, onClick: (() -> Unit)? = null) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s8),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        if (onClick != null) {
+            Icon(
+                Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 // --- match sheet -----------------------------------------------------------------
