@@ -113,11 +113,14 @@ object AuthRepository {
             validatedRemoteUserId = userId
             true
         }.getOrElse { e ->
-            if (isInvalidRemoteSessionError(e)) {
+            if (isSessionDefinitelyInvalid(e)) {
                 log.w(e) { "Stored Supabase session no longer belongs to an active account; clearing local auth" }
                 clearLocalSessionAfterRemoteInvalidation()
                 false
             } else {
+                // Transient, or a stale/unverifiable ACCESS token that the refresh just settled —
+                // either way the account is intact; keep the cached auth state.
+                validatedRemoteUserId = userId
                 log.w(e) { "Unable to validate stored Supabase session; keeping cached auth state" }
                 true
             }
@@ -179,11 +182,37 @@ object AuthRepository {
     }
 
     suspend fun signOutIfSessionInvalid(error: Throwable, source: String): Boolean {
-        if (!isInvalidRemoteSessionError(error)) return false
+        if (!isSessionDefinitelyInvalid(error)) return false
 
         log.w(error) { "$source failed because the current Supabase account/session is no longer valid; clearing local auth" }
         clearLocalSessionAfterRemoteInvalidation()
         return true
+    }
+
+    /**
+     * Decides whether an error really means "this account/session is dead" — the ONLY verdict that
+     * may wipe local auth. A 401/bad-JWT from an API call is NOT that: access tokens legitimately
+     * go stale/unverifiable (expiry while the app was closed, device clock skew, a backend JWT
+     * signing-key rotation), and every one of those heals with a refresh. So the REFRESH TOKEN is
+     * the arbiter: on a token-shaped failure we try refreshCurrentSession() and only report
+     * invalid when the refresh itself is definitively rejected (invalid_grant & co). Network
+     * errors on the refresh stay "not invalid" — never sign out for being offline.
+     *
+     * (This replaced a blanket 401/403 => sign-out classifier that wiped the session at cold
+     * start whenever the stored access token failed verification — the "signed out after every
+     * app update" bug.)
+     */
+    private suspend fun isSessionDefinitelyInvalid(error: Throwable): Boolean {
+        if (isUserGoneError(error)) return true
+        if (!isAuthTokenError(error)) return false
+        val refreshed = runCatching { SupabaseProvider.client.auth.refreshCurrentSession() }
+        return refreshed.fold(
+            onSuccess = {
+                log.i { "Access token was rejected but the session refreshed fine; keeping auth" }
+                false
+            },
+            onFailure = { refreshError -> isRefreshDefinitelyInvalid(refreshError) }
+        )
     }
 
     private suspend fun clearLocalSessionAfterRemoteInvalidation() {
@@ -236,11 +265,9 @@ object AuthRepository {
         _error.value = null
     }
 
-    private fun isInvalidRemoteSessionError(error: Throwable): Boolean {
+    private fun fullMessage(error: Throwable): String {
         val restError = error.findCause<RestException>()
-        if (restError?.statusCode == 401 || restError?.statusCode == 403) return true
-
-        val message = buildString {
+        return buildString {
             append(error.message.orEmpty())
             if (restError != null) {
                 append(' ')
@@ -249,17 +276,47 @@ object AuthRepository {
                 append(restError.description)
             }
         }.lowercase()
+    }
 
+    /** The account itself is gone (deleted server-side) — invalid regardless of tokens. */
+    internal fun isUserGoneError(error: Throwable): Boolean {
+        val message = fullMessage(error)
         return (
-            "jwt" in message &&
-                ("invalid" in message || "expired" in message || "malformed" in message)
-            ) || (
             "user" in message &&
                 ("does not exist" in message || "not found" in message || "deleted" in message)
             ) || (
             "foreign key" in message &&
                 ("auth.users" in message || "user_id" in message)
             )
+    }
+
+    /** A token-shaped rejection (401/403 or a JWT parse/verify/expiry complaint) — refreshable. */
+    internal fun isAuthTokenError(error: Throwable): Boolean {
+        val restError = error.findCause<RestException>()
+        if (restError?.statusCode == 401 || restError?.statusCode == 403) return true
+        val message = fullMessage(error)
+        return "bad_jwt" in message || (
+            "jwt" in message &&
+                ("invalid" in message || "expired" in message || "malformed" in message)
+            )
+    }
+
+    /** The refresh call itself was rejected: the refresh token (= the session) is dead. Network
+     *  and 5xx failures are NOT invalid — offline must never sign the user out. */
+    internal fun isRefreshDefinitelyInvalid(error: Throwable): Boolean {
+        val message = fullMessage(error)
+        if (
+            "invalid_grant" in message ||
+            "invalid refresh token" in message ||
+            "refresh token not found" in message ||
+            "refresh_token_not_found" in message ||
+            "session not found" in message ||
+            "session_not_found" in message
+        ) {
+            return true
+        }
+        val restError = error.findCause<RestException>()
+        return restError?.statusCode == 400 || restError?.statusCode == 401 || restError?.statusCode == 403
     }
 
     private inline fun <reified T : Throwable> Throwable.findCause(): T? {

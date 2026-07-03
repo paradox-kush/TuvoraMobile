@@ -9,6 +9,8 @@ import io.github.jan.supabase.functions.Functions
 import io.github.jan.supabase.postgrest.Postgrest
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.http.HttpHeaders
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 
 object SupabaseProvider {
     private data class ClientHolder(
@@ -16,6 +18,7 @@ object SupabaseProvider {
         val client: SupabaseClient,
     )
 
+    private val clientLock = SynchronizedObject()
     private var holder: ClientHolder? = null
 
     val selectedBackend: SyncBackendConfig
@@ -26,11 +29,15 @@ object SupabaseProvider {
         get() = clientFor(selectedBackend)
 
     fun rebuildClient() {
-        holder = null
+        synchronized(clientLock) { holder = null }
     }
 
+    // Client construction is single-flight: two coroutines racing this getter at cold start must
+    // NOT build two clients — each client's Auth plugin runs its own token auto-refresh against
+    // the SAME persisted session, and two refreshers eventually desync past the server's
+    // refresh-token reuse window, which revokes the session and signs the user out.
     @OptIn(SupabaseInternal::class)
-    private fun clientFor(config: SyncBackendConfig): SupabaseClient {
+    private fun clientFor(config: SyncBackendConfig): SupabaseClient = synchronized(clientLock) {
         holder
             ?.takeIf { it.backend.hasSameConnectionIdentity(config) }
             ?.let { return it.client }
@@ -50,6 +57,6 @@ object SupabaseProvider {
             install(Functions)
         }
         holder = ClientHolder(backend = config, client = nextClient)
-        return nextClient
+        nextClient
     }
 }
