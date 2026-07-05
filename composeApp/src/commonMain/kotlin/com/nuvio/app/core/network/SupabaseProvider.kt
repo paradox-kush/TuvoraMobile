@@ -7,8 +7,11 @@ import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.functions.Functions
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.realtime.Realtime
+import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.http.HttpHeaders
+import io.ktor.http.takeFrom
 
 object SupabaseProvider {
     private data class ClientHolder(
@@ -41,6 +44,30 @@ object SupabaseProvider {
             supabaseKey = config.anonKey,
         ) {
             httpConfig {
+                // Upstream's primary->fallback endpoint retry; inert unless a fallback URL is
+                // configured (the fork's self-hosted backend usually has none).
+                if (SupabaseEndpointConfig.hasFallback) {
+                    install(HttpRequestRetry) {
+                        retryOnExceptionIf(maxRetries = 1) { request, cause ->
+                            SupabaseEndpointConfig.shouldRetryWithFallback(
+                                requestUrl = request.url.buildString(),
+                                cause = cause,
+                            )
+                        }
+                        retryIf(maxRetries = 1) { request, response ->
+                            SupabaseEndpointConfig.shouldRetryWithFallback(
+                                requestUrl = request.url.toString(),
+                                statusCode = response.status.value,
+                            )
+                        }
+                        modifyRequest { request ->
+                            SupabaseEndpointConfig.fallbackUrlFor(request.url.buildString())?.let { fallbackUrl ->
+                                request.url.takeFrom(fallbackUrl)
+                            }
+                        }
+                        constantDelay(millis = 100)
+                    }
+                }
                 defaultRequest {
                     headers.append(HttpHeaders.UserAgent, userAgent)
                 }
@@ -48,6 +75,8 @@ object SupabaseProvider {
             install(Auth)
             install(Postgrest)
             install(Functions)
+            // Realtime backs upstream's sync-invalidation service.
+            install(Realtime)
         }
         holder = ClientHolder(backend = config, client = nextClient)
         return nextClient

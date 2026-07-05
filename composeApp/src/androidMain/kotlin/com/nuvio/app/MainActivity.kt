@@ -10,9 +10,10 @@ import androidx.activity.SystemBarStyle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.nuvio.app.core.auth.AuthStorage
+import com.nuvio.app.core.diagnostics.SentryInitializer
 import com.nuvio.app.core.deeplink.handleAppUrl
-import com.nuvio.app.core.network.SyncBackendStorage
 import com.nuvio.app.core.storage.PlatformLocalAccountDataCleaner
+import com.nuvio.app.core.sync.SyncClientIdentityStorage
 import com.nuvio.app.features.addons.AddonStorage
 import com.nuvio.app.features.collection.CollectionMobileSettingsStorage
 import com.nuvio.app.features.collection.CollectionStorage
@@ -39,6 +40,7 @@ import com.nuvio.app.features.profiles.ProfilePinCacheStorage
 import com.nuvio.app.features.profiles.ProfileStorage
 import com.nuvio.app.features.details.SeasonViewModeStorage
 import com.nuvio.app.features.search.SearchHistoryStorage
+import com.nuvio.app.features.settings.SentrySettingsStorage
 import com.nuvio.app.features.settings.ThemeSettingsStorage
 import com.nuvio.app.features.trakt.TraktAuthStorage
 import com.nuvio.app.features.trakt.TraktCommentsStorage
@@ -65,13 +67,15 @@ class MainActivity : AppCompatActivity() {
             ),
         )
         ThemeSettingsStorage.initialize(applicationContext)
+        SentrySettingsStorage.initialize(applicationContext)
+        SentryInitializer.start(application)
         super.onCreate(savedInstanceState)
         window.setBackgroundDrawableResource(R.color.nuvio_background)
+        SyncClientIdentityStorage.initialize(applicationContext)
         AddonStorage.initialize(applicationContext)
         com.nuvio.app.features.iptv.XtreamAccountStorage.initialize(applicationContext)
         com.nuvio.app.features.iptv.match.MatchDbDriver.initialize(applicationContext)
         AuthStorage.initialize(applicationContext)
-        SyncBackendStorage.initialize(applicationContext)
         LibraryStorage.initialize(applicationContext)
         WatchedStorage.initialize(applicationContext)
         MetaScreenSettingsStorage.initialize(applicationContext)
