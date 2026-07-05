@@ -710,6 +710,11 @@ private fun MainAppContent(
             EpisodeReleaseNotificationsRepository.ensureLoaded()
         }
         remember {
+            // Warm the IPTV catalog indexes off the critical path so the first
+            // play/search doesn't pay the full-catalog download on demand.
+            XtreamRepository.warmUpMatchIndexes(startDelayMs = 10_000)
+        }
+        remember {
             CollectionSyncService.startObserving()
         }
         remember {

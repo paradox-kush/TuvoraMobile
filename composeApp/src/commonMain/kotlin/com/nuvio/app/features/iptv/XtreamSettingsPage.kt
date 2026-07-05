@@ -27,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.app.features.iptv.match.XtreamTmdbResolver
 import com.nuvio.app.features.settings.SettingsGroup
 import com.nuvio.app.features.settings.SettingsGroupDivider
 import com.nuvio.app.features.settings.SettingsNavigationRow
@@ -44,6 +46,7 @@ internal fun LazyListScope.xtreamSettingsContent(
         var showAddDialog by remember { mutableStateOf(false) }
         var actionsFor by remember { mutableStateOf<XtreamAccount?>(null) }
         var editFor by remember { mutableStateOf<XtreamAccount?>(null) }
+        val indexingAccounts by XtreamTmdbResolver.indexing.collectAsStateWithLifecycle()
 
         SettingsSection(title = "IPTV (Xtream Codes)", isTablet = isTablet) {
             SettingsGroup(isTablet = isTablet) {
@@ -57,7 +60,9 @@ internal fun LazyListScope.xtreamSettingsContent(
                     SettingsGroupDivider(isTablet = isTablet)
                     SettingsNavigationRow(
                         title = account.name,
-                        description = account.baseUrl + if (account.enabled) "" else "  •  disabled",
+                        description = account.baseUrl +
+                            (if (account.id in indexingAccounts) "  •  preparing catalog…" else "") +
+                            (if (account.enabled) "" else "  •  disabled"),
                         isTablet = isTablet,
                         onClick = { actionsFor = account },
                     )

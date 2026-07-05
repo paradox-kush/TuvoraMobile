@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
 
@@ -37,6 +39,7 @@ object AuthRepository {
 
     private var initialized = false
     private var validatedRemoteUserId: String? = null
+    private val refreshMutex = Mutex()
 
     /** Asks the app shell to show the sign-in screen (used from Settings while signed out). */
     fun requestSignIn() {
@@ -113,9 +116,7 @@ object AuthRepository {
             validatedRemoteUserId = userId
             true
         }.getOrElse { e ->
-            if (isInvalidRemoteSessionError(e)) {
-                log.w(e) { "Stored Supabase session no longer belongs to an active account; clearing local auth" }
-                clearLocalSessionAfterRemoteInvalidation()
+            if (signOutIfSessionInvalid(e, "Session validation")) {
                 false
             } else {
                 log.w(e) { "Unable to validate stored Supabase session; keeping cached auth state" }
@@ -179,7 +180,27 @@ object AuthRepository {
     }
 
     suspend fun signOutIfSessionInvalid(error: Throwable, source: String): Boolean {
-        if (!isInvalidRemoteSessionError(error)) return false
+        if (!couldBeInvalidSessionError(error.restStatusCode(), error.authErrorText())) return false
+        val auth = SupabaseProvider.client.auth
+        val staleToken = auth.currentAccessTokenOrNull() ?: return false
+
+        // A 401/jwt-expired usually just means the access token lapsed. The refresh
+        // endpoint is the authority: only a rejected refresh proves the session is dead.
+        val refreshError = refreshMutex.withLock {
+            if (auth.currentAccessTokenOrNull() != staleToken) {
+                null // another caller already refreshed while we waited
+            } else {
+                runCatching { auth.refreshCurrentSession() }.exceptionOrNull()
+            }
+        }
+        if (refreshError == null) {
+            log.i { "$source hit an auth error but the session refreshed; keeping auth state" }
+            return false
+        }
+        if (!isInvalidRefreshError(refreshError.restStatusCode(), refreshError.authErrorText())) {
+            log.w(refreshError) { "$source hit an auth error and the session refresh failed transiently; keeping auth state" }
+            return false
+        }
 
         log.w(error) { "$source failed because the current Supabase account/session is no longer valid; clearing local auth" }
         clearLocalSessionAfterRemoteInvalidation()
@@ -236,12 +257,12 @@ object AuthRepository {
         _error.value = null
     }
 
-    private fun isInvalidRemoteSessionError(error: Throwable): Boolean {
-        val restError = error.findCause<RestException>()
-        if (restError?.statusCode == 401 || restError?.statusCode == 403) return true
+    private fun Throwable.restStatusCode(): Int? = findCause<RestException>()?.statusCode
 
-        val message = buildString {
-            append(error.message.orEmpty())
+    private fun Throwable.authErrorText(): String {
+        val restError = findCause<RestException>()
+        return buildString {
+            append(message.orEmpty())
             if (restError != null) {
                 append(' ')
                 append(restError.error)
@@ -249,18 +270,36 @@ object AuthRepository {
                 append(restError.description)
             }
         }.lowercase()
-
-        return (
-            "jwt" in message &&
-                ("invalid" in message || "expired" in message || "malformed" in message)
-            ) || (
-            "user" in message &&
-                ("does not exist" in message || "not found" in message || "deleted" in message)
-            ) || (
-            "foreign key" in message &&
-                ("auth.users" in message || "user_id" in message)
-            )
     }
+
+    // Classifiers are pure (status + lowercased text) so tests need no ktor fixtures.
+    // couldBeInvalidSessionError only gates the refresh probe; it never signs out by itself.
+    internal fun couldBeInvalidSessionError(statusCode: Int?, text: String): Boolean =
+        statusCode == 401 || statusCode == 403 ||
+            (
+                "jwt" in text &&
+                    ("invalid" in text || "expired" in text || "malformed" in text)
+                ) || (
+                "user" in text &&
+                    ("does not exist" in text || "not found" in text || "deleted" in text)
+                ) || (
+                "foreign key" in text &&
+                    ("auth.users" in text || "user_id" in text)
+                )
+
+    internal fun isInvalidRefreshError(statusCode: Int?, text: String): Boolean =
+        statusCode == 400 || statusCode == 401 || statusCode == 403 ||
+            listOf(
+                "invalid refresh token",
+                "refresh token not found",
+                "refresh_token_not_found",
+                "invalid_grant",
+                "session not found",
+                "invalid session",
+                "invalid token",
+                "user not found",
+                "user does not exist",
+            ).any { it in text }
 
     private inline fun <reified T : Throwable> Throwable.findCause(): T? {
         var current: Throwable? = this

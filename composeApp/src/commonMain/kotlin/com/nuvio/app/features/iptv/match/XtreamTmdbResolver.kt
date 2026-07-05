@@ -9,6 +9,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -28,7 +32,10 @@ internal data class XtreamMatch(val item: IndexedItem, val via: String)
 internal object XtreamTmdbResolver {
     private val log = Logger.withTag("XtreamTmdbResolver")
 
-    private const val INDEX_TTL_MS = 24 * 60 * 60 * 1000L
+    // Staleness ceiling before a re-fetch. The refresh is an incremental diff (unchanged
+    // titles validate by fingerprint; only new/renamed re-index), so it's cheap on-device —
+    // the 72h window just bounds how often the full catalog JSON is re-downloaded.
+    private const val INDEX_TTL_MS = 72 * 60 * 60 * 1000L
     private const val BUILD_BACKOFF_MS = 60 * 60 * 1000L
     private const val NEGATIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000L
     private const val MAX_VERIFY_CALLS = 3
@@ -37,12 +44,33 @@ internal object XtreamTmdbResolver {
     private val inFlightBuilds = mutableMapOf<String, CompletableDeferred<Unit>>()
     private val lastFailedBuildMs = mutableMapOf<String, Long>()
 
+    // account ids whose catalog index is currently building — drives the
+    // "preparing catalog…" status on the IPTV settings rows
+    private val indexingCounts = mutableMapOf<String, Int>()
+    private val _indexing = MutableStateFlow<Set<String>>(emptySet())
+    val indexing: StateFlow<Set<String>> = _indexing.asStateFlow()
+
     // index builds outlive the stream request that triggered them: a 175k-item catalog
     // takes ~a minute on-device, and users navigate away — cancelling the request must
     // not kill (and backoff-poison) the build
     private val buildScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private fun now() = TraktPlatformClock.nowEpochMs()
+
+    /**
+     * Fire-and-forget index warm-up (account add, app start, sync-in) so the first
+     * resolve/search doesn't pay the full-catalog download on demand — on budget
+     * devices that's minutes, which reads as "finding the movie takes forever".
+     */
+    fun warmUp(accounts: List<XtreamAccount>, startDelayMs: Long = 0L) {
+        accounts.filter { it.enabled }.forEach { acc ->
+            buildScope.launch {
+                if (startDelayMs > 0) delay(startDelayMs)
+                ensureIndexed(acc, MatchKind.MOVIE)
+                ensureIndexed(acc, MatchKind.SERIES)
+            }
+        }
+    }
 
     suspend fun resolve(acc: XtreamAccount, kind: MatchKind, tmdbId: Int, titles: TmdbTitleBundle): XtreamMatch? {
         ensureIndexed(acc, kind)
@@ -184,6 +212,7 @@ internal object XtreamTmdbResolver {
             if (now() - (lastFailedBuildMs[key] ?: 0) < BUILD_BACKOFF_MS) return
             val d = CompletableDeferred<Unit>()
             inFlightBuilds[key] = d
+            markIndexingLocked(acc.id, +1)
             d to true
         }
 
@@ -198,19 +227,38 @@ internal object XtreamTmdbResolver {
                             IndexedItem(it.seriesId, it.name, it.year ?: TitleNormalizer.yearOf(it.name), it.tmdb, null, it.poster)
                         }
                     }
-                    XtreamMatchIndex.rebuild(acc.id, kind, items)
-                    log.i { "indexed ${items.size} ${kind.slug} items for ${acc.name}" }
+                    // An empty list where we previously indexed content is a panel glitch, not a
+                    // real catalog — fail into the 1h backoff instead of re-fetching every resolve.
+                    check(items.isNotEmpty() || XtreamMatchIndex.builtAt(acc.id, kind) == null) {
+                        "panel returned an empty ${kind.slug} list"
+                    }
+                    val stats = XtreamMatchIndex.sync(acc.id, kind, items)
+                    log.i { "synced ${kind.slug} index for ${acc.name}: +${stats.added} ~${stats.changed} -${stats.removed} (${stats.total} total)" }
                     buildLock.withLock { lastFailedBuildMs.remove(key) }
                 } catch (t: Throwable) {
                     log.w(t) { "index build failed for ${acc.name} ${kind.slug}" }
                     buildLock.withLock { lastFailedBuildMs[key] = now() }
                 } finally {
-                    buildLock.withLock { inFlightBuilds.remove(key) }
+                    buildLock.withLock {
+                        inFlightBuilds.remove(key)
+                        markIndexingLocked(acc.id, -1)
+                    }
                     deferred.complete(Unit)
                 }
             }
         }
+        // A stale-but-present index serves immediately — yesterday's catalog still
+        // resolves, and the rebuild lands in the background. Only a MISSING index is
+        // worth blocking the caller for.
+        if (existing != null) return
         // await is cancellable (the caller's request may die); the build itself is not
         deferred.await()
+    }
+
+    /** Callers hold [buildLock]. Tracks per-account in-flight build counts for [indexing]. */
+    private fun markIndexingLocked(accountId: String, delta: Int) {
+        val n = (indexingCounts[accountId] ?: 0) + delta
+        if (n <= 0) indexingCounts.remove(accountId) else indexingCounts[accountId] = n
+        _indexing.value = indexingCounts.keys.toSet()
     }
 }

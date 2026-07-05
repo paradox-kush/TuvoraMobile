@@ -110,8 +110,15 @@ object XtreamSearchIndex {
         val job = mutex.withLock {
             channelJobs.getOrPut(account.id) {
                 bgScope.async {
-                    val channels = XtreamClient.liveChannels(account).getOrDefault(emptyList())
-                    mutex.withLock { channelCache[account.id] = channels }
+                    val result = XtreamClient.liveChannels(account)
+                    val channels = result.getOrDefault(emptyList())
+                    mutex.withLock {
+                        channelCache[account.id] = channels
+                        // A FAILED fetch must not poison the whole session ("live search dead
+                        // until restart") — drop the job so a later search retries. A
+                        // successful-but-empty list stays cached.
+                        if (result.isFailure) channelJobs.remove(account.id)
+                    }
                     channels
                 }
             }

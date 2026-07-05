@@ -1,5 +1,7 @@
 package com.nuvio.app.features.iptv
 
+import com.nuvio.app.features.iptv.match.XtreamMatchIndex
+import com.nuvio.app.features.iptv.match.XtreamTmdbResolver
 import com.nuvio.app.features.library.LibraryRepository
 import com.nuvio.app.features.profiles.ProfileRepository
 import com.nuvio.app.features.watched.WatchedRepository
@@ -49,6 +51,18 @@ object XtreamRepository {
         loaded = true
         currentProfileId = profileId
         _uiState.value = XtreamUiState(accounts = parse(XtreamAccountStorage.loadAccountsJson(profileId)))
+        XtreamTmdbResolver.warmUp(_uiState.value.accounts)
+    }
+
+    /**
+     * Kick background catalog-index builds so the first play/search doesn't pay the
+     * full-catalog download on demand (minutes on budget devices). Idempotent — a
+     * fresh index short-circuits. Called at app start with a delay so the home
+     * screen wins the cold-start bandwidth.
+     */
+    fun warmUpMatchIndexes(startDelayMs: Long = 0L) {
+        ensureLoaded()
+        XtreamTmdbResolver.warmUp(_uiState.value.accounts, startDelayMs)
     }
 
     /** Parse a pasted portal/M3U URL, verify the credentials live, then persist. */
@@ -71,12 +85,22 @@ object XtreamRepository {
             onResult(false)
             return
         }
+        val profileAtStart = currentProfileId
         scope.launch {
             _uiState.update { it.copy(isValidating = true, error = null) }
             XtreamClient.verify(account)
                 .onSuccess {
+                    // Profile switched while verifying — saving now would write this playlist
+                    // into the wrong profile's list. Drop it; re-add on the right profile.
+                    if (currentProfileId != profileAtStart) {
+                        _uiState.update { it.copy(isValidating = false) }
+                        onResult(false)
+                        return@onSuccess
+                    }
                     val updated = _uiState.value.accounts.filterNot { it.id == account.id } + account
                     _uiState.update { it.copy(accounts = updated, isValidating = false) }
+                    // Start the catalog index now, not on first play — minutes on budget devices.
+                    XtreamTmdbResolver.warmUp(listOf(account))
                     persist()
                     onResult(true)
                 }
@@ -117,10 +141,17 @@ object XtreamRepository {
             return
         }
         val account = candidate.copy(enabled = old.enabled)
+        val profileAtStart = currentProfileId
         scope.launch {
             _uiState.update { it.copy(isValidating = true, error = null) }
             XtreamClient.verify(account)
                 .onSuccess {
+                    // Profile switched while verifying — see verifyAndSave.
+                    if (currentProfileId != profileAtStart) {
+                        _uiState.update { it.copy(isValidating = false) }
+                        onResult(false)
+                        return@onSuccess
+                    }
                     _uiState.update { st ->
                         st.copy(
                             // Replace in place; drop any pre-existing duplicate of the new identity.
@@ -135,6 +166,7 @@ object XtreamRepository {
                     XtreamItemRegistry.resetForProfile()
                     XtreamHubRepository.resetForProfile()
                     XtreamSearchIndex.resetForProfile()
+                    XtreamTmdbResolver.warmUp(listOf(account))
                     persist()
                     onResult(true)
                 }
@@ -164,11 +196,23 @@ object XtreamRepository {
         _uiState.update { state ->
             state.copy(accounts = state.accounts.map { if (it.id == id) it.copy(enabled = enabled) else it })
         }
+        if (enabled) _uiState.value.accounts.firstOrNull { it.id == id }?.let { XtreamTmdbResolver.warmUp(listOf(it)) }
         persist()
     }
 
     fun remove(id: String) {
         _uiState.update { it.copy(accounts = it.accounts.filterNot { acc -> acc.id == id }) }
+        // Caches keyed by this id leak otherwise (match db rows survive forever); saved
+        // refs would be dead ids (phantom favorites / continue-watching rows).
+        XtreamItemRegistry.resetForProfile()
+        XtreamHubRepository.resetForProfile()
+        XtreamSearchIndex.resetForProfile()
+        scope.launch { runCatching { XtreamMatchIndex.purge(id) } }
+        val prefix = XtreamItemRegistry.accountPrefix(id)
+        LibraryRepository.migrateIdPrefix(prefix, null)
+        WatchProgressRepository.migrateIdPrefix(prefix, null)
+        WatchedRepository.migrateIdPrefix(prefix, null)
+        XtreamLiveRecents.migrateIdPrefix(prefix, null)
         persist()
     }
 
@@ -178,8 +222,21 @@ object XtreamRepository {
     fun applyFromRemote(profileId: Int, accounts: List<XtreamAccount>) {
         loaded = true
         currentProfileId = profileId
+        val before = _uiState.value.accounts
         _uiState.update { it.copy(accounts = accounts) }
         XtreamAccountStorage.saveAccountsJson(profileId, json.encodeToString(accounts))
+        if (before != accounts) {
+            // Same discovery-cycle reset as a local edit: cached stream URLs embed the old
+            // server/creds, and a playlist deleted on another device leaves index rows behind.
+            XtreamItemRegistry.resetForProfile()
+            XtreamHubRepository.resetForProfile()
+            XtreamSearchIndex.resetForProfile()
+            val remaining = accounts.map { it.id }.toSet()
+            before.filter { it.id !in remaining }
+                .forEach { gone -> scope.launch { runCatching { XtreamMatchIndex.purge(gone.id) } } }
+        }
+        // An account added on another device should index here before its first play.
+        XtreamTmdbResolver.warmUp(accounts)
     }
 
     private fun persist() {

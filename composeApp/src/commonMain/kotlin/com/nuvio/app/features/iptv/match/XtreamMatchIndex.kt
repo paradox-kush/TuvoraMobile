@@ -25,6 +25,71 @@ internal data class IndexedItem(
 /** A confirmed (or confirmed-absent when [sid] is null) TMDB->stream mapping. */
 internal data class CachedMapping(val sid: Int?, val matchedName: String?, val updatedAtMs: Long)
 
+/** Outcome of a [XtreamMatchIndex.sync]: how much of the catalog actually changed. */
+internal data class SyncStats(val added: Int, val changed: Int, val removed: Int, val total: Int)
+
+/** Pure diff outcome: items to (re-)insert, sids whose old name-keys must be dropped, vanished sids. */
+internal data class CatalogDiff(val upserts: List<IndexedItem>, val changedSids: List<Int>, val goneSids: List<Int>)
+
+/**
+ * Row fingerprint for change detection between an indexed row and its fresh fetch.
+ * ponytail: a 32-bit hash can collide (~2^-32 per changed row) leaving one stale row;
+ * exact field comparison would need all 175k names in heap — accepted ceiling.
+ */
+internal fun itemFp(name: String, year: Int?, tmdb: Int?, ext: String?, poster: String?): Int {
+    var h = name.hashCode()
+    h = 31 * h + (year ?: -1)
+    h = 31 * h + (tmdb ?: -1)
+    h = 31 * h + (ext?.hashCode() ?: 0)
+    h = 31 * h + (poster?.hashCode() ?: 0)
+    return h
+}
+
+private fun IndexedItem.fp(): Int = itemFp(name, year, tmdb, ext, poster)
+
+/**
+ * Diffs a fresh catalog fetch against the indexed rows. [existingSids] MUST be ascending
+ * (PK read order) and positionally aligned with [existingFps]. Unchanged rows cost one
+ * binary search each — that's the whole "validate existing quickly" pass. Duplicate sids
+ * in [fetched] (degenerate panels): first occurrence decides.
+ */
+internal fun diffCatalog(existingSids: IntArray, existingFps: IntArray, fetched: List<IndexedItem>): CatalogDiff {
+    val seen = BooleanArray(existingSids.size)
+    val upserts = ArrayList<IndexedItem>()
+    val changedSids = ArrayList<Int>()
+    for (item in fetched) {
+        val i = existingSids.ascIndexOf(item.sid)
+        if (i < 0) {
+            upserts += item
+        } else if (!seen[i]) {
+            seen[i] = true
+            if (existingFps[i] != item.fp()) {
+                upserts += item
+                changedSids += item.sid
+            }
+        }
+    }
+    val goneSids = ArrayList<Int>()
+    for (i in existingSids.indices) if (!seen[i]) goneSids += existingSids[i]
+    return CatalogDiff(upserts, changedSids, goneSids)
+}
+
+/** Binary search over an ascending IntArray (no boxing, no JVM Arrays dependency). */
+private fun IntArray.ascIndexOf(v: Int): Int {
+    var lo = 0
+    var hi = size - 1
+    while (lo <= hi) {
+        val mid = (lo + hi) ushr 1
+        val x = this[mid]
+        when {
+            x < v -> lo = mid + 1
+            x > v -> hi = mid - 1
+            else -> return mid
+        }
+    }
+    return -1
+}
+
 /**
  * Disk-backed lookup index per provider+kind: normalized-name keys and bulk-list tmdb ids
  * over the full catalog, plus the cache of verified tmdb->sid mappings (the thing Supabase
@@ -53,6 +118,27 @@ internal object XtreamMatchIndex {
     }
 
     private fun now(): Long = TraktPlatformClock.nowEpochMs()
+
+    /**
+     * Drops EVERYTHING stored for one provider (index + local mapping mirror) — account
+     * removed. The Supabase copy of the mappings survives for other devices / a re-add.
+     */
+    suspend fun purge(provider: String) {
+        mutex.withLock {
+            val c = connection()
+            c.execSQL("BEGIN IMMEDIATE")
+            try {
+                for (t in listOf("items", "keys", "idx_meta", "tmdb_map")) {
+                    c.prepare("DELETE FROM $t WHERE provider = ?").use { st ->
+                        st.bindText(1, provider); st.step()
+                    }
+                }
+                c.execSQL("COMMIT")
+            } catch (t: Throwable) {
+                c.execSQL("ROLLBACK"); throw t
+            }
+        }
+    }
 
     suspend fun builtAt(provider: String, kind: MatchKind): Long? = mutex.withLock {
         connection().prepare("SELECT built_at FROM idx_meta WHERE provider = ? AND kind = ?").use { st ->
@@ -85,6 +171,97 @@ internal object XtreamMatchIndex {
                 c.execSQL("ROLLBACK"); throw t
             }
         }
+        insertItems(provider, kind, items)
+        writeMeta(provider, kind, items.size)
+    }
+
+    /**
+     * Incrementally reconciles the index with a fresh catalog fetch: unchanged rows are
+     * validated by fingerprint only (no re-normalization, no rewrite), new/renamed rows are
+     * (re)indexed, vanished rows deleted. Falls back to [rebuild] when the index is empty or
+     * the catalog reshuffled wholesale. built_at is bumped LAST so a crashed sync reads as
+     * stale and re-runs (idempotent).
+     */
+    suspend fun sync(provider: String, kind: MatchKind, items: List<IndexedItem>): SyncStats {
+        // One streaming pass over the existing rows -> primitive (sid, fingerprint) arrays,
+        // PK-ordered. ~1.4MB for a 175k catalog; never materializes the old names in heap.
+        var sids = IntArray(4_096)
+        var fps = IntArray(4_096)
+        var count = 0
+        mutex.withLock {
+            connection().prepare(
+                "SELECT sid, name, year, tmdb, ext, poster FROM items WHERE provider = ? AND kind = ? ORDER BY sid"
+            ).use { st ->
+                st.bindText(1, provider); st.bindText(2, kind.slug)
+                while (st.step()) {
+                    if (count == sids.size) {
+                        sids = sids.copyOf(count * 2); fps = fps.copyOf(count * 2)
+                    }
+                    sids[count] = st.getLong(0).toInt()
+                    fps[count] = itemFp(
+                        name = st.getText(1),
+                        year = if (st.isNull(2)) null else st.getLong(2).toInt(),
+                        tmdb = if (st.isNull(3)) null else st.getLong(3).toInt(),
+                        ext = if (st.isNull(4)) null else st.getText(4),
+                        poster = if (st.isNull(5)) null else st.getText(5),
+                    )
+                    count++
+                }
+            }
+        }
+        if (count == 0) {
+            rebuild(provider, kind, items)
+            return SyncStats(added = items.size, changed = 0, removed = 0, total = items.size)
+        }
+        // A glitchy panel returning an empty list must not wipe a good index — keep it,
+        // don't bump built_at, let the next window retry.
+        if (items.isEmpty()) return SyncStats(0, 0, 0, count)
+
+        val diff = diffCatalog(sids.copyOf(count), fps.copyOf(count), items)
+        // A wholesale reshuffle (provider migration, sid renumbering) is cheaper as a clean rebuild.
+        if (diff.upserts.size + diff.goneSids.size > maxOf(500, count / 3)) {
+            rebuild(provider, kind, items)
+            return SyncStats(added = items.size, changed = 0, removed = 0, total = items.size)
+        }
+
+        // Deletes first: renamed rows' old name-keys and vanished rows. Then the (small) upsert
+        // set rides the same chunked insert path as a full rebuild.
+        mutex.withLock {
+            val c = connection()
+            c.execSQL("BEGIN IMMEDIATE")
+            try {
+                for (chunk in (diff.changedSids + diff.goneSids).chunked(500)) {
+                    val ph = chunk.joinToString(",") { "?" }
+                    c.prepare("DELETE FROM keys WHERE provider = ? AND kind = ? AND sid IN ($ph)").use { st ->
+                        st.bindText(1, provider); st.bindText(2, kind.slug)
+                        chunk.forEachIndexed { i, sid -> st.bindLong(i + 3, sid.toLong()) }
+                        st.step()
+                    }
+                }
+                for (chunk in diff.goneSids.chunked(500)) {
+                    val ph = chunk.joinToString(",") { "?" }
+                    c.prepare("DELETE FROM items WHERE provider = ? AND kind = ? AND sid IN ($ph)").use { st ->
+                        st.bindText(1, provider); st.bindText(2, kind.slug)
+                        chunk.forEachIndexed { i, sid -> st.bindLong(i + 3, sid.toLong()) }
+                        st.step()
+                    }
+                }
+                c.execSQL("COMMIT")
+            } catch (t: Throwable) {
+                c.execSQL("ROLLBACK"); throw t
+            }
+        }
+        insertItems(provider, kind, diff.upserts)
+        writeMeta(provider, kind, items.size)
+        return SyncStats(
+            added = diff.upserts.size - diff.changedSids.size,
+            changed = diff.changedSids.size,
+            removed = diff.goneSids.size,
+            total = items.size,
+        )
+    }
+
+    private suspend fun insertItems(provider: String, kind: MatchKind, items: List<IndexedItem>) {
         for (chunk in items.chunked(5_000)) {
             mutex.withLock {
                 val c = connection()
@@ -117,10 +294,12 @@ internal object XtreamMatchIndex {
                 }
             }
         }
+    }
+
+    private suspend fun writeMeta(provider: String, kind: MatchKind, itemCount: Int) {
         mutex.withLock {
-            val c = connection()
-            c.prepare("INSERT OR REPLACE INTO idx_meta(provider, kind, built_at, item_count) VALUES(?,?,?,?)").use { st ->
-                st.bindText(1, provider); st.bindText(2, kind.slug); st.bindLong(3, now()); st.bindLong(4, items.size.toLong())
+            connection().prepare("INSERT OR REPLACE INTO idx_meta(provider, kind, built_at, item_count) VALUES(?,?,?,?)").use { st ->
+                st.bindText(1, provider); st.bindText(2, kind.slug); st.bindLong(3, now()); st.bindLong(4, itemCount.toLong())
                 st.step()
             }
         }
