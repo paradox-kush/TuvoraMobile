@@ -260,9 +260,19 @@ private fun BrowseHeader(title: String, onBack: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                // Explicit token color — LocalContentColor defaults to black on the dark bg here.
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
         }
-        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(
+            title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 

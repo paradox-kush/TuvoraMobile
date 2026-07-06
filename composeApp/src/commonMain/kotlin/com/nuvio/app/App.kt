@@ -29,11 +29,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
+import com.nuvio.app.features.iptv.IptvPlaybackGate
+import com.nuvio.app.features.iptv.IptvRefreshScheduler
 import com.nuvio.app.features.iptv.XtreamHubScreen
 import com.nuvio.app.features.radar.SportsHubScreen
 import com.nuvio.app.features.iptv.XtreamItemRegistry
 import com.nuvio.app.features.iptv.XtreamLiveRecents
 import com.nuvio.app.features.iptv.XtreamRepository
+import com.nuvio.app.features.iptv.resolveLivePlaybackUrl
 import com.nuvio.app.features.iptv.toMetaPreview
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
@@ -940,6 +943,15 @@ private fun MainAppContent(
         }
     }
 
+    // iOS auto-refresh (P3-B): iOS has no WorkManager, so overdue IPTV playlists are refreshed
+    // foreground-on-launch (best-effort, off the main thread). Android schedules a periodic
+    // WorkManager worker from MainActivity instead, so this stays iOS-only to avoid double work.
+    LaunchedEffect(Unit) {
+        if (isIos) {
+            runCatching { IptvRefreshScheduler.refreshDuePlaylists() }
+        }
+    }
+
     LaunchedEffect(authState, profileState.activeProfile?.profileIndex) {
         if (!RealtimeSyncConfig.ENABLED) {
             RealtimeSyncInvalidationService.stop()
@@ -984,27 +996,52 @@ private fun MainAppContent(
     var lastExternalPlayerLaunch by remember { mutableStateOf<PlayerLaunch?>(null) }
     val activePlaybackProfileId = profileState.activeProfile?.profileIndex ?: ProfileRepository.activeProfileId
 
-    // Shared launch for an Xtream LIVE channel (from the hub or the Library) — forces libmpv via
+    // Shared launch for an IPTV LIVE channel (from the hub or the Library) — forces libmpv via
     // streamType="live". The URL is rebuilt from the id when the caller doesn't have one (e.g. a
-    // favorite opened from the Library after a fresh launch, when the registry is empty).
+    // favorite opened from the Library after a fresh launch, when the registry is empty). For M3U
+    // channels the URL isn't rebuildable from creds, so it's resolved from the content DB async.
+    //
+    // P3: when the playlist has a non-system DNS provider, the plain-http live URL is DoH-resolved +
+    // IP-rewritten (with a Host header) on Android before it reaches mpv; iOS/https are a no-op. Any
+    // failure falls back to the original URL, so playback never breaks. The DoH step is a network call,
+    // so the whole launch runs on a coroutine (both call sites already tolerate async).
+    fun launchLiveChannel(contentId: String, name: String, logo: String?, resolvedUrl: String) {
+        coroutineScope.launch {
+            val dnsProvider = XtreamItemRegistry.dnsProviderFor(contentId)
+            val playback = resolveLivePlaybackUrl(resolvedUrl, dnsProvider)
+            XtreamLiveRecents.record(contentId, name, logo)
+            val liveLaunch = PlayerLaunch(
+                profileId = activePlaybackProfileId,
+                title = name,
+                sourceUrl = playback.url,
+                sourceHeaders = playback.headers,
+                streamTitle = name,
+                streamType = "live",
+                providerName = XtreamItemRegistry.accountNameFor(contentId) ?: "IPTV",
+                providerAddonId = "xtream",
+                logo = logo,
+                contentType = "live",
+                videoId = contentId,
+                parentMetaId = contentId,
+                parentMetaType = "tv",
+            )
+            navController.navigate(PlayerRoute(launchId = PlayerLaunchStore.put(liveLaunch)))
+        }
+    }
+
     fun playLiveXtreamChannel(contentId: String, name: String, logo: String?, url: String?) {
-        val resolvedUrl = url ?: XtreamItemRegistry.liveStreamUrlFor(contentId) ?: return
-        XtreamLiveRecents.record(contentId, name, logo)
-        val liveLaunch = PlayerLaunch(
-            profileId = activePlaybackProfileId,
-            title = name,
-            sourceUrl = resolvedUrl,
-            streamTitle = name,
-            streamType = "live",
-            providerName = XtreamItemRegistry.accountNameFor(contentId) ?: "Xtream",
-            providerAddonId = "xtream",
-            logo = logo,
-            contentType = "live",
-            videoId = contentId,
-            parentMetaId = contentId,
-            parentMetaType = "tv",
-        )
-        navController.navigate(PlayerRoute(launchId = PlayerLaunchStore.put(liveLaunch)))
+        // A BLANK url is a placeholder, not a real stream: M3U keeps the URL only in the content DB,
+        // and Stalker resolves a fresh single-use create_link at play time. Both must fall through to
+        // the async resolve — treating "" as present would hand mpv an empty URL.
+        val immediate = url?.takeIf { it.isNotBlank() } ?: XtreamItemRegistry.liveStreamUrlFor(contentId)
+        if (immediate != null) {
+            launchLiveChannel(contentId, name, logo, immediate)
+            return
+        }
+        coroutineScope.launch {
+            val resolved = XtreamItemRegistry.liveStreamUrlForAsync(contentId) ?: return@launch
+            launchLiveChannel(contentId, name, logo, resolved)
+        }
     }
 
     val launchExternalPlayer = rememberExternalPlayerLauncher { result ->
@@ -2572,6 +2609,12 @@ private fun MainAppContent(
                     }
                     LaunchedEffect(launch.videoId) {
                         launch.videoId?.let { ResumePromptRepository.markPlayerEntered(it) }
+                    }
+                    // Tell the IPTV auto-refresh worker a player is on screen so a heavy M3U re-ingest
+                    // defers instead of firing mid-playback (P3-B skip-while-playing).
+                    DisposableEffect(Unit) {
+                        IptvPlaybackGate.setPlaybackActive(true)
+                        onDispose { IptvPlaybackGate.setPlaybackActive(false) }
                     }
                     PlayerScreen(
                         profileId = launch.profileId,

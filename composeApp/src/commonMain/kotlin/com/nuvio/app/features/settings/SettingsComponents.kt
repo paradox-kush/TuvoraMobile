@@ -313,6 +313,7 @@ internal fun SettingsSwitchRow(
     checked: Boolean,
     enabled: Boolean = true,
     isTablet: Boolean,
+    onRowClick: (() -> Unit)? = null,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val tokens = MaterialTheme.nuvio
@@ -322,7 +323,7 @@ internal fun SettingsSwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .clickable(enabled = enabled) { onRowClick?.invoke() ?: onCheckedChange(!checked) }
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),
         horizontalArrangement = Arrangement.Start,
         verticalAlignment = Alignment.CenterVertically,

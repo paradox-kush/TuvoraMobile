@@ -23,6 +23,27 @@ class XtreamItemRegistryTest {
     }
 
     @Test
+    fun parsesStalkerIdWithPortalAndMacColonsPlusUnderscoreEpisode() {
+        // A Stalker account id carries BOTH the portal's scheme/port colons AND the MAC's colons.
+        val accountId = "stalker|http://fastshare1.com:8080|00:1A:79:58:B3:A6"
+        val liveId = XtreamItemRegistry.liveId(accountId, 745149)
+        val parsedLive = XtreamItemRegistry.parseId(liveId)
+        assertTrue(parsedLive != null)
+        assertEquals(accountId, parsedLive.accountId)
+        assertEquals(XtreamKind.LIVE, parsedLive.kind)
+        assertEquals("745149", parsedLive.id)
+
+        // Stalker episode ids encode "{seriesId}_{episodeNum}" — the '_' keeps the inner value colon-free
+        // so parseId's colon split stays anchored on kind + rawId.
+        val epId = XtreamItemRegistry.episodeId(accountId, "42_3")
+        val parsedEp = XtreamItemRegistry.parseId(epId)
+        assertTrue(parsedEp != null)
+        assertEquals(accountId, parsedEp.accountId)
+        assertEquals(XtreamKind.EPISODE, parsedEp.kind)
+        assertEquals("42_3", parsedEp.id)
+    }
+
+    @Test
     fun parsesIdForDefaultPortAccount() {
         val accountId = "http://example.com|user"   // no ":port" segment
         val parsed = XtreamItemRegistry.parseId(XtreamItemRegistry.liveId(accountId, 7))

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.nuvio.app.core.diagnostics.SentryNetworkBreadcrumbInterceptor
 import com.nuvio.app.core.network.IPv4FirstDns
+import com.nuvio.app.core.network.PlaylistDns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -21,6 +22,8 @@ import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import kotlin.text.Charsets
 import java.util.concurrent.TimeUnit
+import okio.GzipSource
+import okio.buffer
 
 actual object AddonStorage {
     private const val preferencesName = "nuvio_addons"
@@ -163,11 +166,20 @@ private fun readResponseBody(body: ResponseBody?): String {
     }
 }
 
+/**
+ * The client for a request: the per-playlist DoH client when [dnsProvider] names a real resolver
+ * (P3, IPTV only), else the shared addon client. Any failure building the DoH client falls back to
+ * [addonHttpClient] — DNS must never break a fetch.
+ */
+private fun clientForDns(dnsProvider: String?): OkHttpClient =
+    runCatching { PlaylistDns.clientFor(dnsProvider, addonHttpClient) }.getOrNull() ?: addonHttpClient
+
 private suspend fun executeTextRequest(
     method: String,
     url: String,
     headers: Map<String, String> = emptyMap(),
     body: String = "",
+    dnsProvider: String? = null,
 ): String = withContext(Dispatchers.IO) {
     val normalizedMethod = method.uppercase()
     val sanitizedHeaders = headers.withoutAcceptEncoding()
@@ -186,7 +198,7 @@ private suspend fun executeTextRequest(
         builder.method(normalizedMethod, null)
     }.build()
 
-    addonHttpClient.newCall(request).execute().use { response ->
+    clientForDns(dnsProvider).newCall(request).execute().use { response ->
         val payload = readResponseBody(response.body)
         if (!response.isSuccessful) {
             error(runBlocking { getString(Res.string.network_request_failed_http, response.code) })
@@ -198,11 +210,12 @@ private suspend fun executeTextRequest(
     }
 }
 
-actual suspend fun httpGetText(url: String): String =
+actual suspend fun httpGetText(url: String, dnsProvider: String?): String =
     executeTextRequest(
         method = "GET",
         url = url,
         headers = mapOf("Accept" to "application/json"),
+        dnsProvider = dnsProvider,
     )
 
 actual suspend fun httpPostJson(url: String, body: String): String =
@@ -288,3 +301,41 @@ actual suspend fun httpRequestRaw(
             )
         }
     }
+
+actual suspend fun httpStreamLines(
+    url: String,
+    userAgent: String?,
+    dnsProvider: String?,
+    onLine: (String) -> Unit,
+): Unit = withContext(Dispatchers.IO) {
+    val builder = Request.Builder().url(url).get()
+    if (!userAgent.isNullOrBlank()) builder.header("User-Agent", userAgent)
+    // OkHttp transparently gunzips a `Content-Encoding: gzip` response when we don't set
+    // Accept-Encoding ourselves — so leave it unset. For a URL that returns a raw .gz body
+    // (no Content-Encoding header), we sniff the gzip magic bytes and wrap manually.
+    val request = builder.build()
+    clientForDns(dnsProvider).newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+            error(runBlocking { getString(Res.string.network_request_failed_http, response.code) })
+        }
+        val body = response.body ?: return@use
+        val rawSource = body.source()
+        val encoding = response.header("Content-Encoding")?.lowercase()
+        // Peek the first two bytes for the gzip magic (0x1f 0x8b) — only when OkHttp didn't
+        // already decode (encoding is null because the server sent a bare .gz file).
+        val looksGzipped = encoding == null && runCatching {
+            rawSource.request(2)
+            rawSource.buffer.size >= 2 &&
+                rawSource.buffer[0] == 0x1f.toByte() && rawSource.buffer[1] == 0x8b.toByte()
+        }.getOrDefault(false)
+        val source: okio.BufferedSource = if (looksGzipped) {
+            GzipSource(rawSource).buffer()
+        } else {
+            rawSource
+        }
+        while (true) {
+            val line = source.readUtf8Line() ?: break
+            onLine(line)
+        }
+    }
+}

@@ -80,6 +80,14 @@ fun XtreamHubScreen(
     }
     val epgMap by XtreamHubRepository.epg.collectAsStateWithLifecycle()
 
+    // Playlist-manager enforcement, all display-level (caches stay intact): disabled content
+    // types lose their section chip; category selections filter the visible rows.
+    val account = state.accounts.firstOrNull { it.id == state.selectedAccountId }
+    val enabledSections = XtreamHubSection.entries.filter { account?.typeEnabled(it.contentKey) != false }
+    val visibleCategories = if (account == null) state.categories else {
+        state.categories.filter { account.allowsCategory(state.section.contentKey, it.id) }
+    }
+
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         // In the wide/tablet layout the app's floating top nav bar overlays the top of the content,
         // which would hide this fixed section-chip header — pad it down to clear the bar.
@@ -88,6 +96,7 @@ fun XtreamHubScreen(
         XtreamHubHeader(
             accounts = state.accounts,
             selectedAccountId = state.selectedAccountId,
+            sections = enabledSections,
             section = state.section,
             onSelectAccount = { XtreamHubRepository.selectAccount(it) },
             onSelectSection = { XtreamHubRepository.selectSection(it) },
@@ -96,12 +105,12 @@ fun XtreamHubScreen(
 
         when {
             state.loadingCategories -> CenteredProgress()
-            state.categories.isEmpty() -> CenteredMessage("Nothing here yet")
+            visibleCategories.isEmpty() -> CenteredMessage("Nothing here yet")
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = NuvioTokens.Space.s24),
             ) {
-                items(state.categories, key = { it.id }) { category ->
+                items(visibleCategories, key = { it.id }) { category ->
                     LaunchedEffect(category.id) { XtreamHubRepository.loadCategory(category.id) }
                     // Title always shows; only collapse a category once it's confirmed empty.
                     if (!(category.loaded && category.items.isEmpty())) {
@@ -124,6 +133,7 @@ fun XtreamHubScreen(
 private fun XtreamHubHeader(
     accounts: List<XtreamAccount>,
     selectedAccountId: String?,
+    sections: List<XtreamHubSection>,
     section: XtreamHubSection,
     onSelectAccount: (String) -> Unit,
     onSelectSection: (XtreamHubSection) -> Unit,
@@ -136,21 +146,21 @@ private fun XtreamHubHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8),
     ) {
-        FilterChip(
-            selected = section == XtreamHubSection.LIVE,
-            onClick = { onSelectSection(XtreamHubSection.LIVE) },
-            label = { Text("Live TV") },
-        )
-        FilterChip(
-            selected = section == XtreamHubSection.MOVIES,
-            onClick = { onSelectSection(XtreamHubSection.MOVIES) },
-            label = { Text("Movies") },
-        )
-        FilterChip(
-            selected = section == XtreamHubSection.SERIES,
-            onClick = { onSelectSection(XtreamHubSection.SERIES) },
-            label = { Text("Series") },
-        )
+        sections.forEach { s ->
+            FilterChip(
+                selected = section == s,
+                onClick = { onSelectSection(s) },
+                label = {
+                    Text(
+                        when (s) {
+                            XtreamHubSection.LIVE -> "Live TV"
+                            XtreamHubSection.MOVIES -> "Movies"
+                            XtreamHubSection.SERIES -> "Series"
+                        }
+                    )
+                },
+            )
+        }
         Spacer(Modifier.weight(1f))
         // Always a dropdown so it's obvious you can switch playlists (and it lists all of them,
         // plus an "Add playlist" entry so a second provider is one tap away).

@@ -18,4 +18,7 @@ internal expect object XtreamAccountStorage {
     /** Last-fetched fixtures (JSON RadarFixturesResponse) so the Sports tab renders offline. */
     fun loadRadarFixturesJson(profileId: Int): String?
     fun saveRadarFixturesJson(profileId: Int, json: String)
+    /** Per-playlist last auto-refresh timestamps (JSON map id->epochMs), profile-scoped — P3 auto-refresh. */
+    fun loadRefreshStateJson(profileId: Int): String?
+    fun saveRefreshStateJson(profileId: Int, json: String)
 }

@@ -75,13 +75,39 @@ object XtreamItemRegistry {
      * Rebuilds a live channel's stream URL straight from its id (accountId + streamId), so a
      * favorited channel plays from the Library after a fresh launch even when the in-memory
      * registry is empty. Returns null if the account is gone or the id isn't a live id.
+     *
+     * Xtream URLs are rebuildable from creds synchronously. An M3U channel's URL lives only in the
+     * content DB (it's an arbitrary line), so this returns null for M3U — use [liveStreamUrlForAsync].
      */
     fun liveStreamUrlFor(contentId: String): String? {
         val parsed = parseId(contentId) ?: return null
         if (parsed.kind != XtreamKind.LIVE) return null
         val streamId = parsed.id.toIntOrNull() ?: return null
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return null
+        // M3U (DB-backed) and Stalker (single-use create_link) resolve on the async path.
+        if (account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_STALKER) return null
         return XtreamClient.liveStreamUrl(account, streamId)
+    }
+
+    /**
+     * Resolves a live channel's URL for either source. For Xtream it's the synchronous rebuild; for
+     * M3U it reads the stored line from the content DB (ingesting first if this playlist was never
+     * browsed on this device). Used by the cold-launch play path when the registry is empty.
+     */
+    suspend fun liveStreamUrlForAsync(contentId: String): String? {
+        liveStreamUrlFor(contentId)?.let { return it }
+        val parsed = parseId(contentId) ?: return null
+        if (parsed.kind != XtreamKind.LIVE) return null
+        val streamId = parsed.id.toIntOrNull() ?: return null
+        val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return null
+        return when (account.sourceType) {
+            SOURCE_TYPE_M3U_URL -> {
+                M3UClient.ensureIngested(account)
+                M3UClient.liveUrlFor(account, streamId)
+            }
+            SOURCE_TYPE_STALKER -> com.nuvio.app.features.iptv.stalker.StalkerClient.resolveLiveUrl(account, streamId)
+            else -> null
+        }
     }
 
     fun accountNameFor(contentId: String): String? {
@@ -98,6 +124,12 @@ object XtreamItemRegistry {
         val parsed = parseId(contentId) ?: return false
         runCatching { XtreamRepository.ensureLoaded() }
         return XtreamRepository.uiState.value.accounts.none { it.id == parsed.accountId }
+    }
+
+    /** The playlist's DNS provider for a content id (drives the P3 live-mpv DoH path). "system" if unknown. */
+    fun dnsProviderFor(contentId: String): String {
+        val accountId = parseId(contentId)?.accountId ?: return "system"
+        return XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }?.dnsProvider ?: "system"
     }
 
     /** The single direct StreamItem for a playable id, or null (series containers aren't directly playable). */
@@ -139,7 +171,9 @@ data class XtreamResolvedItem(
 )
 
 fun XtreamResolvedItem.toStreamItem(accountName: String): StreamItem? {
-    val url = streamUrl ?: return null
+    // Blank == a Stalker placeholder (create_link not yet resolved) -> treat as "no direct item" so the
+    // streams flow rebuilds it fresh via ensureXtreamStreamRegistered. A real URL is never blank.
+    val url = streamUrl?.takeIf { it.isNotBlank() } ?: return null
     return StreamItem(
         name = "Direct",
         title = name,

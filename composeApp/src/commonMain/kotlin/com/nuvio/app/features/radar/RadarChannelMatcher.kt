@@ -196,7 +196,9 @@ object RadarChannelMatcher {
         if (queries.isEmpty()) return emptyList()
 
         XtreamRepository.ensureLoaded()
-        val accounts = XtreamRepository.uiState.value.accounts.filter { it.enabled }
+        // TMDB-based recording matching is an Xtream-only path (it needs the TMDB match index, which
+        // M3U catalogs don't populate). M3U live channels still participate via assembleCandidates.
+        val accounts = XtreamRepository.uiState.value.accounts.filter { it.enabled && it.sourceType != com.nuvio.app.features.iptv.SOURCE_TYPE_M3U_URL }
         val hits = LinkedHashMap<String, RecordingHit>()
         for (account in accounts) {
             withTimeoutOrNull(INDEX_WAIT_MS) {

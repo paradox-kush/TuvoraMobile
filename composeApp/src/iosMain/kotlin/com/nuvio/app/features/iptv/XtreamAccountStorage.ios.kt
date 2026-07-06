@@ -32,4 +32,11 @@ internal actual object XtreamAccountStorage {
     actual fun saveRadarFixturesJson(profileId: Int, json: String) {
         NSUserDefaults.standardUserDefaults.setObject(json, forKey = "radar_fixtures_$profileId")
     }
+
+    actual fun loadRefreshStateJson(profileId: Int): String? =
+        NSUserDefaults.standardUserDefaults.stringForKey("xtream_refresh_state_$profileId")
+
+    actual fun saveRefreshStateJson(profileId: Int, json: String) {
+        NSUserDefaults.standardUserDefaults.setObject(json, forKey = "xtream_refresh_state_$profileId")
+    }
 }

@@ -17,6 +17,9 @@ import nuvio.composeapp.generated.resources.compose_settings_page_appearance
 import nuvio.composeapp.generated.resources.compose_settings_page_content_discovery
 import nuvio.composeapp.generated.resources.compose_settings_page_debrid
 import nuvio.composeapp.generated.resources.compose_settings_page_iptv
+import nuvio.composeapp.generated.resources.compose_settings_page_iptv_add_playlist
+import nuvio.composeapp.generated.resources.compose_settings_page_iptv_content
+import nuvio.composeapp.generated.resources.compose_settings_page_iptv_category_checklist
 import nuvio.composeapp.generated.resources.compose_settings_page_continue_watching
 import nuvio.composeapp.generated.resources.compose_settings_page_homescreen
 import nuvio.composeapp.generated.resources.compose_settings_page_integrations
@@ -154,6 +157,21 @@ internal enum class SettingsPage(
         titleRes = Res.string.compose_settings_page_iptv,
         category = SettingsCategory.General,
         parentPage = Integrations,
+    ),
+    IptvAddPlaylist(
+        titleRes = Res.string.compose_settings_page_iptv_add_playlist,
+        category = SettingsCategory.General,
+        parentPage = Iptv,
+    ),
+    IptvContent(
+        titleRes = Res.string.compose_settings_page_iptv_content,
+        category = SettingsCategory.General,
+        parentPage = Iptv,
+    ),
+    IptvCategoryChecklist(
+        titleRes = Res.string.compose_settings_page_iptv_category_checklist,
+        category = SettingsCategory.General,
+        parentPage = IptvContent,
     ),
     TraktAuthentication(
         titleRes = Res.string.compose_settings_page_trakt,

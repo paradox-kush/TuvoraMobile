@@ -117,6 +117,41 @@ data class XtreamEpgEntryDto(
 
 // --- Domain models ----------------------------------------------------------
 
+const val CONTENT_TYPE_LIVE = "live"
+const val CONTENT_TYPE_MOVIES = "movies"
+const val CONTENT_TYPE_SERIES = "series"
+val ALL_CONTENT_TYPES: Set<String> = setOf(CONTENT_TYPE_LIVE, CONTENT_TYPE_MOVIES, CONTENT_TYPE_SERIES)
+
+/**
+ * Per-content-type category include lists (playlist manager P1).
+ * null = ALL categories including ones the provider adds later; a list = only those ids
+ * (new provider categories arrive unselected); empty list = none.
+ */
+@Serializable
+data class CategorySelections(
+    val live: List<String>? = null,
+    val movies: List<String>? = null,
+    val series: List<String>? = null,
+) {
+    fun forType(type: String): List<String>? = when (type) {
+        CONTENT_TYPE_LIVE -> live
+        CONTENT_TYPE_MOVIES -> movies
+        CONTENT_TYPE_SERIES -> series
+        else -> null
+    }
+
+    fun withType(type: String, selection: List<String>?): CategorySelections = when (type) {
+        CONTENT_TYPE_LIVE -> copy(live = selection)
+        CONTENT_TYPE_MOVIES -> copy(movies = selection)
+        CONTENT_TYPE_SERIES -> copy(series = selection)
+        else -> this
+    }
+
+    val allNull: Boolean get() = live == null && movies == null && series == null
+}
+
+// Playlist-manager option fields are ADDITIVE with defaults so JSON persisted by older
+// builds (and legacy sync rows) decodes unchanged — same storage keys, no migration.
 @Serializable
 data class XtreamAccount(
     val id: String,
@@ -124,8 +159,37 @@ data class XtreamAccount(
     val baseUrl: String,      // http://host:port (no trailing slash, no path)
     val username: String,
     val password: String,
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val sourceType: String = "xtream",                        // xtream | m3u_url | m3u_file | stalker
+    val epgUrl: String? = null,                               // custom XMLTV override (P2 uses it; synced now)
+    val userAgent: String? = null,                            // optional per-playlist UA (M3U URL fetch; P2)
+    // The picked document's display name for a m3u_file playlist. Synced (spec §3.2) so another device
+    // knows the playlist exists + can prompt a re-import; the FILE BYTES are NOT synced (local only).
+    val fileName: String? = null,
+    val dnsProvider: String = "system",                       // system|cloudflare|google|mullvad|quad9|dnssb (P3)
+    val autoRefreshHours: Int = 24,                           // 0 = off; 24 = default (P3 uses it)
+    val contentTypes: Set<String> = ALL_CONTENT_TYPES,
+    val categorySelections: CategorySelections = CategorySelections(),
+    // --- Stalker (MAG/Ministra) source fields (sourceType = stalker; P4) ------------------------
+    // All additive with defaults so JSON written by older builds decodes unchanged. For a Stalker
+    // playlist baseUrl == the entered portal base (e.g. http://host:port) and username/password stay
+    // blank (Stalker auths by MAC, not creds); stalkerUsername/stalkerPassword are only sent when a
+    // strict portal demands them.
+    val macAddress: String = "",                              // 00:1A:79:xx:xx:xx
+    val stalkerUsername: String? = null,                      // optional portal login (rare)
+    val stalkerPassword: String? = null,                      // optional portal login (rare)
+    val serialNumber: String? = null,                         // optional STB serial override (else derived from MAC)
+    val deviceId: String? = null,                             // optional STB device id override (else derived from MAC)
+    val sendDeviceId: Boolean = true,                         // send derived/overridden device identity on get_profile
 )
+
+fun XtreamAccount.typeEnabled(type: String): Boolean = type in contentTypes
+
+/** null selection = every category incl. future ones; a list = only those ids. */
+fun XtreamAccount.allowsCategory(type: String, categoryId: String?): Boolean {
+    val selection = categorySelections.forType(type) ?: return true
+    return categoryId != null && categoryId in selection
+}
 
 data class XtreamCategory(val id: String, val name: String)
 

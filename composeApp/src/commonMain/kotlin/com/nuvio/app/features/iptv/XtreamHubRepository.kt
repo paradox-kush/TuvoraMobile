@@ -42,17 +42,19 @@ object XtreamHubRepository {
         val current = _uiState.value
         val selected = current.selectedAccountId?.takeIf { id -> accounts.any { it.id == id } }
             ?: accounts.firstOrNull()?.id
-        _uiState.update { it.copy(accounts = accounts, selectedAccountId = selected) }
+        val section = clampSection(accounts.firstOrNull { it.id == selected }, current.section)
+        _uiState.update { it.copy(accounts = accounts, selectedAccountId = selected, section = section) }
         if (selected != null) {
-            showSection(selected, current.section)
+            showSection(selected, section)
             maybePrefetch(selected)
         }
     }
 
     fun selectAccount(accountId: String) {
         if (_uiState.value.selectedAccountId == accountId) return
-        _uiState.update { it.copy(selectedAccountId = accountId) }
-        showSection(accountId, _uiState.value.section)
+        val section = clampSection(accountFor(accountId), _uiState.value.section)
+        _uiState.update { it.copy(selectedAccountId = accountId, section = section) }
+        showSection(accountId, section)
         maybePrefetch(accountId)
     }
 
@@ -65,6 +67,11 @@ object XtreamHubRepository {
 
     /** Show cached categories instantly, else fetch the (cheap) category list. */
     private fun showSection(accountId: String, section: XtreamHubSection) {
+        if (accountFor(accountId)?.typeEnabled(section.contentKey) == false) {
+            // Disabled content type: never fetched, nothing shown.
+            _uiState.update { it.copy(categories = emptyList(), loadingCategories = false) }
+            return
+        }
         val cached = cache[accountId to section]
         if (cached != null) {
             _uiState.update { it.copy(categories = cached, loadingCategories = false) }
@@ -76,10 +83,11 @@ object XtreamHubRepository {
 
     private suspend fun fetchCategoryList(accountId: String, section: XtreamHubSection) {
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId } ?: return
+        val client = IptvClient.forAccount(account)   // xtream -> XtreamClient, m3u_url -> M3UClient
         val fresh = when (section) {
-            XtreamHubSection.LIVE -> XtreamClient.liveCategories(account)
-            XtreamHubSection.MOVIES -> XtreamClient.vodCategories(account)
-            XtreamHubSection.SERIES -> XtreamClient.seriesCategories(account)
+            XtreamHubSection.LIVE -> client.liveCategories(account)
+            XtreamHubSection.MOVIES -> client.vodCategories(account)
+            XtreamHubSection.SERIES -> client.seriesCategories(account)
         }.getOrNull() ?: return  // keep any existing cache on a failed refresh
         // Merge: carry over already-loaded items for categories that still exist.
         val previous = cache[accountId to section].orEmpty().associateBy { it.id }
@@ -103,14 +111,15 @@ object XtreamHubRepository {
         updateCategory(accountId, section, categoryId) { it.copy(loading = true) }
         scope.launch {
             val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }
-            val items = if (account == null) emptyList() else when (section) {
-                XtreamHubSection.LIVE -> XtreamClient.liveChannels(account, categoryId).getOrDefault(emptyList()).map { ch ->
+            val client = account?.let { IptvClient.forAccount(it) }
+            val items = if (account == null || client == null) emptyList() else when (section) {
+                XtreamHubSection.LIVE -> client.liveChannels(account, categoryId).getOrDefault(emptyList()).map { ch ->
                     XtreamItemRegistry.registerChannel(accountId, ch); ch.toMetaPreview(accountId)
                 }
-                XtreamHubSection.MOVIES -> XtreamClient.vodMovies(account, categoryId).getOrDefault(emptyList()).map { m ->
+                XtreamHubSection.MOVIES -> client.vodMovies(account, categoryId).getOrDefault(emptyList()).map { m ->
                     XtreamItemRegistry.registerMovie(accountId, m); m.toMetaPreview(accountId)
                 }
-                XtreamHubSection.SERIES -> XtreamClient.series(account, categoryId).getOrDefault(emptyList()).map { s ->
+                XtreamHubSection.SERIES -> client.series(account, categoryId).getOrDefault(emptyList()).map { s ->
                     XtreamItemRegistry.registerSeries(accountId, s); s.toMetaPreview(accountId)
                 }
             }
@@ -124,11 +133,22 @@ object XtreamHubRepository {
         if (mark != null && mark.elapsedNow() < REFRESH_TTL) return
         lastPrefetchMark = TimeSource.Monotonic.markNow()
         scope.launch {
+            val account = accountFor(accountId)
             for (section in XtreamHubSection.entries) {
+                if (account?.typeEnabled(section.contentKey) == false) continue  // disabled type: skip fetch
                 fetchCategoryList(accountId, section)
             }
         }
     }
+
+    /** Keep the shown section one the account actually has enabled. */
+    private fun clampSection(account: XtreamAccount?, wanted: XtreamHubSection): XtreamHubSection {
+        if (account == null || account.typeEnabled(wanted.contentKey)) return wanted
+        return XtreamHubSection.entries.firstOrNull { account.typeEnabled(it.contentKey) } ?: wanted
+    }
+
+    private fun accountFor(accountId: String?): XtreamAccount? =
+        XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }
 
     /** Lazily fetch now/next EPG for a live channel (called when its tile scrolls into view). */
     fun ensureEpg(contentId: String) {
@@ -139,7 +159,8 @@ object XtreamHubRepository {
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return
         scope.launch {
             // get_short_epg returns current + upcoming, so the nowPlaying (or first) entry is "now".
-            val listings = XtreamClient.shortEpg(account, streamId).getOrDefault(emptyList())
+            // M3U has no EPG in P2 (returns empty) — routed via forAccount so it just no-ops there.
+            val listings = IptvClient.forAccount(account).shortEpg(account, streamId).getOrDefault(emptyList())
             if (listings.isEmpty()) return@launch
             val nowIndex = listings.indexOfFirst { it.nowPlaying }.takeIf { it >= 0 } ?: 0
             val now = listings.getOrNull(nowIndex)?.title?.ifBlank { null }

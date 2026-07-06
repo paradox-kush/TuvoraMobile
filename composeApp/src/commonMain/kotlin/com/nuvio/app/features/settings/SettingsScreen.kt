@@ -46,8 +46,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.app.features.iptv.XtreamAddPage
+import com.nuvio.app.features.iptv.XtreamContentPage
 import com.nuvio.app.features.iptv.XtreamRepository
 import com.nuvio.app.features.iptv.XtreamUiState
+import com.nuvio.app.features.iptv.xtreamAddPlaylistContent
+import com.nuvio.app.features.iptv.xtreamCategoryChecklistContent
+import com.nuvio.app.features.iptv.xtreamContentSettingsContent
 import com.nuvio.app.features.iptv.xtreamSettingsContent
 import com.nuvio.app.core.ui.AppTheme
 import com.nuvio.app.core.ui.LocalNuvioBottomNavigationOverlayPadding
@@ -84,6 +89,7 @@ import com.nuvio.app.features.tmdb.TmdbSettingsRepository
 import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesRepository
 import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesUiState
 import nuvio.composeapp.generated.resources.Res
+import nuvio.composeapp.generated.resources.compose_settings_page_iptv_edit_playlist
 import nuvio.composeapp.generated.resources.compose_settings_page_root
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -100,6 +106,18 @@ private fun SettingsPage.isEnabledByPolicy(): Boolean =
     when (this) {
         SettingsPage.SupportersContributors -> AppFeaturePolicy.supportersContributorsPageEnabled
         else -> true
+    }
+
+/**
+ * Header title for a page. The IPTV Add-Playlist page is reused for both add and edit, so it flips
+ * its title from the shared XtreamAddPage state; every other page just uses its static title res.
+ */
+@Composable
+private fun settingsPageHeaderTitle(page: SettingsPage): String =
+    if (page == SettingsPage.IptvAddPlaylist && XtreamAddPage.isEdit) {
+        stringResource(Res.string.compose_settings_page_iptv_edit_playlist)
+    } else {
+        stringResource(page.titleRes)
     }
 
 @Composable
@@ -534,7 +552,7 @@ private fun MobileSettingsScreen(
             stickyHeader {
                 val previousPage = page.previousPage()
                 NuvioScreenHeader(
-                    title = stringResource(page.titleRes),
+                    title = settingsPageHeaderTitle(page),
                     onBack = previousPage?.let { { onPageChange(it) } },
                 )
             }
@@ -688,7 +706,51 @@ private fun MobileSettingsScreen(
                 SettingsPage.Iptv -> xtreamSettingsContent(
                     isTablet = false,
                     state = xtreamState,
+                    onAddPlaylist = {
+                        XtreamRepository.clearError()
+                        XtreamAddPage.openAdd()
+                        onPageChange(SettingsPage.IptvAddPlaylist)
+                    },
+                    onEditPlaylist = { account ->
+                        XtreamRepository.clearError()
+                        XtreamAddPage.openEdit(account.id)
+                        onPageChange(SettingsPage.IptvAddPlaylist)
+                    },
+                    onOpenContent = { account ->
+                        XtreamContentPage.open(account.id)
+                        onPageChange(SettingsPage.IptvContent)
+                    },
                 )
+                SettingsPage.IptvAddPlaylist -> xtreamAddPlaylistContent(
+                    isTablet = false,
+                    state = xtreamState,
+                    onDone = { onPageChange(SettingsPage.Iptv) },
+                )
+                SettingsPage.IptvContent -> if (XtreamContentPage.accountId == null) {
+                    // Process-death restore: the page survives (rememberSaveable) but the
+                    // target playlist id is a plain var — bounce back to the playlist list.
+                    item { LaunchedEffect(Unit) { onPageChange(SettingsPage.Iptv) } }
+                } else {
+                    xtreamContentSettingsContent(
+                        isTablet = false,
+                        state = xtreamState,
+                        onOpenType = { type ->
+                            XtreamContentPage.openChecklist(type)
+                            onPageChange(SettingsPage.IptvCategoryChecklist)
+                        },
+                    )
+                }
+                SettingsPage.IptvCategoryChecklist -> if (
+                    XtreamContentPage.accountId == null || XtreamContentPage.type == null
+                ) {
+                    // Process-death restore: the drilled-into type is a plain var — bounce back.
+                    item { LaunchedEffect(Unit) { onPageChange(SettingsPage.Iptv) } }
+                } else {
+                    xtreamCategoryChecklistContent(
+                        isTablet = false,
+                        state = xtreamState,
+                    )
+                }
                 SettingsPage.TraktAuthentication -> traktSettingsContent(
                     isTablet = false,
                     uiState = traktAuthUiState,
@@ -937,7 +999,7 @@ private fun TabletSettingsScreen(
                                 stringResource(Res.string.compose_settings_page_root)
                             }
                         } else {
-                            stringResource(page.titleRes)
+                            settingsPageHeaderTitle(page)
                         },
                         showBack = previousPage != null,
                         onBack = { previousPage?.let(onPageChange) },
@@ -1096,7 +1158,51 @@ private fun TabletSettingsScreen(
                     SettingsPage.Iptv -> xtreamSettingsContent(
                         isTablet = true,
                         state = xtreamState,
+                        onAddPlaylist = {
+                            XtreamRepository.clearError()
+                            XtreamAddPage.openAdd()
+                            onPageChange(SettingsPage.IptvAddPlaylist)
+                        },
+                        onEditPlaylist = { account ->
+                            XtreamRepository.clearError()
+                            XtreamAddPage.openEdit(account.id)
+                            onPageChange(SettingsPage.IptvAddPlaylist)
+                        },
+                        onOpenContent = { account ->
+                            XtreamContentPage.open(account.id)
+                            onPageChange(SettingsPage.IptvContent)
+                        },
                     )
+                    SettingsPage.IptvAddPlaylist -> xtreamAddPlaylistContent(
+                        isTablet = true,
+                        state = xtreamState,
+                        onDone = { onPageChange(SettingsPage.Iptv) },
+                    )
+                    SettingsPage.IptvContent -> if (XtreamContentPage.accountId == null) {
+                        // Process-death restore: the page survives (rememberSaveable) but the
+                        // target playlist id is a plain var — bounce back to the playlist list.
+                        item { LaunchedEffect(Unit) { onPageChange(SettingsPage.Iptv) } }
+                    } else {
+                        xtreamContentSettingsContent(
+                            isTablet = true,
+                            state = xtreamState,
+                            onOpenType = { type ->
+                                XtreamContentPage.openChecklist(type)
+                                onPageChange(SettingsPage.IptvCategoryChecklist)
+                            },
+                        )
+                    }
+                    SettingsPage.IptvCategoryChecklist -> if (
+                        XtreamContentPage.accountId == null || XtreamContentPage.type == null
+                    ) {
+                        // Process-death restore: the drilled-into type is a plain var — bounce back.
+                        item { LaunchedEffect(Unit) { onPageChange(SettingsPage.Iptv) } }
+                    } else {
+                        xtreamCategoryChecklistContent(
+                            isTablet = true,
+                            state = xtreamState,
+                        )
+                    }
                     SettingsPage.TraktAuthentication -> traktSettingsContent(
                         isTablet = true,
                         uiState = traktAuthUiState,
