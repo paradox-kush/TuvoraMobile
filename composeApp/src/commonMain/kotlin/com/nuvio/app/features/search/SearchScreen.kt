@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.core.network.NetworkCondition
 import com.nuvio.app.core.network.NetworkStatusRepository
 import com.nuvio.app.core.ui.NuvioInputField
@@ -71,6 +72,8 @@ import nuvio.composeapp.generated.resources.compose_search_empty_failed_message
 import nuvio.composeapp.generated.resources.compose_search_empty_failed_title
 import nuvio.composeapp.generated.resources.compose_search_empty_no_active_addons_message
 import nuvio.composeapp.generated.resources.compose_search_empty_no_active_addons_title
+import nuvio.composeapp.generated.resources.home_empty_iptv_hint_message
+import nuvio.composeapp.generated.resources.home_empty_iptv_hint_title
 import nuvio.composeapp.generated.resources.compose_search_empty_no_results_message
 import nuvio.composeapp.generated.resources.compose_search_empty_no_results_title
 import nuvio.composeapp.generated.resources.compose_search_empty_no_search_catalogs_message
@@ -413,8 +416,15 @@ private fun SearchEmptyStateCard(
 
     when (reason) {
         SearchEmptyStateReason.NoActiveAddons -> {
-            title = stringResource(Res.string.compose_search_empty_no_active_addons_title)
-            message = stringResource(Res.string.compose_search_empty_no_active_addons_message)
+            // Store builds hide the addon system, so point at IPTV setup instead.
+            title = stringResource(
+                if (AppFeaturePolicy.addonsEnabled) Res.string.compose_search_empty_no_active_addons_title
+                else Res.string.home_empty_iptv_hint_title
+            )
+            message = stringResource(
+                if (AppFeaturePolicy.addonsEnabled) Res.string.compose_search_empty_no_active_addons_message
+                else Res.string.home_empty_iptv_hint_message
+            )
         }
 
         SearchEmptyStateReason.NoSearchCatalogs -> {

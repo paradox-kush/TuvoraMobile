@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
+import com.nuvio.app.core.build.AppFeaturePolicy
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Extension
@@ -127,14 +128,17 @@ internal fun LazyListScope.settingsRootContent(
                         isTablet = isTablet,
                         onClick = onAppearanceClick,
                     )
-                    SettingsGroupDivider(isTablet = isTablet)
-                    SettingsNavigationRow(
-                        title = stringResource(Res.string.compose_settings_page_content_discovery),
-                        description = stringResource(Res.string.compose_settings_root_content_discovery_description),
-                        icon = Icons.Rounded.Extension,
-                        isTablet = isTablet,
-                        onClick = onContentDiscoveryClick,
-                    )
+                    // Store builds hide addons+plugins, leaving Content Discovery empty — skip the row.
+                    if (AppFeaturePolicy.addonsEnabled || AppFeaturePolicy.pluginsEnabled) {
+                        SettingsGroupDivider(isTablet = isTablet)
+                        SettingsNavigationRow(
+                            title = stringResource(Res.string.compose_settings_page_content_discovery),
+                            description = stringResource(Res.string.compose_settings_root_content_discovery_description),
+                            icon = Icons.Rounded.Extension,
+                            isTablet = isTablet,
+                            onClick = onContentDiscoveryClick,
+                        )
+                    }
                     SettingsGroupDivider(isTablet = isTablet)
                     SettingsNavigationRow(
                         title = stringResource(Res.string.compose_settings_root_downloads_title),

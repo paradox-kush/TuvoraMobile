@@ -13,6 +13,7 @@ import org.jetbrains.compose.resources.stringResource
 
 internal fun LazyListScope.contentDiscoveryContent(
     isTablet: Boolean,
+    showAddonsEntry: Boolean,
     showPluginsEntry: Boolean,
     onAddonsClick: () -> Unit,
     onPluginsClick: () -> Unit,
@@ -23,18 +24,20 @@ internal fun LazyListScope.contentDiscoveryContent(
             isTablet = isTablet,
         ) {
             SettingsGroup(isTablet = isTablet) {
-                SettingsNavigationRow(
-                    title = stringResource(Res.string.compose_settings_page_addons),
-                    description = stringResource(
-                        if (AppFeaturePolicy.personalMediaAddonCopyEnabled) {
-                            Res.string.settings_content_discovery_addons_description_appstore
-                        } else {
-                            Res.string.settings_content_discovery_addons_description
-                        },
-                    ),
-                    isTablet = isTablet,
-                    onClick = onAddonsClick,
-                )
+                if (showAddonsEntry) {
+                    SettingsNavigationRow(
+                        title = stringResource(Res.string.compose_settings_page_addons),
+                        description = stringResource(
+                            if (AppFeaturePolicy.personalMediaAddonCopyEnabled) {
+                                Res.string.settings_content_discovery_addons_description_appstore
+                            } else {
+                                Res.string.settings_content_discovery_addons_description
+                            },
+                        ),
+                        isTablet = isTablet,
+                        onClick = onAddonsClick,
+                    )
+                }
                 if (showPluginsEntry) {
                     SettingsNavigationRow(
                         title = stringResource(Res.string.compose_settings_page_plugins),

@@ -1255,6 +1255,8 @@
     <string name="home_continue_watching_hours_minutes_left">%1$dh %2$dm left</string>
     <string name="home_continue_watching_minutes_left">%1$dm left</string>
     <string name="home_empty_no_active_addons_message">Install and validate at least one addon before loading catalog rows on Home.</string>
+    <string name="home_empty_iptv_hint_title">No content yet</string>
+    <string name="home_empty_iptv_hint_message">Add your IPTV playlist in Settings to see your channels, movies, and series here.</string>
     <string name="home_empty_no_rows_message">Installed addons do not currently expose board-compatible catalogs without required extras.</string>
     <string name="home_empty_no_rows_title">No home rows available</string>
     <string name="home_view_details">View Details</string>

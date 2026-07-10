@@ -7,6 +7,8 @@ enum class TrailerPlaybackMode {
 
 expect object AppFeaturePolicy {
     val pluginsEnabled: Boolean
+    /** Stremio-style addon system (user-installable catalog/stream sources). Off in store builds. */
+    val addonsEnabled: Boolean
     val supportersContributorsPageEnabled: Boolean
     val accountDeletionEnabled: Boolean
     val personalMediaAddonCopyEnabled: Boolean

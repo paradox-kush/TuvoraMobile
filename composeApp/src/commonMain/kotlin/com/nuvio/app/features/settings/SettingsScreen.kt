@@ -495,6 +495,7 @@ private fun MobileSettingsScreen(
             }
         }
         val searchEntries = settingsSearchEntries(
+            addonsEnabled = AppFeaturePolicy.addonsEnabled,
             pluginsEnabled = AppFeaturePolicy.pluginsEnabled,
             supportersContributorsPageEnabled = AppFeaturePolicy.supportersContributorsPageEnabled,
             accountDeletionEnabled = AppFeaturePolicy.accountDeletionEnabled,
@@ -667,6 +668,7 @@ private fun MobileSettingsScreen(
                 )
                 SettingsPage.ContentDiscovery -> contentDiscoveryContent(
                     isTablet = false,
+                    showAddonsEntry = AppFeaturePolicy.addonsEnabled,
                     showPluginsEntry = AppFeaturePolicy.pluginsEnabled,
                     onAddonsClick = onAddonsClick,
                     onPluginsClick = onPluginsClick,
@@ -927,6 +929,7 @@ private fun TabletSettingsScreen(
             val hapticFeedback = LocalHapticFeedback.current
             val hapticScope = rememberCoroutineScope()
             val searchEntries = settingsSearchEntries(
+                addonsEnabled = AppFeaturePolicy.addonsEnabled,
                 pluginsEnabled = AppFeaturePolicy.pluginsEnabled,
                 supportersContributorsPageEnabled = AppFeaturePolicy.supportersContributorsPageEnabled,
                 accountDeletionEnabled = AppFeaturePolicy.accountDeletionEnabled,
@@ -1119,6 +1122,7 @@ private fun TabletSettingsScreen(
                     )
                     SettingsPage.ContentDiscovery -> contentDiscoveryContent(
                         isTablet = true,
+                        showAddonsEntry = AppFeaturePolicy.addonsEnabled,
                         showPluginsEntry = AppFeaturePolicy.pluginsEnabled,
                         onAddonsClick = { openInlinePage(SettingsPage.Addons) },
                         onPluginsClick = { openInlinePage(SettingsPage.Plugins) },

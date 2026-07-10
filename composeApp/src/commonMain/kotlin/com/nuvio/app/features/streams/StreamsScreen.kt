@@ -1235,8 +1235,15 @@ private fun EmptyStateBlock(
 
     when (reason) {
         StreamsEmptyStateReason.NoAddonsInstalled -> {
-            title = stringResource(Res.string.compose_search_empty_no_active_addons_title)
-            message = stringResource(Res.string.streams_empty_no_addons_message)
+            // Store builds hide the addon system, so point at IPTV setup instead.
+            title = stringResource(
+                if (AppFeaturePolicy.addonsEnabled) Res.string.compose_search_empty_no_active_addons_title
+                else Res.string.home_empty_iptv_hint_title
+            )
+            message = stringResource(
+                if (AppFeaturePolicy.addonsEnabled) Res.string.streams_empty_no_addons_message
+                else Res.string.home_empty_iptv_hint_message
+            )
         }
 
         StreamsEmptyStateReason.NoCompatibleAddons -> {

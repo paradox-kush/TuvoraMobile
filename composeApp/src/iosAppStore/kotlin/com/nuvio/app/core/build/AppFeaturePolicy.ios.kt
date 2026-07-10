@@ -2,6 +2,8 @@ package com.nuvio.app.core.build
 
 actual object AppFeaturePolicy {
     actual val pluginsEnabled: Boolean = false
+    // App Store builds hide the addon system entirely (guideline 5.2.3).
+    actual val addonsEnabled: Boolean = false
     actual val supportersContributorsPageEnabled: Boolean = false
     actual val accountDeletionEnabled: Boolean = true
     actual val personalMediaAddonCopyEnabled: Boolean = true
