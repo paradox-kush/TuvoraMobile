@@ -409,7 +409,7 @@ kotlin {
         minSdk = libs.versions.android.minSdk.get().toInt()
         androidResources.enable = true
         // JVM-side run of commonTest (fast local + ubuntu CI; the iOS twin is iosSimulatorArm64Test)
-        withHostTestBuilder {}
+        withHostTest {}
 
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
@@ -518,12 +518,13 @@ kotlin {
             implementation(libs.compose.ui)
             implementation(libs.compose.components.resources)
             implementation(libs.compose.uiToolingPreview)
+            implementation(libs.compottie)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.atomicfu)
             implementation(libs.kmpalette.core)
-            implementation(libs.androidx.navigation.compose)
+            implementation(libs.androidx.navigation3.ui)
             implementation(libs.kermit)
             implementation(libs.supabase.postgrest)
             implementation(libs.supabase.auth)

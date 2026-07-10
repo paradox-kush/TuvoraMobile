@@ -129,8 +129,8 @@ object PlayerSubtitleCueParser {
     }
 
     private fun parseTtml(text: String): List<SubtitleSyncCue> =
-        // (?s) = dotall so . spans newlines; RegexOption.DOT_MATCHES_ALL is JVM-only (breaks Kotlin/Native/iOS).
-        Regex("""(?s)<p\b([^>]*)>(.*?)</p>""", RegexOption.IGNORE_CASE)
+        // [\s\S] spans newlines portably; RegexOption.DOT_MATCHES_ALL is JVM-only (breaks Kotlin/Native/iOS).
+        Regex("""<p\b([^>]*)>([\s\S]*?)</p>""", RegexOption.IGNORE_CASE)
             .findAll(text)
             .mapNotNull { match ->
                 val attrs = match.groupValues[1]
