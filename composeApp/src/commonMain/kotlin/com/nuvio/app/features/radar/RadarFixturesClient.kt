@@ -33,4 +33,16 @@ internal object RadarFixturesClient {
             json.decodeFromString<RadarFixturesResponse>(response.bodyAsText())
         }.onFailure { e -> log.e(e) { "fetch — FAILED" } }.getOrNull()
     }
+
+    /** Broadcaster listings for one event (server caches 12h; empty on any failure). */
+    suspend fun fetchTv(eventId: String): List<RadarTvStation> = runCatching {
+        val body = buildJsonObject {
+            put("tv_event_ids", buildJsonArray { add(eventId) })
+        }
+        val response = SupabaseProvider.client.functions.invoke(
+            function = "radar-fixtures",
+            body = body,
+        )
+        json.decodeFromString<RadarFixturesResponse>(response.bodyAsText()).tv[eventId].orEmpty()
+    }.onFailure { e -> log.e(e) { "tv fetch — FAILED" } }.getOrDefault(emptyList())
 }

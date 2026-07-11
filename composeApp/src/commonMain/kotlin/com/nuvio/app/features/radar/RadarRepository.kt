@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration.Companion.minutes
@@ -91,6 +92,9 @@ object RadarRepository {
     private val FETCH_TTL = 15.minutes
 
     fun ensureLoaded() {
+        // The match sheet reads the EPG mirror; refresh it (12h TTL, no-op when fresh) so
+        // the EPG tier is warm by the time a fixture is opened.
+        scope.launch { com.nuvio.app.features.epg.EpgMirrorRepository.ensureFresh() }
         if (loaded) {
             refreshFixtures()
             return
@@ -261,5 +265,19 @@ object RadarRepository {
     private fun parseFixtures(stored: String?): RadarFixturesResponse? {
         if (stored.isNullOrBlank()) return null
         return runCatching { json.decodeFromString<RadarFixturesResponse>(stored) }.getOrNull()
+    }
+
+    // Broadcaster listings barely change and the edge function caches them 12h — one
+    // fetch per event per app session is plenty.
+    private val tvCache = mutableMapOf<String, List<RadarTvStation>>()
+    private val tvCacheLock = kotlinx.coroutines.sync.Mutex()
+
+    /** TheSportsDB broadcaster list for a fixture (session-cached; empty when unknown). */
+    suspend fun tvStations(eventId: String?): List<RadarTvStation> {
+        if (eventId.isNullOrBlank()) return emptyList()
+        tvCacheLock.withLock { tvCache[eventId] }?.let { return it }
+        val fetched = RadarFixturesClient.fetchTv(eventId)
+        if (fetched.isNotEmpty()) tvCacheLock.withLock { tvCache[eventId] = fetched }
+        return fetched
     }
 }

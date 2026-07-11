@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import com.nuvio.app.core.ui.NuvioModalBottomSheet
 import com.nuvio.app.core.ui.NuvioPrimaryButton
 import com.nuvio.app.core.ui.NuvioSurfaceCard
@@ -688,7 +689,10 @@ internal fun MatchChannelsSheet(
             if (fixtureStarted) {
                 launch { recordings = runCatching { RadarChannelMatcher.findRecordings(fixture) }.getOrDefault(emptyList()) }
             }
-            matches = RadarChannelMatcher.match(fixture, league, onPartial = { matches = it })
+            // Broadcaster listings are one cached edge-fn call; bounded so a slow network
+            // can't hold the sheet hostage (matching proceeds without them).
+            val stations = withTimeoutOrNull(4_000) { RadarRepository.tvStations(fixture.id) } ?: emptyList()
+            matches = RadarChannelMatcher.match(fixture, league, stations, onPartial = { matches = it })
         }
         matching = false
     }
@@ -845,8 +849,15 @@ private fun ChannelMatchRow(
             val programme = match.programme
             Text(
                 when {
-                    programme != null ->
-                        "${programme.title} · ${RadarTime.formatTime(programme.startMs)} – ${RadarTime.formatTime(programme.endMs)}"
+                    programme != null -> listOfNotNull(
+                        match.language,
+                        "${programme.title} · ${RadarTime.formatTime(programme.startMs)} – ${RadarTime.formatTime(programme.endMs)}",
+                    ).joinToString(" · ")
+                    match.via == RadarChannelMatcher.MatchVia.LISTING -> listOfNotNull(
+                        match.language,
+                        "TV listing",
+                        match.channel.playlistName,
+                    ).joinToString(" · ")
                     else -> match.channel.playlistName
                 },
                 style = MaterialTheme.typography.labelSmall,

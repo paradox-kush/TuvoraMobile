@@ -77,6 +77,7 @@ class MainActivity : AppCompatActivity() {
         com.nuvio.app.features.iptv.M3UFilePicker.initialize(applicationContext)
         com.nuvio.app.features.iptv.match.MatchDbDriver.initialize(applicationContext)
         com.nuvio.app.features.iptv.content.IptvContentDbDriver.initialize(applicationContext)
+        com.nuvio.app.features.epg.EpgMirrorDbDriver.initialize(applicationContext)
         AuthStorage.initialize(applicationContext)
         LibraryStorage.initialize(applicationContext)
         WatchedStorage.initialize(applicationContext)

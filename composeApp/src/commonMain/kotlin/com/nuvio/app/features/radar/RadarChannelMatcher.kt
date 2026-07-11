@@ -1,5 +1,8 @@
 package com.nuvio.app.features.radar
 
+import com.nuvio.app.features.epg.EpgLang
+import com.nuvio.app.features.epg.EpgMirrorRepository
+import com.nuvio.app.features.epg.EpgNorm
 import com.nuvio.app.features.iptv.XtreamClient
 import com.nuvio.app.features.iptv.XtreamItemRegistry
 import com.nuvio.app.features.iptv.XtreamProgram
@@ -49,19 +52,43 @@ object RadarChannelMatcher {
         val playlistName: String,
     )
 
+    /** How a channel earned its place in the sheet (drives the "via EPG"/country chips). */
+    enum class MatchVia { NAME, EPG, LISTING }
+
     data class ChannelMatch(
         val channel: CandidateChannel,
         /** The EPG programme that matched, when the panel has EPG for this channel. */
         val programme: XtreamProgram?,
         val score: Int,
+        val via: MatchVia = MatchVia.NAME,
+        /** Short language/region tag ("FR", "AR") or the broadcaster country ("France"). */
+        val language: String? = null,
     )
 
     private const val NAME_POOL_CAP = 200
     private const val EPG_PROBE_CAP = 40
     private const val EPG_CONCURRENCY = 8
-    private const val RESULT_CAP = 10
+    /** Sheet capacity now that EPG/listing tiers surface worldwide airings (was 10). */
+    private const val RESULT_CAP = 40
+    /** Classic list length — name-only generic hits never rank past this. */
+    private const val NAME_RESULT_CAP = 10
+    private const val GENERIC_NAME_SCORE = 8
+    /** Mirror-EPG hits outrank every name tier; listing hits sit between. */
+    private const val MIRROR_BASE_SCORE = 100
+    private const val LISTING_SCORE = 80
+    private const val PROGRAMME_WINDOW_BACK_MS = 45 * 60 * 1000L
+    private const val PROGRAMME_WINDOW_AHEAD_MS = 4 * 60 * 60 * 1000L
     private const val RECORDING_CAP = 6
     private const val INDEX_WAIT_MS = 12_000L
+
+    /** Trailing country words TheSportsDB appends to station names ("M4 Sport HU"). */
+    private val STATION_COUNTRY_TAILS = setOf(
+        "uk", "us", "usa", "ca", "au", "nz", "fr", "france", "de", "germany", "it", "italy",
+        "es", "spain", "pt", "portugal", "nl", "netherlands", "be", "mx", "mexico", "br",
+        "brazil", "ar", "argentina", "rs", "serbia", "hu", "hr", "si", "sk", "cz", "pl",
+        "ro", "bg", "gr", "tr", "il", "za", "ie", "ireland", "is", "iceland", "no", "norway",
+        "se", "sweden", "fi", "finland", "dk", "denmark", "ch", "at", "hd",
+    )
 
     // Channel-name markers of generic sports channels — weak candidates that the EPG stage
     // can confirm even when no league keyword appears in the channel name.
@@ -80,6 +107,7 @@ object RadarChannelMatcher {
     suspend fun match(
         fixture: RadarFixture,
         league: RadarLeague?,
+        stations: List<RadarTvStation> = emptyList(),
         onPartial: (List<ChannelMatch>) -> Unit = {},
     ): List<ChannelMatch> {
         val keywords = buildList {
@@ -115,7 +143,117 @@ object RadarChannelMatcher {
             }.awaitAll() + named.drop(EPG_PROBE_CAP)
         }
 
-        return probed.sortedByDescending { it.score }.take(RESULT_CAP)
+        // Stage 3: canonical-EPG event hits joined back through the persisted channel
+        // mappings — finds every mapped channel whose guide airs this event, whatever its
+        // name (the "FIFA on BBC One" gap). Stage 4: TheSportsDB broadcaster names.
+        val mirrorMatches = mirrorMatches(candidates, start, keywords, homeTokens, awayTokens, eventTokens)
+        val stationMatches = stationMatches(candidates, stations)
+
+        // Merge, best score per channel; keep any programme/language a weaker signal found.
+        val merged = LinkedHashMap<String, ChannelMatch>()
+        for (m in mirrorMatches + stationMatches + probed) {
+            val old = merged[m.channel.contentId]
+            merged[m.channel.contentId] = if (old == null) m else {
+                val best = if (m.score > old.score) m else old
+                best.copy(
+                    programme = best.programme ?: m.programme ?: old.programme,
+                    language = best.language ?: m.language ?: old.language,
+                )
+            }
+        }
+        val ranked = merged.values.sortedByDescending { it.score }
+        // Generic sports-channel name hits don't earn slots beyond the classic list length.
+        return ranked
+            .filterIndexed { i, m -> i < NAME_RESULT_CAP || m.score > GENERIC_NAME_SCORE }
+            .take(RESULT_CAP)
+    }
+
+    /** Stage 3: search the mirrored programme window for the event, join via mappings. */
+    private suspend fun mirrorMatches(
+        candidates: List<CandidateChannel>,
+        startMs: Long?,
+        keywords: List<String>,
+        homeTokens: List<String>,
+        awayTokens: List<String>,
+        eventTokens: List<String>,
+    ): List<ChannelMatch> {
+        if (startMs == null) return emptyList()
+        val sqlTokens = (homeTokens + awayTokens + eventTokens).filter { it.length > 3 }.distinct().take(8)
+        if (sqlTokens.isEmpty()) return emptyList()
+        val hits = runCatching {
+            EpgMirrorRepository.programmesInWindow(
+                sqlTokens,
+                startMs - PROGRAMME_WINDOW_BACK_MS,
+                startMs + PROGRAMME_WINDOW_AHEAD_MS,
+            )
+        }.getOrDefault(emptyList())
+            .mapNotNull { p ->
+                val score = programmeScore(normalize("${p.title} ${p.desc.orEmpty()}"), keywords, homeTokens, awayTokens, eventTokens)
+                if (score > 0) Triple(p.channelId, p, score) else null
+            }
+            .groupBy { it.first }
+            .mapValues { (_, l) -> l.maxBy { it.third } }
+        if (hits.isEmpty()) return emptyList()
+
+        return buildList {
+            for ((playlistId, chans) in candidates.groupBy { it.playlistId }) {
+                val mapping = runCatching { EpgMirrorRepository.mappingFor(playlistId) }.getOrDefault(emptyMap())
+                if (mapping.isEmpty()) continue
+                for (c in chans) {
+                    val epgId = mapping[c.streamId] ?: continue
+                    val (_, p, score) = hits[epgId] ?: continue
+                    add(
+                        ChannelMatch(
+                            channel = c,
+                            programme = XtreamProgram(p.title, p.desc.orEmpty(), p.startMs, p.endMs, nowPlaying = false),
+                            score = MIRROR_BASE_SCORE + score / 10,
+                            via = MatchVia.EPG,
+                            language = EpgLang.of(epgId, c.name, p.title),
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    /** Stage 4: broadcaster names from TheSportsDB matched against candidate channel names. */
+    private fun stationMatches(
+        candidates: List<CandidateChannel>,
+        stations: List<RadarTvStation>,
+    ): List<ChannelMatch> {
+        if (stations.isEmpty()) return emptyList()
+        val byCore = HashMap<String, MutableList<CandidateChannel>>()
+        val bySquash = HashMap<String, MutableList<CandidateChannel>>()
+        for (c in candidates) {
+            val core = EpgNorm.coreNorm(c.name)
+            if (core.isEmpty()) continue
+            byCore.getOrPut(core) { mutableListOf() }.add(c)
+            bySquash.getOrPut(EpgNorm.squash(core)) { mutableListOf() }.add(c)
+        }
+        return buildList {
+            for (st in stations) {
+                val raw = st.channel ?: continue
+                val core = EpgNorm.coreNorm(raw)
+                if (core.isEmpty()) continue
+                val tries = LinkedHashSet<String>()
+                tries.add(core)
+                tries.add(dropStationCountryTail(core))
+                for (t in tries) {
+                    if (t.isEmpty()) continue
+                    val found = byCore[t] ?: bySquash[EpgNorm.squash(t)] ?: continue
+                    for (c in found) {
+                        add(ChannelMatch(c, programme = null, score = LISTING_SCORE, via = MatchVia.LISTING, language = st.country))
+                    }
+                    break
+                }
+            }
+        }
+    }
+
+    /** "bein sports 1 france" -> "bein sports 1" (listing names often carry the country). */
+    private fun dropStationCountryTail(core: String): String {
+        val toks = core.split(" ")
+        return if (toks.size > 1 && toks.last() in STATION_COUNTRY_TAILS) toks.dropLast(1).joinToString(" ") else core
     }
 
     // --- source assembly (the ONLY source-specific part) ----------------------
@@ -281,28 +419,38 @@ object RadarChannelMatcher {
         awayTokens: List<String>,
         eventTokens: List<String>,
     ): Pair<XtreamProgram, Int>? {
-        val windowStart = startMs - 45 * 60 * 1000L
-        val windowEnd = startMs + 4 * 60 * 60 * 1000L
+        val windowStart = startMs - PROGRAMME_WINDOW_BACK_MS
+        val windowEnd = startMs + PROGRAMME_WINDOW_AHEAD_MS
         return programmes
             .filter { it.endMs > windowStart && it.startMs < windowEnd }
             .mapNotNull { p ->
-                val text = normalize("${p.title} ${p.description}")
-                if (text.isBlank()) return@mapNotNull null
-                val home = homeTokens.any { hits(text, it) }
-                val away = awayTokens.any { hits(text, it) }
-                val keyword = keywords.any { hits(text, it) }
-                val event = eventTokens.count { hits(text, it) } >= 2
-                val score = when {
-                    home && away -> 100
-                    event -> 90
-                    (home || away) && keyword -> 70
-                    keyword -> 35
-                    home || away -> 25
-                    else -> 0
-                }
+                val score = programmeScore(normalize("${p.title} ${p.description}"), keywords, homeTokens, awayTokens, eventTokens)
                 if (score > 0) p to score else null
             }
             .maxByOrNull { it.second }
+    }
+
+    /** Shared programme-text scoring for panel short_epg and the canonical mirror. */
+    private fun programmeScore(
+        text: String,
+        keywords: List<String>,
+        homeTokens: List<String>,
+        awayTokens: List<String>,
+        eventTokens: List<String>,
+    ): Int {
+        if (text.isBlank()) return 0
+        val home = homeTokens.any { hits(text, it) }
+        val away = awayTokens.any { hits(text, it) }
+        val keyword = keywords.any { hits(text, it) }
+        val event = eventTokens.count { hits(text, it) } >= 2
+        return when {
+            home && away -> 100
+            event -> 90
+            (home || away) && keyword -> 70
+            keyword -> 35
+            home || away -> 25
+            else -> 0
+        }
     }
 
     private fun normalize(s: String?): String =

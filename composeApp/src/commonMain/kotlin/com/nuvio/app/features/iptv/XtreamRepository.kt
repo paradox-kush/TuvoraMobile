@@ -323,6 +323,7 @@ object XtreamRepository {
         XtreamHubRepository.resetForProfile()
         XtreamSearchIndex.resetForProfile()
         scope.launch { runCatching { XtreamMatchIndex.purge(id) } }
+        scope.launch { runCatching { com.nuvio.app.features.epg.EpgMirrorDb.purgeProvider(id) } }
         val prefix = XtreamItemRegistry.accountPrefix(id)
         LibraryRepository.migrateIdPrefix(prefix, null)
         WatchProgressRepository.migrateIdPrefix(prefix, null)
@@ -354,7 +355,10 @@ object XtreamRepository {
             XtreamSearchIndex.resetForProfile()
             val remaining = accounts.map { it.id }.toSet()
             before.filter { it.id !in remaining }
-                .forEach { gone -> scope.launch { runCatching { XtreamMatchIndex.purge(gone.id) } } }
+                .forEach { gone ->
+                    scope.launch { runCatching { XtreamMatchIndex.purge(gone.id) } }
+                    scope.launch { runCatching { com.nuvio.app.features.epg.EpgMirrorDb.purgeProvider(gone.id) } }
+                }
         }
         // An account added on another device should index here before its first play.
         XtreamTmdbResolver.warmUp(accounts)

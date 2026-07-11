@@ -38,6 +38,9 @@ object XtreamHubRepository {
     /** Sync accounts, show the current section (from cache if warm), and prefetch the rest. */
     fun ensureLoaded() {
         XtreamRepository.ensureLoaded()
+        // Warm the canonical-EPG mirror (12h TTL, no-op when fresh) — it backs the hub's
+        // now/next whenever the panel's own EPG is missing.
+        scope.launch { com.nuvio.app.features.epg.EpgMirrorRepository.ensureFresh() }
         val accounts = XtreamRepository.uiState.value.accounts.filter { it.enabled }
         val current = _uiState.value
         val selected = current.selectedAccountId?.takeIf { id -> accounts.any { it.id == id } }
@@ -159,8 +162,15 @@ object XtreamHubRepository {
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return
         scope.launch {
             // get_short_epg returns current + upcoming, so the nowPlaying (or first) entry is "now".
-            // M3U has no EPG in P2 (returns empty) — routed via forAccount so it just no-ops there.
+            // When the panel has nothing (the common case on real panels — Starshare fills 6% of
+            // epg_channel_id), fall back to the mirrored canonical EPG via the channel mapping.
             val listings = IptvClient.forAccount(account).shortEpg(account, streamId).getOrDefault(emptyList())
+                .ifEmpty {
+                    runCatching {
+                        com.nuvio.app.features.epg.EpgMirrorRepository
+                            .nowNextProgrammes(account.id, streamId, com.nuvio.app.features.trakt.TraktPlatformClock.nowEpochMs())
+                    }.getOrDefault(emptyList())
+                }
             if (listings.isEmpty()) return@launch
             val nowIndex = listings.indexOfFirst { it.nowPlaying }.takeIf { it >= 0 } ?: 0
             val now = listings.getOrNull(nowIndex)?.title?.ifBlank { null }
