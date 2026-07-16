@@ -106,6 +106,29 @@ class StalkerRequestCountTest {
     }
 
     @Test
+    fun `a VOD category row is capped, not paged to the end of the catalog`() = runBlocking {
+        // A huge category: 100 pages available. The row must take its cap (70 = 5 pages) and stop —
+        // the real portal has 63k movies at 14/page, and a poster row has no see-all.
+        val big: suspend (String, Map<String, String>) -> String = { url, _ ->
+            val action = Regex("action=([^&]+)").find(url)?.groupValues?.get(1)
+            requests += "vod/$action"
+            when (action) {
+                "handshake" -> """{"js":{"token":"T"}}"""
+                "get_profile" -> """{"js":{}}"""
+                else -> {
+                    val p = Regex("[&?]p=([0-9]+)").find(url)?.groupValues?.get(1)?.toInt() ?: 1
+                    val data = (1..14).joinToString(",") { """{"id":"${p * 100 + it}","name":"M","cmd":"c"}""" }
+                    """{"js":{"total_items":1400,"max_page_items":14,"data":[$data]}}"""
+                }
+            }
+        }
+        StalkerClient.sessionFactory = { StalkerSession(it, big) }
+        val movies = StalkerClient.vodMovies(account("rc-cap"), "big").getOrThrow()
+        assertEquals(70, movies.size)
+        assertEquals(5, requests.count { it == "vod/get_ordered_list" })   // 5 pages, not 100
+    }
+
+    @Test
     fun `cold-start VOD play stops paging at the match instead of slurping the catalog`() = runBlocking {
         StalkerClient.sessionFactory = { StalkerSession(it, fakePortal) }
         val acc = account("rc-vod")

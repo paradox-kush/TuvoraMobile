@@ -664,12 +664,12 @@ object MetaDetailsRepository {
         if (account.sourceType == com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER) {
             val stalker = com.nuvio.app.features.iptv.stalker.StalkerClient
             val url = when (parsed.kind) {
-                XtreamKind.VOD -> parsed.id.toIntOrNull()?.let { stalker.resolveMovieUrl(account, it) }
+                XtreamKind.VOD -> parsed.id.toIntOrNull()?.let { stalker.resolveMovieUrl(account, it, existing?.name) }
                 XtreamKind.EPISODE -> {
                     val parts = parsed.id.split("_")
                     val seriesId = parts.getOrNull(0)?.toIntOrNull()
                     val episodeNum = parts.getOrNull(1)?.toIntOrNull()
-                    if (seriesId != null && episodeNum != null) stalker.resolveEpisodeUrl(account, seriesId, episodeNum) else null
+                    if (seriesId != null && episodeNum != null) stalker.resolveEpisodeUrl(account, seriesId, episodeNum, existing?.name) else null
                 }
                 else -> null
             } ?: return false

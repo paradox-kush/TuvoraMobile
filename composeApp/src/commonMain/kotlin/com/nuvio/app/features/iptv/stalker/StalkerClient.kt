@@ -156,11 +156,11 @@ object StalkerClient : IptvClient {
         }
 
     override suspend fun vodMovies(acc: XtreamAccount, categoryId: String?): Result<List<XtreamMovie>> = runCatching {
-        orderedList(acc, "vod", categoryId).map { movieOf(acc, it) }.filter { it.streamId > 0 }
+        orderedList(acc, "vod", categoryId, maxItems = CATEGORY_ITEMS).map { movieOf(acc, it) }.filter { it.streamId > 0 }
     }
 
     override suspend fun series(acc: XtreamAccount, categoryId: String?): Result<List<XtreamSeriesItem>> = runCatching {
-        orderedList(acc, "series", categoryId).map { seriesOf(acc, it) }.filter { it.seriesId > 0 }
+        orderedList(acc, "series", categoryId, maxItems = CATEGORY_ITEMS).map { seriesOf(acc, it) }.filter { it.seriesId > 0 }
     }
 
     /**
@@ -280,13 +280,15 @@ object StalkerClient : IptvClient {
         return createLink(acc, "itv", cmd)
     }
 
-    suspend fun resolveMovieUrl(acc: XtreamAccount, streamId: Int): String? {
-        val cmd = vodCmd(acc, streamId) ?: return null
+    /** [nameHint] lets a cold-start play (Library/Continue Watching) find the row via the portal's own
+     *  search instead of scanning a 63k-item catalog — pass the registered title when you have it. */
+    suspend fun resolveMovieUrl(acc: XtreamAccount, streamId: Int, nameHint: String? = null): String? {
+        val cmd = vodCmd(acc, streamId, nameHint) ?: return null
         return createLink(acc, "vod", cmd)
     }
 
-    suspend fun resolveEpisodeUrl(acc: XtreamAccount, seriesId: Int, episodeNum: Int): String? {
-        val cmd = seriesCmd(acc, seriesId) ?: return null
+    suspend fun resolveEpisodeUrl(acc: XtreamAccount, seriesId: Int, episodeNum: Int, nameHint: String? = null): String? {
+        val cmd = seriesCmd(acc, seriesId, nameHint) ?: return null
         return createLink(acc, "vod", cmd, extraParams = mapOf("series" to episodeNum.toString()))
     }
 
@@ -317,11 +319,11 @@ object StalkerClient : IptvClient {
         return liveCmds["${acc.id}:$streamId"] ?: row(acc, "itv", streamId)?.str("cmd")
     }
 
-    private suspend fun vodCmd(acc: XtreamAccount, streamId: Int): String? =
-        row(acc, "vod", streamId)?.str("cmd")
+    private suspend fun vodCmd(acc: XtreamAccount, streamId: Int, nameHint: String? = null): String? =
+        row(acc, "vod", streamId, nameHint)?.str("cmd")
 
-    private suspend fun seriesCmd(acc: XtreamAccount, seriesId: Int): String? =
-        row(acc, "series", seriesId)?.str("cmd")
+    private suspend fun seriesCmd(acc: XtreamAccount, seriesId: Int, nameHint: String? = null): String? =
+        row(acc, "series", seriesId, nameHint)?.str("cmd")
 
     /**
      * The browse row for ONE item. `get_ordered_list` already returns each item's `cmd` (the
@@ -333,10 +335,16 @@ object StalkerClient : IptvClient {
      * cold-start miss (play straight from Library/Continue Watching) still scans, but stops at the
      * match instead of slurping everything first.
      */
-    private suspend fun row(acc: XtreamAccount, type: String, id: Int): JsonObject? =
+    private suspend fun row(acc: XtreamAccount, type: String, id: Int, nameHint: String? = null): JsonObject? =
         rowCache[rowKey(acc.id, type, id)]
-            ?: orderedList(acc, type, null, stopWhen = { it.int("id") == id })
-                .firstOrNull { it.int("id") == id }
+            // Cold start (play straight from Library/Continue Watching): ask the PORTAL to find it by
+            // name — 1-2 requests. Scanning is hopeless at 63k movies / 4,509 pages.
+            ?: nameHint?.takeIf { it.isNotBlank() }?.let { name ->
+                orderedList(acc, type, null, search = name, maxItems = SEARCH_ITEMS,
+                    stopWhen = { it.int("id") == id }).firstOrNull { it.int("id") == id }
+            }
+            ?: orderedList(acc, type, null, maxItems = FALLBACK_SCAN_ITEMS,
+                stopWhen = { it.int("id") == id }).firstOrNull { it.int("id") == id }
 
     private fun rowKey(accId: String, type: String, id: Int) = "$accId:$type:$id"
 
@@ -410,8 +418,20 @@ object StalkerClient : IptvClient {
     private fun JsonObject.int(key: String): Int? = str(key)?.trim()?.toIntOrNull()
     private fun JsonObject.long(key: String): Long? = str(key)?.trim()?.toLongOrNull()
 
-    private const val MAX_ITEMS = 8000    // ponytail: categories are the browse path; don't slurp 26k
+    private const val MAX_ITEMS = 8000
     private const val MAX_PAGES = 200
     private const val SEARCH_ITEMS = 100  // search results: a page or two is plenty
     private const val MAX_CACHED_ROWS = 10_000
+
+    // A hub category is ONE horizontal poster row (no see-all), and this portal serves get_ordered_list
+    // 14 rows a page — so paging a 5,000-movie category cost ~200 requests to fill a row nobody scrolls
+    // to the end of. 70 items = 5 requests.
+    // ponytail: fixed cap, not incremental paging. If a row ever needs to go deeper, page it on demand
+    // as the row scrolls rather than raising this.
+    private const val CATEGORY_ITEMS = 70
+
+    // Last-resort scan when we know an id but have no cached row and no name to search by. Bounded
+    // because it's near-useless at portal scale (63k movies / 14 per page = 4,509 pages): it can only
+    // ever cover the first slice, so let it fail fast instead of firing 200 requests to still miss.
+    private const val FALLBACK_SCAN_ITEMS = 280
 }
