@@ -41,6 +41,12 @@ object StalkerClient : IptvClient {
     // re-paging the whole catalog (the request storm that got a live portal to block us).
     private val rowCache = mutableMapOf<String, JsonObject>()
 
+    // The live lineup per account (one get_all_channels request, filtered client-side) + each
+    // channel's create_link `cmd`. Mapped to the domain model so the raw 13MB JSON isn't retained.
+    private val liveCache = mutableMapOf<String, List<XtreamChannel>>()
+    private val liveCmds = mutableMapOf<String, String>()
+    private val liveMutex = Mutex()
+
     /** Test seam: lets a test drive the whole client against a fake portal (StalkerRequestCountTest). */
     internal var sessionFactory: (XtreamAccount) -> StalkerSession = { StalkerSession(it) }
 
@@ -53,6 +59,8 @@ object StalkerClient : IptvClient {
         if (existing != null && existing.fingerprint == fp) return@withLock existing.session
         // Config changed (or first use) — the cached rows/cmds belong to the OLD portal identity.
         rowCache.keys.removeAll { it.startsWith("${acc.id}:") }
+        liveCmds.keys.removeAll { it.startsWith("${acc.id}:") }
+        liveCache.remove(acc.id)
         sessionFactory(acc).also { sessions[acc.id] = Entry(it, fp) }
     }
 
@@ -91,9 +99,33 @@ object StalkerClient : IptvClient {
         categories(acc, "series", "get_categories")
 
     override suspend fun liveChannels(acc: XtreamAccount, categoryId: String?): Result<List<XtreamChannel>> = runCatching {
-        orderedList(acc, "itv", categoryId).map { item ->
+        val all = allLiveChannels(acc)
+        if (categoryId == null) all else all.filter { it.categoryId == categoryId }
+    }
+
+    /**
+     * The WHOLE live lineup in ONE request, fetched once per account and filtered client-side.
+     *
+     * `get_all_channels` is what every real MAG client uses (stalkerhek / magplex / stalker-to-m3u all
+     * do this). We used to page `get_ordered_list` instead, which this portal serves **14 rows a page**
+     * — 11,286 channels = ~800 requests, so it both hammered the portal into a Cloudflare ban AND
+     * silently truncated at MAX_PAGES (we only ever saw ~25% of the lineup).
+     *
+     * Rows are mapped straight to the domain model and the raw 13MB JSON is dropped — only the `cmd`
+     * per channel is kept ([liveCmds]), which is all create_link needs at play time.
+     */
+    private suspend fun allLiveChannels(acc: XtreamAccount): List<XtreamChannel> = liveMutex.withLock {
+        liveCache[acc.id]?.let { return@withLock it }
+        val js = runCatching {
+            sessionFor(acc).request(mapOf("type" to "itv", "action" to "get_all_channels"))
+        }.getOrNull()
+        val rows = ((js as? JsonObject)?.get("data") as? JsonArray ?: js as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }.orEmpty()
+        val channels = rows.mapNotNull { item ->
+            val id = item.int("id")?.takeIf { it > 0 } ?: return@mapNotNull null
+            item.str("cmd")?.let { liveCmds["${acc.id}:$id"] = it }
             XtreamChannel(
-                streamId = item.int("id") ?: 0,
+                streamId = id,
                 name = item.str("name").orEmpty(),
                 logo = item.str("logo")?.takeIf { it.isNotBlank() }?.let { absolutize(acc, it) },
                 epgChannelId = item.str("xmltv_id")?.takeIf { it.isNotBlank() },
@@ -101,8 +133,27 @@ object StalkerClient : IptvClient {
                 hasArchive = (item.int("tv_archive") ?: 0) > 0,
                 streamUrl = ""   // create_link resolves the real single-use URL at play time
             )
-        }.filter { it.streamId > 0 }
+        }
+        // A portal without get_all_channels falls back to the (expensive) paged path — don't cache an
+        // empty lineup, or one bad response would strand the playlist for the session.
+        if (channels.isEmpty()) return@withLock pagedLiveChannels(acc)
+        channels.also { liveCache[acc.id] = it }
     }
+
+    /** Legacy paged live browse — only for portals that don't answer get_all_channels. */
+    private suspend fun pagedLiveChannels(acc: XtreamAccount): List<XtreamChannel> =
+        orderedList(acc, "itv", null).mapNotNull { item ->
+            val id = item.int("id")?.takeIf { it > 0 } ?: return@mapNotNull null
+            XtreamChannel(
+                streamId = id,
+                name = item.str("name").orEmpty(),
+                logo = item.str("logo")?.takeIf { it.isNotBlank() }?.let { absolutize(acc, it) },
+                epgChannelId = item.str("xmltv_id")?.takeIf { it.isNotBlank() },
+                categoryId = item.str("tv_genre_id") ?: item.str("genre_id"),
+                hasArchive = (item.int("tv_archive") ?: 0) > 0,
+                streamUrl = ""
+            )
+        }
 
     override suspend fun vodMovies(acc: XtreamAccount, categoryId: String?): Result<List<XtreamMovie>> = runCatching {
         orderedList(acc, "vod", categoryId).map { movieOf(acc, it) }.filter { it.streamId > 0 }
@@ -259,8 +310,12 @@ object StalkerClient : IptvClient {
 
     // --- cmd lookup (browse-time cmd needed for create_link) ------------------
 
-    private suspend fun liveCmd(acc: XtreamAccount, streamId: Int): String? =
-        row(acc, "itv", streamId)?.str("cmd")
+    private suspend fun liveCmd(acc: XtreamAccount, streamId: Int): String? {
+        // The lineup fetch (one request, cached) carries every channel's cmd — so playing a channel
+        // costs nothing but the create_link itself.
+        allLiveChannels(acc)
+        return liveCmds["${acc.id}:$streamId"] ?: row(acc, "itv", streamId)?.str("cmd")
+    }
 
     private suspend fun vodCmd(acc: XtreamAccount, streamId: Int): String? =
         row(acc, "vod", streamId)?.str("cmd")

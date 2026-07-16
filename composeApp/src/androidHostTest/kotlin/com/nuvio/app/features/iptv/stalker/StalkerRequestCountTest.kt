@@ -28,6 +28,13 @@ class StalkerRequestCountTest {
         when (action) {
             "handshake" -> """{"js":{"token":"T"}}"""
             "get_profile" -> """{"js":{}}"""
+            // The whole lineup in one shot, like a real portal (2 categories x 3 channels).
+            "get_all_channels" -> {
+                val data = (1..6).joinToString(",") {
+                    """{"id":"$it","name":"Ch $it","tv_genre_id":"${if (it <= 3) "g1" else "g2"}","cmd":"ffmpeg http://localhost/ch/$it"}"""
+                }
+                """{"js":{"data":[$data]}}"""
+            }
             "get_ordered_list" -> {
                 val p = Regex("[&?]p=([0-9]+)").find(url)?.groupValues?.get(1)?.toInt() ?: 1
                 if (p <= 3) {
@@ -56,12 +63,27 @@ class StalkerRequestCountTest {
     }
 
     @Test
-    fun `playing a browsed channel costs exactly one request`() = runBlocking {
+    fun `the live lineup is ONE request and every category is served from it`() = runBlocking {
+        StalkerClient.sessionFactory = { StalkerSession(it, fakePortal) }
+        val acc = account("rc-lineup")
+
+        assertEquals(3, StalkerClient.liveChannels(acc, "g1").getOrThrow().size)
+        assertEquals(3, StalkerClient.liveChannels(acc, "g2").getOrThrow().size)
+        assertEquals(6, StalkerClient.liveChannels(acc, null).getOrThrow().size)
+
+        // One get_all_channels for the whole lineup, and NEVER the paged path. This portal serves
+        // get_ordered_list 14 rows/page, so paging 11k channels was ~800 requests (capped at 200,
+        // which also truncated the lineup) — per category.
+        assertEquals(1, requests.count { it == "itv/get_all_channels" })
+        assertEquals(0, requests.count { it == "itv/get_ordered_list" })
+    }
+
+    @Test
+    fun `playing a channel costs exactly one request`() = runBlocking {
         StalkerClient.sessionFactory = { StalkerSession(it, fakePortal) }
         val acc = account("rc-browsed")
 
-        val channels = StalkerClient.liveChannels(acc, "cat1").getOrThrow()
-        assertEquals(6, channels.size)                       // 3 pages x 2, all cached with their cmd
+        StalkerClient.liveChannels(acc, "g1").getOrThrow()
         val afterBrowse = requests.size
 
         val url = StalkerClient.resolveLiveUrl(acc, 5)
@@ -72,14 +94,25 @@ class StalkerRequestCountTest {
     }
 
     @Test
-    fun `cold-start play stops paging at the match instead of slurping the catalog`() = runBlocking {
+    fun `cold-start play uses the cached lineup, never the catalog`() = runBlocking {
         StalkerClient.sessionFactory = { StalkerSession(it, fakePortal) }
         val acc = account("rc-cold")
 
-        // Nothing browsed: the lookup must scan, but stop at the page holding the id — not read on.
-        val url = StalkerClient.resolveLiveUrl(acc, 1)       // id 1 is on page 1
+        // Nothing browsed: the lineup fetch (1 request) supplies the cmd — no paging at all.
+        val url = StalkerClient.resolveLiveUrl(acc, 1)
         assertEquals("http://portal/live/999.ts?token=x", url)
-        val lists = requests.count { it == "itv/get_ordered_list" }
-        assertEquals(1, lists)                               // stopped after page 1, not all 3 pages
+        assertEquals(0, requests.count { it == "itv/get_ordered_list" })
+        assertEquals(1, requests.count { it == "itv/get_all_channels" })
+    }
+
+    @Test
+    fun `cold-start VOD play stops paging at the match instead of slurping the catalog`() = runBlocking {
+        StalkerClient.sessionFactory = { StalkerSession(it, fakePortal) }
+        val acc = account("rc-vod")
+
+        // VOD has no get_all_channels equivalent, so it still scans — but must stop at the match.
+        val url = StalkerClient.resolveMovieUrl(acc, 1)      // id 1 is on page 1
+        assertEquals("http://portal/live/999.ts?token=x", url)
+        assertEquals(1, requests.count { it == "vod/get_ordered_list" })   // not all 3 pages
     }
 }
