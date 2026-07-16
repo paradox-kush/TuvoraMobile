@@ -4,6 +4,8 @@ import com.nuvio.app.features.addons.httpGetTextWithHeaders
 import com.nuvio.app.features.iptv.XtreamAccount
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -39,6 +41,11 @@ internal class StalkerSession(
     private var resolvedEndpoint: String? = null   // e.g. "/portal.php"
 
     private val authMutex = Mutex()
+
+    // Hard ceiling on concurrent requests to this portal. A real MAG box opens a couple of
+    // connections; magplex (the reference client) caps this at 3 explicitly "to prevent rate
+    // limiting". Ours is per-session so a busy hub can't fan out into a ban.
+    private val gate = Semaphore(MAX_CONCURRENT_REQUESTS)
 
     private val baseUrl: String = StalkerProtocol.normalizePortalBase(account.baseUrl)
     private val identity: StalkerProtocol.DeviceIdentity =
@@ -186,7 +193,10 @@ internal class StalkerSession(
 
         // httpGet throws on non-2xx / blank body — the caller treats that as a stale token and
         // re-auths. A parseable-but-non-JSON body degrades to an empty object (same signal).
-        val body = httpGet(url, headers)
+        // The gate is the backstop against UI fan-out: the hub fires one get_short_epg per channel
+        // tile as it composes (11k channels = 11k potential requests), and a portal behind Cloudflare
+        // bans a client that opens that many at once. Nothing reaches the portal outside this gate.
+        val body = gate.withPermit { httpGet(url, headers) }
         // A portal that rejects the STB identity replies HTTP 200 with the plain text "Authorization
         // failed." (not JSON) — a stale token recovers via re-auth, but a persistent rejection would
         // otherwise surface as a vague "no data". Throw an actionable error instead; it only becomes
@@ -215,6 +225,9 @@ internal class StalkerSession(
     companion object {
         // The reference server's rejection sentinel: `echo 'Authorization failed.'; exit;`
         private const val AUTH_FAILED_MARKER = "Authorization failed"
+        // ponytail: fixed ceiling, no adaptive backoff. Raise only with evidence a portal tolerates
+        // more; add backoff only if we start seeing 429s at this level.
+        private const val MAX_CONCURRENT_REQUESTS = 4
         private val JSON = Json { ignoreUnknownKeys = true; isLenient = true }
         private const val STB_VER =
             "ImageDescription: 0.2.18-r14-pub-250; ImageDate: Wed Aug 29 10:49:52 EEST 2018; PORTAL version: 5.6.1; API Version: JS API version: 343; STB API version: 146; Player Engine version: 0x58c"
