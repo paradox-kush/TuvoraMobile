@@ -33,7 +33,7 @@ object XtreamClient : IptvClient {
     }
 
     /** Live account status: active/expired, trial flag, expiry, and current vs max connections. */
-    suspend fun accountInfo(acc: XtreamAccount): Result<XtreamAccountInfo?> = call {
+    override suspend fun accountInfo(acc: XtreamAccount): Result<XtreamAccountInfo?> = call {
         val info = userInfo(playerApi(acc), acc.dnsProvider) ?: return@call null
         XtreamAccountInfo(
             status = info["status"].asStringOrNull(),

@@ -238,7 +238,8 @@ data class XtreamAccountInfo(
     val isTrial: Boolean,
     val expiresAtEpochSec: Long?,
     val maxConnections: Int?,
-    val activeConnections: Int?
+    val activeConnections: Int?,
+    val expiresText: String? = null,   // Stalker portals return expiry as free text (e.g. "February 20, 2027")
 )
 
 // get_vod_info + get_series_info are parsed by hand in XtreamClient (panels send `info` as

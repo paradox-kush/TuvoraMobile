@@ -2,6 +2,7 @@ package com.nuvio.app.features.iptv.stalker
 
 import com.nuvio.app.features.iptv.IptvClient
 import com.nuvio.app.features.iptv.XtreamAccount
+import com.nuvio.app.features.iptv.XtreamAccountInfo
 import com.nuvio.app.features.iptv.XtreamCategory
 import com.nuvio.app.features.iptv.XtreamChannel
 import com.nuvio.app.features.iptv.XtreamEpisode
@@ -31,17 +32,44 @@ import kotlinx.serialization.json.contentOrNull
  */
 object StalkerClient : IptvClient {
 
-    private val sessions = mutableMapOf<String, StalkerSession>()
+    private data class Entry(val session: StalkerSession, val fingerprint: String)
+
+    private val sessions = mutableMapOf<String, Entry>()
     private val sessionsMutex = Mutex()
 
     private suspend fun sessionFor(acc: XtreamAccount): StalkerSession = sessionsMutex.withLock {
-        sessions.getOrPut(acc.id) { StalkerSession(acc) }
+        // Fingerprint mirrors NuvioTV's StalkerSessionManager: serial/device-id/login edits don't
+        // change acc.id (it's portal+MAC), so a cached session must be dropped when they change or
+        // the edit silently keeps the OLD device identity.
+        val fp = fingerprint(acc)
+        val existing = sessions[acc.id]
+        if (existing != null && existing.fingerprint == fp) return@withLock existing.session
+        StalkerSession(acc).also { sessions[acc.id] = Entry(it, fp) }
     }
+
+    private fun fingerprint(a: XtreamAccount): String =
+        listOf(a.baseUrl, a.macAddress, a.serialNumber, a.deviceId, a.sendDeviceId.toString(),
+            a.stalkerUsername, a.stalkerPassword).joinToString("|")
 
     /** Verify = a successful get_genres proves the full handshake + get_profile + authorised-browse chain. */
     override suspend fun verify(acc: XtreamAccount): Result<Unit> = runCatching {
         sessionFor(acc).request(mapOf("type" to "itv", "action" to "get_genres"))
         Unit
+    }
+
+    /** Account status for the settings row. Stalker returns expiry as free text in `phone`. */
+    override suspend fun accountInfo(acc: XtreamAccount): Result<XtreamAccountInfo?> = runCatching {
+        val js = sessionFor(acc).request(mapOf("type" to "account_info", "action" to "get_main_info"))
+        // `phone` is free text like "February 20, 2027" — surface it verbatim (matches NuvioTV).
+        val expiry = (js as? JsonObject)?.str("phone")?.takeIf { it.isNotBlank() }
+        XtreamAccountInfo(
+            status = if (expiry != null) "Active" else null,
+            isTrial = false,
+            expiresAtEpochSec = null,
+            maxConnections = null,
+            activeConnections = null,
+            expiresText = expiry,
+        )
     }
 
     override suspend fun liveCategories(acc: XtreamAccount): Result<List<XtreamCategory>> =

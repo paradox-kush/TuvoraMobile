@@ -20,6 +20,9 @@ interface IptvClient {
     /** Confirms the source is reachable/usable before it's saved. */
     suspend fun verify(acc: XtreamAccount): Result<Unit>
 
+    /** Account status for the settings row (state/connections/expiry). Null = source has none (M3U). */
+    suspend fun accountInfo(acc: XtreamAccount): Result<XtreamAccountInfo?> = Result.success(null)
+
     suspend fun liveCategories(acc: XtreamAccount): Result<List<XtreamCategory>>
     suspend fun liveChannels(acc: XtreamAccount, categoryId: String? = null): Result<List<XtreamChannel>>
     suspend fun vodCategories(acc: XtreamAccount): Result<List<XtreamCategory>>

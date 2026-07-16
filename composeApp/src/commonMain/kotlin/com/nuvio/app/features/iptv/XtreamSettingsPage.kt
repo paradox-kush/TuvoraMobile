@@ -91,14 +91,17 @@ internal fun LazyListScope.xtreamSettingsContent(
     }
 }
 
-/** Live account status pulled from player_api user_info: state, connections, and expiry. */
+/** Live account status pulled from the source's own panel API: state, connections, and expiry. */
 @Composable
 private fun XtreamAccountDetails(account: XtreamAccount) {
     var info by remember(account.id) { mutableStateOf<XtreamAccountInfo?>(null) }
     var loading by remember(account.id) { mutableStateOf(true) }
+    // M3U has no panel to ask — skip the fetch instead of showing a phantom "couldn't reach".
+    val hasPanel = !account.sourceType.isM3u()
     LaunchedEffect(account.id) {
+        if (!hasPanel) { loading = false; return@LaunchedEffect }
         loading = true
-        info = XtreamClient.accountInfo(account).getOrNull()
+        info = IptvClient.forAccount(account).accountInfo(account).getOrNull()
         loading = false
     }
     Column {
@@ -106,6 +109,7 @@ private fun XtreamAccountDetails(account: XtreamAccount) {
         Spacer(Modifier.height(8.dp))
         val i = info
         when {
+            !hasPanel -> {}
             loading -> Text("Loading account details…", style = MaterialTheme.typography.bodySmall)
             i == null -> Text("Couldn't reach the panel for account details.", style = MaterialTheme.typography.bodySmall)
             else -> {
@@ -117,6 +121,8 @@ private fun XtreamAccountDetails(account: XtreamAccount) {
                 i.expiresAtEpochSec?.let { sec ->
                     AccountDetailLine("Expires", if (sec == 0L) "Never" else formatEpochDate(sec))
                 }
+                // Stalker portals report expiry as free text, not an epoch.
+                i.expiresText?.let { AccountDetailLine("Expires", it) }
             }
         }
     }

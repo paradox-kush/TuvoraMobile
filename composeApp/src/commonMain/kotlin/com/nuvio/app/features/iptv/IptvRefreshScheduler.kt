@@ -74,10 +74,10 @@ object IptvRefreshScheduler {
             ok
         }
         else -> {
-            // Xtream: invalidate the cached channel list so the next browse/search re-fetches, and
-            // verify the panel is still reachable (cheap) so we only bump the timestamp on success.
+            // Xtream/Stalker: invalidate the cached channel list so the next browse/search re-fetches,
+            // and verify the panel is still reachable (cheap) so we only bump the timestamp on success.
             XtreamSearchIndex.invalidate(acc.id)
-            XtreamClient.accountInfo(acc).isSuccess
+            IptvClient.forAccount(acc).accountInfo(acc).isSuccess
         }
     }
 
