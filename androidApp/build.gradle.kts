@@ -50,6 +50,9 @@ val requestedTaskNames = gradle.startParameter.taskNames.map { it.substringAfter
 val buildsReleaseApks = requestedTaskNames.any {
     it.startsWith("assemble", ignoreCase = true) && it.endsWith("Release", ignoreCase = true)
 }
+// When the same invocation also builds an AAB (release.yml runs assemble + bundle together),
+// ABI splits must be OFF or bundling fails with "Multiple shrunk-resources files". Mirror TV.
+val buildingAppBundle = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
 
 android {
     namespace = "com.nuvio.android"
@@ -108,7 +111,7 @@ android {
 
     splits {
         abi {
-            isEnable = buildsReleaseApks
+            isEnable = buildsReleaseApks && !buildingAppBundle
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
             isUniversalApk = false
