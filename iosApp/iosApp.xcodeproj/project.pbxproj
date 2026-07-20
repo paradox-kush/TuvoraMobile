@@ -409,6 +409,11 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					SystemConfiguration,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.tuvora.media;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -438,6 +443,11 @@
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					SystemConfiguration,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.tuvora.app;
 				SWIFT_EMIT_LOC_STRINGS = YES;
