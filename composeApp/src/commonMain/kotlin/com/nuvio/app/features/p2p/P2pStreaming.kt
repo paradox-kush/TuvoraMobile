@@ -114,7 +114,8 @@ object P2pSettingsRepository {
 
     private fun loadFromDisk() {
         hasLoaded = true
-        p2pEnabled = P2pSettingsStorage.loadP2pEnabled() ?: false
+        // Policy gate first: store flavors force P2P off even if a stale pref says on.
+        p2pEnabled = AppFeaturePolicy.p2pEnabled && (P2pSettingsStorage.loadP2pEnabled() ?: false)
         enableUpload = P2pSettingsStorage.loadEnableUpload() ?: true
         hideTorrentStats = P2pSettingsStorage.loadHideTorrentStats() ?: false
         torrentProfile = P2pSettingsStorage.loadTorrentProfile()

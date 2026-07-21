@@ -8,7 +8,9 @@ actual object AppFeaturePolicy {
     // Google Play requires in-app account deletion when the app offers account creation.
     actual val accountDeletionEnabled: Boolean = true
     actual val personalMediaAddonCopyEnabled: Boolean = false
-    actual val p2pEnabled: Boolean = true
+    // Store builds ship without torrent streaming, same posture as addons above;
+    // sideload full builds keep it (upstream sets true here).
+    actual val p2pEnabled: Boolean = false
     actual val trailerPlaybackMode: TrailerPlaybackMode = TrailerPlaybackMode.EXTERNAL
     actual val heroTrailerPlaybackSupported: Boolean = false
     actual val inAppUpdaterEnabled: Boolean = false
