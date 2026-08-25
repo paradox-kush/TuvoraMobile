@@ -327,6 +327,7 @@ internal fun MainAppContent(
         resolvedExternalPlayerId != null
     val externalPlayerNotConfiguredText = stringResource(Res.string.external_player_not_configured)
     val externalPlayerUnavailableText = stringResource(Res.string.external_player_unavailable)
+    val noInternetToastText = stringResource(Res.string.network_no_internet_connection)
     val externalPlayerFailedText = stringResource(Res.string.external_player_failed)
     val failedOpenBrowserText = stringResource(Res.string.settings_trakt_failed_open_browser)
     val cloudLibraryPlayFailedText = stringResource(Res.string.cloud_library_play_failed)
@@ -718,6 +719,13 @@ internal fun MainAppContent(
         resolvedUrl: String,
         replay: LiveReplayLaunch? = null,
     ) {
+        // Live TV always needs the network. With no internet the player would open, fail to
+        // resolve/play, and tear its Compose scene down mid-setup — which trips the CMP-iOS
+        // "ComposeScene is closed" race (#4916) into an unhandled abort. Refuse up front instead.
+        if (networkStatusUiState.condition == NetworkCondition.NoInternet) {
+            NuvioToastController.show(noInternetToastText)
+            return
+        }
         // The new docked Live TV screen resolves + switches channels itself, so it only needs the
         // channel identity. The URL is still resolved here so a placeholder payload is well-formed
         // and the LiveTvScreen's own resolve step is warm.
