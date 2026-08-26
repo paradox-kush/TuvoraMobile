@@ -1405,6 +1405,17 @@ private class NuvioLibmpvView(
                 runCatching {
                     Utils.copyAssets(context)
                     initialize(configDir, cacheDir)
+                    // BaseMPVView.initialize() OVERWRITES idle with "once" AFTER initOptions()
+                    // runs (mpv-android-lib BaseMPVView.kt:38-39) — under idle=once a FAILED load
+                    // (dead IPTV channel) that emptied the playlist QUITS the core, silently
+                    // bricking every later load on this instance (device-traced on Android TV;
+                    // same wrapper here). idle is runtime-settable, last write wins: re-assert
+                    // after the library's overwrite and verify.
+                    mpv.setOptionString("idle", "yes")
+                    val idleNow = runCatching { mpv.getPropertyString("idle") }.getOrNull()
+                    if (idleNow != "yes") {
+                        Log.e(TAG, "mpv idle mode is '" + idleNow + "' after re-assert; core will die on a dead channel")
+                    }
                 }.onSuccess {
                     coreInitialized.set(true)
                     lifecycleLease.markInitialized()
