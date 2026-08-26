@@ -1718,6 +1718,12 @@ private class NuvioLibmpvView(
         // through to ffmpeg (device-reproduced on Android TV, 1.5.8). .ts URLs bypassed the hook,
         // which masked this on Xtream. Every URL goes straight to the ffmpeg demuxer.
         mpv.setOptionString("ytdl", "no")
+        // NEVER let the core self-quit: without idle=yes a FAILED load (dead IPTV channel) empties
+        // the playlist and the core exits (event: shutdown) while the app still holds it — every
+        // later load into that core is silently ignored (device-traced on Android TV, 2026-08-26;
+        // bites any surface that reuses one core for sequential loads, e.g. the docked Live TV
+        // guide's zapping). Canonical embedded-mpv setting (mpv-android ships it).
+        mpv.setOptionString("idle", "yes")
         // Bound blocking network reads (ffmpeg rw_timeout): a half-dead live socket
         // otherwise wedges the demuxer — and with it any thread waiting on the core.
         mpv.setOptionString("network-timeout", "15")

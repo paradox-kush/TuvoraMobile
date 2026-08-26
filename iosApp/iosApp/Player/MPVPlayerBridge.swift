@@ -625,6 +625,11 @@ final class MPVPlayerViewController: UIViewController {
         // of falling through to ffmpeg (device-reproduced on Android TV, 1.5.8; same hook ships in
         // MPVKit). .ts URLs bypass the hook, which masked this on Xtream. Go straight to ffmpeg.
         checkError(mpv_set_option_string(mpv, "ytdl", "no"))
+        // NEVER let the core self-quit: without idle=yes a FAILED load (dead IPTV channel) empties
+        // the playlist and the core exits (event: shutdown) while the bridge still holds it — every
+        // later load into that core is silently ignored (device-traced on Android TV, 2026-08-26;
+        // same libmpv behaviour here). Canonical embedded-mpv setting.
+        checkError(mpv_set_option_string(mpv, "idle", "yes"))
         checkError(mpv_set_option_string(mpv, "vulkan-swap-mode", "fifo"))
         checkError(mpv_set_option_string(mpv, "vulkan-queue-count", "1"))
         checkError(mpv_set_option_string(mpv, "vulkan-async-compute", "no"))
