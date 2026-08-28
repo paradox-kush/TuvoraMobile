@@ -45,6 +45,7 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
                     // An engine with no video-reset primitive skips straight to reconnecting
                     // rather than burning two attempts doing nothing.
                     videoResetAttempts = if (resetVideo == null) 0 else LivePlaybackRecoveryPolicy.VIDEO_RESET_ATTEMPTS,
+                    retryIndefinitely = true,
                 )
             )
         ) {
