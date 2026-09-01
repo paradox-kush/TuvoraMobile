@@ -1,14 +1,13 @@
 name: Build APK
 
-# Builds the Android debug APK on pushes to main and on pull requests. The job FAILS if the build
-# fails, and the APK is uploaded as a downloadable artifact ("nuviomobile-full-debug").
-# Tags are handled by release.yml; naming branches here keeps this off tag pushes.
+# Builds the Android debug APK ON DEMAND ONLY (Actions tab -> Run workflow). The job FAILS if the
+# build fails, and the APK is uploaded as a downloadable artifact ("nuviomobile-full-debug").
+# Deliberately NOT run on every push to main or on PRs — that burned CI minutes on every commit;
+# release builds are owned by release.yml (tag push). Run this by hand when you want a debug APK
+# or a pre-release sanity check.
 # Optional: set repo secrets SUPABASE_URL / SUPABASE_ANON_KEY to bake login into the CI APK.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 jobs:
