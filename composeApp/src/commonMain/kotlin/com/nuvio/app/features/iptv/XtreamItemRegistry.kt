@@ -2,7 +2,9 @@ package com.nuvio.app.features.iptv
 
 import com.nuvio.app.features.home.MetaPreview
 import com.nuvio.app.features.home.PosterShape
+import com.nuvio.app.features.streams.StreamBehaviorHints
 import com.nuvio.app.features.streams.StreamItem
+import com.nuvio.app.features.streams.StreamProxyHeaders
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
@@ -211,8 +213,11 @@ object XtreamItemRegistry {
     /** The single direct StreamItem for a playable id, or null (series containers aren't directly playable). */
     fun streamItemFor(contentId: String): StreamItem? {
         val item = get(contentId) ?: return null
-        val accountName = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == item.accountId }?.name
-        return item.toStreamItem(accountName ?: "Xtream")
+        val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == item.accountId }
+        return item.toStreamItem(
+            accountName = account?.name ?: "Xtream",
+            userAgent = account?.let { StreamUserAgentPolicy.resolve(it) },
+        )
     }
 
     /** Clears everything — call on profile switch so accounts don't leak across profiles. */
@@ -246,10 +251,15 @@ data class XtreamResolvedItem(
     val streamType: String? = null,
 )
 
-fun XtreamResolvedItem.toStreamItem(accountName: String): StreamItem? {
+fun XtreamResolvedItem.toStreamItem(accountName: String, userAgent: String? = null): StreamItem? {
     // Blank == a Stalker placeholder (create_link not yet resolved) -> treat as "no direct item" so the
     // streams flow rebuilds it fresh via ensureXtreamStreamRegistered. A real URL is never blank.
     val url = streamUrl?.takeIf { it.isNotBlank() } ?: return null
+    // A per-playlist stream UA rides the Stremio proxyHeaders the player already honors, so an
+    // honest IPTV-client UA can get past a provider WAF that 456s the spoofed-browser default.
+    val behaviorHints = userAgent
+        ?.let { StreamBehaviorHints(proxyHeaders = StreamProxyHeaders(request = mapOf("User-Agent" to it))) }
+        ?: StreamBehaviorHints()
     return StreamItem(
         name = "Direct",
         title = name,
@@ -257,6 +267,7 @@ fun XtreamResolvedItem.toStreamItem(accountName: String): StreamItem? {
         addonName = accountName,
         addonId = "xtream",
         streamType = streamType,
+        behaviorHints = behaviorHints,
     )
 }
 

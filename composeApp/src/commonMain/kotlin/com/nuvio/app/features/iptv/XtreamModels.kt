@@ -180,7 +180,7 @@ data class XtreamAccount(
     val enabled: Boolean = true,
     val sourceType: String = "xtream",                        // xtream | m3u_url | m3u_file | stalker
     val epgUrl: String? = null,                               // custom XMLTV override (P2 uses it; synced now)
-    val userAgent: String? = null,                            // optional per-playlist UA (M3U URL fetch; P2)
+    val userAgent: String? = null,                            // optional per-playlist UA (catalog + EPG + player stream; see StreamUserAgentPolicy)
     // The picked document's display name for a m3u_file playlist. Synced (spec §3.2) so another device
     // knows the playlist exists + can prompt a re-import; the FILE BYTES are NOT synced (local only).
     val fileName: String? = null,

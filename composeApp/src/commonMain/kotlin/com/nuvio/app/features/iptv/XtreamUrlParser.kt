@@ -73,6 +73,7 @@ internal fun xtreamAccountFromForm(input: XtreamFormInput): XtreamAccount? {
     val base = xtreamAccountFromFields(input.serverUrl, input.username, input.password, input.name)
         ?: return null
     return base.copy(
+        userAgent = input.userAgent?.trim()?.takeIf { it.isNotEmpty() },
         epgUrl = input.epgUrl?.trim()?.takeIf { it.isNotEmpty() },
         dnsProvider = input.dnsProvider,
         autoRefreshHours = input.autoRefreshHours,

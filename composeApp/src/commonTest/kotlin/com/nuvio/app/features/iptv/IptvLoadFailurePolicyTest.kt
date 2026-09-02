@@ -32,7 +32,7 @@ class IptvLoadFailurePolicyTest {
 
     @Test
     fun `every blocking status classifies the same way`() {
-        for (status in listOf(403, 419, 429, 451)) {
+        for (status in listOf(403, 419, 429, 451, 456)) {
             assertEquals(
                 IptvLoadFailurePolicy.Kind.BLOCKED_BY_PROVIDER,
                 classify(HttpStatusException(status, "HTTP $status")).kind,

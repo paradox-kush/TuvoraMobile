@@ -71,8 +71,8 @@ internal data class XtreamFormInput(
     val epgUrl: String?,
     val dnsProvider: String,
     val autoRefreshHours: Int,
-    // M3U-URL source (sourceType = m3u_url): the playlist URL + an optional custom User-Agent.
-    // Ignored for the Xtream source. Xtream stays the default so existing call sites are unaffected.
+    // Optional custom User-Agent (below): the M3U-URL source's fetch UA, and — since the WAF-456 fix
+    // — the Xtream/Stalker stream UA too. Xtream stays the default so existing call sites are unaffected.
     val sourceType: String = SOURCE_TYPE_XTREAM,
     val m3uUrl: String = "",
     val userAgent: String? = null,
@@ -208,6 +208,8 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
                 onUsernameChange = { username = it },
                 password = password,
                 onPasswordChange = { password = it },
+                userAgent = userAgent,
+                onUserAgentChange = { userAgent = it },
                 name = name,
                 onNameChange = { name = it },
             )
@@ -377,9 +379,12 @@ private fun XtreamFieldsSection(
     onUsernameChange: (String) -> Unit,
     password: String,
     onPasswordChange: (String) -> Unit,
+    userAgent: String,
+    onUserAgentChange: (String) -> Unit,
     name: String,
     onNameChange: (String) -> Unit,
 ) {
+    val tokens = MaterialTheme.nuvio
     SettingsSection(title = "Xtream Account", isTablet = isTablet) {
         Column(
             modifier = Modifier
@@ -403,6 +408,18 @@ private fun XtreamFieldsSection(
                 onValueChange = onPasswordChange,
                 label = "Password",
                 modifier = Modifier.fillMaxWidth(),
+            )
+            FormOutlinedField(
+                value = userAgent,
+                onValueChange = onUserAgentChange,
+                label = "User-Agent (optional)",
+                placeholder = "e.g. VLC/3.0.20 LibVLC/3.0.20",
+            )
+            Text(
+                text = "Only if streams won't play: some providers' firewalls block unknown apps. " +
+                    "Set the User-Agent of a player they allow (e.g. VLC) to match it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = tokens.colors.textMuted,
             )
             FormOutlinedField(
                 value = name,
