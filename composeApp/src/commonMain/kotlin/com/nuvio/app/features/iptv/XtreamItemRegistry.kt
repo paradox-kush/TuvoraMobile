@@ -155,13 +155,11 @@ object XtreamItemRegistry {
      * content DB (it's an arbitrary line), so this returns null for M3U — use [liveStreamUrlForAsync].
      */
     fun liveStreamUrlFor(contentId: String): String? {
-        val parsed = parseId(contentId) ?: return null
-        if (parsed.kind != XtreamKind.LIVE) return null
-        val streamId = parsed.id.toIntOrNull() ?: return null
-        val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return null
-        // M3U (DB-backed) and Stalker (single-use create_link) resolve on the async path.
-        if (account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_STALKER) return null
-        return XtreamClient.liveStreamUrl(account, streamId)
+        // Every live id now resolves on the async path: an Xtream id carries the sid the channel had
+        // when it was saved, and the panel may have renumbered since (commit 6c622d49). The current
+        // sid lives in the catalog, which is a database read — see [liveStreamUrlForAsync]. Callers
+        // already fall through to it when this returns null.
+        return null
     }
 
     /**
@@ -173,7 +171,6 @@ object XtreamItemRegistry {
      * rebuild the very URL that just died, so the refresh demands a fresh create_link.
      */
     suspend fun liveStreamUrlForAsync(contentId: String, forceMint: Boolean = false): String? {
-        liveStreamUrlFor(contentId)?.let { return it }
         val parsed = parseId(contentId) ?: return null
         if (parsed.kind != XtreamKind.LIVE) return null
         val streamId = parsed.id.toIntOrNull() ?: return null
@@ -184,7 +181,13 @@ object XtreamItemRegistry {
                 M3UClient.liveUrlFor(account, streamId)
             }
             SOURCE_TYPE_STALKER -> com.nuvio.app.features.iptv.stalker.StalkerClient.resolveLiveUrl(account, streamId, forceMint)
-            else -> null
+            else -> {
+                // The saved sid is a hint, not the truth: bind the channel's identity to whatever sid
+                // the CURRENT catalog gives it. Falls back to the saved sid only when this device has
+                // never indexed the playlist (cold launch before the first build) — the old formula.
+                val currentSid = com.nuvio.app.features.iptv.match.XtreamMatchIndex.resolveLiveSid(account.id, streamId) ?: streamId
+                XtreamClient.liveStreamUrl(account, currentSid)
+            }
         }
     }
 

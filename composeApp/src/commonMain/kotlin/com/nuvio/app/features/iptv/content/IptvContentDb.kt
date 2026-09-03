@@ -98,60 +98,63 @@ internal object IptvContentDb {
     private val mutex = Mutex()
     private var conn: SQLiteConnection? = null
 
+    /** The generation an in-flight M3U ingest (begin → chunks → finish) is writing, per playlist. */
+    private val pendingGeneration = HashMap<String, Long>()
+
+    /** The catalog tables that carry a `generation` column. */
+    private val CATALOG_TABLES = listOf("channels", "vod", "series", "episodes", "categories")
+
+    /**
+     * SQL predicate selecting the generation readers see — the last COMPLETE build's (0 before any
+     * build, which is also where Stalker's write-through rows live). Binds the playlist id a second
+     * time: every query using it binds the id at index 1 AND 2.
+     */
+    private const val GEN = "generation = COALESCE((SELECT active_generation FROM ingest_meta WHERE playlist_id = ?), 0)"
+
+    private fun activeGeneration(c: SQLiteConnection, playlistId: String): Long =
+        c.prepare("SELECT active_generation FROM ingest_meta WHERE playlist_id = ?").use { st ->
+            st.bindText(1, playlistId)
+            if (st.step()) st.getLong(0) else 0L
+        }
+
     private fun connection(): SQLiteConnection = conn ?: IptvContentDbDriver.openConnection().also {
         val version = it.prepare("PRAGMA user_version").use { st -> if (st.step()) st.getLong(0) else 0L }
-        if (version < 1) {
-            it.execSQL("DROP TABLE IF EXISTS channels")
-            it.execSQL("DROP TABLE IF EXISTS vod")
-            it.execSQL("DROP TABLE IF EXISTS series")
-            it.execSQL("DROP TABLE IF EXISTS episodes")
-            it.execSQL("DROP TABLE IF EXISTS categories")
-            it.execSQL("DROP TABLE IF EXISTS ingest_meta")
-            it.execSQL("PRAGMA user_version = 1")
+        // v5 (Overlay Build Spec v1.3.3 §5, the generation swap): every catalog table gains a
+        // `generation` column and it joins the primary key, so a refresh builds generation N+1 BESIDE
+        // the generation still being served and flips in one transaction (finishIngest). A crash
+        // before the flip therefore leaves the previous, complete catalog serving — the old
+        // clear-first ingest left it empty. A primary-key change means recreate; these tables are a
+        // rebuildable cache (the M3U re-ingests once, Stalker re-mirrors), the same policy
+        // XtreamMatchIndex and the TV twin apply. The EPG tables are untouched. Every pre-v5 shape
+        // (v1's clear, v2's epg_url, v3/v4's Stalker + panel flags) collapses into this recreate, so
+        // the base CREATEs below carry the FULL column set and no ALTER is guessed at.
+        if (version < 5) {
+            for (table in CATALOG_TABLES + "ingest_meta") it.execSQL("DROP TABLE IF EXISTS $table")
         }
-        it.execSQL("CREATE TABLE IF NOT EXISTS channels(playlist_id TEXT NOT NULL, sid INTEGER NOT NULL, category_id TEXT, name TEXT NOT NULL, logo TEXT, tvg_id TEXT, url TEXT NOT NULL, PRIMARY KEY(playlist_id, sid)) WITHOUT ROWID")
-        it.execSQL("CREATE INDEX IF NOT EXISTS channels_cat ON channels(playlist_id, category_id)")
-        it.execSQL("CREATE TABLE IF NOT EXISTS vod(playlist_id TEXT NOT NULL, sid INTEGER NOT NULL, category_id TEXT, name TEXT NOT NULL, logo TEXT, url TEXT NOT NULL, ext TEXT, PRIMARY KEY(playlist_id, sid)) WITHOUT ROWID")
-        it.execSQL("CREATE INDEX IF NOT EXISTS vod_cat ON vod(playlist_id, category_id)")
-        it.execSQL("CREATE TABLE IF NOT EXISTS series(playlist_id TEXT NOT NULL, sid INTEGER NOT NULL, category_id TEXT, name TEXT NOT NULL, logo TEXT, PRIMARY KEY(playlist_id, sid)) WITHOUT ROWID")
-        it.execSQL("CREATE INDEX IF NOT EXISTS series_cat ON series(playlist_id, category_id)")
-        it.execSQL("CREATE TABLE IF NOT EXISTS episodes(playlist_id TEXT NOT NULL, series_sid INTEGER NOT NULL, episode_id TEXT NOT NULL, name TEXT NOT NULL, season INTEGER NOT NULL, episode INTEGER NOT NULL, logo TEXT, url TEXT NOT NULL, ext TEXT, PRIMARY KEY(playlist_id, episode_id)) WITHOUT ROWID")
-        it.execSQL("CREATE INDEX IF NOT EXISTS episodes_series ON episodes(playlist_id, series_sid)")
-        it.execSQL("CREATE TABLE IF NOT EXISTS categories(playlist_id TEXT NOT NULL, type TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(playlist_id, type, id)) WITHOUT ROWID")
-        it.execSQL("CREATE TABLE IF NOT EXISTS ingest_meta(playlist_id TEXT NOT NULL PRIMARY KEY, built_at INTEGER NOT NULL, live_count INTEGER NOT NULL, vod_count INTEGER NOT NULL, series_count INTEGER NOT NULL) WITHOUT ROWID")
-        // v2 (P2 XMLTV EPG): programme rows per playlist+channel, plus the M3U `url-tvg` captured at
-        // ingest (stored on ingest_meta as an additive column so existing rows keep their old shape).
+        it.execSQL("CREATE TABLE IF NOT EXISTS channels(playlist_id TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0, sid INTEGER NOT NULL, category_id TEXT, name TEXT NOT NULL, logo TEXT, tvg_id TEXT, url TEXT NOT NULL, cmd TEXT, tv_archive INTEGER, use_http_tmp_link INTEGER, use_load_balancing INTEGER, PRIMARY KEY(playlist_id, generation, sid)) WITHOUT ROWID")
+        it.execSQL("CREATE INDEX IF NOT EXISTS channels_cat ON channels(playlist_id, generation, category_id)")
+        it.execSQL("CREATE TABLE IF NOT EXISTS vod(playlist_id TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0, sid INTEGER NOT NULL, category_id TEXT, name TEXT NOT NULL, logo TEXT, url TEXT NOT NULL, ext TEXT, cmd TEXT, PRIMARY KEY(playlist_id, generation, sid)) WITHOUT ROWID")
+        it.execSQL("CREATE INDEX IF NOT EXISTS vod_cat ON vod(playlist_id, generation, category_id)")
+        it.execSQL("CREATE TABLE IF NOT EXISTS series(playlist_id TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0, sid INTEGER NOT NULL, category_id TEXT, name TEXT NOT NULL, logo TEXT, PRIMARY KEY(playlist_id, generation, sid)) WITHOUT ROWID")
+        it.execSQL("CREATE INDEX IF NOT EXISTS series_cat ON series(playlist_id, generation, category_id)")
+        it.execSQL("CREATE TABLE IF NOT EXISTS episodes(playlist_id TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0, series_sid INTEGER NOT NULL, episode_id TEXT NOT NULL, name TEXT NOT NULL, season INTEGER NOT NULL, episode INTEGER NOT NULL, logo TEXT, url TEXT NOT NULL, ext TEXT, cmd TEXT, PRIMARY KEY(playlist_id, generation, episode_id)) WITHOUT ROWID")
+        it.execSQL("CREATE INDEX IF NOT EXISTS episodes_series ON episodes(playlist_id, generation, series_sid)")
+        it.execSQL("CREATE TABLE IF NOT EXISTS categories(playlist_id TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 0, type TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(playlist_id, generation, type, id)) WITHOUT ROWID")
+        it.execSQL("CREATE TABLE IF NOT EXISTS ingest_meta(playlist_id TEXT NOT NULL PRIMARY KEY, built_at INTEGER NOT NULL, live_count INTEGER NOT NULL, vod_count INTEGER NOT NULL, series_count INTEGER NOT NULL, epg_url TEXT, active_generation INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID")
+        // v2 (P2 XMLTV EPG): programme rows per playlist+channel. Pre-v2 EPG tables are dropped once.
         if (version < 2) {
             it.execSQL("DROP TABLE IF EXISTS epg_programmes")
             it.execSQL("DROP TABLE IF EXISTS epg_meta")
-            // Add the column to any pre-v2 ingest_meta row-set; ignore if it already exists.
-            runCatching { it.execSQL("ALTER TABLE ingest_meta ADD COLUMN epg_url TEXT") }
-            it.execSQL("PRAGMA user_version = 2")
         }
-        // v3 (P6 Stalker→SQLite): the stable create_link handle per row + the timeshift flag, so a
-        // browsed Stalker item survives a cold start. Additive columns; M3U rows leave them NULL.
-        if (version < 3) {
-            runCatching { it.execSQL("ALTER TABLE channels ADD COLUMN cmd TEXT") }
-            runCatching { it.execSQL("ALTER TABLE channels ADD COLUMN tv_archive INTEGER") }
-            runCatching { it.execSQL("ALTER TABLE vod ADD COLUMN cmd TEXT") }
-            runCatching { it.execSQL("ALTER TABLE episodes ADD COLUMN cmd TEXT") }
-            it.execSQL("PRAGMA user_version = 3")
-        }
-        it.execSQL("CREATE TABLE IF NOT EXISTS epg_programmes(playlist_id TEXT NOT NULL, channel_id TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, title TEXT NOT NULL, desc TEXT)")
+        it.execSQL("CREATE TABLE IF NOT EXISTS epg_programmes(playlist_id TEXT NOT NULL, channel_id TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, title TEXT NOT NULL, desc TEXT, has_archive INTEGER NOT NULL DEFAULT 0)")
         it.execSQL("CREATE INDEX IF NOT EXISTS epg_lookup ON epg_programmes(playlist_id, channel_id, start_ms)")
         // Per-playlist EPG freshness marker (kept separate from the catalog's ingest_meta so an EPG
         // refresh doesn't touch the catalog row, and vice-versa).
         it.execSQL("CREATE TABLE IF NOT EXISTS epg_meta(playlist_id TEXT NOT NULL PRIMARY KEY, built_at INTEGER NOT NULL, programme_count INTEGER NOT NULL) WITHOUT ROWID")
-        // v4 (memory/catch-up pre-work, one migration): the per-programme catch-up flag on the
-        // guide rows, plus the Xtream panel's per-channel flags that stream resolution consumes.
-        // Runs AFTER the CREATEs above so a fresh DB replays it against the just-created tables
-        // (the v2/v3 idiom: base CREATEs stay at v1 shape, later columns arrive via ALTER).
-        if (version < 4) {
-            runCatching { it.execSQL("ALTER TABLE epg_programmes ADD COLUMN has_archive INTEGER NOT NULL DEFAULT 0") }
-            runCatching { it.execSQL("ALTER TABLE channels ADD COLUMN use_http_tmp_link INTEGER") }
-            runCatching { it.execSQL("ALTER TABLE channels ADD COLUMN use_load_balancing INTEGER") }
-            it.execSQL("PRAGMA user_version = 4")
-        }
+        // v4 added the per-programme catch-up flag to an epg_programmes table that already existed.
+        // Introspect and add only if absent; a real failure propagates (see SqliteSchema).
+        it.ensureColumn("epg_programmes", "has_archive", "has_archive INTEGER NOT NULL DEFAULT 0")
+        if (version < 5) it.execSQL("PRAGMA user_version = 5")
         // Per-(playlist, channel) EPG fetch stamp — the guide's lazy-fetch gate (v4, but created
         // unconditionally like the other epg tables: IF NOT EXISTS is self-healing).
         it.execSQL("CREATE TABLE IF NOT EXISTS epg_channel_fetch(playlist_id TEXT NOT NULL, channel_id TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY(playlist_id, channel_id)) WITHOUT ROWID")
@@ -177,16 +180,23 @@ internal object IptvContentDb {
     // --- ingest (transactional, chunked, meta-last) ------------------------------
 
     /**
-     * Wipes any prior rows for [playlistId] in one short transaction. Call once at the start of an
-     * ingest; then stream [insertChunk] calls; then [finishIngest] writes the meta row LAST.
+     * Opens a generation for a fresh ingest of [playlistId]. Nothing being served is touched: the
+     * new rows land at `active_generation + 1` while readers keep the last complete build, and
+     * [finishIngest] flips them in one transaction. Rows a previous attempt left at a non-active
+     * generation (a crash before its flip) are purged here. Then stream [insertChunk] calls; then
+     * [finishIngest].
      */
     suspend fun beginIngest(playlistId: String) = mutex.withLock {
         val c = connection()
         c.execSQL("BEGIN IMMEDIATE")
         try {
-            for (table in listOf("channels", "vod", "series", "episodes", "categories", "ingest_meta", "epg_programmes", "epg_meta", "epg_channel_fetch")) {
-                c.prepare("DELETE FROM $table WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
+            val active = activeGeneration(c, playlistId)
+            for (table in CATALOG_TABLES) {
+                c.prepare("DELETE FROM $table WHERE playlist_id = ? AND generation <> ?").use { st ->
+                    st.bindText(1, playlistId); st.bindLong(2, active); st.step()
+                }
             }
+            pendingGeneration[playlistId] = active + 1
             c.execSQL("COMMIT")
         } catch (t: Throwable) {
             c.execSQL("ROLLBACK"); throw t
@@ -209,61 +219,64 @@ internal object IptvContentDb {
         val c = connection()
         c.execSQL("BEGIN IMMEDIATE")
         try {
-            if (channels.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO channels(playlist_id, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing) VALUES(?,?,?,?,?,?,?,?,?,?,?)").use { st ->
+            // Inside an ingest the chunk belongs to the generation being built; outside one (the
+            // Stalker write-through, which never calls beginIngest) it joins the served generation.
+            val gen = pendingGeneration[playlistId] ?: activeGeneration(c, playlistId)
+            if (channels.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
                 for (r in channels) {
                     st.reset()
-                    st.bindText(1, playlistId); st.bindLong(2, r.sid.toLong())
-                    if (r.categoryId != null) st.bindText(3, r.categoryId) else st.bindNull(3)
-                    st.bindText(4, r.name)
-                    if (r.logo != null) st.bindText(5, r.logo) else st.bindNull(5)
-                    if (r.tvgId != null) st.bindText(6, r.tvgId) else st.bindNull(6)
-                    st.bindText(7, r.url)
-                    if (r.cmd != null) st.bindText(8, r.cmd) else st.bindNull(8)
-                    st.bindLong(9, if (r.hasArchive) 1L else 0L)
-                    st.bindLong(10, if (r.useHttpTmpLink) 1L else 0L)
-                    st.bindLong(11, if (r.useLoadBalancing) 1L else 0L)
+                    st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.sid.toLong())
+                    if (r.categoryId != null) st.bindText(4, r.categoryId) else st.bindNull(4)
+                    st.bindText(5, r.name)
+                    if (r.logo != null) st.bindText(6, r.logo) else st.bindNull(6)
+                    if (r.tvgId != null) st.bindText(7, r.tvgId) else st.bindNull(7)
+                    st.bindText(8, r.url)
+                    if (r.cmd != null) st.bindText(9, r.cmd) else st.bindNull(9)
+                    st.bindLong(10, if (r.hasArchive) 1L else 0L)
+                    st.bindLong(11, if (r.useHttpTmpLink) 1L else 0L)
+                    st.bindLong(12, if (r.useLoadBalancing) 1L else 0L)
                     st.step()
                 }
             }
-            if (vod.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO vod(playlist_id, sid, category_id, name, logo, url, ext, cmd) VALUES(?,?,?,?,?,?,?,?)").use { st ->
+            if (vod.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO vod(playlist_id, generation, sid, category_id, name, logo, url, ext, cmd) VALUES(?,?,?,?,?,?,?,?,?)").use { st ->
                 for (r in vod) {
                     st.reset()
-                    st.bindText(1, playlistId); st.bindLong(2, r.sid.toLong())
-                    if (r.categoryId != null) st.bindText(3, r.categoryId) else st.bindNull(3)
-                    st.bindText(4, r.name)
-                    if (r.logo != null) st.bindText(5, r.logo) else st.bindNull(5)
-                    st.bindText(6, r.url)
-                    if (r.ext != null) st.bindText(7, r.ext) else st.bindNull(7)
-                    if (r.cmd != null) st.bindText(8, r.cmd) else st.bindNull(8)
+                    st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.sid.toLong())
+                    if (r.categoryId != null) st.bindText(4, r.categoryId) else st.bindNull(4)
+                    st.bindText(5, r.name)
+                    if (r.logo != null) st.bindText(6, r.logo) else st.bindNull(6)
+                    st.bindText(7, r.url)
+                    if (r.ext != null) st.bindText(8, r.ext) else st.bindNull(8)
+                    if (r.cmd != null) st.bindText(9, r.cmd) else st.bindNull(9)
                     st.step()
                 }
             }
-            if (series.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO series(playlist_id, sid, category_id, name, logo) VALUES(?,?,?,?,?)").use { st ->
+            if (series.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO series(playlist_id, generation, sid, category_id, name, logo) VALUES(?,?,?,?,?,?)").use { st ->
                 for (r in series) {
                     st.reset()
-                    st.bindText(1, playlistId); st.bindLong(2, r.sid.toLong())
-                    if (r.categoryId != null) st.bindText(3, r.categoryId) else st.bindNull(3)
-                    st.bindText(4, r.name)
-                    if (r.logo != null) st.bindText(5, r.logo) else st.bindNull(5)
+                    st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.sid.toLong())
+                    if (r.categoryId != null) st.bindText(4, r.categoryId) else st.bindNull(4)
+                    st.bindText(5, r.name)
+                    if (r.logo != null) st.bindText(6, r.logo) else st.bindNull(6)
                     st.step()
                 }
             }
-            if (episodes.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO episodes(playlist_id, series_sid, episode_id, name, season, episode, logo, url, ext, cmd) VALUES(?,?,?,?,?,?,?,?,?,?)").use { st ->
+            if (episodes.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO episodes(playlist_id, generation, series_sid, episode_id, name, season, episode, logo, url, ext, cmd) VALUES(?,?,?,?,?,?,?,?,?,?,?)").use { st ->
                 for (r in episodes) {
                     st.reset()
-                    st.bindText(1, playlistId); st.bindLong(2, r.seriesSid.toLong()); st.bindText(3, r.episodeId)
-                    st.bindText(4, r.name); st.bindLong(5, r.season.toLong()); st.bindLong(6, r.episode.toLong())
-                    if (r.logo != null) st.bindText(7, r.logo) else st.bindNull(7)
-                    st.bindText(8, r.url)
-                    if (r.ext != null) st.bindText(9, r.ext) else st.bindNull(9)
-                    if (r.cmd != null) st.bindText(10, r.cmd) else st.bindNull(10)
+                    st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.seriesSid.toLong()); st.bindText(4, r.episodeId)
+                    st.bindText(5, r.name); st.bindLong(6, r.season.toLong()); st.bindLong(7, r.episode.toLong())
+                    if (r.logo != null) st.bindText(8, r.logo) else st.bindNull(8)
+                    st.bindText(9, r.url)
+                    if (r.ext != null) st.bindText(10, r.ext) else st.bindNull(10)
+                    if (r.cmd != null) st.bindText(11, r.cmd) else st.bindNull(11)
                     st.step()
                 }
             }
-            if (categories.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO categories(playlist_id, type, id, name) VALUES(?,?,?,?)").use { st ->
+            if (categories.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO categories(playlist_id, generation, type, id, name) VALUES(?,?,?,?,?)").use { st ->
                 for ((type, id, name) in categories) {
                     st.reset()
-                    st.bindText(1, playlistId); st.bindText(2, type); st.bindText(3, id); st.bindText(4, name)
+                    st.bindText(1, playlistId); st.bindLong(2, gen); st.bindText(3, type); st.bindText(4, id); st.bindText(5, name)
                     st.step()
                 }
             }
@@ -273,13 +286,37 @@ internal object IptvContentDb {
         }
     }
 
-    /** Writes the meta row LAST — its presence is the "ingest complete" signal. [epgUrl] = the M3U `url-tvg`. */
+    /**
+     * The flip: in ONE transaction, the meta row points readers at the generation this ingest
+     * built, every other generation's rows are dropped, and the EPG state derived from the old
+     * catalog is reset (it was reset at the START of an ingest before — which briefly showed a
+     * guide with no catalog under it). Its presence is still the "ingest complete" signal.
+     * [epgUrl] = the M3U `url-tvg`.
+     */
     suspend fun finishIngest(playlistId: String, liveCount: Int, vodCount: Int, seriesCount: Int, epgUrl: String? = null) = mutex.withLock {
-        connection().prepare("INSERT OR REPLACE INTO ingest_meta(playlist_id, built_at, live_count, vod_count, series_count, epg_url) VALUES(?,?,?,?,?,?)").use { st ->
-            st.bindText(1, playlistId); st.bindLong(2, now())
-            st.bindLong(3, liveCount.toLong()); st.bindLong(4, vodCount.toLong()); st.bindLong(5, seriesCount.toLong())
-            if (epgUrl != null) st.bindText(6, epgUrl) else st.bindNull(6)
-            st.step()
+        val c = connection()
+        c.execSQL("BEGIN IMMEDIATE")
+        try {
+            val gen = pendingGeneration[playlistId] ?: activeGeneration(c, playlistId)
+            c.prepare("INSERT OR REPLACE INTO ingest_meta(playlist_id, built_at, live_count, vod_count, series_count, epg_url, active_generation) VALUES(?,?,?,?,?,?,?)").use { st ->
+                st.bindText(1, playlistId); st.bindLong(2, now())
+                st.bindLong(3, liveCount.toLong()); st.bindLong(4, vodCount.toLong()); st.bindLong(5, seriesCount.toLong())
+                if (epgUrl != null) st.bindText(6, epgUrl) else st.bindNull(6)
+                st.bindLong(7, gen)
+                st.step()
+            }
+            for (table in CATALOG_TABLES) {
+                c.prepare("DELETE FROM $table WHERE playlist_id = ? AND generation <> ?").use { st ->
+                    st.bindText(1, playlistId); st.bindLong(2, gen); st.step()
+                }
+            }
+            for (table in listOf("epg_programmes", "epg_meta", "epg_channel_fetch")) {
+                c.prepare("DELETE FROM $table WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
+            }
+            c.execSQL("COMMIT")
+            pendingGeneration.remove(playlistId)
+        } catch (t: Throwable) {
+            c.execSQL("ROLLBACK"); throw t
         }
     }
 
@@ -298,8 +335,8 @@ internal object IptvContentDb {
      * filters programmes against (so a 50-100 MB guide only stores rows for channels we actually have).
      */
     suspend fun distinctTvgIds(playlistId: String): List<String> = mutex.withLock {
-        connection().prepare("SELECT DISTINCT tvg_id FROM channels WHERE playlist_id = ? AND tvg_id IS NOT NULL AND tvg_id <> ''").use { st ->
-            st.bindText(1, playlistId)
+        connection().prepare("SELECT DISTINCT tvg_id FROM channels WHERE playlist_id = ? AND $GEN AND tvg_id IS NOT NULL AND tvg_id <> ''").use { st ->
+            st.bindText(1, playlistId); st.bindText(2, playlistId)
             val out = ArrayList<String>()
             while (st.step()) if (!st.isNull(0)) out.add(st.getText(0))
             out
@@ -552,16 +589,17 @@ internal object IptvContentDb {
                 c.prepare("DELETE FROM $table WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
             }
             c.execSQL("COMMIT")
+            pendingGeneration.remove(playlistId)
         } catch (t: Throwable) {
             c.execSQL("ROLLBACK"); throw t
         }
     }
 
-    // --- queries (all single indexed SELECTs) ------------------------------------
+    // --- queries (all single indexed SELECTs, pinned to the served generation) ------
 
     suspend fun categoriesFor(playlistId: String, kind: IptvContentKind): List<IptvCategoryRow> = mutex.withLock {
-        connection().prepare("SELECT id, name FROM categories WHERE playlist_id = ? AND type = ? ORDER BY name").use { st ->
-            st.bindText(1, playlistId); st.bindText(2, kind.slug)
+        connection().prepare("SELECT id, name FROM categories WHERE playlist_id = ? AND $GEN AND type = ? ORDER BY name").use { st ->
+            st.bindText(1, playlistId); st.bindText(2, playlistId); st.bindText(3, kind.slug)
             val out = ArrayList<IptvCategoryRow>()
             while (st.step()) out.add(IptvCategoryRow(st.getText(0), st.getText(1)))
             out
@@ -583,12 +621,12 @@ internal object IptvContentDb {
 
     suspend fun pageSeries(playlistId: String, categoryId: String?, offset: Int, limit: Int): List<IptvSeriesRow> = mutex.withLock {
         val sql = if (categoryId == null)
-            "SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? ORDER BY name, sid LIMIT ? OFFSET ?"
+            "SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? AND $GEN ORDER BY name, sid LIMIT ? OFFSET ?"
         else
-            "SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? AND category_id = ? ORDER BY name, sid LIMIT ? OFFSET ?"
+            "SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name, sid LIMIT ? OFFSET ?"
         connection().prepare(sql).use { st ->
-            st.bindText(1, playlistId)
-            var i = 2
+            st.bindText(1, playlistId); st.bindText(2, playlistId)
+            var i = 3
             if (categoryId != null) st.bindText(i++, categoryId)
             st.bindLong(i++, limit.toLong()); st.bindLong(i, offset.toLong())
             val out = ArrayList<IptvSeriesRow>()
@@ -611,12 +649,12 @@ internal object IptvContentDb {
         val tmpLinkCol = if (table == "channels") "use_http_tmp_link" else "NULL"
         val lbCol = if (table == "channels") "use_load_balancing" else "NULL"
         val sql = if (categoryId == null)
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? ORDER BY name, sid LIMIT ? OFFSET ?"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? AND $GEN ORDER BY name, sid LIMIT ? OFFSET ?"
         else
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? AND category_id = ? ORDER BY name, sid LIMIT ? OFFSET ?"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name, sid LIMIT ? OFFSET ?"
         return connection().prepare(sql).use { st ->
-            st.bindText(1, playlistId)
-            var i = 2
+            st.bindText(1, playlistId); st.bindText(2, playlistId)
+            var i = 3
             if (categoryId != null) st.bindText(i++, categoryId)
             st.bindLong(i++, limit.toLong()); st.bindLong(i, offset.toLong())
             val out = ArrayList<IptvStreamRow>()
@@ -654,12 +692,12 @@ internal object IptvContentDb {
         val tmpLinkCol = if (table == "channels") "use_http_tmp_link" else "NULL"
         val lbCol = if (table == "channels") "use_load_balancing" else "NULL"
         val sql = if (categoryId == null)
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? ORDER BY name"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? AND $GEN ORDER BY name"
         else
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? AND category_id = ? ORDER BY name"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name"
         return connection().prepare(sql).use { st ->
-            st.bindText(1, playlistId)
-            if (categoryId != null) st.bindText(2, categoryId)
+            st.bindText(1, playlistId); st.bindText(2, playlistId)
+            if (categoryId != null) st.bindText(3, categoryId)
             val out = ArrayList<IptvStreamRow>()
             while (st.step()) out.add(
                 IptvStreamRow(
@@ -682,12 +720,12 @@ internal object IptvContentDb {
 
     suspend fun seriesFor(playlistId: String, categoryId: String?): List<IptvSeriesRow> = mutex.withLock {
         val sql = if (categoryId == null)
-            "SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? ORDER BY name"
+            "SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? AND $GEN ORDER BY name"
         else
-            "SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? AND category_id = ? ORDER BY name"
+            "SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name"
         connection().prepare(sql).use { st ->
-            st.bindText(1, playlistId)
-            if (categoryId != null) st.bindText(2, categoryId)
+            st.bindText(1, playlistId); st.bindText(2, playlistId)
+            if (categoryId != null) st.bindText(3, categoryId)
             val out = ArrayList<IptvSeriesRow>()
             while (st.step()) out.add(
                 IptvSeriesRow(
@@ -703,8 +741,8 @@ internal object IptvContentDb {
 
     /** All episodes of one series, ordered season→episode — backs synthetic get_series_info. */
     suspend fun episodesFor(playlistId: String, seriesSid: Int): List<IptvEpisodeRow> = mutex.withLock {
-        connection().prepare("SELECT series_sid, episode_id, name, season, episode, logo, url, ext, cmd FROM episodes WHERE playlist_id = ? AND series_sid = ? ORDER BY season, episode").use { st ->
-            st.bindText(1, playlistId); st.bindLong(2, seriesSid.toLong())
+        connection().prepare("SELECT series_sid, episode_id, name, season, episode, logo, url, ext, cmd FROM episodes WHERE playlist_id = ? AND $GEN AND series_sid = ? ORDER BY season, episode").use { st ->
+            st.bindText(1, playlistId); st.bindText(2, playlistId); st.bindLong(3, seriesSid.toLong())
             val out = ArrayList<IptvEpisodeRow>()
             while (st.step()) out.add(
                 IptvEpisodeRow(
@@ -738,37 +776,41 @@ internal object IptvContentDb {
         val c = connection()
         c.execSQL("BEGIN IMMEDIATE")
         try {
-            c.prepare("DELETE FROM channels WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
-            c.prepare("DELETE FROM categories WHERE playlist_id = ? AND type = ?").use { st ->
-                st.bindText(1, playlistId); st.bindText(2, IptvContentKind.LIVE.slug); st.step()
+            // The Stalker lineup lives at the served generation and is replaced in place — this
+            // transaction is already atomic, so no generation flip is needed here.
+            val gen = activeGeneration(c, playlistId)
+            c.prepare("DELETE FROM channels WHERE playlist_id = ? AND generation = ?").use { st -> st.bindText(1, playlistId); st.bindLong(2, gen); st.step() }
+            c.prepare("DELETE FROM categories WHERE playlist_id = ? AND generation = ? AND type = ?").use { st ->
+                st.bindText(1, playlistId); st.bindLong(2, gen); st.bindText(3, IptvContentKind.LIVE.slug); st.step()
             }
-            c.prepare("INSERT OR REPLACE INTO channels(playlist_id, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing) VALUES(?,?,?,?,?,?,?,?,?,?,?)").use { st ->
+            c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
                 for (r in channels) {
                     st.reset()
-                    st.bindText(1, playlistId); st.bindLong(2, r.sid.toLong())
-                    if (r.categoryId != null) st.bindText(3, r.categoryId) else st.bindNull(3)
-                    st.bindText(4, r.name)
-                    if (r.logo != null) st.bindText(5, r.logo) else st.bindNull(5)
-                    if (r.tvgId != null) st.bindText(6, r.tvgId) else st.bindNull(6)
-                    st.bindText(7, r.url)
-                    if (r.cmd != null) st.bindText(8, r.cmd) else st.bindNull(8)
-                    st.bindLong(9, if (r.hasArchive) 1L else 0L)
-                    st.bindLong(10, if (r.useHttpTmpLink) 1L else 0L)
-                    st.bindLong(11, if (r.useLoadBalancing) 1L else 0L)
+                    st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.sid.toLong())
+                    if (r.categoryId != null) st.bindText(4, r.categoryId) else st.bindNull(4)
+                    st.bindText(5, r.name)
+                    if (r.logo != null) st.bindText(6, r.logo) else st.bindNull(6)
+                    if (r.tvgId != null) st.bindText(7, r.tvgId) else st.bindNull(7)
+                    st.bindText(8, r.url)
+                    if (r.cmd != null) st.bindText(9, r.cmd) else st.bindNull(9)
+                    st.bindLong(10, if (r.hasArchive) 1L else 0L)
+                    st.bindLong(11, if (r.useHttpTmpLink) 1L else 0L)
+                    st.bindLong(12, if (r.useLoadBalancing) 1L else 0L)
                     st.step()
                 }
             }
-            c.prepare("INSERT OR REPLACE INTO categories(playlist_id, type, id, name) VALUES(?,?,?,?)").use { st ->
+            c.prepare("INSERT OR REPLACE INTO categories(playlist_id, generation, type, id, name) VALUES(?,?,?,?,?)").use { st ->
                 for ((id, name) in categories) {
                     st.reset()
-                    st.bindText(1, playlistId); st.bindText(2, IptvContentKind.LIVE.slug)
-                    st.bindText(3, id); st.bindText(4, name)
+                    st.bindText(1, playlistId); st.bindLong(2, gen); st.bindText(3, IptvContentKind.LIVE.slug)
+                    st.bindText(4, id); st.bindText(5, name)
                     st.step()
                 }
             }
             // Freshness marker LAST, inside the same transaction: present+fresh = lineup usable.
-            c.prepare("INSERT OR REPLACE INTO ingest_meta(playlist_id, built_at, live_count, vod_count, series_count, epg_url) VALUES(?,?,?,0,0,NULL)").use { st ->
-                st.bindText(1, playlistId); st.bindLong(2, now()); st.bindLong(3, channels.size.toLong())
+            // active_generation is written back explicitly — INSERT OR REPLACE would otherwise reset it.
+            c.prepare("INSERT OR REPLACE INTO ingest_meta(playlist_id, built_at, live_count, vod_count, series_count, epg_url, active_generation) VALUES(?,?,?,0,0,NULL,?)").use { st ->
+                st.bindText(1, playlistId); st.bindLong(2, now()); st.bindLong(3, channels.size.toLong()); st.bindLong(4, gen)
                 st.step()
             }
             c.execSQL("COMMIT")
@@ -779,16 +821,16 @@ internal object IptvContentDb {
 
     /** One episode's stored stream URL (+ ext) by its string id — for building the play stream. */
     suspend fun episodeUrl(playlistId: String, episodeId: String): Pair<String, String?>? = mutex.withLock {
-        connection().prepare("SELECT url, ext FROM episodes WHERE playlist_id = ? AND episode_id = ?").use { st ->
-            st.bindText(1, playlistId); st.bindText(2, episodeId)
+        connection().prepare("SELECT url, ext FROM episodes WHERE playlist_id = ? AND $GEN AND episode_id = ?").use { st ->
+            st.bindText(1, playlistId); st.bindText(2, playlistId); st.bindText(3, episodeId)
             if (st.step()) st.getText(0) to (if (st.isNull(1)) null else st.getText(1)) else null
         }
     }
 
     /** The single series row for a sid (series-name lookup when building meta). */
     suspend fun seriesRow(playlistId: String, seriesSid: Int): IptvSeriesRow? = mutex.withLock {
-        connection().prepare("SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? AND sid = ?").use { st ->
-            st.bindText(1, playlistId); st.bindLong(2, seriesSid.toLong())
+        connection().prepare("SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? AND $GEN AND sid = ?").use { st ->
+            st.bindText(1, playlistId); st.bindText(2, playlistId); st.bindLong(3, seriesSid.toLong())
             if (st.step()) IptvSeriesRow(
                 sid = st.getLong(0).toInt(),
                 name = st.getText(1),
@@ -800,8 +842,8 @@ internal object IptvContentDb {
 
     /** A single VOD row by sid — rebuilds a movie's stream URL (or Stalker cmd) after a cold launch. */
     suspend fun vodRow(playlistId: String, sid: Int): IptvStreamRow? = mutex.withLock {
-        connection().prepare("SELECT sid, name, logo, NULL, category_id, url, ext, cmd FROM vod WHERE playlist_id = ? AND sid = ?").use { st ->
-            st.bindText(1, playlistId); st.bindLong(2, sid.toLong())
+        connection().prepare("SELECT sid, name, logo, NULL, category_id, url, ext, cmd FROM vod WHERE playlist_id = ? AND $GEN AND sid = ?").use { st ->
+            st.bindText(1, playlistId); st.bindText(2, playlistId); st.bindLong(3, sid.toLong())
             if (st.step()) IptvStreamRow(
                 sid = st.getLong(0).toInt(),
                 name = st.getText(1),
@@ -817,8 +859,8 @@ internal object IptvContentDb {
 
     /** A single channel row by sid — rebuilds a favorited channel's URL (or Stalker cmd) after a cold launch. */
     suspend fun channelRow(playlistId: String, sid: Int): IptvStreamRow? = mutex.withLock {
-        connection().prepare("SELECT sid, name, logo, tvg_id, category_id, url, NULL, cmd, tv_archive, use_http_tmp_link, use_load_balancing FROM channels WHERE playlist_id = ? AND sid = ?").use { st ->
-            st.bindText(1, playlistId); st.bindLong(2, sid.toLong())
+        connection().prepare("SELECT sid, name, logo, tvg_id, category_id, url, NULL, cmd, tv_archive, use_http_tmp_link, use_load_balancing FROM channels WHERE playlist_id = ? AND $GEN AND sid = ?").use { st ->
+            st.bindText(1, playlistId); st.bindText(2, playlistId); st.bindLong(3, sid.toLong())
             if (st.step()) IptvStreamRow(
                 sid = st.getLong(0).toInt(),
                 name = st.getText(1),
@@ -848,9 +890,9 @@ internal object IptvContentDb {
         val extCol = if (hasExt) "ext" else "NULL"
         val tvgCol = if (hasTvg) "tvg_id" else "NULL"
         return connection().prepare(
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol FROM $table WHERE playlist_id = ? AND name LIKE '%' || ? || '%' LIMIT ?"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol FROM $table WHERE playlist_id = ? AND $GEN AND name LIKE '%' || ? || '%' LIMIT ?"
         ).use { st ->
-            st.bindText(1, playlistId); st.bindText(2, query); st.bindLong(3, limit.toLong())
+            st.bindText(1, playlistId); st.bindText(2, playlistId); st.bindText(3, query); st.bindLong(4, limit.toLong())
             val out = ArrayList<IptvStreamRow>()
             while (st.step()) out.add(
                 IptvStreamRow(
@@ -869,8 +911,8 @@ internal object IptvContentDb {
 
     /** Series search returns stream rows with the series sid so callers register + link them. */
     private fun searchSeries(playlistId: String, query: String, limit: Int): List<IptvStreamRow> =
-        connection().prepare("SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? AND name LIKE '%' || ? || '%' LIMIT ?").use { st ->
-            st.bindText(1, playlistId); st.bindText(2, query); st.bindLong(3, limit.toLong())
+        connection().prepare("SELECT sid, name, logo, category_id FROM series WHERE playlist_id = ? AND $GEN AND name LIKE '%' || ? || '%' LIMIT ?").use { st ->
+            st.bindText(1, playlistId); st.bindText(2, playlistId); st.bindText(3, query); st.bindLong(4, limit.toLong())
             val out = ArrayList<IptvStreamRow>()
             while (st.step()) out.add(
                 IptvStreamRow(

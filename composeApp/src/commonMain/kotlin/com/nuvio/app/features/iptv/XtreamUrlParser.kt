@@ -106,6 +106,34 @@ internal fun m3uAccountFromForm(input: XtreamFormInput): XtreamAccount? {
 }
 
 /**
+ * The Xtream panel behind an M3U-field paste, when the URL is the panel's own `get.php` export or
+ * its `player_api.php` root carrying `username` + `password`; null for any other URL (a plain
+ * `.m3u` is not a panel). The M3U lane hard-codes every channel as no-archive, so saving such a
+ * paste as `m3u_url` silently strips catch-up from a perfectly good account — the ADD flow consults
+ * this first and saves the Xtream account instead (falling back to M3U if the panel's API refuses).
+ *
+ * Deliberately NOT folded into [m3uAccountFromForm]: that builder also runs on EDIT, where an
+ * existing `m3u|…` playlist must keep its identity — re-keying it to `{base}|{user}` would orphan
+ * every favourite and progress entry saved under the old id. Recognition is an add-time offer only.
+ */
+internal fun recogniseXtreamPanelInM3uField(input: XtreamFormInput): XtreamAccount? {
+    val raw = input.m3uUrl.trim()
+    if (raw.isEmpty()) return null
+    val withScheme = if (raw.startsWith("http://", true) || raw.startsWith("https://", true)) raw else "http://$raw"
+    val url = try { Url(withScheme) } catch (e: Exception) { return null }
+    val path = url.encodedPath.lowercase()
+    val xtreamShaped = path.endsWith("/get.php") || path.endsWith("/player_api.php")
+    if (!xtreamShaped) return null
+    val parsed = parseXtreamAccount(withScheme, input.name) ?: return null
+    return parsed.copy(
+        epgUrl = input.epgUrl?.trim()?.takeIf { it.isNotEmpty() },
+        dnsProvider = input.dnsProvider,
+        autoRefreshHours = input.autoRefreshHours,
+        userAgent = input.userAgent?.trim()?.takeIf { it.isNotEmpty() },
+    )
+}
+
+/**
  * Builds a Stalker (MAG/Ministra) playlist account from the form. Stalker auths by MAC (not creds),
  * so the identity is portal base + MAC: id = "stalker|$base|$mac" (matches NuvioTV so a playlist
  * added on one app resolves to the same id on the other), baseUrl carries the portal base, and

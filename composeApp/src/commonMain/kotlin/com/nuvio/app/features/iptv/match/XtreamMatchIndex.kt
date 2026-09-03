@@ -1,6 +1,8 @@
 package com.nuvio.app.features.iptv.match
 
 import androidx.sqlite.SQLiteConnection
+import com.nuvio.app.features.iptv.content.ensureColumn
+import com.nuvio.app.features.iptv.identity.IptvIdentity
 import androidx.sqlite.SQLiteStatement
 import androidx.sqlite.execSQL
 import com.nuvio.app.core.memory.AppMemory
@@ -202,7 +204,9 @@ internal object XtreamMatchIndex {
         // moment the provider adds titles). ALTER fails harmlessly when the v<4 step just
         // dropped the table — the CREATE below builds it with the column.
         if (version < 5) {
-            runCatching { it.execSQL("ALTER TABLE idx_meta ADD COLUMN last_added_at INTEGER NOT NULL DEFAULT 0") }
+            // Introspects first: a no-op when the v<4 step just dropped the table (the CREATE below
+            // builds it with the column) and when the column is present; a real failure propagates.
+            it.ensureColumn("idx_meta", "last_added_at", "last_added_at INTEGER NOT NULL DEFAULT 0")
             it.execSQL("PRAGMA user_version = 5")
         }
         // v6 ships the id-mismatch override in verifyDecision: "not on this provider" verdicts
@@ -213,13 +217,28 @@ internal object XtreamMatchIndex {
             it.execSQL("DELETE FROM tmdb_map WHERE sid IS NULL")
         }
         if (version < 6) it.execSQL("PRAGMA user_version = 6")
-        it.execSQL("CREATE TABLE IF NOT EXISTS items(provider TEXT NOT NULL, kind TEXT NOT NULL, sid INTEGER NOT NULL, name TEXT NOT NULL, year INTEGER, tmdb INTEGER, ext TEXT, poster TEXT, category_id TEXT, epg_id TEXT, tv_archive INTEGER NOT NULL DEFAULT 0, pos INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(provider, kind, sid)) WITHOUT ROWID")
+        // v7 (Overlay Build Spec P1): items.entity_id — the channel's deterministic identity
+        // (IptvIdentity), materialized at index time so a saved live id can be re-bound to the
+        // channel's CURRENT sid after the panel renumbers. Same drop+recreate policy (rebuildable
+        // caches; tmdb_map untouched). live_sid_history, created below, is NOT dropped: it is the
+        // durable memory of which identity each sid meant, and must outlive index rebuilds.
+        if (version < 7) {
+            it.execSQL("DROP TABLE IF EXISTS items"); it.execSQL("DROP TABLE IF EXISTS keys")
+            it.execSQL("DROP TABLE IF EXISTS idx_meta"); it.execSQL("DROP TABLE IF EXISTS cats")
+        }
+        it.execSQL("CREATE TABLE IF NOT EXISTS items(provider TEXT NOT NULL, kind TEXT NOT NULL, sid INTEGER NOT NULL, name TEXT NOT NULL, year INTEGER, tmdb INTEGER, ext TEXT, poster TEXT, category_id TEXT, epg_id TEXT, tv_archive INTEGER NOT NULL DEFAULT 0, pos INTEGER NOT NULL DEFAULT 0, entity_id TEXT, PRIMARY KEY(provider, kind, sid)) WITHOUT ROWID")
         it.execSQL("CREATE INDEX IF NOT EXISTS items_tmdb ON items(provider, kind, tmdb)")
         it.execSQL("CREATE INDEX IF NOT EXISTS items_cat ON items(provider, kind, category_id, pos)")
+        it.execSQL("CREATE INDEX IF NOT EXISTS items_entity ON items(provider, kind, entity_id)")
         it.execSQL("CREATE TABLE IF NOT EXISTS cats(provider TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, sort INTEGER NOT NULL, PRIMARY KEY(provider, kind, id)) WITHOUT ROWID")
         it.execSQL("CREATE TABLE IF NOT EXISTS keys(provider TEXT NOT NULL, kind TEXT NOT NULL, k TEXT NOT NULL, sid INTEGER NOT NULL, PRIMARY KEY(provider, kind, k, sid)) WITHOUT ROWID")
         it.execSQL("CREATE TABLE IF NOT EXISTS idx_meta(provider TEXT NOT NULL, kind TEXT NOT NULL, built_at INTEGER NOT NULL, item_count INTEGER NOT NULL, last_added_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(provider, kind)) WITHOUT ROWID")
         it.execSQL("CREATE TABLE IF NOT EXISTS tmdb_map(provider TEXT NOT NULL, kind TEXT NOT NULL, tmdb INTEGER NOT NULL, sid INTEGER, matched_name TEXT, updated_at INTEGER NOT NULL, synced INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(provider, kind, tmdb)) WITHOUT ROWID")
+        // The FIRST identity each live sid was ever seen carrying (INSERT OR IGNORE, never
+        // overwritten): a favourite saved as `live:{sid}` meant THAT channel, even if the panel later
+        // hands the number to another one. Survives rebuilds; purged only with the account.
+        it.execSQL("CREATE TABLE IF NOT EXISTS live_sid_history(provider TEXT NOT NULL, sid INTEGER NOT NULL, entity_id TEXT NOT NULL, seen_at INTEGER NOT NULL, PRIMARY KEY(provider, sid)) WITHOUT ROWID")
+        if (version < 7) it.execSQL("PRAGMA user_version = 7")
         conn = it
     }
 
@@ -234,7 +253,7 @@ internal object XtreamMatchIndex {
             val c = connection()
             c.execSQL("BEGIN IMMEDIATE")
             try {
-                for (t in listOf("items", "keys", "idx_meta", "tmdb_map", "cats")) {
+                for (t in listOf("items", "keys", "idx_meta", "tmdb_map", "cats", "live_sid_history")) {
                     c.prepare("DELETE FROM $t WHERE provider = ?").use { st ->
                         st.bindText(1, provider); st.step()
                     }
@@ -340,6 +359,41 @@ internal object XtreamMatchIndex {
      * Panels fill this field very unevenly (6% on Starshare, measured), so an empty result is a
      * normal answer meaning "this panel cannot be matched by id" — not an error.
      */
+    /**
+     * The sid the channel a saved live id meant carries in the CURRENT catalog, or null when this
+     * device cannot say (never indexed the playlist, or the identity is no longer in it).
+     *
+     * A saved id carries the sid the channel had when it was saved. Panels renumber (commit
+     * 6c622d49), so the sid is a hint: [live_sid_history] remembers which identity that number
+     * FIRST meant, and the current row carrying the same identity is the channel now. This also
+     * covers a number handed to a different channel afterwards — the original identity wins while it
+     * still exists. When it does not, the caller decides what a bare sid is worth.
+     *
+     * Duplicates (metadata-identical rows share an identity) resolve to the saved sid if it is one of
+     * them, else deterministically to the lowest — indistinguishable streams, so any is the channel.
+     */
+    suspend fun resolveLiveSid(provider: String, savedSid: Int): Int? = mutex.withLock {
+        val c = connection()
+        val entity = c.prepare("SELECT entity_id FROM live_sid_history WHERE provider = ? AND sid = ?").use { st ->
+            st.bindText(1, provider); st.bindLong(2, savedSid.toLong())
+            if (st.step()) st.getText(0) else null
+        } ?: c.prepare("SELECT entity_id FROM items WHERE provider = ? AND kind = ? AND sid = ?").use { st ->
+            // No history for this sid (indexed before v7): trust the current row's own identity.
+            st.bindText(1, provider); st.bindText(2, MatchKind.LIVE.slug); st.bindLong(3, savedSid.toLong())
+            if (st.step() && !st.isNull(0)) st.getText(0) else null
+        } ?: return@withLock null
+        c.prepare("SELECT sid FROM items WHERE provider = ? AND kind = ? AND entity_id = ? ORDER BY sid").use { st ->
+            st.bindText(1, provider); st.bindText(2, MatchKind.LIVE.slug); st.bindText(3, entity)
+            var lowest: Int? = null
+            while (st.step()) {
+                val sid = st.getLong(0).toInt()
+                if (sid == savedSid) return@withLock sid
+                if (lowest == null) lowest = sid
+            }
+            lowest
+        }
+    }
+
     suspend fun liveEpgIds(provider: String): List<String> = mutex.withLock {
         connection().prepare(
             "SELECT DISTINCT epg_id FROM items WHERE provider = ? AND kind = ? " +
@@ -691,10 +745,12 @@ internal object XtreamMatchIndex {
                     // catch it either — they run BundledSQLiteDriver, which is modern. The TV twin
                     // carries the same warning ("Framework SQLite on the oldest supported TVs
                     // predates UPSERT, hence two steps"); heed it before trying this again.
-                    c.prepare("UPDATE items SET name=?, year=?, tmdb=?, ext=?, poster=COALESCE(?, poster), category_id=?, epg_id=?, tv_archive=?, pos=? WHERE provider=? AND kind=? AND sid=?").use { upd ->
+                    c.prepare("UPDATE items SET name=?, year=?, tmdb=?, ext=?, poster=COALESCE(?, poster), category_id=?, epg_id=?, tv_archive=?, pos=?, entity_id=? WHERE provider=? AND kind=? AND sid=?").use { upd ->
                         c.prepare("SELECT changes()").use { chg ->
-                            c.prepare("INSERT OR REPLACE INTO items(provider, kind, sid, name, year, tmdb, ext, poster, category_id, epg_id, tv_archive, pos) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").use { ins ->
+                            c.prepare("INSERT OR REPLACE INTO items(provider, kind, sid, name, year, tmdb, ext, poster, category_id, epg_id, tv_archive, pos, entity_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").use { ins ->
                                 for (it in chunk) {
+                                    // Live rows carry their identity; VOD/series identity is a different problem (TMDB).
+                                    val entity = if (kind == MatchKind.LIVE) IptvIdentity.entityId(provider, it.name, it.epgId) else null
                                     upd.reset()
                                     upd.bindText(1, it.name)
                                     if (it.year != null) upd.bindLong(2, it.year.toLong()) else upd.bindNull(2)
@@ -705,7 +761,8 @@ internal object XtreamMatchIndex {
                                     if (it.epgId != null) upd.bindText(7, it.epgId) else upd.bindNull(7)
                                     upd.bindLong(8, if (it.hasArchive) 1L else 0L)
                                     upd.bindLong(9, it.pos.toLong())
-                                    upd.bindText(10, provider); upd.bindText(11, kind.slug); upd.bindLong(12, it.sid.toLong())
+                                    if (entity != null) upd.bindText(10, entity) else upd.bindNull(10)
+                                    upd.bindText(11, provider); upd.bindText(12, kind.slug); upd.bindLong(13, it.sid.toLong())
                                     upd.step()
                                     chg.reset()
                                     val updated = chg.step() && chg.getLong(0) > 0
@@ -721,6 +778,7 @@ internal object XtreamMatchIndex {
                                         if (it.epgId != null) ins.bindText(10, it.epgId) else ins.bindNull(10)
                                         ins.bindLong(11, if (it.hasArchive) 1L else 0L)
                                         ins.bindLong(12, it.pos.toLong())
+                                        if (entity != null) ins.bindText(13, entity) else ins.bindNull(13)
                                         ins.step()
                                     }
                                 }
@@ -732,6 +790,18 @@ internal object XtreamMatchIndex {
                             st.reset()
                             st.bindText(1, provider); st.bindText(2, kind.slug); st.bindText(3, row.key); st.bindLong(4, row.sid.toLong())
                             st.step()
+                        }
+                    }
+                    if (kind == MatchKind.LIVE) {
+                        // First-seen identity per sid, never overwritten (see live_sid_history).
+                        c.prepare("INSERT OR IGNORE INTO live_sid_history(provider, sid, entity_id, seen_at) VALUES(?,?,?,?)").use { st ->
+                            val seenAt = now()
+                            for (item in chunk) {
+                                st.reset()
+                                st.bindText(1, provider); st.bindLong(2, item.sid.toLong())
+                                st.bindText(3, IptvIdentity.entityId(provider, item.name, item.epgId)); st.bindLong(4, seenAt)
+                                st.step()
+                            }
                         }
                     }
                     c.execSQL("COMMIT")

@@ -11,6 +11,7 @@ import com.nuvio.app.core.contracts.IptvCatalogAccess
 import com.nuvio.app.core.contracts.IptvContentClassifierAccess
 import com.nuvio.app.features.iptv.XtreamContentClassifier
 import com.nuvio.app.features.iptv.XtreamSyncParticipant
+import com.nuvio.app.features.iptv.overlay.IptvOverlaySyncParticipant
 import com.nuvio.app.features.radar.RadarSyncParticipant
 import com.nuvio.app.core.contracts.SyncParticipantRegistry
 import com.nuvio.app.core.contracts.LocalStateCleanerRegistry
@@ -86,6 +87,7 @@ fun registerFeatureContributions() {
     IptvContentClassifierAccess.register(XtreamContentClassifier)
     SyncParticipantRegistry.register(XtreamSyncParticipant)
     SyncParticipantRegistry.register(RadarSyncParticipant)
+    SyncParticipantRegistry.register(IptvOverlaySyncParticipant)
     LocalStateCleanerRegistry.register(XtreamRecentsCleaner)
     LocalStateCleanerRegistry.register(RecLocalStateCleaner)
     LocalStateCleanerRegistry.register(XtreamAccountsCleaner)

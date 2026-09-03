@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -98,6 +99,7 @@ fun LiveGuideGrid(
     /** A settled window of channels to fetch now/next for, in the order they should resolve. */
     onNeedProgrammes: (List<String>) -> Unit,
     onSelectChannel: (LiveGuideChannel) -> Unit,
+    onLongPressChannel: (LiveGuideChannel) -> Unit = {},
     onProgrammeAction: (LiveGuideChannel, XtreamProgram, XtreamCatchUp.ProgrammeAction) -> Unit,
     onTravel: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -243,6 +245,7 @@ fun LiveGuideGrid(
                     surface = colors.surface,
                     border = colors.borderSubtle,
                     onClick = { onSelectChannel(channel) },
+                    onLongClick = { onLongPressChannel(channel) },
                     onProgrammeAction = { programme, action -> onProgrammeAction(channel, programme, action) },
                 )
             }
@@ -295,6 +298,7 @@ private fun GuideRow(
     surface: Color,
     border: Color,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
     onProgrammeAction: (XtreamProgram, XtreamCatchUp.ProgrammeAction) -> Unit,
 ) {
     val rowBg = if (isCurrent) accent.copy(alpha = 0.10f) else surface
@@ -310,7 +314,7 @@ private fun GuideRow(
             modifier = Modifier
                 .width(CHANNEL_COL_WIDTH)
                 .height(ROW_HEIGHT)
-                .clickable(onClick = onClick)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
                 .padding(horizontal = NuvioTokens.Space.s4, vertical = NuvioTokens.Space.s6),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s2, Alignment.CenterVertically),

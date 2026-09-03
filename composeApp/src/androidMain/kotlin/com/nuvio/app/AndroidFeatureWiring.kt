@@ -25,6 +25,7 @@ fun registerAndroidStartup() {
     AndroidStartup.registerTask { M3UFilePicker.initialize(it) }
     AndroidStartup.registerTask { MatchDbDriver.initialize(it) }
     AndroidStartup.registerTask { IptvContentDbDriver.initialize(it) }
+    AndroidStartup.registerTask { com.nuvio.app.features.iptv.overlay.OverlayDbDriver.initialize(it) }
     AndroidStartup.registerTask { EpgMirrorDbDriver.initialize(it) }
     // P3: periodic background refresh of overdue IPTV playlists (idempotent — KEEP).
     AndroidStartup.registerTask { IptvRefreshWorker.schedule(it) }

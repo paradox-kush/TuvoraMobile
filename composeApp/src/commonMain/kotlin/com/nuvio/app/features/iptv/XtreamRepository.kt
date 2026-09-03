@@ -43,6 +43,16 @@ object XtreamRepository : IptvCatalog {
     override val enabledAccountCount: Int get() = _uiState.value.accounts.count { it.enabled }
 
     private var loaded = false
+
+    /**
+     * Test seam: installs [accounts] as the loaded state without touching storage, so unit tests can
+     * exercise resolution paths that look accounts up by id (e.g. [XtreamItemRegistry.liveStreamUrlFor]).
+     * Same idiom as `PosterEnricher.resetForTests` — never called from production code.
+     */
+    internal fun installAccountsForTest(accounts: List<XtreamAccount>) {
+        loaded = true
+        _uiState.value = XtreamUiState(accounts = accounts)
+    }
     private var currentProfileId = 1
 
     override fun ensureLoaded() {
@@ -98,7 +108,21 @@ object XtreamRepository : IptvCatalog {
     internal fun addFromForm(input: XtreamFormInput, onResult: (Boolean) -> Unit) {
         when (input.sourceType) {
             SOURCE_TYPE_M3U_FILE -> addFileFromForm(input, existingId = null, onResult = onResult)
-            SOURCE_TYPE_M3U_URL -> verifyAndSave(m3uAccountFromForm(input), "Enter an M3U playlist URL", onResult)
+            SOURCE_TYPE_M3U_URL -> {
+                // An Xtream panel's own get.php export pasted into the M3U field is saved as the
+                // Xtream account it is (catch-up, guide history). Add-time only — editing never
+                // re-keys (see recogniseXtreamPanelInM3uField). If the panel's API refuses while
+                // get.php serves (CDN-fronted panels do this), the M3U lane still works.
+                val panel = recogniseXtreamPanelInM3uField(input)
+                if (panel == null) {
+                    verifyAndSave(m3uAccountFromForm(input), "Enter an M3U playlist URL", onResult)
+                } else {
+                    verifyAndSave(panel, "Enter an M3U playlist URL") { ok ->
+                        if (ok) onResult(true)
+                        else verifyAndSave(m3uAccountFromForm(input), "Enter an M3U playlist URL", onResult)
+                    }
+                }
+            }
             SOURCE_TYPE_STALKER -> verifyAndSave(stalkerAccountFromForm(input), "Enter a portal URL and MAC address", onResult)
             else -> verifyAndSave(xtreamAccountFromForm(input), "Enter a server URL, username and password", onResult)
         }
@@ -337,6 +361,7 @@ object XtreamRepository : IptvCatalog {
         XtreamHubRepository.resetForProfile()
         XtreamSearchIndex.resetForProfile()
         scope.launch { runCatching { XtreamMatchIndex.purge(id) } }
+        com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.onPlaylistRemoved(id)
         scope.launch { runCatching { com.nuvio.app.features.epg.EpgMirrorDb.purgeProvider(id) } }
         val prefix = XtreamItemRegistry.accountPrefix(id)
         LibraryRepository.migrateIdPrefix(prefix, null)

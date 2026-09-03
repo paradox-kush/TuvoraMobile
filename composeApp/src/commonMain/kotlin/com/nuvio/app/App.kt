@@ -144,6 +144,7 @@ import com.nuvio.app.features.catalog.CatalogScreen
 import com.nuvio.app.features.catalog.CatalogTarget
 import com.nuvio.app.features.cloud.CloudLibraryContentType
 import com.nuvio.app.features.cloud.CloudLibraryFile
+import com.nuvio.app.features.player.LiveChannelLaunchPolicy
 import com.nuvio.app.features.cloud.CloudLibraryItem
 import com.nuvio.app.features.cloud.CloudLibraryPlaybackResult
 import com.nuvio.app.features.cloud.CloudLibraryPlaybackTargetLookupResult
@@ -1020,6 +1021,7 @@ private fun MainAppContent(
     val cloudLibraryPlayFailedText = stringResource(Res.string.cloud_library_play_failed)
     val cloudLibraryPlayDisabledText = stringResource(Res.string.cloud_library_play_disabled)
     val cloudLibraryPlayNotConnectedText = stringResource(Res.string.cloud_library_play_not_connected)
+    val liveChannelUnavailableText = stringResource(Res.string.live_channel_play_failed)
     val nativeTabHomeTitle = stringResource(Res.string.compose_nav_home)
     val nativeTabSearchTitle = stringResource(Res.string.compose_nav_search)
     val nativeTabLibraryTitle = stringResource(Res.string.compose_nav_library)
@@ -1466,8 +1468,14 @@ private fun MainAppContent(
             return
         }
         coroutineScope.launch {
-            val resolved = com.nuvio.app.core.contracts.LivePlaybackAccess.current().liveStreamUrlForAsync(contentId) ?: return@launch
-            launchLiveChannel(contentId, name, logo, resolved, replay)
+            val resolved = com.nuvio.app.core.contracts.LivePlaybackAccess.current().liveStreamUrlForAsync(contentId)
+            // The picker is already gone, so a failed resolve must say so rather than return silently.
+            when (val outcome = LiveChannelLaunchPolicy.resolutionOutcome(resolved)) {
+                is LiveChannelLaunchPolicy.Outcome.Launch ->
+                    launchLiveChannel(contentId, name, logo, outcome.url, replay)
+                LiveChannelLaunchPolicy.Outcome.Feedback ->
+                    NuvioToastController.show(liveChannelUnavailableText)
+            }
         }
     }
 

@@ -42,6 +42,8 @@ data class LiveGuideChannel(
     val hasArchive: Boolean = false,
     /** The panel's per-channel window (days); 0 = panel silent → the permissive rules apply. */
     val catchUpDays: Int = 0,
+    /** The channel's durable canon-v1 identity — the key the personalization overlay + native toggle use. */
+    val entityId: String = "",
 )
 
 /**
@@ -105,13 +107,33 @@ object LiveTvData {
                 categoryId = ch.categoryId,
                 hasArchive = supportsCatchUp && ch.hasArchive,
                 catchUpDays = ch.catchUpDays,
+                entityId = com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(account.id, ch.name, ch.epgChannelId),
             )
         }
-        return if (currentCategory != null) {
+        // The channel column is the fully-materialized surface (the whole account, no paging), so the
+        // personalization overlay applies in full here: hidden dropped, pinned/reordered, renamed. The
+        // current channel's category is surfaced first as the provider baseline the overlay orders on top of.
+        val base = if (currentCategory != null) {
             mapped.sortedByDescending { it.categoryId == currentCategory }
         } else {
             mapped
         }
+        val overlay = try {
+            com.nuvio.app.features.iptv.overlay.IptvOverlayStore
+                .snapshot(com.nuvio.app.features.profiles.ProfileRepository.activeProfileId)
+                .channels
+        } catch (e: Throwable) {
+            // Overlay store momentarily unavailable (e.g. first cold open) — show the unfiltered guide
+            // rather than blanking it; the next recompose re-applies once the store is ready.
+            return base
+        }
+        if (overlay.isEmpty()) return base
+        val tagged = base.mapIndexed { i, ch ->
+            com.nuvio.app.features.iptv.overlay.IptvChannelOverlayPolicy.Tagged(ch.entityId, i, ch)
+        }
+        return com.nuvio.app.features.iptv.overlay.IptvChannelOverlayPolicy.displayed(
+            tagged, overlay, honorOrder = true, withName = { row, newName -> row.copy(name = newName) },
+        )
     }
 
     /**

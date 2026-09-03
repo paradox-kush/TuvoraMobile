@@ -16,6 +16,7 @@ internal object IptvProfileChange : ProfileChangeParticipant {
         XtreamItemRegistry.resetForProfile()
         XtreamHubRepository.resetForProfile()
         XtreamSearchIndex.resetForProfile()
+        com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.onProfileChanged(profileIndex)
         XtreamMatchSyncService.reset()
     }
 }

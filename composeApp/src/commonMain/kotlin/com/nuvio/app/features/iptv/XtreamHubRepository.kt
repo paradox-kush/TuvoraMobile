@@ -6,6 +6,7 @@ import com.nuvio.app.features.iptv.match.XtreamMatchIndex
 import com.nuvio.app.features.iptv.match.XtreamTmdbResolver
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
+import co.touchlab.kermit.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlin.concurrent.Volatile
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
@@ -123,7 +125,25 @@ object XtreamHubRepository {
     )
 
     /** Sync accounts, show the current section (from cache if warm), and prefetch the rest. */
+    private var overlayObserving = false
+    @Volatile private var overlaySnapshot = com.nuvio.app.features.iptv.overlay.OverlaySnapshot()
+    /** Re-apply the overlay to the current section when a hide/reorder edit lands (native or synced). */
+    private fun observeOverlay() {
+        if (overlayObserving) return
+        overlayObserving = true
+        com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.ensureLoaded()
+        scope.launch {
+            com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.uiState.collect {
+                overlaySnapshot = it
+                val st = _uiState.value
+                val acc = st.selectedAccountId ?: return@collect
+                showSection(acc, st.section)
+            }
+        }
+    }
+
     fun ensureLoaded() {
+        observeOverlay()
         XtreamRepository.ensureLoaded()
         // Warm the canonical-EPG mirror (12h TTL, no-op when fresh) — it backs the hub's
         // now/next whenever the panel's own EPG is missing.
@@ -201,11 +221,32 @@ object XtreamHubRepository {
         }
         val cached = cachedCategories(accountId, section)
         if (cached != null) {
-            _uiState.update { it.copy(categories = cached, loadingCategories = false, loadError = null) }
+            // Serve the cache, but STILL apply the personalization overlay (the cache holds the raw
+            // provider list; hiding/reordering a category must show without a re-fetch).
+            _uiState.update { it.copy(categories = applyCategoryOverlay(accountId, section.contentKey, cached), loadingCategories = false, loadError = null) }
             return
         }
         _uiState.update { it.copy(categories = emptyList(), loadingCategories = true, loadError = null) }
         scope.launch { fetchCategoryList(accountId, section) }
+    }
+
+    /**
+     * Apply the personalization overlay to a hub category list: hidden categories removed, pinned/
+     * reordered, renamed (keyed on the durable category identity). Degrades to the raw list if the
+     * overlay store is momentarily unavailable. Custom-group rows are a follow-on (they need member
+     * loading); the guide already carries channel-level hide/pin/order.
+     */
+    private fun applyCategoryOverlay(accountId: String, contentType: String, cats: List<XtreamHubCategory>): List<XtreamHubCategory> {
+        val overlay = overlaySnapshot.categories
+        if (overlay.isEmpty()) return cats
+        val tagged = cats.mapIndexed { i, c ->
+            com.nuvio.app.features.iptv.overlay.IptvCategoryOverlayPolicy.TaggedCategory(
+                com.nuvio.app.features.iptv.identity.IptvIdentity.categoryKey(accountId, contentType, c.name), i, c.id, c.name,
+            )
+        }
+        val displayed = com.nuvio.app.features.iptv.overlay.IptvCategoryOverlayPolicy.displayed(tagged, overlay, emptyList())
+        val byId = cats.associateBy { it.id }
+        return displayed.mapNotNull { d -> byId[d.id]?.copy(name = d.name) }
     }
 
     private suspend fun fetchCategoryList(accountId: String, section: XtreamHubSection) {
@@ -225,8 +266,9 @@ object XtreamHubRepository {
                     cache[accountId to section] = next
                     next
                 }
+                val shown = applyCategoryOverlay(account.id, section.contentKey, merged)
                 if (isCurrent(accountId, section)) {
-                    _uiState.update { it.copy(categories = merged, loadingCategories = false, loadError = null) }
+                    _uiState.update { it.copy(categories = shown, loadingCategories = false, loadError = null) }
                 }
                 return
             }
@@ -263,8 +305,9 @@ object XtreamHubRepository {
             cache[accountId to section] = next
             next
         }
+        val shown = applyCategoryOverlay(account.id, section.contentKey, merged)
         if (isCurrent(accountId, section)) {
-            _uiState.update { it.copy(categories = merged, loadingCategories = false, loadError = null) }
+            _uiState.update { it.copy(categories = shown, loadingCategories = false, loadError = null) }
         }
     }
 
@@ -686,7 +729,7 @@ object XtreamHubRepository {
             cache[key] = next
             next
         }
-        if (isCurrent(u.accountId, section)) _uiState.update { it.copy(categories = updated) }
+        if (isCurrent(u.accountId, section)) _uiState.update { it.copy(categories = applyCategoryOverlay(u.accountId, section.contentKey, updated)) }
     }
 
     private fun isCurrent(accountId: String, section: XtreamHubSection): Boolean =
@@ -712,6 +755,6 @@ object XtreamHubRepository {
                 next
             }
         } ?: return
-        if (isCurrent(accountId, section)) _uiState.update { it.copy(categories = updated) }
+        if (isCurrent(accountId, section)) _uiState.update { it.copy(categories = applyCategoryOverlay(accountId, section.contentKey, updated)) }
     }
 }

@@ -1823,6 +1823,7 @@
     <string name="cloud_library_no_playable_files">No playable files</string>
     <string name="cloud_library_play_disabled">Cloud library is off.</string>
     <string name="cloud_library_play_failed">Couldn't play this cloud file.</string>
+    <string name="live_channel_play_failed">Couldn't play this channel.</string>
     <string name="cloud_library_play_file">Play file</string>
     <string name="cloud_library_play_not_connected">Cloud service is not connected.</string>
     <string name="cloud_library_play_provider_not_connected">%1$s is not connected.</string>
