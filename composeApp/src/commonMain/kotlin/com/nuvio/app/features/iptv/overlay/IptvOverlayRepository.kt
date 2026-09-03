@@ -2,6 +2,7 @@ package com.nuvio.app.features.iptv.overlay
 
 import com.nuvio.app.features.profiles.ProfileRepository
 import com.nuvio.app.features.trakt.TraktPlatformClock
+import co.touchlab.kermit.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,6 +30,12 @@ internal object IptvOverlayRepository {
     private fun now() = TraktPlatformClock.nowEpochMs()
     private fun profile() = ProfileRepository.activeProfileId
 
+    // The overlay is an OPTIONAL layer: a DB/sync/apply failure must degrade to the unfiltered guide,
+    // never crash. Every fire-and-forget op runs through here so a throw can't reach the scope's
+    // uncaught handler (parity with the TuvoraTV v1.6.0 IPTV-open crash fix).
+    private fun launchSafely(block: suspend () -> Unit) =
+        scope.launch { runCatching { block() }.onFailure { Logger.w("IptvOverlay") { "overlay op failed: ${it.message}" } } }
+
     fun ensureLoaded() {
         val p = profile()
         if (loadedProfile == p) return
@@ -48,7 +55,7 @@ internal object IptvOverlayRepository {
 
     private fun reload() {
         val p = profile()
-        scope.launch { _uiState.value = IptvOverlayStore.snapshot(p) }
+        launchSafely { _uiState.value = IptvOverlayStore.snapshot(p) }
     }
 
     /** Ordered-sync entry point: pull one profile's overlay edits (called from the SyncManager loop). */
@@ -61,7 +68,7 @@ internal object IptvOverlayRepository {
     /** Pull the website's (and other devices') overlay edits, apply, and refresh the snapshot. Cheap delta. */
     fun pullFromServer() {
         val p = profile()
-        scope.launch {
+        launchSafely {
             runCatching { if (IptvOverlaySyncAdapter.pullInto(p)) _uiState.value = IptvOverlayStore.snapshot(p) }
         }
     }
@@ -69,7 +76,7 @@ internal object IptvOverlayRepository {
     /** Push this device's edits to the server so the web + other devices see them. */
     private fun pushToServer() {
         val p = profile()
-        scope.launch { runCatching { IptvOverlaySyncAdapter.push(p) } }
+        launchSafely { IptvOverlaySyncAdapter.push(p) }
     }
 
     // ---- channel intents -------------------------------------------------------------------------
@@ -78,7 +85,7 @@ internal object IptvOverlayRepository {
         val p = profile()
         val current = _uiState.value.channels[entityId] ?: ChannelOverlay()
         val next = transform(current)
-        scope.launch {
+        launchSafely {
             IptvOverlayStore.setChannel(p, entityId, playlistId, next, now())
             _uiState.value = IptvOverlayStore.snapshot(p)
             pushToServer()
@@ -103,7 +110,7 @@ internal object IptvOverlayRepository {
     /** Assign explicit positions to a whole ordered list of channels (a drag-reorder captures the order). */
     fun reorderChannels(playlistId: String?, orderedEntityIds: List<String>) {
         val p = profile()
-        scope.launch {
+        launchSafely {
             val t = now()
             orderedEntityIds.forEachIndexed { i, entity ->
                 val cur = _uiState.value.channels[entity] ?: ChannelOverlay()
@@ -119,7 +126,7 @@ internal object IptvOverlayRepository {
         val p = profile()
         val current = _uiState.value.categories[categoryKey] ?: CategoryOverlay()
         val next = transform(current)
-        scope.launch {
+        launchSafely {
             IptvOverlayStore.setCategory(p, playlistId, contentType, categoryKey, next, now())
             _uiState.value = IptvOverlayStore.snapshot(p)
             pushToServer()
@@ -139,7 +146,7 @@ internal object IptvOverlayRepository {
 
     fun putGroup(group: CustomGroup) {
         val p = profile()
-        scope.launch {
+        launchSafely {
             IptvOverlayStore.putGroup(p, group, now())
             _uiState.value = IptvOverlayStore.snapshot(p)
         }
@@ -147,7 +154,7 @@ internal object IptvOverlayRepository {
 
     fun deleteGroup(groupId: String) {
         val p = profile()
-        scope.launch {
+        launchSafely {
             IptvOverlayStore.deleteGroup(p, groupId, now())
             _uiState.value = IptvOverlayStore.snapshot(p)
         }
@@ -156,7 +163,7 @@ internal object IptvOverlayRepository {
     /** After a playlist is removed, drop its channel/category overlay (custom groups may span playlists). */
     fun onPlaylistRemoved(playlistId: String) {
         val p = profile()
-        scope.launch {
+        launchSafely {
             IptvOverlayStore.purgePlaylist(p, playlistId)
             _uiState.value = IptvOverlayStore.snapshot(p)
         }
