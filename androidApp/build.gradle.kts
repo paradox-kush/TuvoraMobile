@@ -54,6 +54,13 @@ val buildsReleaseApks = requestedTaskNames.any {
 // When the same invocation also builds an AAB (release.yml runs assemble + bundle together),
 // ABI splits must be OFF or bundling fails with "Multiple shrunk-resources files". Mirror TV.
 val buildingAppBundle = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
+// ARM-only ABI trim is expressed TWO ways depending on this flag, because AGP 9 forbids
+// ndk.abiFilters and an enabled splits.abi filter in the same configuration:
+//  - splits ENABLED  (assemble-only release) -> splits.abi.include restricts to ARM.
+//  - splits DISABLED (the shipped assemble+bundle path, bundle-only, and debug) -> the
+//    single fat APK / AAB would otherwise carry every compiled ABI, so ndk.abiFilters
+//    restricts compilation to ARM instead. Exactly one of the two is active at a time.
+val abiSplitsEnabled = buildsReleaseApks && !buildingAppBundle
 
 android {
     namespace = "com.nuvio.android"
@@ -77,6 +84,23 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = releaseAppVersionCode
         versionName = releaseAppVersionName
+
+        // Compile native code for ARM only (see abiSplitsEnabled above). In the shipped
+        // release path release.yml runs assemble+bundle together, so splits are OFF and
+        // assembleFullRelease emits a SINGLE fat APK carrying every COMPILED ABI. Without
+        // this filter that APK bundled libmpv + FFmpeg for all four ABIs (~105 MB) —
+        // x86/x86_64 being pure dead weight, since every real phone is ARM. Restricting to
+        // both ARM ABIs shrinks the shipped Tuvora-<ver>.apk (and the AAB) while still
+        // installing on every ARM device, 64-bit and 32-bit, with no wrong-ABI brick. Per
+        // Google's fallback ("if you can't ship x86, include both arm32 and arm64"), keeping
+        // armeabi-v7a also covers x86 Chromebooks via arm32 translation. Only set when splits
+        // are OFF — AGP 9 rejects abiFilters alongside an enabled splits.abi filter.
+        if (!abiSplitsEnabled) {
+            ndk {
+                abiFilters.clear()
+                abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+            }
+        }
     }
 
     flavorDimensions += "distribution"
@@ -112,9 +136,11 @@ android {
 
     splits {
         abi {
-            isEnable = buildsReleaseApks && !buildingAppBundle
+            isEnable = abiSplitsEnabled
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            // ARM only — keep in sync with defaultConfig.ndk.abiFilters above. x86/x86_64 are
+            // never compiled, so listing them here would only produce empty/dead split APKs.
+            include("armeabi-v7a", "arm64-v8a")
             isUniversalApk = false
         }
     }
