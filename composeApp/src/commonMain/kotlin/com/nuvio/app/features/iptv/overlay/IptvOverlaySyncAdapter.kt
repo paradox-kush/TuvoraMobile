@@ -1,6 +1,7 @@
 package com.nuvio.app.features.iptv.overlay
 
 import com.nuvio.app.core.network.SupabaseProvider
+import com.nuvio.app.core.sync.SyncSession
 import com.nuvio.app.core.sync.putSyncOriginClientId
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
@@ -42,6 +43,10 @@ internal object IptvOverlaySyncAdapter {
 
     /** Pull all overlay changes since the local cursor and apply them; returns true if anything changed. */
     suspend fun pullInto(profileId: Int): Boolean {
+        // No cloud sync for a signed-out/anon user (or a lapsed session): every sync_* RPC would run as
+        // `anon` and 42501. The local overlay still applies (IptvOverlayStore reads are ungated). Same gate
+        // as the rest of the sync layer — SyncSession.canSync() == AuthManager.canSync on TV.
+        if (!SyncSession.canSync()) return false
         var since = IptvOverlayStore.getCursor(profileId)
         var changed = false
         while (true) {
@@ -83,6 +88,7 @@ internal object IptvOverlaySyncAdapter {
 
     /** Push this device's overlay rows (currently channel edits) to the server. */
     suspend fun push(profileId: Int) {
+        if (!SyncSession.canSync()) return   // signed-out/anon: keep the edit local, don't 42501 the server
         val rows = IptvOverlayStore.rowsForPush(profileId)
         if (rows.isEmpty()) return
         val upserts = rows.filter { !it.deleted }
