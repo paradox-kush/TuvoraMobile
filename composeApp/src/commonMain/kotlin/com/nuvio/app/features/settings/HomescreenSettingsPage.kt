@@ -42,6 +42,8 @@ import nuvio.composeapp.generated.resources.layout_hide_unreleased
 import nuvio.composeapp.generated.resources.layout_hide_unreleased_sub
 import nuvio.composeapp.generated.resources.layout_catalog_type
 import nuvio.composeapp.generated.resources.layout_catalog_type_sub
+import nuvio.composeapp.generated.resources.layout_show_live_on_home
+import nuvio.composeapp.generated.resources.layout_show_live_on_home_sub
 import nuvio.composeapp.generated.resources.settings_homescreen_empty_message
 import nuvio.composeapp.generated.resources.settings_homescreen_empty_title
 import nuvio.composeapp.generated.resources.settings_homescreen_keep_home_focused
@@ -68,6 +70,7 @@ internal fun LazyListScope.homescreenSettingsContent(
     heroEnabled: Boolean,
     showCatalogType: Boolean,
     hideUnreleasedContent: Boolean,
+    showLiveOnHome: Boolean,
     items: List<HomeCatalogSettingsItem>,
 ) {
     val selectedHeroSourceCount = items.count { it.heroSourceEnabled }
@@ -108,6 +111,14 @@ internal fun LazyListScope.homescreenSettingsContent(
                     checked = hideUnreleasedContent,
                     isTablet = isTablet,
                     onCheckedChange = HomeCatalogSettingsRepository::setHideUnreleasedContent,
+                )
+                SettingsGroupDivider(isTablet = isTablet)
+                SettingsSwitchRow(
+                    title = stringResource(Res.string.layout_show_live_on_home),
+                    description = stringResource(Res.string.layout_show_live_on_home_sub),
+                    checked = showLiveOnHome,
+                    isTablet = isTablet,
+                    onCheckedChange = HomeCatalogSettingsRepository::setShowLiveOnHome,
                 )
             }
         }

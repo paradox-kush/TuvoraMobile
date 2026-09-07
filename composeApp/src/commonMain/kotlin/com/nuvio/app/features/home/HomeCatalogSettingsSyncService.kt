@@ -41,6 +41,7 @@ data class SyncCatalogItem(
 data class SyncHomeCatalogPayload(
     @SerialName("show_catalog_type") val showCatalogType: Boolean = true,
     @SerialName("hide_unreleased_content") val hideUnreleasedContent: Boolean = false,
+    @SerialName("show_live_on_home") val showLiveOnHome: Boolean = true,
     val items: List<SyncCatalogItem> = emptyList(),
 )
 
@@ -78,6 +79,7 @@ object HomeCatalogSettingsSyncService {
 
     private const val HIDE_UNRELEASED_CONTENT_KEY = "hide_unreleased_content"
     private const val SHOW_CATALOG_TYPE_KEY = "show_catalog_type"
+    private const val SHOW_LIVE_ON_HOME_KEY = "show_live_on_home"
 
     @Volatile
     var isSyncingFromRemote: Boolean = false
@@ -91,6 +93,8 @@ object HomeCatalogSettingsSyncService {
     private var cachedSharedSettings: CachedSharedSettings? = null
 
     suspend fun pullFromServer(profileId: Int) {
+        // Signed-out / lapsed session: skip the RPC (it would run as `anon` → 42501). Local settings stay.
+        if (!com.nuvio.app.core.sync.SyncSession.canSync()) return
         runCatching {
             val pullToken = currentPullToken(profileId) ?: return
             val localPayload = HomeCatalogSettingsRepository.exportToSyncPayload()
@@ -218,6 +222,11 @@ object HomeCatalogSettingsSyncService {
                 decoded.hideUnreleasedContent
             } else {
                 localPayload.hideUnreleasedContent
+            },
+            showLiveOnHome = if (settingsJson.containsKey(SHOW_LIVE_ON_HOME_KEY)) {
+                decoded.showLiveOnHome
+            } else {
+                localPayload.showLiveOnHome
             },
         )
     }.getOrNull()

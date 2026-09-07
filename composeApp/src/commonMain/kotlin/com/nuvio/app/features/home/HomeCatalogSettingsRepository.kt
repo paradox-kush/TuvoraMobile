@@ -35,6 +35,10 @@ data class HomeCatalogSettingsUiState(
     val heroEnabled: Boolean = true,
     val showCatalogType: Boolean = true,
     val hideUnreleasedContent: Boolean = false,
+    // Recently-watched live channels on the home screen (inside Continue Watching). Live channels have no
+    // resume position, so mobile/desktop surface them as a "recents" row; off keeps home VOD-only (TV
+    // never shows them). Default true = current behaviour.
+    val showLiveOnHome: Boolean = true,
     val items: List<HomeCatalogSettingsItem> = emptyList(),
 ) {
     val signature: String
@@ -44,6 +48,8 @@ data class HomeCatalogSettingsUiState(
             append(showCatalogType)
             append('|')
             append(hideUnreleasedContent)
+            append('|')
+            append(showLiveOnHome)
             append('|')
             append(
                 items.joinToString(separator = "|") { item ->
@@ -81,6 +87,7 @@ private data class StoredHomeCatalogSettingsPayload(
     val heroEnabled: Boolean = true,
     val showCatalogType: Boolean = true,
     val hideUnreleasedContent: Boolean = false,
+    val showLiveOnHome: Boolean = true,
     val items: List<StoredHomeCatalogPreference> = emptyList(),
 )
 
@@ -107,6 +114,7 @@ object HomeCatalogSettingsRepository {
     private var heroEnabled = true
     private var showCatalogType = true
     private var hideUnreleasedContent = false
+    private var showLiveOnHome = true
 
     fun onProfileChanged() {
         hasLoaded = false
@@ -114,6 +122,7 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        showLiveOnHome = true
         definitions = emptyList()
         collectionDefinitions = emptyList()
         _uiState.value = HomeCatalogSettingsUiState()
@@ -127,6 +136,7 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        showLiveOnHome = true
         _uiState.value = HomeCatalogSettingsUiState()
     }
 
@@ -199,6 +209,16 @@ object HomeCatalogSettingsRepository {
         HomeCatalogSettingsSyncService.triggerPush()
     }
 
+    fun setShowLiveOnHome(enabled: Boolean) {
+        ensureLoaded()
+        if (showLiveOnHome == enabled) return
+        showLiveOnHome = enabled
+        publish()
+        persist()
+        HomeRepository.applyCurrentSettings()
+        HomeCatalogSettingsSyncService.triggerPush()
+    }
+
     fun setHeroSourceEnabled(key: String, enabled: Boolean) {
         updatePreference(key, pushRemote = false) { preference ->
             if (!enabled) {
@@ -228,6 +248,7 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        showLiveOnHome = true
         preferences = emptyMap()
         normalizePreferences()
         publish()
@@ -279,6 +300,7 @@ object HomeCatalogSettingsRepository {
             heroEnabled = parsedPayload.heroEnabled
             showCatalogType = parsedPayload.showCatalogType
             hideUnreleasedContent = parsedPayload.hideUnreleasedContent
+            showLiveOnHome = parsedPayload.showLiveOnHome
             preferences = parsedPayload.items.associateBy { it.key }
             publish()
             return
@@ -379,6 +401,7 @@ object HomeCatalogSettingsRepository {
             heroEnabled = heroEnabled,
             showCatalogType = showCatalogType,
             hideUnreleasedContent = hideUnreleasedContent,
+            showLiveOnHome = showLiveOnHome,
             items = items,
         )
     }
@@ -390,6 +413,7 @@ object HomeCatalogSettingsRepository {
                     heroEnabled = heroEnabled,
                     showCatalogType = showCatalogType,
                     hideUnreleasedContent = hideUnreleasedContent,
+                    showLiveOnHome = showLiveOnHome,
                     items = preferences.values.sortedBy { it.order },
                 ),
             ),
@@ -488,6 +512,7 @@ object HomeCatalogSettingsRepository {
         return SyncHomeCatalogPayload(
             showCatalogType = showCatalogType,
             hideUnreleasedContent = hideUnreleasedContent,
+            showLiveOnHome = showLiveOnHome,
             items = items,
         )
     }
@@ -496,6 +521,7 @@ object HomeCatalogSettingsRepository {
         ensureLoaded()
         showCatalogType = payload.showCatalogType
         hideUnreleasedContent = payload.hideUnreleasedContent
+        showLiveOnHome = payload.showLiveOnHome
         if (payload.items.isNotEmpty()) {
             val existingHeroState = preferences.mapValues { it.value.heroSourceEnabled }
             val remotePreferences = payload.items.associate { item ->
