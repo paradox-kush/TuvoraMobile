@@ -574,6 +574,9 @@ object ProfileRepository {
     }
 
     suspend fun pullProfileLocks(): List<ProfileLockState> {
+        // Signed-out / lapsed session: skip the RPC (it would run as `anon` → 42501, the single
+        // biggest source of those on the backend). Mirrors the gate in pullProfiles() above.
+        if (!com.nuvio.app.core.sync.SyncSession.canSync()) return emptyList()
         return runCatching {
             val result = SupabaseProvider.client.postgrest.rpc("sync_pull_profile_locks")
             result.decodeList<ProfileLockState>()

@@ -21,6 +21,7 @@ object SupabaseWatchedSyncAdapter : WatchedSyncAdapter {
     }
 
     override suspend fun getDeltaCursor(profileId: Int): Long {
+        SyncSession.requirePullable()
         val params = buildJsonObject {
             put("p_profile_id", profileId)
         }
@@ -34,6 +35,7 @@ object SupabaseWatchedSyncAdapter : WatchedSyncAdapter {
         sinceEventId: Long,
         limit: Int,
     ): List<WatchedDeltaEvent> {
+        SyncSession.requirePullable()
         val params = buildJsonObject {
             put("p_profile_id", profileId)
             put("p_since_event_id", sinceEventId)
@@ -58,6 +60,7 @@ object SupabaseWatchedSyncAdapter : WatchedSyncAdapter {
         profileId: Int,
         pageSize: Int,
     ): List<WatchedItem> {
+        SyncSession.requirePullable()
         val serverItems = mutableListOf<WatchedSyncItem>()
         var page = 1
 

@@ -60,6 +60,17 @@ internal object SyncSession {
     }
 
     /**
+     * Throws [SyncNotAuthenticatedException] unless [canSync] — the pull-side twin of
+     * [requirePushable]. A pull fired without a live session runs as `anon` and comes back
+     * `42501 permission denied for function sync_pull_…`; refusing it here keeps that noise off the
+     * backend and, because [isSyncAuthRefusal] recognises the throw, abandons the rest of a cycle
+     * whose session lapsed mid-flight instead of firing every remaining step as `anon`.
+     */
+    fun requirePullable() {
+        if (!canSync()) throw SyncNotAuthenticatedException()
+    }
+
+    /**
      * Reading `client` builds one on demand from the selected backend, which can throw before a
      * backend has been resolved. No client means no session, which is the answer we want anyway.
      */

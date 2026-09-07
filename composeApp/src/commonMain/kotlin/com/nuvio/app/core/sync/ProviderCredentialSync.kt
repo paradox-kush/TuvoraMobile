@@ -76,6 +76,9 @@ object ProviderCredentialSync {
     }
 
     suspend fun syncFromRemote(profileId: Int): Boolean = syncMutex.withLock {
+        // Signed-out / lapsed session: skip push+pull (both would run as `anon` → 42501). The ordered
+        // sync cycle re-runs this after sign-in, so nothing is lost.
+        if (!SyncSession.canSync()) return@withLock false
         ensureRepositoriesLoaded()
         val credentialScope = currentScope(profileId) ?: return@withLock false
         try {

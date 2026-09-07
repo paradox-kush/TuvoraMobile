@@ -91,7 +91,12 @@ internal object IptvOverlaySyncAdapter {
         if (!SyncSession.canSync()) return   // signed-out/anon: keep the edit local, don't 42501 the server
         val rows = IptvOverlayStore.rowsForPush(profileId)
         if (rows.isEmpty()) return
-        val upserts = rows.filter { !it.deleted }
+        // Dedupe by (kind, okey) so a batch can't repeat a conflict target and trip SQLSTATE 21000
+        // ("ON CONFLICT DO UPDATE command cannot affect row a second time") — keep the freshest edit.
+        val upserts = IptvOverlayPushDedupPolicy.dedupe(
+            rows.filter { !it.deleted },
+            kind = { it.kind }, okey = { it.okey }, updatedAt = { it.updatedAt },
+        )
         val deletes = rows.filter { it.deleted }
         if (upserts.isNotEmpty()) {
             SupabaseProvider.client.postgrest.rpc(

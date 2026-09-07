@@ -4,6 +4,7 @@ import co.touchlab.kermit.Logger
 import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
 import com.nuvio.app.core.network.SupabaseProvider
+import com.nuvio.app.core.sync.SyncSession
 import com.nuvio.app.core.sync.putSyncOriginClientId
 import com.nuvio.app.features.profiles.ProfileRepository
 import io.github.jan.supabase.postgrest.postgrest
@@ -46,6 +47,9 @@ object CollectionSyncService {
 
     suspend fun pullFromServer(profileId: Int) {
         if (ProfileRepository.activeProfileId != profileId) return
+        // Signed-out / lapsed session: skip the RPC (it would run as `anon` and come back 42501).
+        // Mirrors the gate the other pull surfaces use; the next signed-in cycle pulls for real.
+        if (!SyncSession.canSync()) return
         runCatching {
             val params = buildJsonObject {
                 put("p_profile_id", profileId)

@@ -22,6 +22,7 @@ object SupabaseProgressSyncAdapter : ProgressSyncAdapter {
     }
 
     override suspend fun getDeltaCursor(profileId: Int): Long {
+        SyncSession.requirePullable()
         val params = buildJsonObject {
             put("p_profile_id", profileId)
         }
@@ -35,6 +36,7 @@ object SupabaseProgressSyncAdapter : ProgressSyncAdapter {
         sinceEventId: Long,
         limit: Int,
     ): List<ProgressDeltaEvent> {
+        SyncSession.requirePullable()
         val params = buildJsonObject {
             put("p_profile_id", profileId)
             put("p_since_event_id", sinceEventId)
@@ -68,6 +70,7 @@ object SupabaseProgressSyncAdapter : ProgressSyncAdapter {
         sinceLastWatched: Long?,
         limit: Int?,
     ): List<ProgressSyncRecord> {
+        SyncSession.requirePullable()
         val params = buildJsonObject {
             put("p_profile_id", profileId)
             if (sinceLastWatched != null) {

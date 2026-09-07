@@ -1,6 +1,7 @@
 package com.nuvio.app.features.library.sync
 
 import com.nuvio.app.core.network.SupabaseProvider
+import com.nuvio.app.core.sync.SyncSession
 import com.nuvio.app.core.sync.putSyncOriginClientId
 import com.nuvio.app.features.home.PosterShape
 import com.nuvio.app.features.library.LibraryItem
@@ -22,8 +23,9 @@ object SupabaseLibrarySyncAdapter : LibrarySyncAdapter {
     override suspend fun pullSnapshot(
         profileId: Int,
         pageSize: Int,
-    ): List<LibraryItem> =
-        collectOffsetPages(pageSize) { limit, offset ->
+    ): List<LibraryItem> {
+        SyncSession.requirePullable()
+        return collectOffsetPages(pageSize) { limit, offset ->
             val params = buildJsonObject {
                 put("p_profile_id", profileId)
                 put("p_limit", limit)
@@ -34,8 +36,10 @@ object SupabaseLibrarySyncAdapter : LibrarySyncAdapter {
                 .decodeList<LibrarySyncItem>()
                 .map(LibrarySyncItem::toLibraryItem)
         }
+    }
 
     override suspend fun getDeltaCursor(profileId: Int): Long {
+        SyncSession.requirePullable()
         val params = buildJsonObject {
             put("p_profile_id", profileId)
         }
@@ -49,6 +53,7 @@ object SupabaseLibrarySyncAdapter : LibrarySyncAdapter {
         sinceEventId: Long,
         limit: Int,
     ): List<LibraryDeltaEvent> {
+        SyncSession.requirePullable()
         val params = buildJsonObject {
             put("p_profile_id", profileId)
             put("p_since_event_id", sinceEventId)
