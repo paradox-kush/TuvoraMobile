@@ -44,6 +44,13 @@ data class LiveGuideChannel(
     val catchUpDays: Int = 0,
     /** The channel's durable canon-v1 identity — the key the personalization overlay + native toggle use. */
     val entityId: String = "",
+    /**
+     * The channel is pinned in the personalization overlay. Carried on the row so the guide can draw a
+     * visible pin marker beside the name — today a pin only FLOATS the channel to the top of its
+     * category (see [guideChannels]) with no visible cue. Sourced from the same overlay snapshot that
+     * drives the float, so the marker and the float never disagree.
+     */
+    val pinned: Boolean = false,
 )
 
 /**
@@ -128,11 +135,22 @@ object LiveTvData {
             return base
         }
         if (overlay.isEmpty()) return base
+        // Tag pinned onto the row BEFORE ordering so the marker survives displayedByCategory (it only
+        // reorders/filters/renames the row objects). The overlay.isEmpty() fast-path above returns base
+        // with pinned=false, which is correct — nothing is pinned when there is no overlay.
         val tagged = base.mapIndexed { i, ch ->
-            com.nuvio.app.features.iptv.overlay.IptvChannelOverlayPolicy.Tagged(ch.entityId, i, ch)
+            val row = if (com.nuvio.app.features.iptv.overlay.IptvChannelOverlayPolicy.isPinned(overlay, ch.entityId)) {
+                ch.copy(pinned = true)
+            } else {
+                ch
+            }
+            com.nuvio.app.features.iptv.overlay.IptvChannelOverlayPolicy.Tagged(ch.entityId, i, row)
         }
-        return com.nuvio.app.features.iptv.overlay.IptvChannelOverlayPolicy.displayed(
-            tagged, overlay, honorOrder = true, withName = { row, newName -> row.copy(name = newName) },
+        // Per-category (BUG #1): the guide is one flat all-account column, so applying the overlay
+        // across the whole list floated a channel pinned in category B above category A. Scope the
+        // overlay to each category so a pin floats only to the top of its OWN category.
+        return com.nuvio.app.features.iptv.overlay.IptvChannelOverlayPolicy.displayedByCategory(
+            tagged, overlay, categoryOf = { it.categoryId }, withName = { row, newName -> row.copy(name = newName) },
         )
     }
 

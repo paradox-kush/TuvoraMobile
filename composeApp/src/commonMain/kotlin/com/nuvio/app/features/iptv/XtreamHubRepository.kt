@@ -249,6 +249,35 @@ object XtreamHubRepository {
         return displayed.mapNotNull { d -> byId[d.id]?.copy(name = d.name) }
     }
 
+    /**
+     * BUG #2: the browse hub's LIVE window must DROP hidden channels and APPLY renames per the
+     * channel overlay (categories were already handled by [applyCategoryOverlay]; individual channels
+     * were not). honorOrder=false — a paged surface must never reorder: a pin/position could belong on
+     * a page not yet fetched, and the hub's offsets index the RAW provider list. Dropping hidden rows
+     * therefore leaves paging correct: `hasMore` is derived from the raw window size (not this
+     * filtered list), and [mergePagedWindow] dedups by id and halts when a window adds nothing new.
+     * No-op when the overlay is empty. [entityIds] is parallel to [previews] (same order/length).
+     */
+    private fun applyLiveChannelOverlay(entityIds: List<String>, previews: List<MetaPreview>): List<MetaPreview> {
+        // Tag pinned onto each card from the same snapshot that drives hide/rename, so the hub can draw a
+        // visible pin marker AND displayedWindow can float pinned channels to the top of the window. An
+        // empty overlay leaves pinned=false and displayedWindow returns the rows untouched.
+        val channels = overlaySnapshot.channels
+        val rows = entityIds.zip(previews).map { (eid, preview) ->
+            eid to if (com.nuvio.app.features.iptv.overlay.IptvChannelOverlayPolicy.isPinned(channels, eid)) {
+                preview.copy(pinned = true)
+            } else {
+                preview
+            }
+        }
+        return com.nuvio.app.features.iptv.overlay.IptvChannelOverlayPolicy.displayedWindow(
+            rows = rows,
+            overlay = channels,
+            entityOf = { it.first },
+            withName = { pair, newName -> pair.first to pair.second.copy(name = newName) },
+        ).map { it.second }
+    }
+
     private suspend fun fetchCategoryList(accountId: String, section: XtreamHubSection) {
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId } ?: return
         // Xtream reads its section rows from the local catalog once it's built (P7, item 4) —
@@ -469,7 +498,15 @@ object XtreamHubRepository {
                         }
                     }
                     XtreamItemRegistry.registerAll(resolved)
-                    return resolved.map { it.toMetaPreview() } to (rows.size > PAGE_SIZE)
+                    val previews = resolved.map { it.toMetaPreview() }
+                    // LIVE hub rows carry a personalization overlay (hide/rename); page + previews are 1:1.
+                    val shown = if (section == XtreamHubSection.LIVE) {
+                        val entityIds = page.map {
+                            com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(accountId, it.name, it.epgId)
+                        }
+                        applyLiveChannelOverlay(entityIds, previews)
+                    } else previews
+                    return shown to (rows.size > PAGE_SIZE)
                 }
                 // No index yet (first run): the old whole-category fetch — the build is warming.
                 // Keep only the first window of it: registering a 10k-item category (rows +
@@ -481,7 +518,10 @@ object XtreamHubRepository {
                 return when (section) {
                     XtreamHubSection.LIVE -> client.liveChannels(account, categoryId).getOrDefault(emptyList()).take(PAGE_SIZE).let { rows ->
                         XtreamItemRegistry.registerAll(rows.map { XtreamItemRegistry.resolvedChannel(accountId, it) })
-                        rows.map { it.toMetaPreview(accountId) }
+                        val entityIds = rows.map {
+                            com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(accountId, it.name, it.epgChannelId)
+                        }
+                        applyLiveChannelOverlay(entityIds, rows.map { it.toMetaPreview(accountId) })
                     }
                     XtreamHubSection.MOVIES -> client.vodMovies(account, categoryId).getOrDefault(emptyList()).take(PAGE_SIZE).let { rows ->
                         XtreamItemRegistry.registerAll(rows.map { XtreamItemRegistry.resolvedMovie(accountId, it) })
@@ -499,7 +539,10 @@ object XtreamHubRepository {
                         .liveChannelsPage(account, categoryId, offset, PAGE_SIZE + 1)
                     val page = rows.take(PAGE_SIZE)
                     XtreamItemRegistry.registerAll(page.map { XtreamItemRegistry.resolvedChannel(accountId, it) })
-                    return page.map { it.toMetaPreview(accountId) } to (rows.size > PAGE_SIZE)
+                    val entityIds = page.map {
+                        com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(accountId, it.name, it.epgChannelId)
+                    }
+                    return applyLiveChannelOverlay(entityIds, page.map { it.toMetaPreview(accountId) }) to (rows.size > PAGE_SIZE)
                 }
                 if (offset > 0) return emptyList<MetaPreview>() to false
                 val client = IptvClient.forAccount(account)
@@ -521,7 +564,10 @@ object XtreamHubRepository {
                     XtreamHubSection.LIVE -> M3UClient.liveChannelsPage(account, categoryId, offset, PAGE_SIZE + 1).let { rows ->
                         val page = rows.take(PAGE_SIZE)
                         XtreamItemRegistry.registerAll(page.map { XtreamItemRegistry.resolvedChannel(accountId, it) })
-                        page.map { it.toMetaPreview(accountId) } to (rows.size > PAGE_SIZE)
+                        val entityIds = page.map {
+                            com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(accountId, it.name, it.epgChannelId)
+                        }
+                        applyLiveChannelOverlay(entityIds, page.map { it.toMetaPreview(accountId) }) to (rows.size > PAGE_SIZE)
                     }
                     XtreamHubSection.MOVIES -> M3UClient.vodMoviesPage(account, categoryId, offset, PAGE_SIZE + 1).let { rows ->
                         val page = rows.take(PAGE_SIZE)

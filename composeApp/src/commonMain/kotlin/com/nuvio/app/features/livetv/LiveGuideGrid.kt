@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +58,7 @@ import nuvio.composeapp.generated.resources.compose_livetv_guide_back_to_now
 import nuvio.composeapp.generated.resources.compose_livetv_guide_earlier
 import nuvio.composeapp.generated.resources.compose_livetv_guide_later
 import nuvio.composeapp.generated.resources.compose_livetv_no_epg
+import nuvio.composeapp.generated.resources.compose_livetv_pinned_channel
 import org.jetbrains.compose.resources.stringResource
 
 private val CHANNEL_COL_WIDTH = 88.dp
@@ -347,6 +349,18 @@ private fun GuideRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s2),
             ) {
+                // The personalization pin marker: a small accent glyph, styled/placed exactly like the
+                // catch-up glyph below (its sibling), so the two never collide and read as one family of
+                // per-channel markers. A pin already floats the channel to the top of its category; this
+                // is the visible cue that was missing.
+                if (channel.pinned) {
+                    Icon(
+                        imageVector = Icons.Filled.PushPin,
+                        contentDescription = stringResource(Res.string.compose_livetv_pinned_channel),
+                        tint = accent,
+                        modifier = Modifier.size(10.dp),
+                    )
+                }
                 // The CHANNEL-level catch-up signal, the broadcaster convention: a small archive
                 // glyph beside the name. Archive channels are a tiny slice of a huge catalog (44
                 // of 26,430 on one measured panel), so this must read as a property of the

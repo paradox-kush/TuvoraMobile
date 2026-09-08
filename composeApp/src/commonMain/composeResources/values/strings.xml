@@ -2253,6 +2253,7 @@
     <string name="compose_iptv_hub_section_live">Live TV</string>
     <string name="compose_livetv_catchup_badge">CATCH-UP</string>
     <string name="compose_livetv_catchup_channel">This channel keeps a replay archive</string>
+    <string name="compose_livetv_pinned_channel">Pinned channel</string>
     <string name="compose_livetv_catchup_no_recording">This provider didn't have a recording of this programme</string>
     <string name="compose_livetv_catchup_no_scrub">No scrub — the provider sent a stream, not a file</string>
     <string name="compose_livetv_catchup_session_limit">Your provider allows fewer connections than you're using · Close another device and try again</string>

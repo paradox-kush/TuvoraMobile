@@ -18,6 +18,12 @@ data class MetaPreview(
     val voteCount: Int? = null,
     val imdbRating: String? = null,
     val genres: List<String> = emptyList(),
+    /**
+     * The IPTV live channel this card represents is pinned in the personalization overlay. LIVE-only —
+     * VOD/Series have no overlay — and set by [com.nuvio.app.features.iptv.XtreamHubRepository] from the
+     * same snapshot that drives hide/rename, so the hub can draw a visible pin marker on the card.
+     */
+    val pinned: Boolean = false,
 )
 
 fun MetaPreview.stableKey(): String = "$type:$id"

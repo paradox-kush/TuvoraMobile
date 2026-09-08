@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +25,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -84,6 +86,7 @@ import nuvio.composeapp.generated.resources.compose_iptv_hub_playlist_fallback
 import nuvio.composeapp.generated.resources.compose_iptv_hub_playlists_title
 import nuvio.composeapp.generated.resources.compose_iptv_hub_recent
 import nuvio.composeapp.generated.resources.compose_iptv_hub_section_live
+import nuvio.composeapp.generated.resources.compose_livetv_pinned_channel
 import nuvio.composeapp.generated.resources.compose_settings_page_iptv_add_playlist
 import nuvio.composeapp.generated.resources.library_other
 import nuvio.composeapp.generated.resources.home_view_all
@@ -611,14 +614,38 @@ private fun XtreamLiveChannelTile(
     // The card style's natural landscape width — not a hardcoded tile size.
     val tileWidth = landscapePosterWidth(rememberPosterCardStyleUiState().widthDp)
     Column(modifier = if (compact) Modifier.fillMaxWidth() else Modifier.width(tileWidth)) {
-        HomePosterCard(
-            item = item,
-            modifier = if (compact) Modifier.fillMaxWidth() else Modifier,
-            useLandscapeBackdropMode = true,
-            compact = compact,
-            onClick = onClick,
-            onLongClick = onLongClick,
-        )
+        Box {
+            HomePosterCard(
+                item = item,
+                modifier = if (compact) Modifier.fillMaxWidth() else Modifier,
+                useLandscapeBackdropMode = true,
+                compact = compact,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
+            // Personalization pin marker — a corner badge on the card artwork, the house pattern for a
+            // per-card status marker (mirrors NuvioPosterWatchedOverlay). Top-START so it never collides
+            // with the watched badge (top-END). A pin already floats the channel up its category; this is
+            // the visible cue. LIVE-only: item.pinned is set on live rows in XtreamHubRepository.
+            if (item.pinned) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(NuvioTokens.Space.s6)
+                        .size(NuvioTokens.Icon.md)
+                        .clip(tokens.shapes.avatar)
+                        .background(tokens.colors.accent),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.PushPin,
+                        contentDescription = stringResource(Res.string.compose_livetv_pinned_channel),
+                        tint = tokens.colors.onAccent,
+                        modifier = Modifier.size(NuvioTokens.Icon.xs),
+                    )
+                }
+            }
+        }
         Text(
             text = epg?.now ?: stringResource(Res.string.compose_iptv_hub_epg_no_information),
             style = MaterialTheme.typography.labelSmall,
