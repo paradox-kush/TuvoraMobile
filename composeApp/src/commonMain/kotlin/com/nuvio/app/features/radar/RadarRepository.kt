@@ -19,6 +19,8 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
+private const val RADAR_PRE_KICKOFF_GRACE_MS = 10L * 60 * 1000
+
 data class RadarUiState(
     val catalog: RadarCatalog = RadarCatalog(),
     val follows: List<RadarFollow> = emptyList(),
@@ -93,6 +95,10 @@ data class RadarUiState(
         // window plus grace — the backstop for a stale live-set entry whose finished status we
         // never received.
         fixture.startEpochMs?.let { start ->
+            // Before kickoff a fixture is never live, even when the livescore feed already lists
+            // its id — feeds pre-populate the live set for imminent games. Symmetric to the
+            // max-window cap; the grace absorbs feed/clock skew. B49 (unstarted games badged LIVE).
+            if (nowMs < start - RADAR_PRE_KICKOFF_GRACE_MS) return false
             if (nowMs >= start + fixture.maxLiveWindowMs()) return false
         }
         val feedConfirmed = fixture.id?.let { it in liveEventIds } == true
