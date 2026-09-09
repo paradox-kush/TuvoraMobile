@@ -1,5 +1,7 @@
 package com.nuvio.app.core.analytics
 
+import com.nuvio.app.core.journal.StartupJournal
+
 /**
  * Screen and playback breadcrumbs.
  *
@@ -34,6 +36,10 @@ object Breadcrumbs {
     fun screenChanged(name: String) {
         if (name.isBlank() || name == lastScreen) return
         lastScreen = name
+        // The first real screen = the app composed an interactive shell (the crash-loop discriminator:
+        // a device dying before first frame never gets here). Idempotent; a no-op until the recovery
+        // gate opened a startup attempt this run, so it never touches the journal in tests.
+        StartupJournal.markInteractiveReached()
         crashWriter?.onScreen(name)
         capture(SCREEN_EVENT, mapOf(SCREEN_NAME_PROPERTY to name))
     }

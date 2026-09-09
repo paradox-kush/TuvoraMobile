@@ -20,6 +20,11 @@ fun registerAndroidStartup() {
     if (registered) return
     registered = true
     // Order preserves the old MainActivity sequence; all are independent DB/driver inits.
+    // NOTE: the startup journal store init + decideStartupMode() now live in NuvioApplication.onCreate
+    // (application-scoped), NOT here — this task only runs via MainActivity.runStartup, which never
+    // fires on a headless WorkManager cold start, so gating the journal on it left IptvRefreshWorker
+    // reading an uninitialised/undecided journal (fail-open). Application.onCreate runs on every
+    // process start, so by the time any of these DB inits (or the worker) run, the gate is decided.
     AndroidStartup.registerTask { RecEventStorage.initialize(it) }
     AndroidStartup.registerTask { XtreamAccountStorage.initialize(it) }
     AndroidStartup.registerTask { M3UFilePicker.initialize(it) }

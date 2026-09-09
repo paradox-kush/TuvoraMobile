@@ -35,6 +35,16 @@ class NuvioApplication : Application() {
         // Feature-contribution bootstrap (once per process — see FeatureWiring.kt). Must run
         // before anything reads a port — including the memory tier resolved just below.
         registerFeatureContributions()
+        // Startup journal — application-scoped so it is ready on EVERY process start, including a
+        // headless WorkManager cold start with no Activity (where MainActivity's runStartup never
+        // runs). initialize() is idempotent (just sets the storage dir); decideStartupMode() is
+        // DECISION ONLY (sweeps + advances the one run, decides safe mode) and opens NO UI attempt,
+        // so a worker-only launch cannot inflate the crash-loop counter. The UI-launch attempt is
+        // still opened later, in MainActivity.onCreate (markUiLaunchStarted). Before this fix a
+        // headless IptvRefreshWorker read isSafeMode with the store uninitialised and the mode
+        // undecided → fail-open false, bypassing the safe-mode skip.
+        com.nuvio.app.core.journal.StartupJournalStore.initialize(this)
+        com.nuvio.app.core.journal.StartupJournal.decideStartupMode()
         // Resolve the app-wide memory tier once, before anything sizes a cache from it. The OS's
         // own words (ActivityManager.isLowRamDevice / memoryClass) feed the neutral policy; a null
         // ActivityManager never happens in practice and falls to the bigger cache, as before.

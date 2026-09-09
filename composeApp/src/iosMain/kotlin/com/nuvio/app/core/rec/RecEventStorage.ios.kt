@@ -3,18 +3,26 @@
 package com.nuvio.app.core.rec
 
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.convert
+import kotlinx.cinterop.usePinned
+import platform.Foundation.NSData
 import platform.Foundation.NSDate
 import platform.Foundation.NSDocumentDirectory
+import platform.Foundation.NSFileHandle
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSString
 import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.NSUserDefaults
 import platform.Foundation.NSUserDomainMask
+import platform.Foundation.closeFile
 import platform.Foundation.create
-import platform.Foundation.stringWithContentsOfFile
+import platform.Foundation.fileHandleForReadingAtPath
+import platform.Foundation.readDataOfLength
 import platform.Foundation.timeIntervalSince1970
 import platform.Foundation.writeToFile
+import platform.posix.memcpy
 
 private const val QUEUE_FILE = "rec-events-queue.jsonl"
 
@@ -46,8 +54,20 @@ internal actual object RecEventStorage {
     }
 
     actual fun loadQueue(): String? = runCatching {
-        val path = queuePath() ?: return null
-        NSString.stringWithContentsOfFile(path, encoding = NSUTF8StringEncoding, error = null)
+        val path = queuePath() ?: return@runCatching null
+        val handle = NSFileHandle.fileHandleForReadingAtPath(path) ?: return@runCatching null
+        val data = try {
+            // Read at most MAX_QUEUE_BYTES + 1 — the file is consumed only up to the cap, never wholly
+            // mapped into memory (unlike stringWithContentsOfFile). Over the cap → oversized; drop it.
+            handle.readDataOfLength((RecEventQueueRestorePolicy.MAX_QUEUE_BYTES + 1).convert())
+        } finally {
+            handle.closeFile()
+        }
+        if (data.length.toLong() > RecEventQueueRestorePolicy.MAX_QUEUE_BYTES.toLong()) {
+            NSFileManager.defaultManager.removeItemAtPath(path, error = null)
+            return@runCatching null
+        }
+        data.toByteArray().decodeToString()
     }.getOrNull()
 
     actual fun saveQueue(contents: String?) {
@@ -83,3 +103,14 @@ internal actual val recAppIdentifier: String = "mobile-ios"
 
 internal actual fun recNowMillis(): Long =
     (NSDate().timeIntervalSince1970 * 1000.0).toLong()
+
+/** Copies an NSData's bytes into a Kotlin ByteArray via its raw `bytes` pointer + memcpy (the repo's
+ *  proven bridge, mirroring M3UFilePlatform.ios). Bounded by the caller reading only up to the cap. */
+private fun NSData.toByteArray(): ByteArray {
+    val len = length.toInt()
+    if (len == 0) return ByteArray(0)
+    val src = bytes ?: return ByteArray(0)
+    val out = ByteArray(len)
+    out.usePinned { pinned -> memcpy(pinned.addressOf(0), src, len.convert()) }
+    return out
+}

@@ -247,20 +247,34 @@ object RecEventLogger {
 
     private fun persistQueue(records: List<RecEventRecord>) {
         runCatching {
-            RecEventStorage.saveQueue(
-                records.takeIf { it.isNotEmpty() }
-                    ?.joinToString(QUEUE_SEPARATOR) { json.encodeToString(it) }
-            )
+            // Bound the WRITE too: never persist more than the newest MAX_QUEUED_EVENTS records, drop
+            // an over-length record, and keep the blob within the cap — so the app itself can never
+            // create the oversized value the restore path defends against.
+            val lines = records.map { json.encodeToString(it) }
+            val bounded = RecEventQueueRestorePolicy.boundLines(lines, MAX_QUEUED_EVENTS)
+            RecEventStorage.saveQueue(bounded.takeIf { it.isNotEmpty() }?.joinToString(QUEUE_SEPARATOR))
         }
     }
 
     private fun restoreQueue() {
-        val contents = RecEventStorage.loadQueue()?.takeIf { it.isNotBlank() } ?: return
-        val restored = contents.split(QUEUE_SEPARATOR)
-            .filter { it.isNotBlank() }
-            .mapNotNull { line ->
-                runCatching { json.decodeFromString<RecEventRecord>(line) }.getOrNull()
-            }
+        // Bound the restore in TWO stages, both before a large allocation. (1) The queue is
+        // file-backed on every platform — Android/iOS `RecEventStorage.loadQueue` reads it with a
+        // byte cap (MAX_QUEUE_BYTES) enforced WHILE consuming the file, so an oversized/corrupt file
+        // never fully lands in memory. (2) Here, the returned string is bounded by char: a blob over
+        // the char cap is rejected wholesale, over-length lines dropped, only the newest
+        // MAX_QUEUED_EVENTS kept. The PERSIST side is bounded too (persistQueue), so the app never
+        // writes such a value itself.
+        val bounded = RecEventQueueRestorePolicy.select(
+            RecEventStorage.loadQueue(), QUEUE_SEPARATOR, MAX_QUEUED_EVENTS,
+        )
+        if (bounded.oversized) {
+            log.w { "Rec queue exceeded ${RecEventQueueRestorePolicy.MAX_QUEUE_CHARS} chars; discarding corrupt queue" }
+            RecEventStorage.saveQueue(null)
+            return
+        }
+        val restored = bounded.lines.mapNotNull { line ->
+            runCatching { json.decodeFromString<RecEventRecord>(line) }.getOrNull()
+        }
         if (restored.isEmpty()) {
             RecEventStorage.saveQueue(null)
             return

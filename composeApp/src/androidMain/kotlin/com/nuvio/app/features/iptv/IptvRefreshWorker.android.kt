@@ -31,6 +31,10 @@ class IptvRefreshWorker(
         // Skip while a player is on screen — a big M3U re-ingest could stutter playback. WorkManager
         // re-runs the periodic work on its next window (or sooner via retry backoff).
         if (IptvPlaybackGate.isPlaybackActive) return Result.retry()
+        // Recovery safe mode: the app is crash-looping before it reaches an interactive screen — this
+        // worker does the same heavy re-ingest as the warm-up, so a UI-level gate would be bypassed
+        // here. Skip this run; the next healthy launch clears safe mode.
+        if (com.nuvio.app.core.journal.StartupJournal.isSafeMode) return Result.success()
         return runCatching {
             IptvRefreshScheduler.refreshDuePlaylists()
             Result.success()

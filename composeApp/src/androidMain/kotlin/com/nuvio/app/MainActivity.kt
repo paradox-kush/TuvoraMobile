@@ -92,6 +92,10 @@ open class MainActivity : AppCompatActivity() {
         SentrySettingsStorage.initialize(applicationContext)
         SentryInitializer.start(application)
         super.onCreate(savedInstanceState)
+        // A REAL UI launch (not a headless worker run) — open the recovery gate's "reached
+        // interactive" attempt now. Idempotent per process; markInteractiveReached() fires from the
+        // first screen breadcrumb.
+        com.nuvio.app.core.journal.StartupJournal.markUiLaunchStarted()
         window.setBackgroundDrawableResource(R.color.nuvio_background)
         // Opt the whole window out of autofill.
         //

@@ -102,6 +102,10 @@ private fun ensureIosRuntimeBootstrapped() {
     MemoryPortAccess.current().setBaseTier(
         MemoryTierPolicy.iosTier(NSProcessInfo.processInfo.physicalMemory.toLong()),
     )
+    // iOS has no headless worker entry (no WorkManager), so every process start is a UI launch: take
+    // the decision AND open the UI-launch attempt together (markUiLaunchStarted decides first).
+    // markInteractiveReached() fires from the first screen breadcrumb. Idempotent per process.
+    com.nuvio.app.core.journal.StartupJournal.markUiLaunchStarted()
 }
 
 /**
