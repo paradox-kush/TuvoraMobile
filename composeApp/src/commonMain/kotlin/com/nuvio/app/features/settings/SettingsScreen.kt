@@ -608,6 +608,7 @@ private fun MobileSettingsScreen(
             liquidGlassNativeTabBarSupported = liquidGlassNativeTabBarSupported,
             switchProfileAvailable = onSwitchProfile != null,
             checkForUpdatesAvailable = onCheckForUpdatesClick != null,
+            traktCredentialsConfigured = TraktAuthRepository.hasRequiredCredentials(),
         )
 
         fun openSearchTarget(target: SettingsSearchTarget) {
@@ -1026,6 +1027,7 @@ private fun TabletSettingsScreen(
                 liquidGlassNativeTabBarSupported = liquidGlassNativeTabBarSupported,
                 switchProfileAvailable = onSwitchProfile != null,
                 checkForUpdatesAvailable = onCheckForUpdatesClick != null,
+                traktCredentialsConfigured = TraktAuthRepository.hasRequiredCredentials(),
             )
 
             fun openSearchTarget(target: SettingsSearchTarget) {

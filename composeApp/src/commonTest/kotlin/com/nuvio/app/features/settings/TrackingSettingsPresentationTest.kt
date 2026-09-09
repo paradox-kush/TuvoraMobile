@@ -61,4 +61,44 @@ class TrackingSettingsPresentationTest {
         )
         assertEquals(MoreLikeThisSourcePreference.TRAKT, stored)
     }
+
+    @Test
+    fun `Trakt integration search rows hide when this build has no Trakt credentials`() {
+        val traktRows = listOf(
+            "trakt-authentication",
+            "trakt-library-source",
+            "trakt-watch-progress",
+            "trakt-continue-watching-window",
+            "trakt-comments",
+            "trakt-more-like-this-source",
+        )
+        traktRows.forEach { key ->
+            assertFalse(
+                isTraktSearchEntryVisible(key, traktCredentialsConfigured = false),
+                "$key should be hidden without Trakt credentials",
+            )
+            assertTrue(
+                isTraktSearchEntryVisible(key, traktCredentialsConfigured = true),
+                "$key should be shown when Trakt credentials exist",
+            )
+        }
+    }
+
+    @Test
+    fun `non-Trakt-integration and Simkl search rows stay regardless of Trakt credentials`() {
+        // The combined Tracking page, Simkl, the licenses attribution and MDBList rating rows are not
+        // the Trakt integration card and must never be hidden by the credential gate.
+        val alwaysVisible = listOf(
+            "tracking",
+            "simkl-authentication",
+            "trakt-attribution",
+            "mdb-trakt",
+        )
+        alwaysVisible.forEach { key ->
+            assertTrue(
+                isTraktSearchEntryVisible(key, traktCredentialsConfigured = false),
+                "$key must stay visible even without Trakt credentials",
+            )
+        }
+    }
 }

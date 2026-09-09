@@ -87,6 +87,7 @@ internal fun settingsSearchEntries(
     liquidGlassNativeTabBarSupported: Boolean,
     switchProfileAvailable: Boolean,
     checkForUpdatesAvailable: Boolean,
+    traktCredentialsConfigured: Boolean,
 ): List<SettingsSearchEntry> {
     val accountCategory = stringResource(SettingsCategory.Account.labelRes)
     val generalCategory = stringResource(SettingsCategory.General.labelRes)
@@ -878,16 +879,21 @@ internal fun settingsSearchEntries(
         icon = Icons.Rounded.Notifications,
     )
 
-    addRow(
-        page = SettingsPage.TraktAuthentication,
-        key = "trakt-authentication",
-        title = stringResource(Res.string.trakt_library_source_trakt),
-        description = stringResource(Res.string.settings_trakt_intro_description),
-        pageLabel = trackingPage,
-        section = stringResource(Res.string.settings_tracking_services),
-        category = accountCategory,
-        icon = Icons.Rounded.Link,
-    )
+    // The Trakt integration rows only make sense when this build ships Trakt credentials; without
+    // them the Trakt card is hidden, so its search rows must vanish too (the combined Tracking page,
+    // Simkl, the licenses "trakt-attribution" and the MDBList "mdb-trakt" rating row all stay).
+    if (isTraktSearchEntryVisible("trakt-authentication", traktCredentialsConfigured)) {
+        addRow(
+            page = SettingsPage.TraktAuthentication,
+            key = "trakt-authentication",
+            title = stringResource(Res.string.trakt_library_source_trakt),
+            description = stringResource(Res.string.settings_trakt_intro_description),
+            pageLabel = trackingPage,
+            section = stringResource(Res.string.settings_tracking_services),
+            category = accountCategory,
+            icon = Icons.Rounded.Link,
+        )
+    }
     addRow(
         page = SettingsPage.TraktAuthentication,
         key = "simkl-authentication",
@@ -904,7 +910,7 @@ internal fun settingsSearchEntries(
         PlaybackSearchRow("trakt-continue-watching-window", stringResource(Res.string.trakt_continue_watching_window), stringResource(Res.string.trakt_continue_watching_subtitle)),
         PlaybackSearchRow("trakt-comments", stringResource(Res.string.settings_trakt_comments), stringResource(Res.string.settings_trakt_comments_description)),
         PlaybackSearchRow("trakt-more-like-this-source", stringResource(Res.string.trakt_more_like_this_source_title), stringResource(Res.string.trakt_more_like_this_source_subtitle)),
-    ).forEach { row ->
+    ).filter { isTraktSearchEntryVisible(it.key, traktCredentialsConfigured) }.forEach { row ->
         addRow(
             page = SettingsPage.TraktAuthentication,
             key = row.key,
@@ -919,6 +925,27 @@ internal fun settingsSearchEntries(
 
     return entries
 }
+
+/**
+ * Search-entry keys that belong to the Trakt integration card and its sub-settings. These disappear
+ * from settings search when the build ships no Trakt credentials (the card is hidden then too).
+ *
+ * Deliberately excludes rows that merely mention Trakt but are not the integration: the licenses
+ * "trakt-attribution" row and the MDBList "mdb-trakt" rating-provider row both stay regardless. The
+ * combined Tracking page entry (key "tracking") and every Simkl row also stay.
+ */
+internal val TRAKT_INTEGRATION_SEARCH_KEYS: Set<String> = setOf(
+    "trakt-authentication",
+    "trakt-library-source",
+    "trakt-watch-progress",
+    "trakt-continue-watching-window",
+    "trakt-comments",
+    "trakt-more-like-this-source",
+)
+
+/** A Trakt-integration search row is shown only when this build has Trakt credentials. */
+internal fun isTraktSearchEntryVisible(key: String, traktCredentialsConfigured: Boolean): Boolean =
+    traktCredentialsConfigured || key !in TRAKT_INTEGRATION_SEARCH_KEYS
 
 private data class PlaybackSearchRow(
     val key: String,

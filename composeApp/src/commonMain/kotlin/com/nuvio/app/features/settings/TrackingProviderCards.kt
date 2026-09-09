@@ -180,12 +180,17 @@ internal fun TrackingProviderCards(
                     .height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                TraktProviderCard(
-                    uiState = traktUiState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                )
+                // Trakt is only offered when this build ships Trakt credentials. Without them the
+                // card can never connect, so hide it (matching TV) rather than showing a dead
+                // "missing credentials" tile.
+                if (traktUiState.credentialsConfigured) {
+                    TraktProviderCard(
+                        uiState = traktUiState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    )
+                }
                 SimklProviderCard(
                     uiState = simklUiState,
                     isSyncing = syncState.isLoading,
@@ -202,10 +207,12 @@ internal fun TrackingProviderCards(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(if (isTablet) 16.dp else 12.dp),
             ) {
-                TraktProviderCard(
-                    uiState = traktUiState,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (traktUiState.credentialsConfigured) {
+                    TraktProviderCard(
+                        uiState = traktUiState,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 SimklProviderCard(
                     uiState = simklUiState,
                     isSyncing = syncState.isLoading,
