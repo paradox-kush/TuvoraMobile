@@ -6,8 +6,12 @@ import com.nuvio.app.core.diagnostics.SentryNetworkBreadcrumbInterceptor
 import com.nuvio.app.core.network.IPv4FirstDns
 import com.nuvio.app.core.network.PlaylistDns
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.network_empty_response_body
 import nuvio.composeapp.generated.resources.network_request_failed_http
@@ -370,26 +374,45 @@ actual suspend fun httpStreamLines(
     // Accept-Encoding ourselves — so leave it unset. For a URL that returns a raw .gz body
     // (no Content-Encoding header), we sniff the gzip magic bytes and wrap manually.
     val request = builder.build()
-    clientForDns(dnsProvider).newCall(request).execute().use { response ->
-        if (!response.isSuccessful) {
-            throw HttpStatusException(response.code, runBlocking { getString(Res.string.network_request_failed_http, response.code) })
+    // Cancellation must stop the actual blocking read, not merely abandon the coroutine: a synchronous
+    // okio read does not observe coroutine cancellation, so wire it to OkHttp's Call.cancel(), which
+    // closes the socket and unblocks the read. ensureActive() then surfaces it as CancellationException
+    // (rather than the resulting SocketException) so the caller treats it as a cancel, not a failure.
+    val call = clientForDns(dnsProvider).newCall(request)
+    // onCancelling=true fires as soon as the job is cancelled — BEFORE the blocking read returns —
+    // which is what unblocks it (a default invokeOnCompletion only fires once the block finishes,
+    // deadlocking against the very read we need to interrupt).
+    @OptIn(InternalCoroutinesApi::class)
+    val cancelHook = coroutineContext.job.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { cause ->
+        if (cause != null) call.cancel()
+    }
+    try {
+        call.execute().use { response ->
+            if (!response.isSuccessful) {
+                throw HttpStatusException(response.code, runBlocking { getString(Res.string.network_request_failed_http, response.code) })
+            }
+            val body = response.body ?: return@use
+            val rawSource = body.source()
+            val encoding = response.header("Content-Encoding")?.lowercase()
+            // Peek the first two bytes for the gzip magic (0x1f 0x8b) — only when OkHttp didn't
+            // already decode (encoding is null because the server sent a bare .gz file).
+            val looksGzipped = encoding == null && runCatching {
+                rawSource.request(2)
+                rawSource.buffer.size >= 2 &&
+                    rawSource.buffer[0] == 0x1f.toByte() && rawSource.buffer[1] == 0x8b.toByte()
+            }.getOrDefault(false)
+            val source: okio.BufferedSource = if (looksGzipped) {
+                GzipSource(rawSource).buffer()
+            } else {
+                rawSource
+            }
+            streamBoundedLines(source, onLine)
         }
-        val body = response.body ?: return@use
-        val rawSource = body.source()
-        val encoding = response.header("Content-Encoding")?.lowercase()
-        // Peek the first two bytes for the gzip magic (0x1f 0x8b) — only when OkHttp didn't
-        // already decode (encoding is null because the server sent a bare .gz file).
-        val looksGzipped = encoding == null && runCatching {
-            rawSource.request(2)
-            rawSource.buffer.size >= 2 &&
-                rawSource.buffer[0] == 0x1f.toByte() && rawSource.buffer[1] == 0x8b.toByte()
-        }.getOrDefault(false)
-        val source: okio.BufferedSource = if (looksGzipped) {
-            GzipSource(rawSource).buffer()
-        } else {
-            rawSource
-        }
-        streamBoundedLines(source, onLine)
+    } catch (t: Throwable) {
+        coroutineContext.ensureActive() // a cancel-induced read failure becomes CancellationException
+        throw t
+    } finally {
+        cancelHook.dispose()
     }
 }
 

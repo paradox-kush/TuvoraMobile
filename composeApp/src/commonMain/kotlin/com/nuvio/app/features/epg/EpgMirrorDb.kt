@@ -156,6 +156,64 @@ internal object EpgMirrorDb {
         }
     }
 
+    /** Test-only: observes each shadow-insert batch size, to prove the streamed batch stays bounded
+     *  no matter how large the catalog is. Null (no-op) in production. */
+    internal var indexInsertObserver: ((Int) -> Unit)? = null
+
+    /**
+     * Shadow-swap channels-index refresh, driven by the repository's PHASE 2 (promote-from-staging).
+     *
+     * Each call takes and RELEASES the mutex on its own, so a guide read can interleave BETWEEN
+     * batches — the network stream (phase 1) never reaches this table and never holds this lock. The
+     * live `index_channels` keeps serving until [commitIndexShadow]; if the caller aborts, it calls
+     * [dropIndexShadow] and the previous generation stands. Overlapping ingests are prevented upstream
+     * (the repository single-flights `ensureFresh`), so there is at most one open shadow at a time.
+     */
+    suspend fun beginIndexShadow(): Unit = mutex.withLock {
+        val c = connection()
+        c.execSQL("DROP TABLE IF EXISTS index_channels_shadow")
+        c.execSQL("CREATE TABLE index_channels_shadow(slug TEXT NOT NULL, epg_id TEXT NOT NULL, name TEXT NOT NULL)")
+    }
+
+    /** Insert one bounded batch into the shadow (short lock hold; the caller clears its buffer after). */
+    suspend fun insertIndexShadow(rows: List<EpgIndexRow>): Unit = mutex.withLock {
+        if (rows.isEmpty()) return@withLock
+        indexInsertObserver?.invoke(rows.size)
+        val c = connection()
+        c.execSQL("BEGIN IMMEDIATE")
+        try {
+            c.prepare("INSERT INTO index_channels_shadow(slug, epg_id, name) VALUES(?,?,?)").use { st ->
+                for (r in rows) {
+                    st.reset()
+                    st.bindText(1, r.slug); st.bindText(2, r.epgId); st.bindText(3, r.name)
+                    st.step()
+                }
+            }
+            c.execSQL("COMMIT")
+        } catch (t: Throwable) {
+            c.execSQL("ROLLBACK"); throw t
+        }
+    }
+
+    /** Atomically swap the filled shadow in as the live index (and rebuild its slug lookup). */
+    suspend fun commitIndexShadow(): Unit = mutex.withLock {
+        val c = connection()
+        c.execSQL("BEGIN IMMEDIATE")
+        try {
+            c.execSQL("DROP TABLE IF EXISTS index_channels")
+            c.execSQL("ALTER TABLE index_channels_shadow RENAME TO index_channels")
+            c.execSQL("CREATE INDEX IF NOT EXISTS index_channels_slug ON index_channels(slug)")
+            c.execSQL("COMMIT")
+        } catch (t: Throwable) {
+            c.execSQL("ROLLBACK"); throw t
+        }
+    }
+
+    /** Drops an orphaned shadow (an aborted/cancelled refresh) without touching the live index. */
+    suspend fun dropIndexShadow(): Unit = mutex.withLock {
+        connection().execSQL("DROP TABLE IF EXISTS index_channels_shadow")
+    }
+
     /** Stream every index row (build the transient [EpgChannelIndex] without a big copy). */
     suspend fun forEachIndexRow(block: (EpgIndexRow) -> Unit): Unit = mutex.withLock {
         connection().prepare("SELECT slug, epg_id, name FROM index_channels").use { st ->

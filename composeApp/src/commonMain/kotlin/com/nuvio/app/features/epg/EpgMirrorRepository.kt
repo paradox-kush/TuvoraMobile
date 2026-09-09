@@ -10,11 +10,13 @@ import com.nuvio.app.features.iptv.content.EpgProgrammeRow
 import com.nuvio.app.features.iptv.epg.XmltvStreamingParser
 import com.nuvio.app.features.iptv.epg.normalizeChannelId
 import com.nuvio.app.features.trakt.TraktPlatformClock
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -33,6 +35,11 @@ internal object EpgMirrorRepository {
     private val log = Logger.withTag("EpgMirror")
     private val json = Json { ignoreUnknownKeys = true }
     private val syncMutex = Mutex()
+    /** Serializes channels-index ingests so two can never interleave shadow begin/insert/commit and
+     *  publish or drop each other's generation. `ensureFresh` already single-flights via [syncMutex];
+     *  this additionally guards a direct [ingestChannelsIndexStream]. It does NOT gate guide reads
+     *  (those take EpgMirrorDb's own lock), so serializing ingests never blocks the guide. */
+    private val indexIngestMutex = Mutex()
     /** Survives any screen: region changes rebuild even though the picker closes immediately. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -144,37 +151,15 @@ internal object EpgMirrorRepository {
                 return
             }
 
-            val index = fetchJson<ChannelsIndexDoc>("$base/${manifest.channelsIndexPath ?: "channels-index.json.gz"}")
-                ?: return
-            // Remember what the mirror offers before filtering, so the picker can list every
-            // region (including ones the viewer has switched off) without a re-fetch.
-            val published = index.sources.map {
-                EpgSourceInfo(
-                    slug = it.slug,
-                    label = it.label ?: it.slug,
-                    countries = it.countries,
-                    channelCount = it.channels.size,
-                )
+            // Stream the channels-index: decode ONE source at a time (the whole ChannelsIndexDoc tree
+            // and the whole decompressed body are never materialized), store the selected regions'
+            // rows into a bounded shadow, and swap it in only after a fully successful parse — so an
+            // oversized/malformed/truncated response leaves the previous generation intact.
+            val indexUrl = "$base/${manifest.channelsIndexPath ?: "channels-index.json.gz"}"
+            val committed = ingestChannelsIndexStream(selectedRegions()) { onChunk ->
+                httpStreamLines(indexUrl, null) { line -> onChunk(line) }
             }
-            EpgMirrorDb.replaceSources(published)
-
-            // Only selected regions are STORED. Filtering here rather than at query time is the
-            // point of the picker: the index is what costs disk on every device and a match walk
-            // per channel, and a household typically uses ~13% of it.
-            val selection = selectedRegions()
-            val keepSlugs = EpgRegionCatalog.slugsFor(selection, published)
-            val rows = ArrayList<EpgIndexRow>(64_000)
-            for (src in index.sources) {
-                if (src.slug !in keepSlugs) continue
-                for (ch in src.channels) {
-                    val id = normalizeChannelId(ch.id)
-                    if (id.isEmpty()) continue
-                    if (ch.names.isEmpty()) rows.add(EpgIndexRow(src.slug, id, ch.id))
-                    else ch.names.forEach { n -> if (n.isNotBlank()) rows.add(EpgIndexRow(src.slug, id, n)) }
-                }
-            }
-            if (rows.isEmpty()) return
-            EpgMirrorDb.replaceIndex(rows)
+            if (!committed) return
 
             // The index just changed, so this is the one moment a re-match can produce a new
             // answer — but the policy still admits at most ONE account per sync, so a bump that
@@ -343,12 +328,133 @@ internal object EpgMirrorRepository {
     }
 
 
-    /** GET + accumulate + parse. httpStreamLines transparently gunzips bare .gz bodies. */
+    /** GET + accumulate + parse. httpStreamLines transparently gunzips bare .gz bodies.
+     *  Input limit: the DECOMPRESSED accumulation is bounded so a runaway / decompression-bomb /
+     *  corrupt response cannot OOM. Over the cap → reject the whole fetch (null); every caller keeps
+     *  the previous valid generation (`?: return`), never a partial replacement. This bounds the
+     *  bomb/corruption vector; it does NOT reduce the legitimate index's decode transient — bounding
+     *  that needs element-streaming into the DB (backend NDJSON), the documented follow-up. */
     private suspend inline fun <reified T> fetchJson(url: String): T? = runCatching {
-        val sb = StringBuilder()
-        httpStreamLines(url, null, null) { line -> sb.append(line) }
-        json.decodeFromString<T>(sb.toString())
+        val body = boundedJoin(MAX_FETCH_CHARS) { emit ->
+            httpStreamLines(url, null, null) { line -> emit(line) }
+        }
+        if (body == null) {
+            log.w { "EPG response exceeded $MAX_FETCH_CHARS chars; rejected, kept prior generation: $url" }
+            return@runCatching null
+        }
+        json.decodeFromString<T>(body)
     }.onFailure { log.w(it) { "fetch failed: $url" } }.getOrNull()
+
+    /**
+     * Bounded-memory channels-index ingestion, in two phases so guide reads are never blocked on the
+     * network and so a channel's keep/skip decision uses its source's FINAL metadata:
+     *
+     * PHASE 1 (no EPG DB lock held): [feed] streams the (gunzipped) response; a
+     * [ChannelsIndexStreamParser] emits each source's scalars and its channel objects one at a time,
+     * and EVERY source's channels are appended to bounded off-DB [EpgIngestStaging] (a temp file),
+     * tagged by a STABLE per-source ordinal. Keep is NOT decided here — a late or duplicate
+     * slug/label/countries could still change it — so field order is fully independent and no channel
+     * is ever selected on a stale value. The whole document, a whole source's channel list, and the
+     * whole catalog all stay out of memory (peak = one row + the parser/writer buffers).
+     *
+     * PHASE 2 (short per-batch lock, NO network): once the metadata is final, [EpgRegionCatalog.slugsFor]
+     * decides the kept sources; a plain suspend loop pulls staged rows and promotes only the kept
+     * ordinals' rows into the shadow in [INDEX_BATCH] batches, each under a lock RELEASED between
+     * batches (a guide read interleaves), then swaps atomically. The previous generation serves until
+     * the swap; any failure or cancellation drops the shadow and keeps the prior generation.
+     *
+     * Caps ([MAX_SOURCES], [MAX_ROWS] total staged, [MAX_SCALAR_CHARS]/[MAX_CHANNEL_CHARS]/[MAX_DEPTH])
+     * bound skipped-region and unknown-field input too. Returns true iff a new generation was committed.
+     */
+    internal suspend fun ingestChannelsIndexStream(
+        selection: Set<String>,
+        feed: suspend (onChunk: (String) -> Unit) -> Unit,
+    ): Boolean = indexIngestMutex.withLock {
+        val published = ArrayList<EpgSourceInfo>() // index == source ordinal; holds each source's FINAL metadata
+        val staging = EpgIngestStaging()
+        try {
+            // --- PHASE 1: network → staging, no EPG DB lock ---
+            var ordinal = -1
+            var slug = ""; var label: String? = null; var countries: String? = null; var channelCount = 0
+            var stagedRows = 0
+            val handler = object : ChannelsIndexStreamParser.Handler {
+                override fun onSourceBegin() {
+                    ordinal++
+                    if (ordinal >= MAX_SOURCES) throw EpgElementTooLargeException(ordinal)
+                    slug = ""; label = null; countries = null; channelCount = 0
+                }
+
+                // Last value wins for a repeated key — the final scalars are what onSourceEnd records.
+                override fun onSourceScalar(key: String, value: String?) {
+                    when (key) {
+                        "slug" -> slug = value.orEmpty()
+                        "label" -> label = value
+                        "countries" -> countries = value
+                    }
+                }
+
+                override fun onChannel(channelJson: String) {
+                    channelCount++
+                    val ch = json.decodeFromString<IndexChannelDoc>(channelJson)
+                    val id = normalizeChannelId(ch.id)
+                    if (id.isEmpty()) return
+                    val names = if (ch.names.isEmpty()) listOf(ch.id) else ch.names
+                    for (n in names) {
+                        if (n.isBlank()) continue
+                        if (stagedRows >= MAX_ROWS) throw EpgElementTooLargeException(stagedRows)
+                        staging.append(encodeStagedRow(EpgStagedRow(ordinal, id, n)))
+                        stagedRows++
+                    }
+                }
+
+                override fun onSourceEnd() {
+                    published.add(EpgSourceInfo(slug, label ?: slug, countries, channelCount))
+                }
+            }
+            val parser = ChannelsIndexStreamParser(MAX_SCALAR_CHARS, MAX_CHANNEL_CHARS, MAX_DEPTH, handler)
+            val parsed = runCatching {
+                feed { chunk -> parser.accept(chunk) }
+                parser.finish() // throws on an absent/truncated array — never publish a partial replacement
+                true
+            }.getOrElse { t ->
+                if (t is CancellationException) throw t // propagate: the finally disposes staging, prior gen stands
+                log.w(t) { "channels-index stream rejected; kept prior generation" }
+                false
+            }
+            if (!parsed) return@withLock false // parse failed/truncated → prior generation intact, catalog not trusted
+
+            // --- keep decision from FINAL metadata (field-order independent; duplicate key = last wins) ---
+            val keptSlugs = EpgRegionCatalog.slugsFor(selection, published)
+            val slugByKeptOrdinal = HashMap<Int, String>()
+            published.forEachIndexed { ord, info -> if (info.slug in keptSlugs) slugByKeptOrdinal[ord] = info.slug }
+
+            // --- PHASE 2: staging → shadow, short per-batch lock, no network ---
+            staging.openForRead()
+            EpgMirrorDb.beginIndexShadow()
+            var committed = false
+            try {
+                val batch = ArrayList<EpgIndexRow>(INDEX_BATCH)
+                var promoted = 0
+                while (true) {
+                    val line = staging.nextLine() ?: break
+                    val row = decodeStagedRow(line)
+                    val rowSlug = slugByKeptOrdinal[row.o] ?: continue // skipped region — never promoted
+                    batch.add(EpgIndexRow(rowSlug, row.i, row.n))
+                    promoted++
+                    if (batch.size >= INDEX_BATCH) { EpgMirrorDb.insertIndexShadow(batch); batch.clear() }
+                }
+                if (batch.isNotEmpty()) EpgMirrorDb.insertIndexShadow(batch)
+                if (promoted > 0) { EpgMirrorDb.commitIndexShadow(); committed = true } else EpgMirrorDb.dropIndexShadow()
+            } catch (t: Throwable) {
+                EpgMirrorDb.dropIndexShadow()
+                throw t
+            }
+            EpgMirrorDb.replaceSources(published) // full catalog parsed → publish for the region picker
+            return@withLock committed
+        } finally {
+            staging.dispose()
+        }
+    }
 
     // --- wire models ------------------------------------------------------------------
 
@@ -368,26 +474,34 @@ internal object EpgMirrorRepository {
         val error: String? = null,
     )
 
-    @Serializable
-    private data class ChannelsIndexDoc(
-        val generatedAt: String? = null,
-        val sources: List<IndexSourceDoc> = emptyList(),
-    )
-
-    @Serializable
-    private data class IndexSourceDoc(
-        val slug: String,
-        val label: String? = null,
-        /** Comma-separated country names; drives the region picker. */
-        val countries: String? = null,
-        val channels: List<IndexChannelDoc> = emptyList(),
-    )
-
+    /** One channel of a source — decoded one at a time from the stream (never a whole-source list). */
     @Serializable
     private data class IndexChannelDoc(
         val id: String,
         val names: List<String> = emptyList(),
     )
+
+    /** Manifest fetch cap (small JSON) — a corrupt/runaway manifest is rejected without OOM. The
+     *  channels-index no longer goes through fetchJson: it is streamed record-wise (below). */
+    private const val MAX_FETCH_CHARS = 4_000_000
+
+    // --- streaming channels-index bounds -------------------------------------------------
+    // Working-set bounds (retained memory, independent of catalog size):
+    /** One source's metadata string (slug/label/countries) cap — larger ⇒ reject the update. */
+    private const val MAX_SCALAR_CHARS = 8_192
+    /** One channel object's JSON cap — larger ⇒ reject. A channel is `{"id":..,"names":[..]}`; tiny. */
+    private const val MAX_CHANNEL_CHARS = 64 * 1024
+    /** Max nesting depth inside a channel object or a skipped field — larger ⇒ reject. */
+    private const val MAX_DEPTH = 32
+    /** Rows buffered before a flush+clear: the parser callback can't suspend, so a full batch is the
+     *  peak retained selected-row memory. Kept modest so working memory stays flat. */
+    private const val INDEX_BATCH = 4_000
+    /** Max source records before the update is rejected (the mirror publishes ~tens of regions). */
+    private const val MAX_SOURCES = 4_096
+    // Total-accepted bound (NOT a working-set bound — rows are streamed to disk in INDEX_BATCH flushes):
+    /** Max selected index rows accepted in one refresh. The full multi-region index is ~49k channels;
+     *  a household stores ~13%. Well above the real ceiling so a valid catalog is never rejected. */
+    private const val MAX_ROWS = 400_000
 
     private const val META_SYNCED_AT = "synced_at"
     private const val META_REGIONS = "selected_regions"
