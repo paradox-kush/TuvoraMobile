@@ -927,7 +927,7 @@ actual object PlayerSettingsStorage {
         saveInt(iosGammaKey, value)
     }
 
-    actual fun exportToSyncPayload(): JsonObject = buildJsonObject {
+    actual fun exportToSyncPayload(): JsonObject = PlayerSyncLocalKeys.stripLocal(buildJsonObject {
         loadShowLoadingOverlay()?.let { put(showLoadingOverlayKey, encodeSyncBoolean(it)) }
         loadShowParentalGuide()?.let { put(showParentalGuideKey, encodeSyncBoolean(it)) }
         loadShowStreamInfo()?.let { put(showStreamInfoKey, encodeSyncBoolean(it)) }
@@ -997,10 +997,13 @@ actual object PlayerSettingsStorage {
         loadIosContrast()?.let { put(iosContrastKey, encodeSyncInt(it)) }
         loadIosSaturation()?.let { put(iosSaturationKey, encodeSyncInt(it)) }
         loadIosGamma()?.let { put(iosGammaKey, encodeSyncInt(it)) }
-    }
+    })
 
-    actual fun replaceFromSyncPayload(payload: JsonObject) {
-        syncKeys.forEach { key ->
+    actual fun replaceFromSyncPayload(incoming: JsonObject) {
+        // Device-local playback keys are neither cleared nor applied (see PlayerSyncLocalKeys) — a
+        // stale remote value must not overwrite the local choice, nor an omitted key wipe it.
+        val payload = PlayerSyncLocalKeys.stripLocal(incoming)
+        PlayerSyncLocalKeys.clearableOnImport(syncKeys).forEach { key ->
             NSUserDefaults.standardUserDefaults.removeObjectForKey(ProfileScopedKey.of(key))
         }
 

@@ -147,5 +147,5 @@ internal expect object PlayerSettingsStorage {
     fun loadIosGamma(): Int?
     fun saveIosGamma(value: Int)
     fun exportToSyncPayload(): JsonObject
-    fun replaceFromSyncPayload(payload: JsonObject)
+    fun replaceFromSyncPayload(incoming: JsonObject)
 }

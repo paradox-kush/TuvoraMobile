@@ -1135,7 +1135,7 @@ actual object PlayerSettingsStorage {
         saveIosInt(iosGammaKey, value)
     }
 
-    actual fun exportToSyncPayload(): JsonObject = buildJsonObject {
+    actual fun exportToSyncPayload(): JsonObject = PlayerSyncLocalKeys.stripLocal(buildJsonObject {
         loadShowLoadingOverlay()?.let { put(showLoadingOverlayKey, encodeSyncBoolean(it)) }
         loadShowParentalGuide()?.let { put(showParentalGuideKey, encodeSyncBoolean(it)) }
         loadShowStreamInfo()?.let { put(showStreamInfoKey, encodeSyncBoolean(it)) }
@@ -1206,11 +1206,15 @@ actual object PlayerSettingsStorage {
         loadIosContrast()?.let { put(iosContrastKey, encodeSyncInt(it)) }
         loadIosSaturation()?.let { put(iosSaturationKey, encodeSyncInt(it)) }
         loadIosGamma()?.let { put(iosGammaKey, encodeSyncInt(it)) }
-    }
+    })
 
-    actual fun replaceFromSyncPayload(payload: JsonObject) {
+    actual fun replaceFromSyncPayload(incoming: JsonObject) {
+        // Device-local playback keys (engine/decoder/renderer/hw/enhancement) are neither cleared nor
+        // applied: a stale remote value must not overwrite the local choice, and a payload omitting a
+        // local key must not wipe it. Everything else keeps the replace (clear-then-apply) semantics.
+        val payload = PlayerSyncLocalKeys.stripLocal(incoming)
         preferences?.edit()?.apply {
-            syncKeys.forEach { remove(ProfileScopedKey.of(it)) }
+            PlayerSyncLocalKeys.clearableOnImport(syncKeys).forEach { remove(ProfileScopedKey.of(it)) }
         }?.apply()
 
         payload.decodeSyncBoolean(showLoadingOverlayKey)?.let(::saveShowLoadingOverlay)
