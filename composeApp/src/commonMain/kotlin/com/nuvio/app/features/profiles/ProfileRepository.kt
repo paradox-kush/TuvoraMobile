@@ -478,7 +478,11 @@ object ProfileRepository {
                 put("p_pin", pin)
             }
             val result = SupabaseProvider.client.postgrest.rpc("verify_profile_pin", params)
-            result.decodeSingle<PinVerifyResult>().also { verifyResult ->
+            // The RPC returns a single JSON object ({"unlocked":..,"retry_after_seconds":..}), not an
+            // array. decodeSingle decodes the body as a List and takes .first(), so it throws on an
+            // object and the runCatching below silently falls back to verifyPinLocally. decodeAs
+            // deserializes the object directly.
+            result.decodeAs<PinVerifyResult>().also { verifyResult ->
                 if (verifyResult.unlocked) {
                     pullProfiles()
                     rememberVerifiedPin(profileIndex = profileIndex, pin = pin)
