@@ -3,6 +3,7 @@ package com.nuvio.app.features.iptv
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.int
@@ -196,6 +197,26 @@ class XtreamPlaylistModelTest {
 
         // TV's internal spellings are tolerated as aliases on the wire.
         assertEquals(SOURCE_TYPE_M3U_URL, PlaylistRow(sourceType = "url", url = "http://h/l.m3u").toAccount()!!.sourceType)
+    }
+
+    @Test
+    fun xtreamUserAgentAndAutoRefreshSurviveTheSyncColdStartRoundTrip() {
+        // B04 (reporter "king c0llier"): on a signed-in device an Xtream playlist's per-playlist
+        // User-Agent and auto-refresh interval are held in memory (the edit screen still shows them
+        // in-session) but come back blank / default 24h after a full app restart. Root cause is the
+        // login PULL, which REPLACES local state with accounts rebuilt from the wire: any shared
+        // column the push omits or the pull mapping drops silently reverts to its constructor default.
+        // Model that exact cold-start round trip for an Xtream account:
+        //   local account -> playlistPushPayload (the wire row) -> PlaylistRow -> toAccount (the pull).
+        val local = base.copy(
+            userAgent = "MyPlayer/1.0",
+            autoRefreshHours = 12,
+        )
+        val wireRow = playlistPushPayload(listOf(local)).single()
+        val pulled = json.decodeFromJsonElement<PlaylistRow>(wireRow)
+        val restored = pulled.toAccount()!!
+        assertEquals("MyPlayer/1.0", restored.userAgent, "per-playlist User-Agent must survive cold start (xtream)")
+        assertEquals(12, restored.autoRefreshHours, "auto-refresh interval must survive cold start (xtream)")
     }
 
     @Test

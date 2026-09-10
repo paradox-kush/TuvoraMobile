@@ -233,7 +233,6 @@ internal fun PlaylistRow.toAccount(): XtreamAccount? = when (sourceType) {
             password = "",
             enabled = enabled,
             sourceType = SOURCE_TYPE_M3U_URL,
-            userAgent = userAgent?.takeIf { it.isNotBlank() },
         ).withOptions(this)
     }
     SOURCE_TYPE_M3U_FILE, "file" -> {
@@ -249,7 +248,6 @@ internal fun PlaylistRow.toAccount(): XtreamAccount? = when (sourceType) {
             password = "",
             enabled = enabled,
             sourceType = SOURCE_TYPE_M3U_FILE,
-            userAgent = userAgent?.takeIf { it.isNotBlank() },
             fileName = fn,
         ).withOptions(this)
     }
@@ -278,6 +276,9 @@ internal fun PlaylistRow.toAccount(): XtreamAccount? = when (sourceType) {
 /** The playlist-manager option fields every source type shares. */
 private fun XtreamAccount.withOptions(row: PlaylistRow): XtreamAccount = copy(
     epgUrl = row.epgUrl,
+    // Shared across every source type (B04): an Xtream/Stalker playlist carries a per-playlist UA
+    // too, so it must ride the pull the same way it rides the push — not just the M3U branches.
+    userAgent = row.userAgent?.takeIf { it.isNotBlank() },
     dnsProvider = row.dnsProvider,
     autoRefreshHours = row.autoRefreshHours,
     contentTypes = row.contentTypes.toSet(),
@@ -373,11 +374,9 @@ internal fun playlistPushPayload(accounts: List<XtreamAccount>): JsonArray = bui
             when (acc.sourceType) {
                 SOURCE_TYPE_M3U_URL -> {
                     put("url", acc.baseUrl)                       // the playlist URL IS the base
-                    acc.userAgent?.let { put("user_agent", it) }
                 }
                 SOURCE_TYPE_M3U_FILE -> {
                     acc.fileName?.let { put("file_name", it) }    // metadata only; bytes stay local
-                    acc.userAgent?.let { put("user_agent", it) }
                 }
                 SOURCE_TYPE_STALKER -> {
                     put("portal_url", acc.baseUrl)                // mobile keeps the portal in baseUrl
@@ -390,6 +389,11 @@ internal fun playlistPushPayload(accounts: List<XtreamAccount>): JsonArray = bui
                 }
             }
             acc.epgUrl?.let { put("epg_url", it) }
+            // user_agent is a SHARED column applying to every source type (catalog + EPG + player
+            // stream; see StreamUserAgentPolicy) — not an M3U-only extra. Writing it here (not in the
+            // per-type when) is what stops an Xtream/Stalker playlist's UA from silently reverting to
+            // blank on the next login pull (B04). Omitted when null so the RPC's default applies.
+            acc.userAgent?.let { put("user_agent", it) }
             put("dns_provider", acc.dnsProvider)
             put("auto_refresh_hours", acc.autoRefreshHours)
             put("content_types", JsonArray(acc.contentTypes.map { JsonPrimitive(it) }))
