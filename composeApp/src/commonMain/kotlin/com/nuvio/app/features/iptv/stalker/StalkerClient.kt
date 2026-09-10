@@ -505,7 +505,8 @@ object StalkerClient : IptvClient {
             if (streamed.isFailure) return@withLock false   // retryable — meta stays absent/stale
             if (!ingest.sawData) {
                 epgUnsupported += acc.id                    // healthy body, genuinely no guide
-                IptvContentDb.finishEpg(acc.id, 0)
+                // A completed fetch with no data must not blank a good guide — keep the prior.
+                IptvContentDb.finishEpg(acc.id, 0, keepPriorIfEmpty = true)
                 return@withLock false
             }
             val count = ingest.finish()
@@ -559,7 +560,8 @@ object StalkerClient : IptvClient {
         /** Flushes the tail and writes the meta row LAST (crash-safe, like every other ingest). */
         fun finish(): Int {
             if (buffer.isNotEmpty()) flushBlocking()
-            runBlocking { IptvContentDb.finishEpg(playlistId, count) }
+            // A completed fetch that parsed to nothing must not blank a good guide — keep the prior.
+            runBlocking { IptvContentDb.finishEpg(playlistId, count, keepPriorIfEmpty = true) }
             return count
         }
     }

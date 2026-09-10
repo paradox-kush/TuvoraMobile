@@ -116,7 +116,9 @@ object XmltvClient {
         }
         parser.finish()
         collector.finish()
-        IptvContentDb.finishEpg(acc.id, collector.count)
+        // A completed fetch that parsed to nothing (truncated/garbage body) must not blank a good
+        // guide — keep the prior generation; the throttle still advances inside finishEpg.
+        IptvContentDb.finishEpg(acc.id, collector.count, keepPriorIfEmpty = true)
         log.i { "XMLTV ingest done acc=${acc.id} src=${source.kind} programmes=${collector.count} channels=${allow.size}" }
         EpgTelemetry.ingestFinished(
             source = EpgTelemetry.Source.PLAYLIST_XMLTV,

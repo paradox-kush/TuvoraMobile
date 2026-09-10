@@ -111,6 +111,10 @@ internal object IptvContentDb {
      */
     private const val GEN = "generation = COALESCE((SELECT active_generation FROM ingest_meta WHERE playlist_id = ?), 0)"
 
+    /** Staging table for the EPG generation swap ([beginEpg]→[insertEpgChunk]→[finishEpg]); holds
+     *  only the in-flight refresh's rows, never what readers are serving. */
+    private const val EPG_SHADOW = "epg_programmes_shadow"
+
     private fun activeGeneration(c: SQLiteConnection, playlistId: String): Long =
         c.prepare("SELECT active_generation FROM ingest_meta WHERE playlist_id = ?").use { st ->
             st.bindText(1, playlistId)
@@ -148,6 +152,9 @@ internal object IptvContentDb {
         }
         it.execSQL("CREATE TABLE IF NOT EXISTS epg_programmes(playlist_id TEXT NOT NULL, channel_id TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, title TEXT NOT NULL, desc TEXT, has_archive INTEGER NOT NULL DEFAULT 0)")
         it.execSQL("CREATE INDEX IF NOT EXISTS epg_lookup ON epg_programmes(playlist_id, channel_id, start_ms)")
+        // Staging table for the EPG generation swap ([beginEpg]/[insertEpgChunk] fill it; [finishEpg]
+        // flips it into the live table). A failed/cancelled/empty refresh never touches the live guide.
+        it.execSQL("CREATE TABLE IF NOT EXISTS $EPG_SHADOW(playlist_id TEXT NOT NULL, channel_id TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, title TEXT NOT NULL, desc TEXT, has_archive INTEGER NOT NULL DEFAULT 0)")
         // Per-playlist EPG freshness marker (kept separate from the catalog's ingest_meta so an EPG
         // refresh doesn't touch the catalog row, and vice-versa).
         it.execSQL("CREATE TABLE IF NOT EXISTS epg_meta(playlist_id TEXT NOT NULL PRIMARY KEY, built_at INTEGER NOT NULL, programme_count INTEGER NOT NULL) WITHOUT ROWID")
@@ -343,28 +350,33 @@ internal object IptvContentDb {
         }
     }
 
-    /** Wipes any prior EPG rows for a playlist (per-channel fetch stamps included — a wholesale
-     *  refresh supersedes them). Call once before streaming [insertEpgChunk] calls. */
+    /**
+     * Arms a fresh EPG refresh by clearing the SHADOW staging table for a playlist — NOT the live
+     * guide. Call once before the streaming [insertEpgChunk] calls; [finishEpg] swaps the shadow into
+     * the live table only once the fill completes. A refresh that fails or is cancelled between here
+     * and [finishEpg] therefore leaves the previous complete guide serving (the old approach cleared
+     * the live rows up front, so any failure left the guide empty until a later refresh succeeded).
+     */
     suspend fun beginEpg(playlistId: String) = mutex.withLock {
         val c = connection()
         c.execSQL("BEGIN IMMEDIATE")
         try {
-            for (table in listOf("epg_programmes", "epg_meta", "epg_channel_fetch")) {
-                c.prepare("DELETE FROM $table WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
-            }
+            // Drop rows a previously aborted attempt may have staged for this playlist.
+            c.prepare("DELETE FROM $EPG_SHADOW WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
             c.execSQL("COMMIT")
         } catch (t: Throwable) {
             c.execSQL("ROLLBACK"); throw t
         }
     }
 
-    /** Inserts one bounded batch of EPG programmes (caller flushes every ~5k to keep RAM flat). */
+    /** Inserts one bounded batch of EPG programmes into the SHADOW (caller flushes every ~5k to keep
+     *  RAM flat); [finishEpg] promotes the shadow to the live guide. */
     suspend fun insertEpgChunk(playlistId: String, programmes: List<EpgProgrammeRow>) = mutex.withLock {
         if (programmes.isEmpty()) return@withLock
         val c = connection()
         c.execSQL("BEGIN IMMEDIATE")
         try {
-            c.prepare("INSERT INTO epg_programmes(playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive) VALUES(?,?,?,?,?,?,?)").use { st ->
+            c.prepare("INSERT INTO $EPG_SHADOW(playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive) VALUES(?,?,?,?,?,?,?)").use { st ->
                 for (r in programmes) {
                     st.reset()
                     st.bindText(1, playlistId); st.bindText(2, r.channelId)
@@ -499,11 +511,51 @@ internal object IptvContentDb {
         }
     }
 
-    /** Writes the EPG meta row LAST — its presence is the "EPG ingest complete" signal. */
-    suspend fun finishEpg(playlistId: String, programmeCount: Int) = mutex.withLock {
-        connection().prepare("INSERT OR REPLACE INTO epg_meta(playlist_id, built_at, programme_count) VALUES(?,?,?)").use { st ->
-            st.bindText(1, playlistId); st.bindLong(2, now()); st.bindLong(3, programmeCount.toLong())
-            st.step()
+    /**
+     * Completes an EPG refresh by SWAPPING the staged (shadow) rows into the live guide in ONE
+     * transaction, then writing the meta row LAST. A refresh that failed or was cancelled never
+     * reaches here, so the previous complete guide keeps serving.
+     *
+     * [keepPriorIfEmpty] governs a fetch that COMPLETED but produced zero programmes: a real fetch
+     * passes true (a bad/empty/truncated body must not blank a good guide), an explicit clear passes
+     * false (empty the guide). The throttle (built_at) always advances so an empty provider isn't
+     * refetched on every browse; on a kept-prior empty result the meta count reports what is actually
+     * live so callers gating on programmeCount stay consistent with [epgAround].
+     */
+    suspend fun finishEpg(playlistId: String, programmeCount: Int, keepPriorIfEmpty: Boolean = false) = mutex.withLock {
+        val c = connection()
+        c.execSQL("BEGIN IMMEDIATE")
+        try {
+            val swap = programmeCount > 0
+            if (swap || !keepPriorIfEmpty) {
+                // A wholesale refresh supersedes the per-channel fetch stamps too. On an explicit
+                // clear (empty + !keepPrior) this empties the guide; on a swap it makes room for it.
+                for (table in listOf("epg_programmes", "epg_channel_fetch")) {
+                    c.prepare("DELETE FROM $table WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
+                }
+            }
+            if (swap) {
+                c.prepare(
+                    "INSERT INTO epg_programmes(playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive) " +
+                        "SELECT playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive FROM $EPG_SHADOW WHERE playlist_id = ?",
+                ).use { st -> st.bindText(1, playlistId); st.step() }
+            }
+            // Always clear this playlist's shadow rows (swapped in, or discarded).
+            c.prepare("DELETE FROM $EPG_SHADOW WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
+            // Meta LAST — the "ingest complete" signal. On a kept-prior empty result, report the count
+            // still live so ensureEpg's `programmeCount > 0` gate matches what epgAround will return.
+            val metaCount = if (swap) programmeCount else {
+                c.prepare("SELECT COUNT(*) FROM epg_programmes WHERE playlist_id = ?").use { st ->
+                    st.bindText(1, playlistId); if (st.step()) st.getLong(0).toInt() else 0
+                }
+            }
+            c.prepare("INSERT OR REPLACE INTO epg_meta(playlist_id, built_at, programme_count) VALUES(?,?,?)").use { st ->
+                st.bindText(1, playlistId); st.bindLong(2, now()); st.bindLong(3, metaCount.toLong())
+                st.step()
+            }
+            c.execSQL("COMMIT")
+        } catch (t: Throwable) {
+            c.execSQL("ROLLBACK"); throw t
         }
     }
 

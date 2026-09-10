@@ -33,6 +33,14 @@ class IptvContentDbEpgWindowTest {
         hasArchive: Boolean = false,
     ) = EpgProgrammeRow(channel, startMs, endMs, title, desc, hasArchive)
 
+    /** Seeds a COMPLETE live generation the way a real refresh does: stage into the shadow, then swap
+     *  it in with finishEpg. (insertEpgChunk alone now only fills the shadow, not the live guide.) */
+    private suspend fun seedEpg(pid: String, rows: List<EpgProgrammeRow>) {
+        IptvContentDb.beginEpg(pid)
+        IptvContentDb.insertEpgChunk(pid, rows)
+        IptvContentDb.finishEpg(pid, rows.size)
+    }
+
     @Test
     fun `epg window truncates descriptions and the full-desc getter returns the whole text`() = runBlocking {
         val pid = "wp1:window"
@@ -72,7 +80,7 @@ class IptvContentDbEpgWindowTest {
     @Test
     fun `channel refill replaces only that channel and stamps its fetch time`() = runBlocking {
         val pid = "wp1:refill"
-        IptvContentDb.insertEpgChunk(
+        seedEpg(
             pid,
             listOf(
                 programme("bbc.uk", 1_000L, 2_000L, "Old A"),
@@ -97,7 +105,7 @@ class IptvContentDbEpgWindowTest {
     @Test
     fun `an empty refill clears the channel and still stamps the gate`() = runBlocking {
         val pid = "wp1:empty-refill"
-        IptvContentDb.insertEpgChunk(pid, listOf(programme("bbc.uk", 1_000L, 2_000L, "Stale")))
+        seedEpg(pid, listOf(programme("bbc.uk", 1_000L, 2_000L, "Stale")))
         IptvContentDb.refillChannelEpg(pid, "bbc.uk", emptyList(), fetchedAtMs = 900L)
         assertTrue(IptvContentDb.epgWindow(pid, "bbc.uk", 0L, 10_000L).isEmpty())
         // A provider with no guide for the channel is remembered — the gate stops re-asking.
@@ -107,7 +115,7 @@ class IptvContentDbEpgWindowTest {
     @Test
     fun `prune drops programmes that ended before the cutoff`() = runBlocking {
         val pid = "wp1:prune"
-        IptvContentDb.insertEpgChunk(
+        seedEpg(
             pid,
             listOf(
                 programme("bbc.uk", 0L, 1_000L, "Long gone"),
@@ -122,7 +130,7 @@ class IptvContentDbEpgWindowTest {
     @Test
     fun `has archive round-trips through insert and every epg read`() = runBlocking {
         val pid = "wp1:archive"
-        IptvContentDb.insertEpgChunk(
+        seedEpg(
             pid,
             listOf(
                 programme("bbc.uk", 1_000L, 2_000L, "Replayable", hasArchive = true),
@@ -133,6 +141,57 @@ class IptvContentDbEpgWindowTest {
         assertEquals(listOf(true, false), window.map { it.hasArchive })
         val around = IptvContentDb.epgAround(pid, "bbc.uk", atMs = 1_500L, limit = 2)
         assertEquals(listOf(true, false), around.map { it.hasArchive })
+    }
+
+    // --- EPG generation swap: a failed / cancelled / empty refresh must not blank the guide ---
+
+    @Test
+    fun `a refresh abandoned before finishEpg keeps the previously stored generation`() = runBlocking {
+        val pid = "epg:abandoned"
+        seedEpg(pid, listOf(programme("bbc.uk", 2_000L, 3_000L, "Prior")))
+        // A refresh that begins and stages partial rows but never finishes (network drop / cancellation):
+        // the live guide is untouched because the shadow is only swapped in by finishEpg.
+        IptvContentDb.beginEpg(pid)
+        IptvContentDb.insertEpgChunk(pid, listOf(programme("bbc.uk", 10_000L, 11_000L, "Partial")))
+        assertEquals(listOf("Prior"), IptvContentDb.epgWindow(pid, "bbc.uk", 0L, 20_000L).map { it.title })
+    }
+
+    @Test
+    fun `an empty completed refresh keeps the prior generation but still throttles`() = runBlocking {
+        val pid = "epg:empty-keep"
+        seedEpg(pid, listOf(programme("bbc.uk", 2_000L, 3_000L, "Prior")))
+        IptvContentDb.beginEpg(pid)
+        IptvContentDb.finishEpg(pid, 0, keepPriorIfEmpty = true) // the real-fetch-parsed-nothing path
+        assertEquals(listOf("Prior"), IptvContentDb.epgWindow(pid, "bbc.uk", 0L, 20_000L).map { it.title })
+        // Meta present (throttle advanced) and consistent with what is actually live — not zero.
+        assertEquals(1, IptvContentDb.epgMeta(pid)?.programmeCount)
+    }
+
+    @Test
+    fun `an explicit clear empties the guide`() = runBlocking {
+        val pid = "epg:clear"
+        seedEpg(pid, listOf(programme("bbc.uk", 2_000L, 3_000L, "Prior")))
+        IptvContentDb.beginEpg(pid)
+        IptvContentDb.finishEpg(pid, 0, keepPriorIfEmpty = false) // XmltvClient.clear() / no-tvg-ids path
+        assertTrue(IptvContentDb.epgWindow(pid, "bbc.uk", 0L, 20_000L).isEmpty())
+        assertEquals(0, IptvContentDb.epgMeta(pid)?.programmeCount)
+    }
+
+    @Test
+    fun `a successful refresh swaps the whole generation atomically leaving no old rows`() = runBlocking {
+        val pid = "epg:swap"
+        seedEpg(
+            pid,
+            listOf(
+                programme("bbc.uk", 2_000L, 3_000L, "Old"),
+                programme("cnn.us", 2_000L, 3_000L, "Old CNN"),
+            ),
+        )
+        seedEpg(pid, listOf(programme("bbc.uk", 2_000L, 3_000L, "New")))
+        // New generation fully visible; EVERY old row is gone, including the channel it didn't mention.
+        assertEquals(listOf("New"), IptvContentDb.epgWindow(pid, "bbc.uk", 0L, 20_000L).map { it.title })
+        assertTrue(IptvContentDb.epgWindow(pid, "cnn.us", 0L, 20_000L).isEmpty())
+        assertEquals(1, IptvContentDb.epgMeta(pid)?.programmeCount)
     }
 
     @Test
