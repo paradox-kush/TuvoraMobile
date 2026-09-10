@@ -65,7 +65,7 @@ internal fun CachedInProgressItem.resolvedProgressKey(): String =
         )
 
 @Serializable
-private data class CachedEnrichmentPayload(
+internal data class CachedEnrichmentPayload(
     val nextUp: List<CachedNextUpItem> = emptyList(),
     val inProgress: List<CachedInProgressItem> = emptyList(),
 )
@@ -83,6 +83,12 @@ internal object ContinueWatchingEnrichmentCache {
     // the TV file cache uses. This keeps a runaway producer or an old/oversized stored value from
     // materializing an unbounded list on a startup path.
     private const val MAX_RECORDS = 500
+    // Byte/char guard enforced BEFORE decoding. The preferences API hands us the stored value as a
+    // fully-materialized String (unavoidable at that layer), but decoding it into the object graph is
+    // the larger, multiplied cost — so an over-cap value is dropped without ever being decoded, rather
+    // than decoding an unbounded graph and only then trimming with capped(). Mirrors the TV file
+    // cache's MAX_CACHE_BYTES pre-read check; sized well above a real ~500-record payload.
+    private const val MAX_CACHE_CHARS = 4 * 1024 * 1024
     private fun <T> List<T>.capped(): List<T> = if (size > MAX_RECORDS) take(MAX_RECORDS) else this
     private val cacheLock = SynchronizedObject()
     private val lastPayloadHashByScope = mutableMapOf<CacheScope, Int>()
@@ -184,20 +190,29 @@ internal object ContinueWatchingEnrichmentCache {
             lastPayloadHashByScope.remove(scope)
             return@synchronized null
         }
-        runCatching {
-            json.decodeFromString<CachedEnrichmentPayload>(raw)
-        }.getOrNull()?.let { decoded ->
-            // Defensive consumer cap: an old/oversized stored value must not yield an unbounded list.
-            CachedEnrichmentPayload(nextUp = decoded.nextUp.capped(), inProgress = decoded.inProgress.capped())
-        }?.also { payload ->
-            lastPayloadHashByScope[scope] = payload.hashCode()
-        } ?: run {
+        val payload = decodeBounded(raw) ?: run {
+            // Oversized (byte cap, before decode) or unparseable -> drop the disposable value.
             lastPayloadHashByScope.remove(scope)
             ContinueWatchingEnrichmentStorage.removePayload(
                 continueWatchingEnrichmentStorageKey(profileId = profileId, source = source),
             )
-            null
+            return@synchronized null
         }
+        lastPayloadHashByScope[scope] = payload.hashCode()
+        payload
+    }
+
+    /**
+     * Decode a stored value under BOTH bounds. The byte/char cap is checked FIRST, so an over-cap
+     * value is rejected WITHOUT ever decoding it into the object graph — the producer/consumer record
+     * caps run post-decode and cannot bound that allocation. A decoded payload's lists are then
+     * record-capped. null = drop (oversized or unparseable). Extracted pure so both bounds are
+     * unit-testable without the platform preferences store.
+     */
+    internal fun decodeBounded(raw: String): CachedEnrichmentPayload? {
+        if (raw.length > MAX_CACHE_CHARS) return null
+        return runCatching { json.decodeFromString<CachedEnrichmentPayload>(raw) }.getOrNull()
+            ?.let { CachedEnrichmentPayload(nextUp = it.nextUp.capped(), inProgress = it.inProgress.capped()) }
     }
 
     private fun removeLegacyPayload(profileId: Int) {
