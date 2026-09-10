@@ -77,6 +77,13 @@ internal object ContinueWatchingEnrichmentCache {
     }
 
     private const val storageKey = "cw_enrichment_cache"
+    // Continue-watching is a bounded UI list. The payload store here is per-app preferences
+    // (SharedPreferences / NSUserDefaults / desktop file) — NOT inherently size-bounded, so cap both
+    // the producer (what we write) and the consumer (what we decode back), the same 500-record bound
+    // the TV file cache uses. This keeps a runaway producer or an old/oversized stored value from
+    // materializing an unbounded list on a startup path.
+    private const val MAX_RECORDS = 500
+    private fun <T> List<T>.capped(): List<T> = if (size > MAX_RECORDS) take(MAX_RECORDS) else this
     private val cacheLock = SynchronizedObject()
     private val lastPayloadHashByScope = mutableMapOf<CacheScope, Int>()
     private val _generation = MutableStateFlow(0)
@@ -115,7 +122,7 @@ internal object ContinueWatchingEnrichmentCache {
         if (generation != _generation.value) return@synchronized false
 
         removeLegacyPayload(profileId)
-        val payload = CachedEnrichmentPayload(nextUp = nextUp, inProgress = inProgress)
+        val payload = CachedEnrichmentPayload(nextUp = nextUp.capped(), inProgress = inProgress.capped())
         val payloadHash = payload.hashCode()
         val scope = CacheScope(profileId = profileId, source = source)
         if (!force && lastPayloadHashByScope[scope] == payloadHash) {
@@ -179,7 +186,10 @@ internal object ContinueWatchingEnrichmentCache {
         }
         runCatching {
             json.decodeFromString<CachedEnrichmentPayload>(raw)
-        }.getOrNull()?.also { payload ->
+        }.getOrNull()?.let { decoded ->
+            // Defensive consumer cap: an old/oversized stored value must not yield an unbounded list.
+            CachedEnrichmentPayload(nextUp = decoded.nextUp.capped(), inProgress = decoded.inProgress.capped())
+        }?.also { payload ->
             lastPayloadHashByScope[scope] = payload.hashCode()
         } ?: run {
             lastPayloadHashByScope.remove(scope)
