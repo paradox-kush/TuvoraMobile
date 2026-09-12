@@ -185,6 +185,15 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                 onSnapshot = { snapshot ->
                     playbackSnapshot = snapshot
                     if (!snapshot.isLoading) initialLoadCompleted = true
+                    // Re-arm the credential-refresh loop guard once the stream has genuinely recovered
+                    // (played continuously well past the refresh baseline). A short-TTL link that dies
+                    // ~5s after minting never reaches this threshold, so it cannot re-arm the loop.
+                    if (credentialRefreshAttempts > 0 &&
+                        PlayerCredentialRefreshPolicy.hasRecovered(snapshot.positionMs, credentialRefreshBaselinePositionMs)
+                    ) {
+                        credentialRefreshAttempts = 0
+                        credentialRefreshBaselinePositionMs = 0L
+                    }
                     if (!playbackStartRecorded.value && (snapshot.positionMs > 0L || snapshot.isPlaying)) {
                         playbackStartRecorded.value = true
                         Breadcrumbs.playbackStarted(

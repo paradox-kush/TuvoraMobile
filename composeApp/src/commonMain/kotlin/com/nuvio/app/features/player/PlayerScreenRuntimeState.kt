@@ -180,7 +180,14 @@ internal class PlayerScreenRuntime(
     var nextEpisodeAutoPlayJob by mutableStateOf<Job?>(null)
     var pendingP2pSwitch by mutableStateOf<PendingPlayerP2pSwitch?>(null)
     var credentialRefreshJob by mutableStateOf<Job?>(null)
-    var credentialRefreshAttemptedSourceUrl by mutableStateOf<String?>(null)
+    // Bounded, URL-INDEPENDENT credential-refresh guard (see PlayerCredentialRefreshPolicy). A Stalker
+    // create_link mints a new unique short-TTL URL every time, so the old URL-keyed guard never matched
+    // and the refresh looped forever on a live channel. This counts consecutive re-mints since the last
+    // genuinely new stream / sustained recovery; the policy caps it so the error surfaces instead of
+    // spinning. Reset ONLY on a new videoId (channel/content change) or after sustained healthy playback
+    // — never on the refresh's own source swap.
+    var credentialRefreshAttempts by mutableStateOf(0)
+    var credentialRefreshBaselinePositionMs by mutableStateOf(0L)
 
     var showAudioModal by mutableStateOf(false)
     var showSubtitleModal by mutableStateOf(false)
