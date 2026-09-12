@@ -17,8 +17,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
@@ -72,18 +74,141 @@ object XtreamAccountSyncService {
             delay(PUSH_DEBOUNCE_MS)
             if (ProfileRepository.activeProfileId != profileId) return@launch
             if (isSyncingFromRemote || !authed()) return@launch
-            pushToRemote(profileId)
+            when (activationFor(profileId)) {
+                PlaylistSyncActivation.V2_ACTIVE -> runV2Sync(profileId)
+                PlaylistSyncActivation.V1_LEGACY -> pushToRemote(profileId)
+                // Adopted profile with v2 turned off: never fall back to destructive v1. Retain
+                // pending; push nothing until v2 is re-enabled.
+                PlaylistSyncActivation.V2_PAUSED ->
+                    log.w { "triggerPush — v2 paused for profile $profileId; pending retained, no v1 write" }
+            }
         }
+    }
+
+    /** Per-profile activation: reads the stored sync-state to decide whether this profile has adopted
+     *  v2, then applies the rollout policy. */
+    private fun activationFor(profileId: Int): PlaylistSyncActivation {
+        val st = decodePlaylistSyncState(XtreamAccountStorage.loadPlaylistSyncStateJson(profileId))
+        val adopted = st.revision > 0 || st.pending.isNotEmpty()
+        return PlaylistSyncConfig.activationFor(adopted)
     }
 
     private suspend fun pushToRemote(profileId: Int) {
         runCatching {
             if (ProfileRepository.activeProfileId != profileId) return@runCatching
-            val accounts = XtreamRepository.uiState.value.accounts
+            // B24 §2: capture authority AND the outgoing accounts in ONE synchronous snapshot, so
+            // the authority decision and the payload cannot desync and a profile switch during the
+            // network call below cannot redirect the payload. Send the SNAPSHOT's profile + accounts,
+            // never the live active-profile state.
+            val snapshot = XtreamRepository.captureOutgoingPush()
+            if (snapshot.profileId != profileId) return@runCatching // loaded state is for another profile
+            // A full-replace push whose local state is not authoritative (a Recovered/Corrupt local
+            // decode, or an unloaded store) would delete-then-insert an empty/truncated set and wipe
+            // the server. Withhold it; a genuine user deletion stays authoritative and still pushes
+            // (B24). This also covers the login-time flush, not just the debounced edit push.
+            if (!snapshot.canFullReplace) {
+                log.w { "pushToRemote — withheld: local playlist state not authoritative; preserving server (B24)" }
+                return@runCatching
+            }
+            // No lock is held across this network call; the payload is the immutable snapshot, and a
+            // failure here changes NO local authority/synced state — it can neither authorize a
+            // future push nor mark a newer edit synced (this push records nothing locally).
             SupabaseProvider.client.postgrest
-                .rpc("sync_push_iptv_playlists", playlistPushParams(profileId, accounts))
-            log.d { "pushToRemote — ${accounts.size} playlists" }
+                .rpc("sync_push_iptv_playlists", playlistPushParams(snapshot.profileId, snapshot.accounts))
+            log.d { "pushToRemote — ${snapshot.accounts.size} playlists" }
         }.onFailure { e -> log.e(e) { "pushToRemote — FAILED" } }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // B24 v2 — the REAL revision-contract sync path (debug/local only; see PlaylistSyncConfig).
+    // Drives the shared PlaylistV2SyncEngine through a transport that calls the actual v2 RPCs, using
+    // the real repository state + reconcile core. Serialized per profile by [v2Mutex] (the network
+    // calls happen INSIDE the engine, NOT inside any storage lock).
+    // ---------------------------------------------------------------------------------------------
+    private val v2Mutex = kotlinx.coroutines.sync.Mutex()
+    private val pullJson = Json { ignoreUnknownKeys = true }
+
+    /** A fresh mutation id (128 bits of randomness) — persisted, so it is stable across retries and
+     *  restarts and rotated only after a committed push. */
+    private fun newPlaylistMutationId(): String =
+        "m-" + kotlin.random.Random.nextLong().toULong().toString(16) + kotlin.random.Random.nextLong().toULong().toString(16)
+
+    private val v2Transport = object : PlaylistSyncTransport {
+        override suspend fun pull(profileId: Int): PlaylistPullResponse {
+            val result: JsonObject = SupabaseProvider.client.postgrest
+                .rpc("sync_pull_iptv_playlists_v2", buildJsonObject { put("p_profile_id", profileId) })
+                .decodeAs()
+            val revision = (result["revision"] as? JsonPrimitive)?.content?.toLongOrNull() ?: 0L
+            val generation = (result["generation"] as? JsonPrimitive)?.content?.toLongOrNull() ?: 0L
+            val rowsJson = result["playlists"] as? JsonArray ?: JsonArray(emptyList())
+            val rows = rowsJson.mapNotNull { el ->
+                runCatching { pullJson.decodeFromJsonElement(PlaylistRow.serializer(), el) }.getOrNull()
+            }
+            val accounts = usableRemoteAccounts(rows)
+            return PlaylistPullResponse(revision, accounts, generation)
+        }
+
+        override suspend fun push(
+            profileId: Int,
+            expectedRevision: Long?,
+            accounts: List<XtreamAccount>,
+            deleteAll: Boolean,
+            mutationId: String,
+            expectedGeneration: Long?,
+        ): PlaylistPushResponse {
+            val params = buildJsonObject {
+                put("p_profile_id", profileId)
+                put("p_expected_revision", if (expectedRevision == null) JsonNull else JsonPrimitive(expectedRevision))
+                put("p_playlists", playlistPushPayload(accounts))
+                put("p_source_types", JsonArray(SYNCED_SOURCE_TYPES.map(::JsonPrimitive)))
+                put("p_delete_all", deleteAll)
+                put("p_mutation_id", mutationId)
+                put("p_expected_generation", if (expectedGeneration == null) JsonNull else JsonPrimitive(expectedGeneration))
+            }
+            val result: JsonObject = SupabaseProvider.client.postgrest
+                .rpc("sync_push_iptv_playlists_v2", params).decodeAs()
+            return when ((result["status"] as? JsonPrimitive)?.content) {
+                "ok" -> PlaylistPushResponse.Ok(
+                    revision = (result["revision"] as? JsonPrimitive)?.content?.toLongOrNull() ?: 0L,
+                    deduped = (result["deduped"] as? JsonPrimitive)?.content?.toBoolean() ?: false,
+                )
+                "conflict" -> {
+                    val curRows = (result["current_rows"] as? JsonArray ?: JsonArray(emptyList()))
+                        .mapNotNull { el -> runCatching { pullJson.decodeFromJsonElement(PlaylistRow.serializer(), el) }.getOrNull() }
+                    PlaylistPushResponse.Conflict(
+                        currentRevision = (result["current_revision"] as? JsonPrimitive)?.content?.toLongOrNull() ?: 0L,
+                        currentRows = usableRemoteAccounts(curRows),
+                    )
+                }
+                else -> PlaylistPushResponse.Rejected(result.toString())
+            }
+        }
+    }
+
+    private fun v2Engine() = PlaylistV2SyncEngine(
+        transport = v2Transport,
+        loadState = { decodePlaylistSyncState(XtreamAccountStorage.loadPlaylistSyncStateJson(it)) },
+        saveState = { p, s -> XtreamAccountStorage.savePlaylistSyncStateJson(p, encodePlaylistSyncState(s)) },
+        currentAccounts = { XtreamRepository.uiState.value.accounts },
+        canPush = { XtreamRepository.canPushFullReplace() },
+        applyLocal = { p, accounts -> XtreamRepository.applyFromRemote(p, reconcileLocalIds(accounts, XtreamRepository.uiState.value.accounts)) },
+        stillActive = { ProfileRepository.activeProfileId == it },
+        newMutationId = { newPlaylistMutationId() },
+    )
+
+    /** Runs one full v2 sync for [profileId], serialized per call. Rejections/conflicts are logged. */
+    suspend fun runV2Sync(profileId: Int) {
+        if (ProfileRepository.activeProfileId != profileId) return
+        v2Mutex.lock()
+        val outcome = try {
+            v2Engine().sync(profileId)
+        } catch (e: Throwable) {
+            log.e(e) { "runV2Sync — FAILED (no v1 fallback; server preserved)" }
+            PlaylistSyncOutcome.PUSH_FAILED
+        } finally {
+            v2Mutex.unlock()
+        }
+        log.i { "runV2Sync(profile $profileId) — $outcome" }
     }
 
     /**
@@ -114,6 +239,16 @@ object XtreamAccountSyncService {
      */
     suspend fun pullFromServer(profileId: Int) {
         if (!authed() || ProfileRepository.activeProfileId != profileId) return
+        when (activationFor(profileId)) {
+            PlaylistSyncActivation.V2_ACTIVE -> { runV2Sync(profileId); return }
+            // Adopted-but-paused: don't run a v1 pull/apply that could overwrite local; freeze the
+            // profile (pending retained) until v2 is re-enabled.
+            PlaylistSyncActivation.V2_PAUSED -> {
+                log.w { "pullFromServer — v2 paused for profile $profileId; skipping (local + pending preserved)" }
+                return
+            }
+            PlaylistSyncActivation.V1_LEGACY -> Unit // fall through to the legacy v1 pull below
+        }
         runCatching {
             val rows = SupabaseProvider.client.postgrest
                 .from("iptv_playlists")

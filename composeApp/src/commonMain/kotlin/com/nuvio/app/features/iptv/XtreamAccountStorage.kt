@@ -28,4 +28,9 @@ internal expect object XtreamAccountStorage {
      *  selection. Device-local UI state: deliberately NOT part of the account sync payload. */
     fun loadHubSelectionJson(profileId: Int): String?
     fun saveHubSelectionJson(profileId: Int, json: String)
+    /** B24 v2 sync state (JSON PlaylistSyncState: revision + mutationId + pending ops), profile-scoped.
+     *  A SEPARATE key from the accounts blob so it survives an accounts-store corruption reset — the
+     *  pending "add C" and the mutation id outlive a reset of the accounts store. */
+    fun loadPlaylistSyncStateJson(profileId: Int): String?
+    fun savePlaylistSyncStateJson(profileId: Int, json: String)
 }

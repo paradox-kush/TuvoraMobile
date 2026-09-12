@@ -27,6 +27,19 @@ data class XtreamUiState(
 )
 
 /**
+ * An immutable, atomically-captured outgoing-push snapshot (B24 §2): the target [profileId], whether
+ * the loaded state is authoritative enough to full-replace, and the exact accounts to send. Because
+ * it is a value snapshot taken in one synchronous read, a profile switch or a local edit occurring
+ * during the network push can neither redirect it nor change its payload. The KMP twin of NuvioTV's
+ * PlaylistPushSnapshot.
+ */
+data class PlaylistPushSnapshot(
+    val profileId: Int,
+    val canFullReplace: Boolean,
+    val accounts: List<XtreamAccount>,
+)
+
+/**
  * Xtream IPTV accounts, persisted locally per profile. Object-singleton with a
  * MutableStateFlow, mirroring AddonRepository / DebridSettingsRepository. KMP twin of
  * NuvioTV's XtreamAccountStore + XtreamSettingsViewModel.
@@ -45,30 +58,120 @@ object XtreamRepository : IptvCatalog {
     private var loaded = false
 
     /**
+     * Whether the current in-memory state is a faithful, COMPLETE view of this profile's playlists —
+     * a clean local decode ([PlaylistLoadOutcome.Valid], including a genuine empty list), a remote
+     * pull, or a test install. False when the local decode was [PlaylistLoadOutcome.Recovered] or
+     * [PlaylistLoadOutcome.Corrupt]: in that case we show the recovered subset but must NOT overwrite
+     * the stored bytes or full-replace the server with it (B24 — an incompatible row must not become
+     * a wipe). A subsequent clean local decode or a remote pull heals it.
+     */
+    private var authoritative = false
+
+    /**
+     * Last local decode held rows/fields this build could not fully read ([PlaylistLoadOutcome]
+     * Recovered/Corrupt). While damaged we must not overwrite the stored bytes with a truncated
+     * snapshot, nor push it up (B24). A clean local decode or a remote pull clears it.
+     */
+    private var damaged = false
+
+    /**
+     * The raw blob currently in storage, kept so a re-persist can preserve any per-row keys this
+     * build's serializer doesn't know (B24 §3) instead of stripping them via a plain re-encode.
+     */
+    private var lastStoredRaw: String? = null
+
+    /**
+     * Test seam (B24 §3): when set, persist() routes its durable write through this instead of the
+     * platform storage, so a test can simulate a write FAILURE (throw) and assert the recovery
+     * contract — no false success, no push, no authority promotion, in-memory keeps the pending
+     * edit. Never set in production. Reset it in the test's teardown.
+     */
+    internal var persistWriteForTest: ((profileId: Int, json: String) -> Unit)? = null
+
+    /** Test seam (B24 §3): invoke the private persist() directly to exercise the write path. */
+    internal fun persistForTest() = persist()
+
+    /**
+     * Test seam (B24 §3): stage an in-memory edit the way the add/edit flow does — mutate the shown
+     * accounts WITHOUT touching authority/damaged — so a following [persistForTest] reproduces "user
+     * edited a fresh store, then the durable write failed." Never called from production code.
+     */
+    internal fun stageEditForTest(accounts: List<XtreamAccount>) {
+        _uiState.update { it.copy(accounts = accounts) }
+    }
+
+    /** Test-only view of whether the in-memory state is authoritative (B24 §3). */
+    internal val authoritativeForTest: Boolean get() = authoritative
+
+    /** Test-only view of the last durably-persisted blob (B24 §3). */
+    internal val lastStoredRawForTest: String? get() = lastStoredRaw
+
+    /**
      * Test seam: installs [accounts] as the loaded state without touching storage, so unit tests can
      * exercise resolution paths that look accounts up by id (e.g. [XtreamItemRegistry.liveStreamUrlFor]).
      * Same idiom as `PosterEnricher.resetForTests` — never called from production code.
      */
     internal fun installAccountsForTest(accounts: List<XtreamAccount>) {
         loaded = true
+        authoritative = true
+        damaged = false
         _uiState.value = XtreamUiState(accounts = accounts)
     }
+
+    /**
+     * Test seam: load state from a RAW stored blob (as a real decode would), so tests can exercise
+     * the authority decision the sync push depends on — a Valid/Absent/Recovered/Corrupt blob and
+     * its effect on [canPushFullReplace] (B24 §4). Never called from production code.
+     */
+    internal fun installRawForTest(raw: String?) {
+        loaded = true
+        _uiState.value = XtreamUiState(accounts = loadAccounts(raw))
+    }
     private var currentProfileId = 1
+
+    /** Decode the stored blob element-wise and record whether it is authoritative / damaged. */
+    private fun loadAccounts(stored: String?): List<XtreamAccount> {
+        val outcome = decodePlaylistStore(json, stored)
+        authoritative = outcome.isAuthoritative
+        damaged = outcome.isDamaged
+        lastStoredRaw = stored
+        return outcome.accounts
+    }
 
     override fun ensureLoaded() {
         if (loaded) return
         loaded = true
         currentProfileId = ProfileRepository.activeProfileId
-        _uiState.update { it.copy(accounts = parse(XtreamAccountStorage.loadAccountsJson(currentProfileId))) }
+        _uiState.update { it.copy(accounts = loadAccounts(XtreamAccountStorage.loadAccountsJson(currentProfileId))) }
     }
 
     /** Reload this profile's accounts on a profile switch so no data leaks across profiles. */
     fun onProfileChanged(profileId: Int) {
         loaded = true
         currentProfileId = profileId
-        _uiState.value = XtreamUiState(accounts = parse(XtreamAccountStorage.loadAccountsJson(profileId)))
+        _uiState.value = XtreamUiState(accounts = loadAccounts(XtreamAccountStorage.loadAccountsJson(profileId)))
         XtreamTmdbResolver.warmUp(_uiState.value.accounts)
     }
+
+    /**
+     * True only when the in-memory state may safely full-replace the server (or overwrite local
+     * storage). The sync push checks this so a Recovered/Corrupt/unloaded state can never wipe a
+     * good server collection (B24). A genuine user "delete every playlist" stays authoritative and
+     * still pushes the deletion.
+     */
+    fun canPushFullReplace(): Boolean = authoritative && !damaged
+
+    /**
+     * B24 §2 — one atomic capture of everything the outgoing push needs: the profile the loaded
+     * state belongs to, whether that state may full-replace, and the exact accounts to send. Read
+     * synchronously (no suspension between the three), so the authority decision and the payload
+     * cannot desync, and the returned value is immutable — a profile switch or a local edit during
+     * the network push can neither redirect it nor change what it sends. The push must send
+     * [PlaylistPushSnapshot.accounts] under [PlaylistPushSnapshot.profileId], never the live
+     * active-profile state, so a switch mid-flight cannot redirect the payload.
+     */
+    fun captureOutgoingPush(): PlaylistPushSnapshot =
+        PlaylistPushSnapshot(currentProfileId, canPushFullReplace(), _uiState.value.accounts.toList())
 
     /**
      * Kick background catalog-index builds so the first play/search doesn't pay the
@@ -162,8 +265,8 @@ object XtreamRepository : IptvCatalog {
                 .onSuccess {
                     val updated = _uiState.value.accounts.filterNot { it.id == account.id } + account
                     _uiState.update { it.copy(accounts = updated, isValidating = false) }
-                    persist()
-                    onResult(true)
+                    recordPending { it.recordAdd(account) }   // B24 v2: durable add intent (file playlist)
+                    persistAndReport(onResult)
                 }
                 .onFailure { e ->
                     _uiState.update { it.copy(isValidating = false, error = e.message ?: "Could not read that playlist file") }
@@ -228,8 +331,8 @@ object XtreamRepository : IptvCatalog {
                     _uiState.update { it.copy(accounts = updated, isValidating = false) }
                     // Start the catalog index now, not on first play — minutes on budget devices.
                     XtreamTmdbResolver.warmUp(listOf(account))
-                    persist()
-                    onResult(true)
+                    recordPending { it.recordAdd(account) }   // B24 v2: durable "user added this playlist" intent
+                    persistAndReport(onResult)
                 }
                 .onFailure { e ->
                     _uiState.update { it.copy(isValidating = false, error = e.message ?: "Could not reach the panel") }
@@ -309,8 +412,8 @@ object XtreamRepository : IptvCatalog {
                     XtreamHubRepository.resetForProfile()
                     XtreamSearchIndex.resetForProfile()
                     XtreamTmdbResolver.warmUp(listOf(account))
-                    persist()
-                    onResult(true)
+                    recordPending { it.recordUpdate(account) }   // B24 v2: durable "user edited this playlist" intent
+                    persistAndReport(onResult)
                 }
                 .onFailure { e ->
                     _uiState.update { it.copy(isValidating = false, error = e.message ?: "Could not reach the panel") }
@@ -349,11 +452,13 @@ object XtreamRepository : IptvCatalog {
             state.copy(accounts = state.accounts.map { if (it.id == id) it.copy(enabled = enabled) else it })
         }
         if (enabled) _uiState.value.accounts.firstOrNull { it.id == id }?.let { XtreamTmdbResolver.warmUp(listOf(it)) }
+        _uiState.value.accounts.firstOrNull { it.id == id }?.let { recordPending { ops -> ops.recordUpdate(it) } }
         persist()
     }
 
     fun remove(id: String) {
         val removed = _uiState.value.accounts.firstOrNull { it.id == id }
+        recordPending { ops -> ops.recordDelete(id) }
         _uiState.update { it.copy(accounts = it.accounts.filterNot { acc -> acc.id == id }) }
         // Caches keyed by this id leak otherwise (match db rows survive forever); saved
         // refs would be dead ids (phantom favorites / continue-watching rows).
@@ -382,6 +487,9 @@ object XtreamRepository : IptvCatalog {
     /** Drop credential-bearing in-memory state after sign-out or account deletion. */
     fun clearLocalState() {
         loaded = false
+        authoritative = false
+        damaged = false
+        lastStoredRaw = null
         currentProfileId = 1
         _uiState.value = XtreamUiState()
         XtreamItemRegistry.resetForProfile()
@@ -394,10 +502,16 @@ object XtreamRepository : IptvCatalog {
     /** Replace this profile's accounts from a remote pull WITHOUT echoing a push back. */
     fun applyFromRemote(profileId: Int, accounts: List<XtreamAccount>) {
         loaded = true
+        // The server copy is authoritative — a pull heals a locally-recovered/corrupt/absent store.
+        authoritative = true
+        damaged = false
         currentProfileId = profileId
         val before = _uiState.value.accounts
         _uiState.update { it.copy(accounts = accounts) }
-        XtreamAccountStorage.saveAccountsJson(profileId, json.encodeToString(accounts))
+        // The server carries only known columns, so a pull's blob has no unknown keys to preserve.
+        val encoded = json.encodeToString(accounts)
+        XtreamAccountStorage.saveAccountsJson(profileId, encoded)
+        lastStoredRaw = encoded
         if (before != accounts) {
             // Same discovery-cycle reset as a local edit: cached stream URLs embed the old
             // server/creds, and a playlist deleted on another device leaves index rows behind.
@@ -415,14 +529,75 @@ object XtreamRepository : IptvCatalog {
         XtreamTmdbResolver.warmUp(accounts)
     }
 
-    private fun persist() {
-        XtreamAccountStorage.saveAccountsJson(currentProfileId, json.encodeToString(_uiState.value.accounts))
-        XtreamAccountSyncService.triggerPush()
+    /**
+     * Persist the in-memory accounts durably and, on success, authorize a sync push. Returns whether
+     * the state was DURABLY written: false means the caller must treat the mutation as not-saved (no
+     * false success — B24 §3). A false return leaves the in-memory edit pending (not reverted).
+     */
+    /**
+     * B24 v2 — append a user mutation to the durable per-profile pending-op log (a SEPARATE storage
+     * key that survives an accounts-store corruption reset). Only records when the v2 sync path is
+     * active; in v1 the log is never consumed or grown. This is what lets "reset → add C" reconcile
+     * to A+B+C: the accounts blob may be wiped, but the "add C" intent persists here.
+     */
+    private fun recordPending(transform: (List<PendingOpDto>) -> List<PendingOpDto>) {
+        val cur = decodePlaylistSyncState(XtreamAccountStorage.loadPlaylistSyncStateJson(currentProfileId))
+        // A profile that already advanced a v2 revision (or holds pending v2 ops) has ADOPTED v2, so it
+        // keeps recording pending even while paused — never silently dropping intent (B24 activation).
+        val adopted = cur.revision > 0 || cur.pending.isNotEmpty()
+        if (!PlaylistSyncConfig.recordsPending(adopted)) return
+        XtreamAccountStorage.savePlaylistSyncStateJson(
+            currentProfileId,
+            encodePlaylistSyncState(cur.copy(pending = transform(cur.pending)))
+        )
     }
 
-    private fun parse(stored: String?): List<XtreamAccount> {
-        if (stored.isNullOrBlank()) return emptyList()
-        return runCatching { json.decodeFromString<List<XtreamAccount>>(stored) }.getOrDefault(emptyList())
+    private fun persist(): Boolean {
+        // A damaged load (Recovered/Corrupt) must not overwrite the stored bytes (which hold rows or
+        // forward-compat fields this build can't decode) with a truncated snapshot, nor push that
+        // subset up (B24). Preserve the original for a future build or a remote pull to heal.
+        if (damaged) return false
+        // Preserve any forward-compat per-row keys this build can't decode (B24 §3) instead of
+        // stripping them via a plain re-encode.
+        val merged = mergePlaylistJson(json, lastStoredRaw, _uiState.value.accounts)
+        // B24 §3/§4 — a FAILED local write must not report success, must not authorize a push, and
+        // must not promote the state to authoritative. saveAccountsJson here is a SYNCHRONOUS
+        // platform write (Android SharedPreferences.apply / iOS NSUserDefaults) — not a suspend
+        // call — so no CancellationException can originate inside this runCatching; it only ever
+        // captures a genuine storage failure. If the store did not accept the bytes we bail BEFORE
+        // touching authoritative/lastStoredRaw/the push: authority is unchanged (a fresh store stays
+        // non-authoritative, so a later login-flush cannot full-replace the server from an
+        // unpersisted edit), lastStoredRaw still points at the last durable bytes, and the in-memory
+        // state keeps the pending edit (recovery contract: pending-in-memory, not yet durable — the
+        // next successful edit re-attempts the whole persist).
+        val wrote = runCatching {
+            val override = persistWriteForTest
+            if (override != null) override(currentProfileId, merged)
+            else XtreamAccountStorage.saveAccountsJson(currentProfileId, merged)
+        }.isSuccess
+        if (!wrote) return false
+        // Only a SUCCESSFULLY-persisted authored set is authoritative — even when it is empty (the
+        // user deleted their last playlist) or was built up from a fresh/Absent store. This is what
+        // lets a genuine delete-all push while a corruption-reset (Absent, never persisted) stays
+        // withheld, and what keeps a failed write from ever authorizing a push.
+        authoritative = true
+        lastStoredRaw = merged
+        XtreamAccountSyncService.triggerPush()
+        return true
+    }
+
+    /**
+     * Persist a just-verified add/edit and report the DURABLE outcome to the form (B24 §3): a failed
+     * write reports failure with a user-facing error instead of falsely dismissing as saved. The
+     * in-memory edit stays pending (visible) — it is not rolled back — so a retry re-attempts it.
+     */
+    private fun persistAndReport(onResult: (Boolean) -> Unit) {
+        if (persist()) {
+            onResult(true)
+        } else {
+            _uiState.update { it.copy(error = "Couldn't save the playlist on this device. Free up space and try again.") }
+            onResult(false)
+        }
     }
 }
 

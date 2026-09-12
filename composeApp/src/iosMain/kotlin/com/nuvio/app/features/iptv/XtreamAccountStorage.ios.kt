@@ -52,4 +52,11 @@ internal actual object XtreamAccountStorage {
     actual fun saveHubSelectionJson(profileId: Int, json: String) {
         NSUserDefaults.standardUserDefaults.setObject(json, forKey = "xtream_hub_selection_$profileId")
     }
+
+    actual fun loadPlaylistSyncStateJson(profileId: Int): String? =
+        NSUserDefaults.standardUserDefaults.stringForKey("xtream_sync_state_$profileId")
+
+    actual fun savePlaylistSyncStateJson(profileId: Int, json: String) {
+        NSUserDefaults.standardUserDefaults.setObject(json, forKey = "xtream_sync_state_$profileId")
+    }
 }

@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import io.github.jan.supabase.auth.auth
 
 object SyncBackendRepository {
     private val log = Logger.withTag("SyncBackendRepository")
@@ -83,6 +84,21 @@ object SyncBackendRepository {
         }.getOrNull() ?: return SyncBackendRefreshResult.Failed(
             _state.value.lastManifestError ?: "Failed to fetch sync backend manifest",
         )
+
+        // B24 — resolve this client's effective v2 rollout from the manifest cohort (percent-by-account
+        // + platform) and publish it into the core-owned signal the IPTV feature reads. Cohorting is a
+        // client-side feature-flag decision (the backend contract enforces safety regardless), so it is
+        // evaluated here against this client's own account id + platform. Null mode leaves the build
+        // default. A missing account (not signed in yet) buckets out of an enabled cohort until sign-in.
+        PlaylistSyncRolloutSignal.raw = manifest.iptvPlaylistV2?.let { rawMode ->
+            PlaylistV2CohortPolicy.resolveMode(
+                rawMode = rawMode,
+                percent = manifest.iptvPlaylistV2Percent,
+                platforms = manifest.iptvPlaylistV2Platforms,
+                userId = runCatching { SupabaseProvider.client.auth.currentSessionOrNull()?.user?.id }.getOrNull(),
+                platform = if (com.nuvio.app.isIos) "ios" else "android",
+            )
+        }
 
         val targetBackend = manifest.backendConfigForActiveBackend()
             ?: return SyncBackendRefreshResult.Failed("Sync backend manifest is invalid")
