@@ -3,14 +3,20 @@ package com.nuvio.app.core.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -137,29 +143,56 @@ private fun NuvioDropdownOptionsSheet(
                 color = tokens.colors.textPrimary,
             )
             NuvioBottomSheetDivider()
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = tokens.breakpoints.largePhone),
-            ) {
-                itemsIndexed(options) { index, option ->
-                    NuvioBottomSheetActionRow(
-                        title = option.label,
-                        onClick = { onSelected(option) },
-                        trailingContent = {
-                            if (option.key == selectedKey) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Check,
-                                    contentDescription = null,
-                                    tint = tokens.colors.accent,
-                                    modifier = Modifier.size(tokens.icons.md),
-                                )
-                            }
-                        },
-                    )
-                    if (index < options.lastIndex) {
-                        NuvioBottomSheetDivider()
+            // Edge fades signal that the list scrolls when there are more playlists than fit: the
+            // capped-height LazyColumn otherwise ends on a clean divider that reads as "that's all".
+            // Bottom fade = more below (the "keep scrolling" hint); top fade appears once scrolled.
+            val listState = rememberLazyListState()
+            val showTopFade by remember { derivedStateOf { listState.canScrollBackward } }
+            val showBottomFade by remember { derivedStateOf { listState.canScrollForward } }
+            Box(modifier = Modifier.fillMaxWidth()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = tokens.breakpoints.largePhone),
+                ) {
+                    itemsIndexed(options) { index, option ->
+                        NuvioBottomSheetActionRow(
+                            title = option.label,
+                            onClick = { onSelected(option) },
+                            trailingContent = {
+                                if (option.key == selectedKey) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Check,
+                                        contentDescription = null,
+                                        tint = tokens.colors.accent,
+                                        modifier = Modifier.size(tokens.icons.md),
+                                    )
+                                }
+                            },
+                        )
+                        if (index < options.lastIndex) {
+                            NuvioBottomSheetDivider()
+                        }
                     }
+                }
+                if (showTopFade) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .height(NuvioTokens.Space.s24)
+                            .background(Brush.verticalGradient(listOf(tokens.colors.surfaceSheet, Color.Transparent))),
+                    )
+                }
+                if (showBottomFade) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(NuvioTokens.Space.s40)
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, tokens.colors.surfaceSheet))),
+                    )
                 }
             }
         }
