@@ -90,4 +90,42 @@ class IptvOverlayStoreTest {
         assertNull(snap.channels["fp:v1:a"])
         assertTrue(snap.channels.containsKey("fp:v1:b"))
     }
+
+    // ---- delta-push / dirty tracking (2026-09-19 write-amplification fix) -------------------------
+
+    @Test
+    fun `push sends only dirty rows and an ack clears them`() = runBlocking {
+        IptvOverlayStore.setChannel(1, "fp:v1:bbc", "pl", ChannelOverlay(hidden = true), 100)
+        val pending = IptvOverlayStore.rowsForPush(1)
+        assertEquals(1, pending.size)
+        assertEquals("fp:v1:bbc", pending.single().okey)
+        IptvOverlayStore.markChannelsPushed(1, pending)
+        assertTrue(IptvOverlayStore.rowsForPush(1).isEmpty()) // nothing owed once the server acked it
+    }
+
+    @Test
+    fun `a remote-applied row is never pushed back`() = runBlocking {
+        IptvOverlayStore.applyRemoteChannel(1, "fp:v1:remote", "pl", ChannelOverlay(pinned = true), 100, false)
+        assertTrue(IptvOverlayStore.rowsForPush(1).isEmpty()) // pulled edits are not local, so not dirty
+        assertEquals(ChannelOverlay(pinned = true), IptvOverlayStore.snapshot(1).channels["fp:v1:remote"])
+    }
+
+    @Test
+    fun `a row edited during a push stays dirty and is resent`() = runBlocking {
+        IptvOverlayStore.setChannel(1, "fp:v1:x", "pl", ChannelOverlay(hidden = true), 100)
+        val inflight = IptvOverlayStore.rowsForPush(1) // captured at updated_at=100
+        IptvOverlayStore.setChannel(1, "fp:v1:x", "pl", ChannelOverlay(pinned = true), 200) // re-edited mid-push
+        IptvOverlayStore.markChannelsPushed(1, inflight) // ack clears only the updated_at=100 version
+        val still = IptvOverlayStore.rowsForPush(1)
+        assertEquals(1, still.size)
+        assertEquals(200, still.single().updatedAt)
+    }
+
+    @Test
+    fun `a stale remote event does not clobber a newer pending local edit`() = runBlocking {
+        IptvOverlayStore.setChannel(1, "fp:v1:y", "pl", ChannelOverlay(rename = "Local"), 200)
+        IptvOverlayStore.applyRemoteChannel(1, "fp:v1:y", "pl", ChannelOverlay(rename = "Older"), 100, false) // older -> ignored
+        assertEquals("Local", IptvOverlayStore.snapshot(1).channels["fp:v1:y"]?.rename)
+        assertEquals(1, IptvOverlayStore.rowsForPush(1).size) // still owed to the server
+    }
 }

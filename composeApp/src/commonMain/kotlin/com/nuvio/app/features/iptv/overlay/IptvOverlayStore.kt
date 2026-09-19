@@ -30,30 +30,40 @@ internal object IptvOverlayStore {
             "CREATE TABLE IF NOT EXISTS channel_overlay(profile_id INTEGER NOT NULL, entity_id TEXT NOT NULL, " +
                 "playlist_id TEXT, hidden INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, " +
                 "position INTEGER, rename TEXT, updated_at INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, " +
-                "PRIMARY KEY(profile_id, entity_id)) WITHOUT ROWID",
+                "dirty INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(profile_id, entity_id)) WITHOUT ROWID",
         )
         it.execSQL("CREATE INDEX IF NOT EXISTS channel_overlay_pl ON channel_overlay(profile_id, playlist_id)")
         it.execSQL(
             "CREATE TABLE IF NOT EXISTS category_overlay(profile_id INTEGER NOT NULL, playlist_id TEXT NOT NULL, " +
                 "content_type TEXT NOT NULL, category_key TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0, " +
                 "pinned INTEGER NOT NULL DEFAULT 0, position INTEGER, rename TEXT, updated_at INTEGER NOT NULL DEFAULT 0, " +
-                "deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(profile_id, playlist_id, content_type, category_key)) WITHOUT ROWID",
+                "deleted INTEGER NOT NULL DEFAULT 0, dirty INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(profile_id, playlist_id, content_type, category_key)) WITHOUT ROWID",
         )
         it.execSQL(
             "CREATE TABLE IF NOT EXISTS custom_group(profile_id INTEGER NOT NULL, group_id TEXT NOT NULL, " +
                 "playlist_id TEXT, content_type TEXT NOT NULL, name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, " +
-                "updated_at INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, " +
+                "updated_at INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, dirty INTEGER NOT NULL DEFAULT 0, " +
                 "PRIMARY KEY(profile_id, group_id)) WITHOUT ROWID",
         )
         it.execSQL(
             "CREATE TABLE IF NOT EXISTS custom_group_member(profile_id INTEGER NOT NULL, group_id TEXT NOT NULL, " +
                 "entity_id TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0, " +
-                "deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(profile_id, group_id, entity_id)) WITHOUT ROWID",
+                "deleted INTEGER NOT NULL DEFAULT 0, dirty INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(profile_id, group_id, entity_id)) WITHOUT ROWID",
         )
         it.execSQL(
             "CREATE TABLE IF NOT EXISTS overlay_cursor(profile_id INTEGER NOT NULL PRIMARY KEY, cursor INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID",
         )
-        it.execSQL("PRAGMA user_version = 1")
+        // v2: `dirty` marks locally-edited rows still to be pushed, so a push sends only the delta —
+        // not the whole overlay set on every edit (the 2026-09-19 write-amplification incident). For
+        // DBs created at v1 without the column, add it (existing rows default dirty=0: they were
+        // already force-pushed by the old full-set path, so nothing to re-send).
+        val ver = it.prepare("PRAGMA user_version").use { st -> if (st.step()) st.getLong(0) else 0L }
+        if (ver < 2) {
+            for (t in listOf("channel_overlay", "category_overlay", "custom_group", "custom_group_member")) {
+                runCatching { it.execSQL("ALTER TABLE $t ADD COLUMN dirty INTEGER NOT NULL DEFAULT 0") }
+            }
+            it.execSQL("PRAGMA user_version = 2")
+        }
         conn = it
     }
 
@@ -77,7 +87,7 @@ internal object IptvOverlayStore {
             "INSERT INTO channel_overlay(profile_id, entity_id, playlist_id, hidden, pinned, position, rename, updated_at, deleted) " +
                 "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id, entity_id) DO UPDATE SET playlist_id=excluded.playlist_id, " +
                 "hidden=excluded.hidden, pinned=excluded.pinned, position=excluded.position, rename=excluded.rename, " +
-                "updated_at=excluded.updated_at, deleted=excluded.deleted",
+                "updated_at=excluded.updated_at, deleted=excluded.deleted, dirty=0 WHERE excluded.updated_at >= channel_overlay.updated_at",
         ).use { st ->
             st.bindLong(1, profileId.toLong()); st.bindText(2, entityId)
             if (playlistId != null) st.bindText(3, playlistId) else st.bindNull(3)
@@ -94,7 +104,7 @@ internal object IptvOverlayStore {
             "INSERT INTO category_overlay(profile_id, playlist_id, content_type, category_key, hidden, pinned, position, rename, updated_at, deleted) " +
                 "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id, playlist_id, content_type, category_key) DO UPDATE SET " +
                 "hidden=excluded.hidden, pinned=excluded.pinned, position=excluded.position, rename=excluded.rename, " +
-                "updated_at=excluded.updated_at, deleted=excluded.deleted",
+                "updated_at=excluded.updated_at, deleted=excluded.deleted, dirty=0 WHERE excluded.updated_at >= category_overlay.updated_at",
         ).use { st ->
             st.bindLong(1, profileId.toLong()); st.bindText(2, playlistId); st.bindText(3, contentType); st.bindText(4, categoryKey)
             st.bindLong(5, if (o.hidden) 1 else 0); st.bindLong(6, if (o.pinned) 1 else 0)
@@ -109,7 +119,7 @@ internal object IptvOverlayStore {
         connection().prepare(
             "INSERT INTO custom_group(profile_id, group_id, playlist_id, content_type, name, position, updated_at, deleted) " +
                 "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(profile_id, group_id) DO UPDATE SET playlist_id=excluded.playlist_id, " +
-                "content_type=excluded.content_type, name=excluded.name, position=excluded.position, updated_at=excluded.updated_at, deleted=excluded.deleted",
+                "content_type=excluded.content_type, name=excluded.name, position=excluded.position, updated_at=excluded.updated_at, deleted=excluded.deleted, dirty=0 WHERE excluded.updated_at >= custom_group.updated_at",
         ).use { st ->
             st.bindLong(1, profileId.toLong()); st.bindText(2, groupId)
             if (playlistId != null) st.bindText(3, playlistId) else st.bindNull(3)
@@ -121,18 +131,22 @@ internal object IptvOverlayStore {
     suspend fun applyRemoteMember(profileId: Int, groupId: String, entityId: String, position: Int, updatedAt: Long, deleted: Boolean): Unit = mutex.withLock {
         connection().prepare(
             "INSERT INTO custom_group_member(profile_id, group_id, entity_id, position, updated_at, deleted) VALUES(?,?,?,?,?,?) " +
-                "ON CONFLICT(profile_id, group_id, entity_id) DO UPDATE SET position=excluded.position, updated_at=excluded.updated_at, deleted=excluded.deleted",
+                "ON CONFLICT(profile_id, group_id, entity_id) DO UPDATE SET position=excluded.position, updated_at=excluded.updated_at, deleted=excluded.deleted, dirty=0 WHERE excluded.updated_at >= custom_group_member.updated_at",
         ).use { st ->
             st.bindLong(1, profileId.toLong()); st.bindText(2, groupId); st.bindText(3, entityId); st.bindLong(4, position.toLong()); st.bindLong(5, updatedAt); st.bindLong(6, if (deleted) 1 else 0)
             st.step()
         }
     }
 
-    /** Rows to push to the server: every edited row (including tombstones) as (kind, okey, playlistId, valueJson, updatedAt). */
+    /**
+     * Rows the local device still owes the server: only rows dirtied since the last successful push
+     * (each edit sets dirty=1; [markChannelsPushed] clears it on ack). This is the delta — pushing
+     * every row for the profile on each edit is what caused the 2026-09-19 write-amplification.
+     */
     suspend fun rowsForPush(profileId: Int): List<OverlayPushRow> = mutex.withLock {
         val c = connection()
         val out = ArrayList<OverlayPushRow>()
-        c.prepare("SELECT entity_id, playlist_id, hidden, pinned, position, rename, updated_at, deleted FROM channel_overlay WHERE profile_id = ?").use { st ->
+        c.prepare("SELECT entity_id, playlist_id, hidden, pinned, position, rename, updated_at, deleted FROM channel_overlay WHERE profile_id = ? AND dirty = 1").use { st ->
             st.bindLong(1, profileId.toLong())
             while (st.step()) {
                 val v = buildString {
@@ -146,6 +160,24 @@ internal object IptvOverlayStore {
             }
         }
         out
+    }
+
+    /**
+     * Clear the dirty flag for exactly the channel rows the server just acked — matched by entity_id
+     * AND the pushed updated_at, so a row edited again *during* the push (newer updated_at) stays
+     * dirty and is re-sent next time instead of being silently dropped.
+     */
+    suspend fun markChannelsPushed(profileId: Int, rows: List<OverlayPushRow>): Unit = mutex.withLock {
+        if (rows.isEmpty()) return@withLock
+        val c = connection()
+        c.prepare("UPDATE channel_overlay SET dirty = 0 WHERE profile_id = ? AND entity_id = ? AND updated_at = ? AND dirty = 1").use { st ->
+            for (r in rows) {
+                if (r.kind != "channel") continue
+                st.reset()
+                st.bindLong(1, profileId.toLong()); st.bindText(2, r.okey); st.bindLong(3, r.updatedAt)
+                st.step()
+            }
+        }
     }
 
     private fun jsonStr(s: String): String {
@@ -215,10 +247,10 @@ internal object IptvOverlayStore {
     suspend fun setChannel(profileId: Int, entityId: String, playlistId: String?, o: ChannelOverlay, updatedAt: Long): Unit = mutex.withLock {
         val c = connection()
         c.prepare(
-            "INSERT INTO channel_overlay(profile_id, entity_id, playlist_id, hidden, pinned, position, rename, updated_at, deleted) " +
-                "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id, entity_id) DO UPDATE SET playlist_id=excluded.playlist_id, " +
+            "INSERT INTO channel_overlay(profile_id, entity_id, playlist_id, hidden, pinned, position, rename, updated_at, deleted, dirty) " +
+                "VALUES(?,?,?,?,?,?,?,?,?,1) ON CONFLICT(profile_id, entity_id) DO UPDATE SET playlist_id=excluded.playlist_id, " +
                 "hidden=excluded.hidden, pinned=excluded.pinned, position=excluded.position, rename=excluded.rename, " +
-                "updated_at=excluded.updated_at, deleted=excluded.deleted",
+                "updated_at=excluded.updated_at, deleted=excluded.deleted, dirty=1",
         ).use { st ->
             st.bindLong(1, profileId.toLong()); st.bindText(2, entityId)
             if (playlistId != null) st.bindText(3, playlistId) else st.bindNull(3)
@@ -233,10 +265,10 @@ internal object IptvOverlayStore {
     suspend fun setCategory(profileId: Int, playlistId: String, contentType: String, categoryKey: String, o: CategoryOverlay, updatedAt: Long): Unit = mutex.withLock {
         val c = connection()
         c.prepare(
-            "INSERT INTO category_overlay(profile_id, playlist_id, content_type, category_key, hidden, pinned, position, rename, updated_at, deleted) " +
-                "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id, playlist_id, content_type, category_key) DO UPDATE SET " +
+            "INSERT INTO category_overlay(profile_id, playlist_id, content_type, category_key, hidden, pinned, position, rename, updated_at, deleted, dirty) " +
+                "VALUES(?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(profile_id, playlist_id, content_type, category_key) DO UPDATE SET " +
                 "hidden=excluded.hidden, pinned=excluded.pinned, position=excluded.position, rename=excluded.rename, " +
-                "updated_at=excluded.updated_at, deleted=excluded.deleted",
+                "updated_at=excluded.updated_at, deleted=excluded.deleted, dirty=1",
         ).use { st ->
             st.bindLong(1, profileId.toLong()); st.bindText(2, playlistId); st.bindText(3, contentType); st.bindText(4, categoryKey)
             st.bindLong(5, if (o.hidden) 1 else 0); st.bindLong(6, if (o.pinned) 1 else 0)
@@ -253,9 +285,9 @@ internal object IptvOverlayStore {
         c.execSQL("BEGIN IMMEDIATE")
         try {
             c.prepare(
-                "INSERT INTO custom_group(profile_id, group_id, playlist_id, content_type, name, position, updated_at, deleted) " +
-                    "VALUES(?,?,?,?,?,?,?,0) ON CONFLICT(profile_id, group_id) DO UPDATE SET playlist_id=excluded.playlist_id, " +
-                    "content_type=excluded.content_type, name=excluded.name, position=excluded.position, updated_at=excluded.updated_at, deleted=0",
+                "INSERT INTO custom_group(profile_id, group_id, playlist_id, content_type, name, position, updated_at, deleted, dirty) " +
+                    "VALUES(?,?,?,?,?,?,?,0,1) ON CONFLICT(profile_id, group_id) DO UPDATE SET playlist_id=excluded.playlist_id, " +
+                    "content_type=excluded.content_type, name=excluded.name, position=excluded.position, updated_at=excluded.updated_at, deleted=0, dirty=1",
             ).use { st ->
                 st.bindLong(1, profileId.toLong()); st.bindText(2, group.id)
                 if (group.playlistId != null) st.bindText(3, group.playlistId) else st.bindNull(3)
@@ -263,12 +295,12 @@ internal object IptvOverlayStore {
                 st.step()
             }
             // Replace membership: tombstone existing, then upsert the new ordered set.
-            c.prepare("UPDATE custom_group_member SET deleted = 1, updated_at = ? WHERE profile_id = ? AND group_id = ?").use { st ->
+            c.prepare("UPDATE custom_group_member SET deleted = 1, updated_at = ?, dirty = 1 WHERE profile_id = ? AND group_id = ?").use { st ->
                 st.bindLong(1, updatedAt); st.bindLong(2, profileId.toLong()); st.bindText(3, group.id); st.step()
             }
             c.prepare(
-                "INSERT INTO custom_group_member(profile_id, group_id, entity_id, position, updated_at, deleted) VALUES(?,?,?,?,?,0) " +
-                    "ON CONFLICT(profile_id, group_id, entity_id) DO UPDATE SET position=excluded.position, updated_at=excluded.updated_at, deleted=0",
+                "INSERT INTO custom_group_member(profile_id, group_id, entity_id, position, updated_at, deleted, dirty) VALUES(?,?,?,?,?,0,1) " +
+                    "ON CONFLICT(profile_id, group_id, entity_id) DO UPDATE SET position=excluded.position, updated_at=excluded.updated_at, deleted=0, dirty=1",
             ).use { st ->
                 group.memberEntityIds.forEachIndexed { i, entity ->
                     st.reset()
@@ -285,10 +317,10 @@ internal object IptvOverlayStore {
 
     suspend fun deleteGroup(profileId: Int, groupId: String, updatedAt: Long): Unit = mutex.withLock {
         val c = connection()
-        c.prepare("UPDATE custom_group SET deleted = 1, updated_at = ? WHERE profile_id = ? AND group_id = ?").use { st ->
+        c.prepare("UPDATE custom_group SET deleted = 1, updated_at = ?, dirty = 1 WHERE profile_id = ? AND group_id = ?").use { st ->
             st.bindLong(1, updatedAt); st.bindLong(2, profileId.toLong()); st.bindText(3, groupId); st.step()
         }
-        c.prepare("UPDATE custom_group_member SET deleted = 1, updated_at = ? WHERE profile_id = ? AND group_id = ?").use { st ->
+        c.prepare("UPDATE custom_group_member SET deleted = 1, updated_at = ?, dirty = 1 WHERE profile_id = ? AND group_id = ?").use { st ->
             st.bindLong(1, updatedAt); st.bindLong(2, profileId.toLong()); st.bindText(3, groupId); st.step()
         }
     }

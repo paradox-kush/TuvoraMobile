@@ -116,6 +116,8 @@ internal object IptvOverlaySyncAdapter {
                     putSyncOriginClientId()
                 },
             )
+            // Acked: drop the dirty flag so the next push sends only the NEXT edit, not the whole set.
+            IptvOverlayStore.markChannelsPushed(profileId, upserts)
         }
         if (deletes.isNotEmpty()) {
             SupabaseProvider.client.postgrest.rpc(
@@ -126,6 +128,7 @@ internal object IptvOverlaySyncAdapter {
                     putSyncOriginClientId()
                 },
             )
+            IptvOverlayStore.markChannelsPushed(profileId, deletes)
         }
     }
 }
