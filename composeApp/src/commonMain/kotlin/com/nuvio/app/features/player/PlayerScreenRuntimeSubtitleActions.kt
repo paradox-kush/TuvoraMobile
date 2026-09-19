@@ -24,9 +24,15 @@ internal fun PlayerScreenRuntime.loadSubtitleAutoSyncCues(force: Boolean = false
     subtitleAutoSyncState = subtitleAutoSyncState.copy(isLoading = true, errorMessage = null)
     scope.launch {
         val result = runCatching {
+            // Only forward the stream's (credential-bearing) headers when the subtitle shares the
+            // stream host and the hop is not an https->http downgrade — never to a foreign host.
             val body = httpGetTextWithHeaders(
                 url = subtitle.url,
-                headers = sanitizePlaybackHeaders(activeSourceHeaders),
+                headers = SubtitleCredentialScope.forwardableStreamHeaders(
+                    streamUrl = activeSourceUrl,
+                    subtitleUrl = subtitle.url,
+                    streamHeaders = sanitizePlaybackHeaders(activeSourceHeaders),
+                ),
             )
             PlayerSubtitleCueParser.parse(body, subtitle.url)
         }

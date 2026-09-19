@@ -52,6 +52,7 @@ actual fun HeroTrailerPlayerSurface(
     val dataSourceFactory = remember(context) {
         PlatformPlaybackDataSourceFactory.create(
             context = context,
+            streamUrl = sourceUrl,
             defaultRequestHeaders = emptyMap(),
             defaultResponseHeaders = emptyMap(),
             useYoutubeChunkedPlayback = true,

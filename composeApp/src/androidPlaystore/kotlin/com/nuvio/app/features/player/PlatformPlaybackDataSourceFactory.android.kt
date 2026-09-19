@@ -7,6 +7,7 @@ import androidx.media3.datasource.DefaultDataSource
 internal object PlatformPlaybackDataSourceFactory {
     fun create(
         context: Context,
+        streamUrl: String?,
         defaultRequestHeaders: Map<String, String>,
         defaultResponseHeaders: Map<String, String>,
         useYoutubeChunkedPlayback: Boolean,
@@ -17,9 +18,17 @@ internal object PlatformPlaybackDataSourceFactory {
             defaultRequestHeaders,
             useLongReadTimeout,
         )
+        // Clean client with no stream default headers — subtitle fetches get only policy-scoped ones.
+        val subtitleNetworkFactory = PlayerPlaybackNetworking.createHttpDataSourceFactory(
+            emptyMap(),
+            useLongReadTimeout,
+        )
         val subtitleHeaderFactory = SubtitleRequestHeaderDataSourceFactory(
-            upstreamFactory = httpFactory,
-            externalSubtitles = externalSubtitles
+            streamUpstreamFactory = httpFactory,
+            subtitleUpstreamFactory = subtitleNetworkFactory,
+            streamUrl = streamUrl,
+            streamHeaders = defaultRequestHeaders,
+            externalSubtitles = externalSubtitles,
         )
         val baseFactory: DataSource.Factory = DefaultDataSource.Factory(context, subtitleHeaderFactory)
         return if (defaultResponseHeaders.isEmpty()) {

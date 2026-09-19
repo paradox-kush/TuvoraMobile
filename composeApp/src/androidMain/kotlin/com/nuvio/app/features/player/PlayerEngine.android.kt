@@ -392,6 +392,7 @@ private fun ExoPlayerSurface(
     ) {
         PlatformPlaybackDataSourceFactory.create(
             context = context,
+            streamUrl = sourceUrl,
             defaultRequestHeaders = sanitizedSourceHeaders,
             defaultResponseHeaders = sanitizedSourceResponseHeaders,
             useYoutubeChunkedPlayback = useYoutubeChunkedPlayback,
@@ -2890,48 +2891,70 @@ private fun diagnosticThrowableChain(value: Throwable): String =
         .let(::diagnosticPlayerMessage)
 
 internal class SubtitleRequestHeaderDataSourceFactory(
-    private val upstreamFactory: DataSource.Factory,
+    // Carries the stream's default request headers — used for the stream and its segments.
+    private val streamUpstreamFactory: DataSource.Factory,
+    // Clean client with NO stream default headers — used for sideloaded subtitle fetches so a
+    // foreign subtitle host never inherits the stream's credentials.
+    private val subtitleUpstreamFactory: DataSource.Factory,
+    private val streamUrl: String?,
+    private val streamHeaders: Map<String, String>,
     private val externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
 ) : DataSource.Factory {
     override fun createDataSource(): DataSource =
         SubtitleRequestHeaderDataSource(
-            upstream = upstreamFactory.createDataSource(),
+            streamUpstream = streamUpstreamFactory.createDataSource(),
+            subtitleUpstream = subtitleUpstreamFactory.createDataSource(),
+            streamUrl = streamUrl,
+            streamHeaders = streamHeaders,
             externalSubtitles = externalSubtitles,
         )
 }
 
 internal class SubtitleRequestHeaderDataSource(
-    private val upstream: DataSource,
+    private val streamUpstream: DataSource,
+    private val subtitleUpstream: DataSource,
+    private val streamUrl: String?,
+    private val streamHeaders: Map<String, String>,
     private val externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
 ) : DataSource {
+    private var opened: DataSource? = null
+
     override fun addTransferListener(transferListener: TransferListener) {
-        upstream.addTransferListener(transferListener)
+        // Called before open(); we don't yet know which upstream serves the request.
+        streamUpstream.addTransferListener(transferListener)
+        subtitleUpstream.addTransferListener(transferListener)
     }
 
     override fun open(dataSpec: DataSpec): Long {
         val url = dataSpec.uri.toString()
         val subtitle = externalSubtitles.find { it.url == url }
-        val headers = subtitle?.headers
-        
-        return if (headers.isNullOrEmpty()) {
-            upstream.open(dataSpec)
-        } else {
-            val mergedHeaders = dataSpec.httpRequestHeaders.toMutableMap()
-            headers.forEach { (key, value) ->
-                mergedHeaders[key] = value
-            }
-            upstream.open(dataSpec.buildUpon().setHttpRequestHeaders(mergedHeaders).build())
+        if (subtitle == null) {
+            // Stream / segment / key request: unchanged — full stream default headers apply.
+            opened = streamUpstream
+            return streamUpstream.open(dataSpec)
         }
+        // Sideloaded subtitle: forward only the stream credentials the policy permits for this
+        // subtitle's host (never to a foreign host, never on an https->http downgrade), plus the
+        // subtitle's own headers. The clean upstream carries no stream default request properties.
+        val scopedHeaders = LinkedHashMap<String, String>()
+        scopedHeaders.putAll(
+            SubtitleCredentialScope.forwardableStreamHeaders(streamUrl, url, streamHeaders)
+        )
+        subtitle.headers?.forEach { (key, value) -> scopedHeaders[key] = value }
+        opened = subtitleUpstream
+        return subtitleUpstream.open(dataSpec.buildUpon().setHttpRequestHeaders(scopedHeaders).build())
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
-        upstream.read(buffer, offset, length)
+        (opened ?: streamUpstream).read(buffer, offset, length)
 
-    override fun getUri(): Uri? = upstream.uri
+    override fun getUri(): Uri? = opened?.uri
 
-    override fun getResponseHeaders(): Map<String, List<String>> = upstream.responseHeaders
+    override fun getResponseHeaders(): Map<String, List<String>> =
+        opened?.responseHeaders ?: emptyMap()
 
     override fun close() {
-        upstream.close()
+        opened?.close()
+        opened = null
     }
 }

@@ -84,7 +84,11 @@ internal object PlayerPlaybackNetworking {
             baseClient.newBuilder()
                 .addNetworkInterceptor { chain ->
                     val request = chain.request()
-                    if (request.header("Authorization") == null) {
+                    // Re-inject only on the original host. OkHttp deliberately drops Authorization on
+                    // a cross-host redirect; re-adding it there would leak the credential to a foreign
+                    // host (e.g. a subtitle/segment URL that 30x-es away).
+                    val sameHost = request.url.host.equals(chain.call().request().url.host, ignoreCase = true)
+                    if (sameHost && request.header("Authorization") == null) {
                         chain.proceed(
                             request.newBuilder()
                                 .header("Authorization", authorization)
