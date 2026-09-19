@@ -95,6 +95,12 @@ object ProfileSettingsSync {
         ProviderCredentialSync.clearAccountState()
     }
 
+    fun onProfileChanged() {
+        if (observeJob?.isActive != true) return
+        skipNextPushSignature = currentObservedStateSignature()
+        ProviderCredentialSync.onProfileChanged()
+    }
+
     suspend fun pull(profileId: Int): Boolean {
         // Signed-out / lapsed session: don't fire the RPC as `anon` (→ 42501); nothing to pull.
         if (!SyncSession.canSync()) return false
@@ -195,13 +201,14 @@ object ProfileSettingsSync {
 
         observeJob = scope.launch {
             combine(signatureFlows) { currentObservedStateSignature() }
-                .drop(1)
                 .distinctUntilChanged()
+                .drop(1)
                 .debounce(PUSH_DEBOUNCE_MS)
                 .collect { signature ->
                     val authState = AuthRepository.state.value
                     if (authState !is AuthState.Authenticated || authState.isAnonymous) return@collect
                     if (isApplyingRemoteBlob || isServerSyncInFlight) return@collect
+                    if (signature != currentObservedStateSignature()) return@collect
                     if (signature == skipNextPushSignature) {
                         skipNextPushSignature = null
                         return@collect

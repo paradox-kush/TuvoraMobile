@@ -196,7 +196,6 @@ object LibraryRepository {
             log.d { "Skipping library pull for inactive profile $profileId" }
             return
         }
-        var serializedOperationToken: LibraryProfileToken? = null
 
         activeLibraryProvider()?.let { provider ->
             refreshLibraryProvider(
@@ -211,7 +210,6 @@ object LibraryRepository {
 
         nuvioSyncMutex.withLock {
             val serializedToken = activeOperationToken(profileId) ?: return@withLock
-            serializedOperationToken = serializedToken
             val pullSnapshot = localState.markPullStarted(serializedToken) ?: return@withLock
 
             try {
@@ -241,11 +239,6 @@ object LibraryRepository {
             } catch (error: Throwable) {
                 log.e(error) { "Failed to pull library from server" }
             }
-        }
-        val completedToken = serializedOperationToken ?: operationToken
-        val pendingSnapshot = localState.snapshot()
-        if (pendingSnapshot.token == completedToken && isActiveOperation(completedToken)) {
-            pushToServer(pendingSnapshot, delayMs = 0L)
         }
     }
 
