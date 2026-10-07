@@ -116,15 +116,16 @@ class TvSportsHubPolicyTest {
     )
 
     @Test
-    fun `match sheet tiers are labelled only when more than one is present`() {
+    fun `match sheet always distinguishes evidence even with a single tier`() {
         val epg = match("c1", RadarChannelMatcher.MatchVia.EPG, MatchConfidence.CONFIRMED)
         val listing = match("c2", RadarChannelMatcher.MatchVia.LISTING, MatchConfidence.CONFIRMED)
         val league = match("c3", RadarChannelMatcher.MatchVia.NAME, MatchConfidence.LEAGUE)
-        val groups = TvSportsHubPolicy.groupMatches(listOf(league, epg, listing, epg), "Premier League")
-        assertEquals(listOf("SHOWING THIS MATCH", "BROADCASTING THIS MATCH", "CARRIES PREMIER LEAGUE"), groups.map { it.label })
-        assertEquals(listOf(listOf("c1"), listOf("c2"), listOf("c3")), groups.map { g -> g.matches.map { it.channel.contentId } })
+        val possible = match("c4", RadarChannelMatcher.MatchVia.NAME, MatchConfidence.POSSIBLE)
+        val groups = TvSportsHubPolicy.groupMatches(listOf(league, epg, listing, epg, possible), "Premier League")
+        assertEquals(listOf("SCHEDULED FOR THIS EVENT", "LISTED BROADCASTER", "POSSIBLE EVENT FEEDS", "CARRIES PREMIER LEAGUE"), groups.map { it.label })
+        assertEquals(listOf(listOf("c1"), listOf("c2"), listOf("c4"), listOf("c3")), groups.map { g -> g.matches.map { it.channel.contentId } })
         val single = TvSportsHubPolicy.groupMatches(listOf(league), null)
-        assertEquals(listOf<String?>(null), single.map { it.label })
+        assertEquals(listOf<String?>("CARRIES THIS COMPETITION"), single.map { it.label })
         assertTrue(TvSportsHubPolicy.groupMatches(emptyList(), null).isEmpty())
     }
 

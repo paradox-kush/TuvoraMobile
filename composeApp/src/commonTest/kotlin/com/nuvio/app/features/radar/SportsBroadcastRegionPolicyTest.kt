@@ -57,11 +57,11 @@ class SportsBroadcastRegionPolicyTest {
     }
 
     @Test
-    fun `home-country listings confirm while out-of-country ones only carry the league`() {
+    fun `only a known matching feed territory confirms a listing`() {
         assertEquals(MatchConfidence.CONFIRMED, SportsBroadcastRegionPolicy.listingConfidence("us", "us"), "US station for a US game confirms")
-        assertEquals(MatchConfidence.LEAGUE, SportsBroadcastRegionPolicy.listingConfidence("nl", "us"), "a Dutch feed of a US game only carries it")
-        assertEquals(MatchConfidence.CONFIRMED, SportsBroadcastRegionPolicy.listingConfidence("nl", null), "unknown home country stays permissive")
-        assertEquals(MatchConfidence.CONFIRMED, SportsBroadcastRegionPolicy.listingConfidence(null, "us"), "unknown station region stays permissive")
+        assertEquals(MatchConfidence.POSSIBLE, SportsBroadcastRegionPolicy.listingConfidence("nl", "us"), "a mismatched national feed is unresolved")
+        assertEquals(MatchConfidence.POSSIBLE, SportsBroadcastRegionPolicy.listingConfidence("nl", null), "unknown channel territory remains possible")
+        assertEquals(MatchConfidence.POSSIBLE, SportsBroadcastRegionPolicy.listingConfidence(null, "us"), "unknown station territory remains possible")
     }
 
     @Test

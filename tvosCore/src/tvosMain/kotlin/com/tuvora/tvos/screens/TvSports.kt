@@ -8,10 +8,8 @@ import com.nuvio.app.features.radar.RadarRepository
 import com.nuvio.app.features.radar.RadarTime
 import com.nuvio.app.features.radar.RadarUiState
 import com.tuvora.tvos.player.TvPlayerSession
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Apple TV's Sports hub over the shared RadarRepository (the phone's and NuvioTV's Sports Centre):
@@ -90,17 +88,14 @@ object TvSports {
      * The viewer's channels showing [fixture], best evidence first (the match sheet's lookup:
      * broadcaster listings bounded to 4 s, then name + EPG matching). Empty when nothing matches.
      */
-    suspend fun matchChannels(fixture: RadarFixture): List<RadarChannelMatcher.ChannelMatch> {
+    @Throws(Exception::class)
+    suspend fun matchChannels(fixture: RadarFixture, onPartial: (List<RadarChannelMatcher.ChannelMatch>) -> Unit): List<RadarChannelMatcher.ChannelMatch> {
         XtreamRepository.ensureLoaded()
-        val stations = try {
-            withTimeoutOrNull(4_000) { RadarRepository.tvStations(fixture.id) } ?: emptyList()
-        } catch (error: CancellationException) {
-            throw error
-        } catch (_: Exception) {
-            emptyList()
-        }
         val league = fixture.leagueId?.let { RadarRepository.uiState.value.leagueById(it) }
-        return RadarChannelMatcher.match(fixture, league, stations)
+        return RadarChannelMatcher.match(fixture, league,
+            stationLookup = { RadarRepository.tvStations(fixture.id) },
+            onPartial = { matches -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onPartial(matches) } },
+        )
     }
 
     fun groupMatches(fixture: RadarFixture, matches: List<RadarChannelMatcher.ChannelMatch>): List<TvMatchGroup> =

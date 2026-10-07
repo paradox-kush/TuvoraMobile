@@ -700,7 +700,9 @@ private struct MatchChannelsSheet: View {
             hasPlaylists = TvSports.shared.hasPlaylists()
             guard hasPlaylists else { matching = false; return }
             do {
-                let matches = try await TvSports.shared.matchChannels(fixture: fixture)
+                let matches = try await TvSports.shared.matchChannels(fixture: fixture, onPartial: { partial in
+                    groups = TvSports.shared.groupMatches(fixture: fixture, matches: partial)
+                })
                 groups = TvSports.shared.groupMatches(fixture: fixture, matches: matches)
                 smokeLog("SMOKE sports match channels=%d", matches.count)
             } catch {

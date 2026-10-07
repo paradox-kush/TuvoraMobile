@@ -113,19 +113,20 @@ object TvSportsHubPolicy {
     /**
      * The match sheet's three evidence tiers (SportsHubScreen.kt:750-770): the channel's own guide
      * names the match > a broadcaster listing or the channel name does > the channel only carries the
-     * competition. Deduplicated by channel first; tiers are labelled only when more than one shows.
+     * competition. Deduplicated by channel first; tiers are always labelled, including a lone weak tier.
      */
     fun groupMatches(matches: List<RadarChannelMatcher.ChannelMatch>, league: String?): List<TvMatchGroup> {
         val deduped = matches.distinctBy { it.channel.contentId }
         val showing = deduped.filter { it.confidence == MatchConfidence.CONFIRMED && it.via == RadarChannelMatcher.MatchVia.EPG }
         val broadcasting = deduped.filter { it.confidence == MatchConfidence.CONFIRMED && it.via != RadarChannelMatcher.MatchVia.EPG }
+        val possible = deduped.filter { it.confidence == MatchConfidence.POSSIBLE }
         val carries = deduped.filter { it.confidence == MatchConfidence.LEAGUE }
-        val labeled = listOf(showing, broadcasting, carries).count { it.isNotEmpty() } >= 2
         val carriesLabel = (league?.takeIf { it.isNotBlank() }?.let { "CARRIES $it" } ?: "CARRIES THIS COMPETITION").uppercase()
         return listOf(
-            TvMatchGroup(if (labeled) "SHOWING THIS MATCH" else null, showing),
-            TvMatchGroup(if (labeled) "BROADCASTING THIS MATCH" else null, broadcasting),
-            TvMatchGroup(if (labeled) carriesLabel else null, carries),
+            TvMatchGroup("SCHEDULED FOR THIS EVENT", showing),
+            TvMatchGroup("LISTED BROADCASTER", broadcasting),
+            TvMatchGroup("POSSIBLE EVENT FEEDS", possible),
+            TvMatchGroup(carriesLabel, carries),
         ).filter { it.matches.isNotEmpty() }
     }
 

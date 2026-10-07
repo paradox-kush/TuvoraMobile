@@ -5,6 +5,7 @@ import com.nuvio.app.features.epg.EpgLang
 import com.nuvio.app.features.epg.EpgMirrorRepository
 import com.nuvio.app.features.epg.EpgNorm
 import com.nuvio.app.features.iptv.content.IptvContentDb
+import com.nuvio.app.features.iptv.isM3u
 import com.nuvio.app.features.iptv.XtreamItemRegistry
 import com.nuvio.app.features.iptv.XtreamProgram
 import com.nuvio.app.features.iptv.XtreamRepository
@@ -12,10 +13,13 @@ import com.nuvio.app.features.iptv.XtreamSearchIndex
 import com.nuvio.app.features.iptv.match.MatchKind
 import com.nuvio.app.features.iptv.match.XtreamMatchIndex
 import com.nuvio.app.features.iptv.match.XtreamTmdbResolver
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -47,6 +51,7 @@ object RadarChannelMatcher {
         val epgChannelId: String? = null,
         /** Channel offers catch-up (Xtream tv_archive) — enables Replay for past fixtures. */
         val hasArchive: Boolean = false,
+        val catalogRevision: String = "",
     )
 
     /** A provider VOD entry that looks like a recording of the fixture. */
@@ -68,18 +73,16 @@ object RadarChannelMatcher {
         val via: MatchVia = MatchVia.NAME,
         /** Short language/region tag ("FR", "AR") or the broadcaster country ("France"). */
         val language: String? = null,
-        /** CONFIRMED = this fixture is on (both teams / event title / broadcaster listing); LEAGUE = only carries the competition. */
+        /** Evidence tier: time-aligned guide/listing, possible event identity, or competition only. */
         val confidence: MatchConfidence = MatchConfidence.LEAGUE,
+        val evidence: SportsMatchEvidence? = null,
     )
 
     private const val NAME_POOL_CAP = 200
-    private const val EPG_PROBE_CAP = 40
-    private const val EPG_CONCURRENCY = 8
+    private const val EPG_PROBE_CAP = 6
+    private const val EPG_CONCURRENCY = 2
     /** Sheet capacity now that EPG/listing tiers surface worldwide airings (was 10). */
     private const val RESULT_CAP = 40
-    /** Classic list length — name-only generic hits never rank past this. */
-    private const val NAME_RESULT_CAP = 10
-    private const val GENERIC_NAME_SCORE = 8
     /** Mirror-EPG hits outrank every name tier; listing hits sit between. */
     private const val MIRROR_BASE_SCORE = 100
     private const val LISTING_SCORE = 80
@@ -115,89 +118,97 @@ object RadarChannelMatcher {
         fixture: RadarFixture,
         league: RadarLeague?,
         stations: List<RadarTvStation> = emptyList(),
+        stationLookup: (suspend () -> List<RadarTvStation>)? = null,
         onPartial: suspend (List<ChannelMatch>) -> Unit = {},
     ): List<ChannelMatch> = withContext(Dispatchers.Default) {
-        val keywords = buildList {
-            league?.keywords?.forEach { add(normalize(it)) }
-            fixture.league?.let { add(normalize(it)) }
-        }.filter { it.isNotBlank() }.distinct()
-        val homeTokens = teamTokens(fixture.home)
-        val awayTokens = teamTokens(fixture.away)
-        val eventTokens = if (homeTokens.isEmpty() && awayTokens.isEmpty()) teamTokens(fixture.event) else emptyList()
-        // The competition's home country, so the home broadcaster/feed leads its group.
+        val stationTask = stationLookup?.let { lookup -> async {
+            try { withTimeoutOrNull(4_000L) { lookup() }.orEmpty() }
+            catch (error: CancellationException) { throw error } catch (_: Exception) { emptyList() }
+        } }
+        val generation = matcherGeneration.value
+        val keywords = league?.keywords.orEmpty()
+        val prepared = SportsEventMatchEngine.prepare(fixture, keywords)
         val homeRegion = SportsBroadcastRegionPolicy.regionOfCountry(fixture.country)
-
         val candidates = assembleCandidates()
-
-        // Stage 1: name scores over the full pool (cheap, in-memory). An event-feed channel names both
-        // teams ("US (ESPN+) | Bills vs Steelers") → CONFIRMED; a home-country feed gets a rank nudge so
-        // it leads the "showing this match" group ahead of an out-of-country feed of the same game.
         val named = candidates.mapNotNull { c ->
-            val scored = nameScored(normalize(c.name), keywords, homeTokens, awayTokens, eventTokens)
-            if (scored.score <= 0) return@mapNotNull null
-            val boost = SportsBroadcastRegionPolicy.homeRegionBoost(c.name, homeRegion)
-            ChannelMatch(c, programme = null, score = scored.score + boost, confidence = scored.confidence)
-        }.sortedByDescending { it.score }.take(NAME_POOL_CAP)
+            val evidence = SportsEventMatchEngine.name(prepared, c.name)
+            if (evidence.strength == 0) return@mapNotNull null
+            ChannelMatch(c, programme = null,
+                score = evidence.strength + SportsBroadcastRegionPolicy.homeRegionBoost(c.name, homeRegion),
+                confidence = evidence.confidence, evidence = evidence)
+        }.sortedWith(matchOrder).take(NAME_POOL_CAP)
+        if (generation != matcherGeneration.value) return@withContext emptyList()
+        onPartial(mergeMatches(named))
 
-        // Same rule for the early partial: flashing a list of guesses and then clearing it
-        // when the guide tiers land is worse than showing the spinner a moment longer.
-        // Dedup by channel before the partial renders: two enabled accounts (or a provider listing a
-        // stream twice) can yield equal contentIds, and a duplicate Compose `key` is a hard crash. The
-        // final `merged` list is already keyed-unique; the partial was the gap. `named` is score-sorted
-        // desc, so distinctBy keeps the best match per channel.
-        if (named.any { it.score > GENERIC_NAME_SCORE }) onPartial(named.distinctBy { it.channel.contentId }.take(RESULT_CAP))
-
-        // Stage 2: EPG probes for the strongest name candidates.
-        val start = fixture.startEpochMs
-        val probed = if (start == null) named else coroutineScope {
+        // Read the local guides before any provider probes. These queries never fetch a catalog.
+        val cached = coroutineScope {
+            val mirror = async { mirrorMatches(candidates, prepared) }
+            val provider = async { providerEpgMatches(candidates, prepared) }
+            mirror.await() + provider.await() + stationMatches(candidates, stations, homeRegion)
+        }
+        if (generation != matcherGeneration.value) return@withContext emptyList()
+        onPartial(mergeMatches(named + cached))
+        val local = cached + stationMatches(candidates, stationTask?.await().orEmpty(), homeRegion)
+        if (generation != matcherGeneration.value) return@withContext emptyList()
+        onPartial(mergeMatches(named + local))
+        val resolved = local.filter { it.via == MatchVia.EPG && it.confidence == MatchConfidence.CONFIRMED }
+            .map { it.channel.contentId }.toSet()
+        // Generic sports channels are probe candidates only. They never pad displayed results.
+        val probeCandidates = (named.map { it.channel } + candidates.filter { c ->
+            GENERIC_SPORT_MARKERS.any { marker -> normalize(c.name).contains(marker) }
+        }).distinctBy { it.contentId }.filterNot { it.contentId in resolved }.take(EPG_PROBE_CAP)
+        val probed = if (fixture.startEpochMs == null || resolved.isNotEmpty()) emptyList() else coroutineScope {
             val semaphore = Semaphore(EPG_CONCURRENCY)
-            named.take(EPG_PROBE_CAP).map { m ->
-                async {
-                    semaphore.withPermit {
-                        val programmes = epgFor(m.channel)
-                        val hit = bestProgramme(programmes, start, fixture.sport, keywords, homeTokens, awayTokens, eventTokens)
-                        if (hit != null) m.copy(
-                            programme = hit.first.toSportsProgramme(),
-                            score = m.score / 10 + hit.second.score,
-                            confidence = SportsChannelMatchPolicy.stronger(m.confidence, hit.second.confidence),
-                        ) else m
+            probeCandidates.map { c -> async {
+                semaphore.withPermit {
+                    val programmes = withTimeoutOrNull(3_000L) { cachedProbe(c) }.orEmpty()
+                    bestProgramme(programmes, prepared)?.let { hit ->
+                        ChannelMatch(c, programme = hit.first.toSportsProgramme(),
+                            score = MIRROR_BASE_SCORE + hit.second.strength / 10,
+                            via = MatchVia.EPG, confidence = hit.second.confidence, evidence = hit.second)
                     }
                 }
-            }.awaitAll() + named.drop(EPG_PROBE_CAP)
+            } }.awaitAll().filterNotNull()
         }
+        if (generation != matcherGeneration.value) emptyList() else mergeMatches(named + local + probed)
+    }
 
-        // Stage 3: canonical-EPG event hits joined back through the persisted channel
-        // mappings — finds every mapped channel whose guide airs this event, whatever its
-        // name (the "FIFA on BBC One" gap). Stage 4: TheSportsDB broadcaster names.
-        val mirrorMatches = mirrorMatches(candidates, start, keywords, homeTokens, awayTokens, eventTokens)
-        // The provider's OWN guide, searched in bulk — same name-independence as the mirror but
-        // without needing a mapping, so it reaches channels the mirror's feeds don't cover.
-        val providerEpg = providerEpgMatches(candidates, start, keywords, homeTokens, awayTokens, eventTokens)
-        val stationMatches = stationMatches(candidates, stations, homeRegion)
+    private val matchOrder = compareByDescending<ChannelMatch> { SportsEventMatchEngine.rank(it.confidence) }
+        .thenByDescending { it.evidence?.strength ?: it.score }
+        .thenByDescending { it.score }
+        .thenBy { it.channel.contentId }
 
-        // Merge, best score per channel; keep any programme/language a weaker signal found.
-        val merged = LinkedHashMap<String, ChannelMatch>()
-        for (m in mirrorMatches + providerEpg + stationMatches + probed) {
-            val old = merged[m.channel.contentId]
-            merged[m.channel.contentId] = if (old == null) m else {
-                val best = if (m.score > old.score) m else old
-                best.copy(
-                    programme = best.programme ?: m.programme ?: old.programme,
-                    language = best.language ?: m.language ?: old.language,
-                    confidence = SportsChannelMatchPolicy.stronger(m.confidence, old.confidence),
-                )
+    /** Keep source, confidence and programme together; preferences are only a tie-breaker. */
+    internal fun mergeMatches(matches: List<ChannelMatch>): List<ChannelMatch> = matches
+        .filter { it.evidence?.strength != 0 }
+        .sortedWith(matchOrder).distinctBy { it.channel.contentId }.take(RESULT_CAP)
+
+    private val matcherGeneration = kotlinx.atomicfu.atomic(0)
+
+    fun resetForProfile() { matcherGeneration.incrementAndGet() }
+
+    private val probeMutex = Mutex()
+    private val probeCache = mutableMapOf<String, Pair<Long, List<XtreamProgram>>>()
+    private val probeLocks = List(16) { Mutex() }
+
+    private suspend fun cachedProbe(channel: CandidateChannel): List<XtreamProgram> {
+        val key = matcherGeneration.value.toString() + ":" + channel.playlistId + ":" + channel.streamId + ":" + channel.name + ":" + channel.epgChannelId + ":" + channel.catalogRevision
+        val lock = probeLocks[(key.hashCode() and Int.MAX_VALUE) % probeLocks.size]
+        return lock.withLock probe@{
+            val now = RadarTime.nowMs()
+            val cached = probeMutex.withLock { probeCache[key] }
+            if (cached != null && now >= cached.first && now - cached.first < 5 * 60_000L) return@probe cached.second
+            val programmes = try { epgFor(channel) }
+                catch (error: CancellationException) { throw error } catch (_: Exception) { emptyList() }
+            probeMutex.withLock {
+                if (probeCache.size >= 128) {
+                    val oldest = probeCache.minByOrNull { it.value.first }?.key
+                    if (oldest != null) probeCache.remove(oldest)
+                }
+                probeCache[key] = now to programmes
             }
+            programmes
         }
-        val ranked = merged.values.sortedByDescending { it.score }
-        // A generic hit is a guess, not an answer: it means the channel merely has "sport" in
-        // its name — no league keyword, no team, no guide entry. A list of those reads as
-        // "here's where the match is" and sends someone into a Bulgarian feed for a Mexican
-        // fixture. When that's ALL we have, report nothing so the sheet can say so honestly.
-        if (ranked.none { it.score > GENERIC_NAME_SCORE }) return@withContext emptyList()
-        // Generic sports-channel name hits don't earn slots beyond the classic list length.
-        ranked
-            .filterIndexed { i, m -> i < NAME_RESULT_CAP || m.score > GENERIC_NAME_SCORE }
-            .take(RESULT_CAP)
     }
 
     /** Stage 3: search the mirrored programme window for the event, join via mappings. */
@@ -213,42 +224,25 @@ object RadarChannelMatcher {
      */
     private suspend fun providerEpgMatches(
         candidates: List<CandidateChannel>,
-        startMs: Long?,
-        keywords: List<String>,
-        homeTokens: List<String>,
-        awayTokens: List<String>,
-        eventTokens: List<String>,
+        prepared: SportsEventMatchEngine.Prepared,
     ): List<ChannelMatch> {
-        if (startMs == null) return emptyList()
-        val tokens = (homeTokens + awayTokens + eventTokens).filter { it.length > 3 }.distinct().take(8)
+        val startMs = prepared.fixture.startEpochMs ?: return emptyList()
+        val tokens = prepared.searchTokens
         if (tokens.isEmpty()) return emptyList()
-        val from = startMs - PROGRAMME_WINDOW_BACK_MS
-        val to = startMs + PROGRAMME_WINDOW_AHEAD_MS
-
         return buildList {
             for ((playlistId, chans) in candidates.groupBy { it.playlistId }) {
-                val byEpgId = chans.mapNotNull { c ->
-                    c.epgChannelId?.takeIf { it.isNotBlank() }?.let { it to c }
-                }.toMap()
+                val byEpgId = chans.filter { !it.epgChannelId.isNullOrBlank() }.groupBy { it.epgChannelId }
                 if (byEpgId.isEmpty()) continue
-                val hits = runCatching { IptvContentDb.epgSearch(playlistId, tokens, from, to) }
-                    .getOrDefault(emptyList())
+                val hits = try { IptvContentDb.epgSearch(playlistId, tokens,
+                    startMs - PROGRAMME_WINDOW_BACK_MS, startMs + PROGRAMME_WINDOW_AHEAD_MS)
+                } catch (error: CancellationException) { throw error } catch (_: Exception) { emptyList() }
                 for (p in hits) {
-                    val channel = byEpgId[p.channelId] ?: continue
-                    val scored = programmeScored(
-                        normalize("${p.title} ${p.desc.orEmpty()}"),
-                        keywords, homeTokens, awayTokens, eventTokens,
-                    )
-                    if (scored.score <= 0) continue
-                    add(
-                        ChannelMatch(
-                            channel,
-                            programme = SportsProgramme(p.title, p.desc.orEmpty(), p.startMs, p.endMs),
-                            score = MIRROR_BASE_SCORE + scored.score / 10,
-                            via = MatchVia.EPG,
-                            confidence = scored.confidence,
-                        )
-                    )
+                    val scored = SportsEventMatchEngine.programme(prepared, p.title, p.desc.orEmpty(), p.startMs, p.endMs)
+                    if (scored.strength == 0) continue
+                    for (channel in byEpgId[p.channelId].orEmpty()) add(ChannelMatch(
+                        channel, programme = SportsProgramme(p.title, p.desc.orEmpty(), p.startMs, p.endMs),
+                        score = MIRROR_BASE_SCORE + scored.strength / 10,
+                        via = MatchVia.EPG, confidence = scored.confidence, evidence = scored))
                 }
             }
         }
@@ -256,53 +250,33 @@ object RadarChannelMatcher {
 
     private suspend fun mirrorMatches(
         candidates: List<CandidateChannel>,
-        startMs: Long?,
-        keywords: List<String>,
-        homeTokens: List<String>,
-        awayTokens: List<String>,
-        eventTokens: List<String>,
+        prepared: SportsEventMatchEngine.Prepared,
     ): List<ChannelMatch> {
-        if (startMs == null) return emptyList()
-        val sqlTokens = (homeTokens + awayTokens + eventTokens).filter { it.length > 3 }.distinct().take(8)
-        if (sqlTokens.isEmpty()) return emptyList()
-        val hits = runCatching {
-            EpgMirrorRepository.programmesInWindow(
-                sqlTokens,
-                startMs - PROGRAMME_WINDOW_BACK_MS,
-                startMs + PROGRAMME_WINDOW_AHEAD_MS,
-            )
-        }.getOrDefault(emptyList())
-            .mapNotNull { p ->
-                val scored = programmeScored(normalize("${p.title} ${p.desc.orEmpty()}"), keywords, homeTokens, awayTokens, eventTokens)
-                if (scored.score > 0) Triple(p.channelId, p, scored) else null
-            }
-            .groupBy { it.first }
-            .mapValues { (_, l) -> l.maxBy { it.third.score } }
-        if (hits.isEmpty()) return emptyList()
-
+        val startMs = prepared.fixture.startEpochMs ?: return emptyList()
+        if (prepared.searchTokens.isEmpty()) return emptyList()
+        val hits = try { EpgMirrorRepository.programmesInWindow(prepared.searchTokens,
+            startMs - PROGRAMME_WINDOW_BACK_MS, startMs + PROGRAMME_WINDOW_AHEAD_MS)
+        } catch (error: CancellationException) { throw error } catch (_: Exception) { emptyList() }
+        val byGuide = hits.mapNotNull { p ->
+            val scored = SportsEventMatchEngine.programme(prepared, p.title, p.desc.orEmpty(), p.startMs, p.endMs)
+            if (scored.strength > 0) Triple(p.channelId, p, scored) else null
+        }.groupBy { it.first }.mapValues { (_, rows) -> rows.maxBy { SportsEventMatchEngine.rank(it.third.confidence) * 1000 + it.third.strength } }
+        if (byGuide.isEmpty()) return emptyList()
         return buildList {
             for ((playlistId, chans) in candidates.groupBy { it.playlistId }) {
-                val mapping = runCatching { EpgMirrorRepository.mappingFor(playlistId) }.getOrDefault(emptyMap())
-                if (mapping.isEmpty()) continue
+                val mapping = try { EpgMirrorRepository.mappingFor(playlistId) }
+                    catch (error: CancellationException) { throw error } catch (_: Exception) { emptyMap() }
                 for (c in chans) {
                     val epgId = mapping[c.streamId] ?: continue
-                    val (_, p, scored) = hits[epgId] ?: continue
-                    add(
-                        ChannelMatch(
-                            channel = c,
-                            programme = SportsProgramme(p.title, p.desc.orEmpty(), p.startMs, p.endMs),
-                            score = MIRROR_BASE_SCORE + scored.score / 10,
-                            via = MatchVia.EPG,
-                            language = EpgLang.of(epgId, c.name, p.title),
-                            confidence = scored.confidence,
-                        )
-                    )
+                    val (_, p, scored) = byGuide[epgId] ?: continue
+                    add(ChannelMatch(c, programme = SportsProgramme(p.title, p.desc.orEmpty(), p.startMs, p.endMs),
+                        score = MIRROR_BASE_SCORE + scored.strength / 10, via = MatchVia.EPG,
+                        language = EpgLang.of(epgId, c.name, p.title), confidence = scored.confidence, evidence = scored))
                 }
             }
         }
     }
 
-    /** Stage 4: broadcaster names from TheSportsDB matched against candidate channel names. */
     private fun stationMatches(
         candidates: List<CandidateChannel>,
         stations: List<RadarTvStation>,
@@ -332,12 +306,13 @@ object RadarChannelMatcher {
                 // otherwise confirm every same-brand channel the user owns. Gate on region alignment.
                 val stationRegion = SportsBroadcastRegionPolicy.regionOfCountry(st.country)
                     ?: SportsBroadcastRegionPolicy.regionOfChannel(raw)
-                val confidence = SportsBroadcastRegionPolicy.listingConfidence(stationRegion, homeRegion)
                 val score = LISTING_SCORE + SportsBroadcastRegionPolicy.listingScoreDelta(stationRegion, homeRegion)
                 for (c in found) {
                     if (!SportsBroadcastRegionPolicy.listingAccepts(stationRegion, c.name)) continue
-                    // Home-country broadcaster leads and confirms; an out-of-country feed sinks to "carries".
-                    add(ChannelMatch(c, programme = null, score = score, via = MatchVia.LISTING, language = st.country, confidence = confidence))
+                    if (!SportsEventMatchEngine.compatibleStation(c.name, raw)) continue
+                    val confidence = SportsBroadcastRegionPolicy.listingConfidence(stationRegion, SportsBroadcastRegionPolicy.regionOfChannel(c.name))
+                    // A fixture-specific listing keeps its evidence across regions; unknown feed territory remains possible.
+                    add(ChannelMatch(c, programme = null, score = score, via = MatchVia.LISTING, language = st.country, confidence = confidence, evidence = SportsMatchEvidence(SportsEvidenceSource.LISTING, confidence, LISTING_SCORE, listOf("fixture_broadcaster_listing"))))
                 }
             }
         }
@@ -358,7 +333,11 @@ object RadarChannelMatcher {
             for (account in accounts) {
                 // Ktor and the platform stores are suspend/non-blocking. This runs on Default,
                 // the platform-neutral background dispatcher, via match() above.
-                for (ch in XtreamSearchIndex.liveChannelsFor(account)) {
+                val revision = account.hashCode().toString() + ":" + IptvContentDb.ingestMeta(account.id)?.builtAtMs
+                val channels = if (account.sourceType.isM3u()) {
+                    com.nuvio.app.features.iptv.IptvClient.forAccount(account).liveChannels(account).getOrDefault(emptyList())
+                } else XtreamSearchIndex.liveChannelsFor(account)
+                for (ch in channels) {
                     add(
                         CandidateChannel(
                             playlistId = account.id,
@@ -369,6 +348,7 @@ object RadarChannelMatcher {
                             streamId = ch.streamId,
                             epgChannelId = ch.epgChannelId,
                             hasArchive = ch.hasArchive,
+                            catalogRevision = revision,
                         )
                     )
                 }
@@ -510,60 +490,18 @@ object RadarChannelMatcher {
 
     // --- scoring (pure) --------------------------------------------------------
 
-    private fun nameScored(
-        name: String,
-        keywords: List<String>,
-        homeTokens: List<String>,
-        awayTokens: List<String>,
-        eventTokens: List<String>,
-    ): SportsChannelMatchPolicy.Scored {
-        if (name.isBlank()) return SportsChannelMatchPolicy.Scored(0, MatchConfidence.LEAGUE)
-        val genericHit = GENERIC_SPORT_MARKERS.any { name.contains(it) }
-        return SportsChannelMatchPolicy.scoreName(
-            homeTokens, awayTokens, keywords, eventTokens, genericHit,
-        ) { hits(name, it) }
-    }
+    private fun bestProgramme(
+        programmes: List<XtreamProgram>,
+        prepared: SportsEventMatchEngine.Prepared,
+    ): Pair<XtreamProgram, SportsMatchEvidence>? = programmes.mapNotNull { p ->
+        val evidence = SportsEventMatchEngine.programme(prepared, p.title, p.description, p.startMs, p.endMs)
+        if (evidence.strength > 0) p to evidence else null
+    }.maxByOrNull { SportsEventMatchEngine.rank(it.second.confidence) * 1000 + it.second.strength }
 
     private fun XtreamProgram.toSportsProgramme(): SportsProgramme =
         SportsProgramme(title, description, startMs, endMs)
 
-    private fun bestProgramme(
-        programmes: List<XtreamProgram>,
-        startMs: Long,
-        sport: String?,
-        keywords: List<String>,
-        homeTokens: List<String>,
-        awayTokens: List<String>,
-        eventTokens: List<String>,
-    ): Pair<XtreamProgram, SportsChannelMatchPolicy.Scored>? {
-        val windowStart = startMs - PROGRAMME_WINDOW_BACK_MS
-        val windowEnd = startMs + PROGRAMME_WINDOW_AHEAD_MS
-        return programmes
-            .filter { it.endMs > windowStart && it.startMs < windowEnd }
-            .mapNotNull { p ->
-                val scored = programmeScored(normalize("${p.title} ${p.description}"), keywords, homeTokens, awayTokens, eventTokens)
-                if (scored.score > 0) p to scored else null
-            }
-            .maxByOrNull { it.second.score }
-    }
-
-    /** Shared programme-text scoring for panel short_epg and the canonical mirror. */
-    private fun programmeScored(
-        text: String,
-        keywords: List<String>,
-        homeTokens: List<String>,
-        awayTokens: List<String>,
-        eventTokens: List<String>,
-    ): SportsChannelMatchPolicy.Scored {
-        if (text.isBlank()) return SportsChannelMatchPolicy.Scored(0, MatchConfidence.LEAGUE)
-        return SportsChannelMatchPolicy.scoreProgramme(
-            homeTokens, awayTokens, keywords, eventTokens,
-        ) { hits(text, it) }
-    }
-
-    private fun normalize(s: String?): String =
-        (s ?: "").lowercase().map { if (it.isLetterOrDigit()) it else ' ' }.joinToString("")
-            .split(" ").filter { it.isNotBlank() }.joinToString(" ")
+    private fun normalize(s: String?): String = SportsEventMatchEngine.normalize(s)
 
     /**
      * Short single tokens must match on WORD BOUNDARIES — plain substring makes "epl" hit

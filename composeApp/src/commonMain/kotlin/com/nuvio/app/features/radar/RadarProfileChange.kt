@@ -9,6 +9,7 @@ import com.nuvio.app.core.contracts.ProfileChangeParticipant
  */
 internal object RadarProfileChange : ProfileChangeParticipant {
     override fun onProfileChanged(profileIndex: Int) {
+        RadarChannelMatcher.resetForProfile()
         RadarRepository.onProfileChanged(profileIndex)
     }
 }

@@ -1573,23 +1573,10 @@ internal fun MatchChannelsSheet(
                         recordings = found
                     }
                 }
-                // Broadcaster listings are one cached edge-fn call; bounded so a slow network
-                // can't hold the sheet hostage (matching proceeds without them).
-                val stations = withContext(Dispatchers.Default) {
-                    try {
-                        withTimeoutOrNull(4_000) { RadarRepository.tvStations(fixture.id) } ?: emptyList()
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        sportsMatchLog.w(error) { "Sports broadcaster lookup failed" }
-                        emptyList()
-                    }
-                }
-                // Render ONCE, when the fully-ranked result is ready — no name-only partial. The fast
-                // name pass and the EPG tiers score on different scales, so showing the partial and then
-                // replacing it made the whole list visibly reorder and grow; the skeleton (matching &&
-                // matches.isEmpty()) holds until the final list lands instead.
-                val result = RadarChannelMatcher.match(fixture, league, stations)
+                val result = RadarChannelMatcher.match(fixture, league,
+                    stationLookup = { RadarRepository.tvStations(fixture.id) },
+                    onPartial = { partial -> withContext(Dispatchers.Main) { matches = partial } },
+                )
                 matches = result
             }
         } catch (error: CancellationException) {
@@ -1698,22 +1685,25 @@ internal fun MatchChannelsSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 else -> {
-                    // Three honest tiers by evidence strength: the channel's own GUIDE names the teams
+                    // Evidence tiers keep schedule, listings, possible event feeds and competition separate.
+                    // The channel's own GUIDE names the teams
                     // (Showing) > a broadcaster listing or the channel name itself names the match
                     // (Broadcasting) > a sport/league channel that only carries the competition (Carries).
                     val showing = matches.filter { it.confidence == MatchConfidence.CONFIRMED && it.via == RadarChannelMatcher.MatchVia.EPG }
                     val broadcasting = matches.filter { it.confidence == MatchConfidence.CONFIRMED && it.via != RadarChannelMatcher.MatchVia.EPG }
+                    val possible = matches.filter { it.confidence == MatchConfidence.POSSIBLE }
                     val carries = matches.filter { it.confidence == MatchConfidence.LEAGUE }
                     val leagueLabel = league?.name?.takeIf { it.isNotBlank() }
                         ?: fixture.league?.takeIf { it.isNotBlank() }
                     // Only label the tiers when more than one is present — a lone tier needs no sub-header.
-                    val labeled = listOf(showing, broadcasting, carries).count { it.isNotEmpty() } >= 2
                     LazyColumn {
-                        if (labeled && showing.isNotEmpty()) item { MatchGroupLabel("Showing this match") }
+                        if ( showing.isNotEmpty()) item { MatchGroupLabel("Scheduled for this event") }
                         channelMatchItems(showing, fixture, fixtureStarted, onDismiss, onPlayChannel, onPlayReplay)
-                        if (labeled && broadcasting.isNotEmpty()) item { MatchGroupLabel("Broadcasting this match") }
+                        if ( broadcasting.isNotEmpty()) item { MatchGroupLabel("Listed broadcaster") }
                         channelMatchItems(broadcasting, fixture, fixtureStarted, onDismiss, onPlayChannel, onPlayReplay)
-                        if (labeled && carries.isNotEmpty()) item { MatchGroupLabel(leagueLabel?.let { "Carries $it" } ?: "Carries this competition") }
+                        if (possible.isNotEmpty()) item { MatchGroupLabel("Possible event feeds") }
+                        channelMatchItems(possible, fixture, fixtureStarted, onDismiss, onPlayChannel, onPlayReplay)
+                        if ( carries.isNotEmpty()) item { MatchGroupLabel(leagueLabel?.let { "Carries $it" } ?: "Carries this competition") }
                         channelMatchItems(carries, fixture, fixtureStarted, onDismiss, onPlayChannel, onPlayReplay)
                         if (matching) {
                             item {
@@ -1731,7 +1721,7 @@ internal fun MatchChannelsSheet(
     }
 }
 
-/** A small section label inside the match sheet ("Showing this match" / "Carries <league>"). */
+/** A small section label inside the match sheet ("Scheduled for this event" / "Carries <league>"). */
 @Composable
 private fun MatchGroupLabel(text: String) {
     Text(
