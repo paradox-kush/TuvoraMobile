@@ -1,4 +1,4 @@
 // Apple TV app version. Its own train on the shared App Store record (Universal Purchase with the
 // iPhone app, com.tuvora.media): bump CURRENT_PROJECT_VERSION for every TestFlight upload.
 MARKETING_VERSION = 1.0.0
-CURRENT_PROJECT_VERSION = 9
+CURRENT_PROJECT_VERSION = 10
