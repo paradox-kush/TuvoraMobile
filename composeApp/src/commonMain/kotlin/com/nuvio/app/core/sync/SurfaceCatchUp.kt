@@ -6,6 +6,7 @@ import com.nuvio.app.core.auth.userId
 import com.nuvio.app.core.network.SupabaseProvider
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
@@ -23,7 +24,7 @@ import kotlinx.serialization.json.put
  * uses ([SyncManager.pullSurface]), and records the new versions only for surfaces whose pull
  * succeeded. Runs on every Realtime (re)subscribe — the moment events may have been missed.
  *
- * A server without the RPC (not yet deployed) or a lapsed session makes it a silent no-op.
+ * A failed catch-up leaves its versions unseen so the subscription can retry it.
  */
 internal object SurfaceCatchUp {
 
@@ -58,19 +59,23 @@ internal object SurfaceCatchUp {
                 "sync_get_surface_versions",
                 buildJsonObject { put("p_profile_id", profileId) },
             ).decodeList<Row>().map { SurfaceVersion(it.profileId, it.surface, it.version) }
-        }.onFailure { log.d { "surface versions unavailable: ${it.message}" } }.getOrNull()
+        }.onFailure {
+            if (it is CancellationException) throw it
+            log.d { "surface versions unavailable: ${it.message}" }
+        }.getOrNull()
     }
 
     /** Pull whatever advanced since this device last pulled it. Returns the surfaces pulled. */
     suspend fun run(profileId: Int, reason: String): List<String> = mutex.withLock {
         val userId = AuthRepository.state.value.userId ?: return@withLock emptyList()
-        val server = fetch(profileId) ?: return@withLock emptyList()
+        val server = fetch(profileId) ?: error("Surface versions unavailable; catch-up was not completed")
         val seen = loadSeen(userId)
         val plan = SurfaceCatchUpPolicy.plan(seen, server, SyncManager.pullableSurfaces())
         if (plan.isEmpty()) return@withLock emptyList()
         log.i { "catch-up ($reason) profile=$profileId surfaces=${plan.map { it.surface }}" }
         val pulled = plan.filter { SyncManager.pullSurface(profileId, it.surface) }
         saveSeen(userId, SurfaceCatchUpPolicy.advance(seen, pulled))
+        check(pulled.size == plan.size) { "Some sync surfaces failed; their versions remain unseen" }
         pulled.map { it.surface }
     }
 

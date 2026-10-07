@@ -1,5 +1,7 @@
 package com.nuvio.app.features.membership
 
+import com.nuvio.app.core.network.BackendFailurePolicy
+import com.nuvio.app.core.network.SupabaseProvider
 import co.touchlab.kermit.Logger
 import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
@@ -31,6 +33,8 @@ object MemberAccessRepository {
     private var started = false
     private var verifiedUserId: String? = null
     private var verifiedAtMs = 0L
+    private var checkedScope: String? = null
+    private var nextCheckAtMs = 0L
 
     fun ensureStarted() {
         if (started) return
@@ -40,12 +44,7 @@ object MemberAccessRepository {
             combine(AuthRepository.state, refreshGeneration) { auth, _ -> auth }
                 .collectLatest(::loadAccess)
         }
-        scope.launch {
-            while (true) {
-                delay(VerificationIntervalMs)
-                refreshIfStale()
-            }
-        }
+
     }
 
     fun refresh() {
@@ -65,6 +64,8 @@ object MemberAccessRepository {
         _access.value = MemberAccess.None
         verifiedUserId = null
         verifiedAtMs = 0L
+        checkedScope = null
+        nextCheckAtMs = 0L
         MemberAssetStorage.clearAccess()
         ProfileBackgroundRepository.invalidate()
     }
@@ -87,6 +88,11 @@ object MemberAccessRepository {
         val cached = loadCached(account.userId)
         _access.value = cached ?: MemberAccess.None
         warmMemberAssets(_access.value)
+        val scopeKey = "${SupabaseProvider.selectedBackend.normalizedSupabaseUrl}|${account.userId}"
+        val now = EpisodeReleaseDatePlatform.nowEpochMs()
+        if (checkedScope == scopeKey && now < nextCheckAtMs) return
+        checkedScope = scopeKey
+        nextCheckAtMs = now + VerificationIntervalMs
         val remote = fetchWithRetry() ?: return
         val effective = saveRemote(account.userId, remote)
         _access.value = effective
@@ -102,7 +108,9 @@ object MemberAccessRepository {
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (attempt == RetryDelaysMs.size) {
+                val status = BackendFailurePolicy.status(error)
+                nextCheckAtMs = EpisodeReleaseDatePlatform.nowEpochMs() + BackendFailurePolicy.membershipCooldownMs(status)
+                if (!BackendFailurePolicy.retryable(status) || attempt == RetryDelaysMs.size) {
                     log.w(error) { "Unable to verify supporter access; retaining cached access" }
                     return null
                 }
