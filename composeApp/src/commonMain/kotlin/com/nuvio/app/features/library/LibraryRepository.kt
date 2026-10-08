@@ -325,6 +325,22 @@ object LibraryRepository {
         return toggleLocalSavedInternal(item)
     }
 
+    /** Capture before a local favourite toggle; Undo restores its original order and metadata. */
+    fun captureLocalSavedUndo(id: String, type: String): LibrarySavedUndo {
+        ensureLoaded()
+        val before = localState.snapshot()
+        return LibrarySavedUndo {
+            if (ProfileRepository.activeProfileId == before.token.profileId) {
+                val result = localState.undoToggle(before, id, type)
+                if (result.affectedCount > 0) {
+                    persist(result.snapshot)
+                    publish()
+                    pushToServer(result.snapshot)
+                }
+            }
+        }
+    }
+
     fun toggleLocalSaved(item: LibraryItem) {
         ensureLoaded()
         toggleLocalSavedInternal(item)

@@ -284,6 +284,32 @@ internal class LibraryLocalState {
         )
     }
 
+    /** Restore one toggle's previous membership and order without replacing other library edits. */
+    fun undoToggle(before: LibraryLocalSnapshot, id: String, type: String): LibraryLocalMutation = synchronized(lock) {
+        if (!before.hasLoaded || !hasLoaded || !isCurrentLocked(before.token)) {
+            return@synchronized LibraryLocalMutation(snapshotLocked(), 0)
+        }
+        val key = libraryItemKey(id, type)
+        val original = before.items.firstOrNull { libraryItemKey(it.id, it.type) == key }
+        val current = itemsById[key]
+        // An already-restored membership is a no-op: never toggle it again or overwrite a later re-add.
+        if ((original == null) == (current == null)) {
+            return@synchronized LibraryLocalMutation(snapshotLocked(), 0)
+        }
+        if (original != null) {
+            itemsById[key] = original
+            pendingUpsertKeysByKey[key] = original.toLibrarySyncKey()
+            pendingDeleteKeysByKey.remove(key)
+        } else {
+            itemsById.remove(key)
+            pendingUpsertKeysByKey.remove(key)
+            pendingDeleteKeysByKey[key] = requireNotNull(current).toLibrarySyncKey()
+        }
+        revision += 1L
+        contentRevision += 1L
+        LibraryLocalMutation(snapshotLocked(), 1)
+    }
+
     fun removeById(id: String): LibraryLocalMutation = synchronized(lock) {
         val removedEntries = itemsById
             .filterValues { item -> item.id == id }
