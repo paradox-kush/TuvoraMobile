@@ -1,5 +1,6 @@
 package com.tuvora.tvos.player
 
+import com.nuvio.app.features.livetv.LiveTvErrorFramePolicy
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sign
@@ -53,6 +54,8 @@ data class TvPlayerRemoteContext(
  * the engine. Swift feeds every press through here; it owns no remote decisions itself.
  */
 object TvPlayerRemotePolicy {
+    fun coverFailedFrame(hasError: Boolean): Boolean = LiveTvErrorFramePolicy.coverVideo(false, hasError)
+
     const val SKIP_MS = 10_000L
 
     /** Pan distance (remote points, ~1920 across the surface) before a swipe counts as a scrub. */

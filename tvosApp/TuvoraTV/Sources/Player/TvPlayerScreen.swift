@@ -88,6 +88,9 @@ struct TvPlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             EngineHost(session: session, generation: Int(state?.engineGeneration ?? 0)).ignoresSafeArea()
+            if TvPlayerRemotePolicy.shared.coverFailedFrame(hasError: state?.errorMessage != nil) {
+                Color.black.ignoresSafeArea()
+            }
             // The focus target over bare video (Apple DTS: with nothing focused tvOS drops the arrows and
             // Back falls through to UIKit). A real Button, not a `.focusable()` container: the focus engine
             // never settled on the container once it had no tap gesture, so the clickpad edges did nothing.
