@@ -63,7 +63,7 @@ class TvPlaylistFormPolicyTest {
         assertEquals("00:1A:79:AA:BB:CC", input.macAddress)
         assertNull(input.stalkerUsername)
         assertEquals("SN1", input.serialNumber)
-        assertFalse(input.sendDeviceId)
+        assertEquals(false, input.sendDeviceId)
     }
 
     @Test

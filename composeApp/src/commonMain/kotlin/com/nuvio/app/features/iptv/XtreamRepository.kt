@@ -336,7 +336,11 @@ object XtreamRepository : IptvCatalog {
         }
         val candidate = when (input.sourceType) {
             SOURCE_TYPE_M3U_URL -> m3uAccountFromForm(input)
-            SOURCE_TYPE_STALKER -> stalkerAccountFromForm(input)
+            SOURCE_TYPE_STALKER -> stalkerAccountFromForm(input.copy(
+                sendDeviceId = input.sendDeviceId
+                    ?: _uiState.value.accounts.firstOrNull { it.id == oldId }?.sendDeviceId
+                    ?: true,
+            ))
             else -> xtreamAccountFromForm(input)
         }
         verifyAndReplace(

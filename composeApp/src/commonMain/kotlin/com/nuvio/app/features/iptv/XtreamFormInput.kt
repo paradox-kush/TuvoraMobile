@@ -31,7 +31,8 @@ internal data class XtreamFormInput(
     val stalkerPassword: String? = null,
     val serialNumber: String? = null,
     val deviceId: String? = null,
-    val sendDeviceId: Boolean = true,
+    // null means no explicit choice: preserve on edit, default enabled on add.
+    val sendDeviceId: Boolean? = null,
     // F46: the optional rest of the STB identity (blank = derived / preset, as before).
     val deviceId2: String? = null,
     val signature: String? = null,
