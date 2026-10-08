@@ -239,6 +239,7 @@ private struct LiveGuideView: View {
     @State private var favoriteOrder: [LiveGuideChannel] = []
     /// F03: the favourite just toggled — Undo (in the hold-OK menu) for a few seconds, like a hide.
     @State private var lastFavoriteToggle: (contentId: String, at: Date)?
+    @State private var lastFavoriteUndo: LibrarySavedUndo?
     /// P5: a favourite removed from a favourites row stays listed (marked as removed) while Undo is offered.
     @State private var pendingRemoval: TvFavouriteRows.PendingRemoval?
     @State private var pendingRemovalChannel: LiveGuideChannel?
@@ -433,6 +434,9 @@ private struct LiveGuideView: View {
     /// F03 (owner 2026-10-04): a favourite toggle is confirmed — with Undo — rather than a popup.
     private func toggleFavorite(_ channel: LiveGuideChannel, undoable: Bool) {
         let adding = !favorites.contains(channel.contentId)
+        let membershipUndo = undoable
+            ? TvLiveGuide.shared.captureFavoriteUndo(contentId: channel.contentId)
+            : lastFavoriteUndo
         // P5: Undo of a removal puts the favourite back in its old place, not at the top.
         let undoing = !undoable ? pendingRemoval.flatMap { $0.contentId == channel.contentId ? $0 : nil } : nil
         // P5: removing inside a favourites row keeps the row (marked as removed) while Undo is offered —
@@ -458,12 +462,9 @@ private struct LiveGuideView: View {
                 lastFavoriteToggle = nil
                 notice = nil
             }
-            if let undoing {
-                if !TvLiveGuide.shared.isFavorite(contentId: channel.contentId) {
-                    try? await TvLiveGuide.shared.toggleFavorite(channel: channel)
-                }
-                // Back on the main actor: the order write must not run on a background coroutine.
-                TvLiveGuide.shared.restoreFavoriteOrder(contentId: channel.contentId, savedAtEpochMs: undoing.savedAtEpochMs)
+            if !undoable {
+                membershipUndo?.undo()
+                lastFavoriteUndo = nil
             } else {
                 try? await TvLiveGuide.shared.toggleFavorite(channel: channel)
             }
@@ -481,6 +482,7 @@ private struct LiveGuideView: View {
             }
             let at = Date()
             lastFavoriteToggle = undoable ? (channel.contentId, at) : nil
+            lastFavoriteUndo = undoable ? membershipUndo : nil
             notice = undoable
                 ? "\u{201C}\(channel.name)\u{201D} \(adding ? "added to" : "removed from") Favorites. Hold OK to undo."
                 : nil

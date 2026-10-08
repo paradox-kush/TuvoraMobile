@@ -30,17 +30,21 @@ object TvLiveGuide {
     /** NuvioTV's live Favorites are channels saved in the Library (XtreamLiveGuideViewModel.favoriteLiveIds). */
     val libraryChanges get() = com.nuvio.app.features.library.LibraryRepository.uiState
 
-    fun isFavorite(contentId: String): Boolean = com.nuvio.app.features.library.LibraryRepository.isSaved(contentId)
+    fun isFavorite(contentId: String): Boolean = com.nuvio.app.features.library.LibraryRepository.isLocalSaved(contentId, "tv")
 
     suspend fun toggleFavorite(channel: LiveGuideChannel) {
         val preview = com.nuvio.app.features.home.MetaPreview(
             id = channel.contentId, type = "tv", name = channel.name, poster = channel.logo, logo = channel.logo,
             posterShape = com.nuvio.app.features.home.PosterShape.Landscape,
         )
-        com.nuvio.app.features.library.LibraryRepository.toggleSaved(
+        com.nuvio.app.features.library.LibraryRepository.toggleLocalSaved(
             preview.toLibraryItem(savedAtEpochMs = nowMs()),
         )
     }
+
+    /** Capture the original local membership before either a provider-row or favourites-row toggle. */
+    fun captureFavoriteUndo(contentId: String): com.nuvio.app.features.library.LibrarySavedUndo =
+        com.nuvio.app.features.library.LibraryRepository.captureLocalSavedUndo(contentId, "tv")
 
     /** P5: a favourite's order stamp (its place in the favourites rows); 0 when it is not saved. */
     fun favoriteSavedAt(contentId: String): Long =

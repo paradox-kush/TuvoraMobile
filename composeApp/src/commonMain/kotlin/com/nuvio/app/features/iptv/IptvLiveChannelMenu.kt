@@ -49,8 +49,9 @@ internal fun IptvLiveChannelMenu(
         isFavorite = Action.REMOVE_FAVORITE in actions,
         // F03 (owner 2026-10-04): a long-press favourite toggle is confirmed with Undo, like a hide.
         onToggleFavorite = {
+            val undo = LibraryRepository.captureLocalSavedUndo(channel.contentId, "tv")
             onToggleFavorite()
-            scope.launch { confirmFavoriteToggled(channel.name, nowFavorite = !wasFavorite, undo = onToggleFavorite) }
+            scope.launch { confirmFavoriteToggled(channel.name, nowFavorite = !wasFavorite, undo = undo::undo) }
         },
         onMoveEarlier = onMoveEarlier,
         onMoveLater = onMoveLater,
