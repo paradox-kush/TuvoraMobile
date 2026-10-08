@@ -178,7 +178,7 @@ internal fun stalkerAccountFromForm(input: XtreamFormInput): XtreamAccount? {
         stalkerPassword = input.stalkerPassword?.trim()?.takeIf { it.isNotEmpty() },
         serialNumber = input.serialNumber?.trim()?.takeIf { it.isNotEmpty() },
         deviceId = input.deviceId?.trim()?.takeIf { it.isNotEmpty() },
-        sendDeviceId = input.sendDeviceId,
+        sendDeviceId = input.sendDeviceId ?: true,
         deviceId2 = input.deviceId2?.trim()?.takeIf { it.isNotEmpty() },
         signature = input.signature?.trim()?.takeIf { it.isNotEmpty() },
         stbModel = input.stbModel?.trim()?.takeIf { it.isNotEmpty() },

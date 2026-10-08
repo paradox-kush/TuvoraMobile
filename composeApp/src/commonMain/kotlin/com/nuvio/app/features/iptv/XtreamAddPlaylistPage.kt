@@ -53,6 +53,7 @@ import com.nuvio.app.core.ui.NuvioPrimaryButton
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.features.settings.SettingsGroup
+import com.nuvio.app.features.settings.SettingsSwitchRow
 import com.nuvio.app.features.settings.SettingsSection
 import com.nuvio.app.features.settings.SettingsSecretTextField
 
@@ -188,6 +189,7 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
         var stalkerPass by remember(editing?.id) { mutableStateOf(editing?.stalkerPassword ?: "") }
         var serial by remember(editing?.id) { mutableStateOf(editing?.serialNumber ?: "") }
         var deviceId by remember(editing?.id) { mutableStateOf(editing?.deviceId ?: "") }
+        var sendDeviceId by remember(editing?.id) { mutableStateOf(editing?.sendDeviceId ?: true) }
         // F46: the rest of a real box's identity (all optional, blank = derived / preset).
         var deviceId2 by remember(editing?.id) { mutableStateOf(editing?.deviceId2 ?: "") }
         var signature by remember(editing?.id) { mutableStateOf(editing?.signature ?: "") }
@@ -282,6 +284,8 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
                     onSerialChange = { serial = it },
                     deviceId = deviceId,
                     onDeviceIdChange = { deviceId = it },
+                    sendDeviceId = sendDeviceId,
+                    onSendDeviceIdChange = { sendDeviceId = it },
                     deviceId2 = deviceId2,
                     onDeviceId2Change = { deviceId2 = it },
                     signature = signature,
@@ -374,6 +378,7 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
                         stalkerPassword = stalkerPass.trim().ifEmpty { null },
                         serialNumber = serial.trim().ifEmpty { null },
                         deviceId = deviceId.trim().ifEmpty { null },
+                        sendDeviceId = sendDeviceId,
                         deviceId2 = deviceId2.trim().ifEmpty { null },
                         signature = signature.trim().ifEmpty { null },
                         stbModel = stbModel.trim().ifEmpty { null },
@@ -522,6 +527,8 @@ private fun StalkerFieldsSection(
     onSerialChange: (String) -> Unit,
     deviceId: String,
     onDeviceIdChange: (String) -> Unit,
+    sendDeviceId: Boolean,
+    onSendDeviceIdChange: (Boolean) -> Unit,
     deviceId2: String,
     onDeviceId2Change: (String) -> Unit,
     signature: String,
@@ -584,6 +591,13 @@ private fun StalkerFieldsSection(
                 value = deviceId2,
                 onValueChange = onDeviceId2Change,
                 label = "Device ID 2 (optional)",
+            )
+            SettingsSwitchRow(
+                title = "Send device signature",
+                description = "Sends the device signature when signing in to the portal. Turn off only if your provider requires it. Device IDs are still sent.",
+                checked = sendDeviceId,
+                isTablet = isTablet,
+                onCheckedChange = onSendDeviceIdChange,
             )
             FormOutlinedField(
                 value = signature,
