@@ -554,6 +554,7 @@ private fun XtreamHubCategoryRow(
     onPosterLongClick: ((MetaPreview) -> Unit)? = null,
     onViewAll: () -> Unit,
 ) {
+    val guideDataGeneration by XtreamHubRepository.guideDataGeneration.collectAsStateWithLifecycle()
     val title = category.name.ifBlank { stringResource(Res.string.library_other) }
     if (category.items.isEmpty()) {
         // Loading or not-yet-loaded: real title, shimmer tiles with the resolved tiles'
@@ -592,7 +593,11 @@ private fun XtreamHubCategoryRow(
             }
             if (live) {
                 // Live channel: card + now/next EPG line, fetched lazily as it appears.
-                LaunchedEffect(item.id) { XtreamHubRepository.ensureEpg(item.id) }
+                // Re-asked when new guide data lands while this tile still shows no programme (the tile asked
+                // before the playlist's XMLTV ingest finished) — see GuideDataRefreshPolicy.
+                LaunchedEffect(item.id, GuideDataRefreshPolicy.tileHealKey(epg[item.id]?.now != null, guideDataGeneration)) {
+                    XtreamHubRepository.ensureEpg(item.id)
+                }
                 XtreamLiveChannelTile(
                     item = item,
                     epg = epg[item.id],
@@ -641,6 +646,7 @@ private fun XtreamHubCategoryPage(
     onHideGroup: (() -> Unit)? = null,
 ) {
     PlatformBackHandler(enabled = true, onBack = onBack)
+    val guideDataGeneration by XtreamHubRepository.guideDataGeneration.collectAsStateWithLifecycle()
     val landscape = live || rememberPosterCardStyleUiState().catalogLandscapeModeEnabled
     val title = category.name.ifBlank { stringResource(Res.string.library_other) }
 
@@ -699,7 +705,11 @@ private fun XtreamHubCategoryPage(
                     }
                 }
                 if (live) {
-                    LaunchedEffect(item.id) { XtreamHubRepository.ensureEpg(item.id) }
+                    // Re-asked when new guide data lands while this tile still shows no programme (the tile asked
+                    // before the playlist's XMLTV ingest finished) — see GuideDataRefreshPolicy.
+                    LaunchedEffect(item.id, GuideDataRefreshPolicy.tileHealKey(epg[item.id]?.now != null, guideDataGeneration)) {
+                        XtreamHubRepository.ensureEpg(item.id)
+                    }
                     XtreamLiveChannelTile(
                         item = item,
                         epg = epg[item.id],
