@@ -366,6 +366,16 @@ private struct LiveGuideView: View {
                 smokeLog("SMOKE guide row=%@ window=%lld programmes=%d", row.contentId, row.windowStartMs, row.programmes.count)
             }
         }
+        .task {
+            // New guide data landed while the guide is open (typically the playlist's XMLTV ingest finishing
+            // after the rows had asked and been stamped empty): the shared policy re-asks the focused
+            // channel and the visible rows that show no programme, so "No information" heals without
+            // leaving the guide. The first value is the generation the guide opened with (no-op).
+            for await generation in TvGuideEpg.shared.guideDataGeneration {
+                TvGuideEpg.shared.onGuideDataGeneration(generation: generation.int64Value)
+                smokeLog("SMOKE guide data generation=%lld asked=%d", generation.int64Value, TvGuideEpg.shared.askedCount)
+            }
+        }
         .task(id: prefetchKey) {
             // The fan-out rule (TvGuideEpgPrefetch): once focus settles, ask for the rows around it — in a
             // past window too, so every visible row shows its schedule, not only the focused channel's.
