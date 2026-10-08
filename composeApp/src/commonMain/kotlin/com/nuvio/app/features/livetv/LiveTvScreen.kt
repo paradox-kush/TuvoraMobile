@@ -738,6 +738,9 @@ fun LiveTvScreen(
                     contentPadding = PaddingValues(end = 16.dp, top = 76.dp),
                 )
 
+                if (LiveTvErrorFramePolicy.coverVideo(resolveError, playbackError != null)) {
+                    Box(Modifier.fillMaxSize().background(Color.Black))
+                }
                 // Loading / error indicators (both orientations).
                 when {
                     hasError -> Box(Modifier.fillMaxSize(), Alignment.Center) { ErrorPill(colors.danger, onRetry) }

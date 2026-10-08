@@ -220,6 +220,7 @@ private struct LiveGuideView: View {
     @State private var focusedChannel: LiveGuideChannel?
     @State private var previewing: LiveGuideChannel?
     @State private var previewSession: TvPlayerSession?
+    @State private var previewFullscreenRequested = false
     /// Latest preview request wins: one that resolves after another channel was chosen or the guide
     /// closed would otherwise play on with no screen (B112).
     @State private var previewRequests = TvPlaybackRequestGate()
@@ -822,7 +823,15 @@ private struct LiveGuideView: View {
     /// OK previews a channel in the strip; OK on the previewing channel goes full screen.
     private func select(_ channel: LiveGuideChannel) {
         notice = nil
-        if previewing?.contentId == channel.contentId, let previewSession {
+        let action = TvGuideSelectionPolicy.shared.decide(
+            sameChannel: previewing?.contentId == channel.contentId,
+            hasSession: previewSession != nil)
+        if action == .awaitFullscreen {
+            previewFullscreenRequested = true
+            return
+        }
+        previewFullscreenRequested = false
+        if action == .fullscreen, let previewSession {
             previewRequests.cancel()
             self.previewSession = nil
             previewing = nil
@@ -848,6 +857,7 @@ private struct LiveGuideView: View {
             if let session = resolved {
                 session.attach()
                 previewSession = session
+                if previewFullscreenRequested { select(channel) }
             } else {
                 previewing = nil
                 playback.notify("\(channel.name) isn't available right now.")
