@@ -229,13 +229,7 @@ actual suspend fun httpPostJsonWithHeaders(
             payload
         }
 
-/**
- * Ktor/Darwin streaming twin of the Android OkHttp version. Ktor transparently gunzips a
- * `Content-Encoding: gzip` response, so reading the decoded channel line-by-line keeps memory
- * bounded even for a 190+ MB playlist. (A bare `.gz` body with no encoding header would arrive
- * still-compressed; providers that serve M3U over http set the encoding header, and the
- * upgrade path is a manual gunzip if a real provider is found not to.)
- */
+/** Darwin decodes HTTP gzip; the line reader also handles raw gzip downloads by magic bytes. */
 actual suspend fun httpStreamLines(
     url: String,
     userAgent: String?,
@@ -273,20 +267,8 @@ private const val MAX_LINE_BYTES = 1 * 1024 * 1024
  * tokenizer accepts chunk boundaries falling anywhere.
  */
 private suspend fun streamBoundedLines(channel: ByteReadChannel, onLine: (String) -> Unit, maxBytes: Long = Long.MAX_VALUE) {
-    val readBuf = ByteArray(64 * 1024)
     var carry = ByteArray(0)
-    var consumed = 0L
-    while (true) {
-        // [maxBytes]: the M3U failover probe reads ~1 KB and stops (leaving execute{} cancels the transfer).
-        val allowance = maxBytes - consumed
-        if (allowance <= 0L) {
-            if (carry.isNotEmpty()) onLine(carry.decodeToString().removeSuffix("\r"))
-            return
-        }
-        val read = channel.readAvailable(readBuf, 0, minOf(readBuf.size.toLong(), allowance).toInt())
-        if (read == -1) break
-        if (read == 0) continue
-        consumed += read
+    streamMaybeGzipChunks(channel, maxBytes) { readBuf, read ->
         val data = if (carry.isEmpty()) readBuf.copyOf(read) else carry + readBuf.copyOf(read)
         var start = 0
         while (true) {

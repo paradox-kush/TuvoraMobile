@@ -42,6 +42,9 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        // Consent must be available before feature registration constructs RecSettingsImpl,
+        // including a headless process start with no MainActivity startup tasks.
+        initializeAndroidProcessStorage(this)
         // Feature-contribution bootstrap (once per process — see FeatureWiring.kt). Must run
         // before anything reads a port — including the memory tier resolved just below.
         registerFeatureContributions()

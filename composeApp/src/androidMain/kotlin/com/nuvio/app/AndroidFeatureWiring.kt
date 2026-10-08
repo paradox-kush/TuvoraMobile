@@ -1,5 +1,6 @@
 package com.nuvio.app
 
+import android.content.Context
 import com.nuvio.app.core.rec.RecEventStorage
 import com.nuvio.app.core.startup.AndroidStartup
 import com.nuvio.app.features.epg.EpgMirrorDbDriver
@@ -8,6 +9,11 @@ import com.nuvio.app.features.iptv.M3UFilePicker
 import com.nuvio.app.features.iptv.XtreamAccountStorage
 import com.nuvio.app.features.iptv.content.IptvContentDbDriver
 import com.nuvio.app.features.iptv.match.MatchDbDriver
+
+/** Process-scoped storage needed before common feature registration or background workers. */
+fun initializeAndroidProcessStorage(context: Context) {
+    RecEventStorage.initialize(context)
+}
 
 /**
  * Android startup wiring — the fork-touching half of MainActivity boot, kept here so MainActivity
@@ -25,7 +31,6 @@ fun registerAndroidStartup() {
     // fires on a headless WorkManager cold start, so gating the journal on it left IptvRefreshWorker
     // reading an uninitialised/undecided journal (fail-open). Application.onCreate runs on every
     // process start, so by the time any of these DB inits (or the worker) run, the gate is decided.
-    AndroidStartup.registerTask { RecEventStorage.initialize(it) }
     AndroidStartup.registerTask { XtreamAccountStorage.initialize(it) }
     AndroidStartup.registerTask { com.nuvio.app.features.mediaserver.api.MediaServerAndroid.initialize(it) }
     AndroidStartup.registerTask { M3UFilePicker.initialize(it) }
