@@ -6,6 +6,7 @@ import com.nuvio.app.core.contracts.StreamSourceRegistry
 import com.nuvio.app.core.contracts.StreamSourceGroup
 import com.nuvio.app.core.contracts.StreamSourceProvider
 import com.nuvio.app.features.details.MetaVideo
+import com.nuvio.app.core.ui.NuvioToastController
 import com.nuvio.app.features.streams.StreamItem
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -64,13 +65,17 @@ class PlayerDeferredSourceSwitchTest {
     fun `a failed mint leaves the playing source untouched`() = runTest {
         val sources = FakeSources(minted = null)
         StreamSourceRegistry.register("fake", sources)
-        val runtime = PlayerScreenRuntime(testArgs()).apply { scope = this@runTest }
+        val runtime = PlayerScreenRuntime(testArgs()).apply {
+            scope = this@runTest
+            resolveText = { "resolve failed" }
+        }
 
         runtime.switchToSource(deferredStream())
         advanceUntilIdle()
 
         assertEquals("https://example.com/video.mp4", runtime.activeSourceUrl, "never the deferred placeholder")
         assertEquals(1, sources.mintCalls)
+        assertEquals("resolve failed", NuvioToastController.currentToast.value?.message, "the viewer is told why nothing changed")
     }
 
     @Test

@@ -20,7 +20,6 @@ import com.nuvio.app.features.watchprogress.WatchProgressRepository
 import com.nuvio.app.features.watchprogress.buildPlaybackVideoId
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
-import org.jetbrains.compose.resources.getString
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.provider_source_resolve_failed
 
@@ -277,7 +276,7 @@ internal fun PlayerScreenRuntime.mintDeferredStreamThen(
         coroutineContext.ensureActive()
         if (minted.isNullOrBlank()) {
             deferredSourceLog.w { "deferred source mint failed - keeping the current source" }
-            NuvioToastController.show(getString(Res.string.provider_source_resolve_failed))
+            NuvioToastController.show(resolveText(Res.string.provider_source_resolve_failed))
             return@launch
         }
         onMinted(stream.copy(url = minted))
