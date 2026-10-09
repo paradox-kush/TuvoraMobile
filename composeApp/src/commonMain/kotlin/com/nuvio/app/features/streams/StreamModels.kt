@@ -284,6 +284,7 @@ enum class StreamsEmptyStateReason {
     NoCompatibleAddons,
     NoStreamsFound,
     StreamFetchFailed,
+    ProviderSourceUnavailable,
 }
 
 data class StreamsUiState(

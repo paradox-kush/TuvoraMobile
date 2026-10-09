@@ -45,6 +45,7 @@ import kotlinx.serialization.json.contentOrNull
  * async live seam and MetaDetailsRepository's VOD/episode ensure-seam).
  */
 object StalkerClient : IptvClient {
+    private val playbackLog = co.touchlab.kermit.Logger.withTag("StalkerPlayback")
 
     /**
      * One playlist's sessions: one per PORTAL it has been reached on (main / a backup — Step 0.3), all
@@ -984,8 +985,21 @@ object StalkerClient : IptvClient {
             putAll(extraParams)
         }
         // Playback: the ACTIVE portal only — a create_link failure never walks to a backup (Step 0.3).
-        val js = try { playbackSession(acc).request(params) as? JsonObject } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { null } ?: return null
-        return StalkerProtocol.extractStreamUrl(js.str("cmd"))
+        val js = try { playbackSession(acc).request(params) as? JsonObject }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                // Never log the exception message: portal errors can echo credentials or play tokens.
+                val status = (error as? com.nuvio.app.features.addons.HttpStatusException)?.status
+                playbackLog.w { "create_link failed: ${error::class.simpleName}, HTTP=$status" }
+                return null
+            }
+        if (js == null) {
+            playbackLog.w { "create_link failed: invalid response shape" }
+            return null
+        }
+        return StalkerProtocol.extractStreamUrl(js.str("cmd")).also {
+            if (it == null) playbackLog.w { "create_link failed: no playable command" }
+        }
     }
 
     // --- cmd lookup (browse-time cmd needed for create_link) ------------------

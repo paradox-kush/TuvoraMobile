@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.DisposableEffect
+import com.nuvio.app.features.streams.DeferredStreamSelection
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -77,7 +79,12 @@ internal fun StreamDestination(
     }
     val pauseDescription = launch.pauseDescription
     val streamRouteScope = rememberCoroutineScope()
+    val providerSelection = remember(route.launchId) { DeferredStreamSelection(streamRouteScope) }
+    DisposableEffect(providerSelection) { onDispose { providerSelection.cancel() } }
+
     var autoPlayNavigationStarted by remember(route.launchId) { mutableStateOf(false) }
+    val providerResolveFailureMessage = stringResource(Res.string.provider_source_resolve_failed)
+    var resolvingProviderStream by remember(route.launchId) { mutableStateOf(false) }
     var resolvingDebridStream by rememberSaveable(route.launchId) { mutableStateOf(false) }
     var pendingP2pStreamOpen by remember { mutableStateOf<PendingP2pStreamOpen?>(null) }
     val shouldResolveEpisodeVideoId =
@@ -364,7 +371,7 @@ internal fun StreamDestination(
         episode = launch.episodeNumber,
         manualSelection = launch.manualSelection,
     )
-    val showLoadingScreen = autoPlayNavigationStarted || resolvingDebridStream || streamsUiState.shouldShowAutoPlayLoading(
+    val showLoadingScreen = autoPlayNavigationStarted || resolvingProviderStream || resolvingDebridStream || streamsUiState.shouldShowAutoPlayLoading(
         expectedRequestToken = expectedStreamsRequestToken,
         settings = playerSettings,
         manualSelection = launch.manualSelection,
@@ -425,7 +432,8 @@ internal fun StreamDestination(
         val playableStream = if (streamSources.isDeferredUrl(stream.playableDirectUrl)) {
             val minted = streamSources.resolveDeferredUrl(stream.playableDirectUrl.orEmpty(), forceMint = false)
             if (minted.isNullOrBlank()) {
-                StreamsRepository.skipAutoPlayStream(selectedStream)
+                val hasNext = StreamsRepository.skipAutoPlayStream(selectedStream)
+                if (!hasNext) NuvioToastController.show(providerResolveFailureMessage)
                 return@LaunchedEffect
             }
             stream.copy(url = minted)
@@ -548,21 +556,19 @@ internal fun StreamDestination(
         // Fork: a Stalker source is listed without a play link (deferred until play): mint it now,
         // for this edition only, then re-enter with the real URL.
         if (com.nuvio.app.core.contracts.StreamSourceAccess.current().isDeferredUrl(stream.playableDirectUrl)) {
-            streamRouteScope.launch {
-                val minted = com.nuvio.app.core.contracts.StreamSourceAccess.current()
-                    .resolveDeferredUrl(stream.playableDirectUrl.orEmpty(), forceMint = false)
-                if (minted.isNullOrBlank()) {
+            resolvingProviderStream = true
+            providerSelection.select(stream,
+                resolve = { url -> com.nuvio.app.core.contracts.StreamSourceAccess.current().resolveDeferredUrl(url, forceMint = false) },
+                onReady = { minted ->
+                    resolvingProviderStream = false
+                    openSelectedStream(minted, resolvedResumePositionMs, resolvedResumeProgressFraction, forceExternal, forceInternal)
+                },
+                onFailure = {
+                    resolvingProviderStream = false
                     StreamsRepository.cancelLoading()
-                    return@launch
-                }
-                openSelectedStream(
-                    stream = stream.copy(url = minted),
-                    resolvedResumePositionMs = resolvedResumePositionMs,
-                    resolvedResumeProgressFraction = resolvedResumeProgressFraction,
-                    forceExternal = forceExternal,
-                    forceInternal = forceInternal,
-                )
-            }
+                    NuvioToastController.show(providerResolveFailureMessage)
+                },
+            )
             return
         }
         if (DirectDebridPlaybackResolver.shouldResolveToPlayableStream(stream)) {

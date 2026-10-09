@@ -2582,4 +2582,5 @@
     <string name="media_server_row_recently_added">Recently Added · %1$s</string>
     <string name="media_server_search_movies">Movies · %1$s</string>
     <string name="media_server_search_series">TV Shows · %1$s</string>
+    <string name="provider_source_resolve_failed">Could not open this source. Try again or choose another source.</string>
 </resources>

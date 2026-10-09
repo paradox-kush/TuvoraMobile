@@ -1169,6 +1169,11 @@ private fun EmptyStateBlock(
             message = stringResource(Res.string.streams_empty_load_failed_message)
         }
 
+        StreamsEmptyStateReason.ProviderSourceUnavailable -> {
+            title = stringResource(Res.string.playback_unavailable)
+            message = stringResource(Res.string.provider_source_resolve_failed)
+        }
+
         StreamsEmptyStateReason.NoStreamsFound, null -> {
             title = stringResource(Res.string.compose_player_no_streams_found)
             message = stringResource(Res.string.streams_empty_no_streams_message)

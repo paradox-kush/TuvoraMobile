@@ -49,7 +49,7 @@ struct RootView: View {
         guard let i = args.firstIndex(of: "-smokePlay"), i + 1 < args.count, !args.contains("-smokeAs"),
               !args.contains("-smokeZapTo"), !args.contains("-smokePresent") else { return nil }
         let launch = TvPlayerLaunches.shared.direct(url: args[i + 1], title: "Smoke test", isLive: args.contains("-smokeLive"), startPositionMs: 0)
-        return TvPlayerSession(launch: launch, liveReresolve: nil)
+        return TvPlayerSession(launch: launch, liveReresolve: nil, vodReresolve: nil)
     }
 
     private func startSmokeZap() async {
@@ -59,9 +59,9 @@ struct RootView: View {
         try? await Task.sleep(nanoseconds: 1_500_000_000)   // the window must be up before presenting
         let first = TvPlayerLaunches.shared.direct(url: args[i + 1], title: "Smoke test", isLive: true, startPositionMs: 0)
         let zapTo = args[z + 1]
-        smokeZapCoordinator.play(TvPlayerSession(launch: first, liveReresolve: nil)) { offset in
+        smokeZapCoordinator.play(TvPlayerSession(launch: first, liveReresolve: nil, vodReresolve: nil)) { offset in
             let next = TvPlayerLaunches.shared.direct(url: zapTo, title: "Smoke zap \(offset)", isLive: true, startPositionMs: 0)
-            return TvPlayerSession(launch: next, liveReresolve: nil)
+            return TvPlayerSession(launch: next, liveReresolve: nil, vodReresolve: nil)
         }
     }
 
@@ -76,7 +76,7 @@ struct RootView: View {
         Self.smokePresented = true
         try? await Task.sleep(nanoseconds: 1_500_000_000)   // the window must be up before presenting
         let launch = TvPlayerLaunches.shared.direct(url: args[i + 1], title: "Smoke test", isLive: args.contains("-smokeLive"), startPositionMs: 0)
-        smokeZapCoordinator.play(TvPlayerSession(launch: launch, liveReresolve: nil))
+        smokeZapCoordinator.play(TvPlayerSession(launch: launch, liveReresolve: nil, vodReresolve: nil))
     }
 
     /// `-smokeAs`: the smoke session as a catalog title, built once the profile is loaded.
@@ -89,7 +89,7 @@ struct RootView: View {
         let type = String(spec[..<colon]), videoId = String(spec[spec.index(after: colon)...])
         let start = args.firstIndex(of: "-smokeStartMs").flatMap { k in k + 1 < args.count ? Int64(args[k + 1]) : nil } ?? 0
         let launch = TvPlayerLaunches.shared.directAs(url: args[i + 1], title: "Smoke test", type: type, videoId: videoId, startPositionMs: start)
-        return TvPlayerSession(launch: launch, liveReresolve: nil)
+        return TvPlayerSession(launch: launch, liveReresolve: nil, vodReresolve: nil)
     }
 
     /// Simulator smoke hook: `-smokeAddM3uLater <seconds> <url> [-smokeAddM3uBackup <url>]` adds an M3U
