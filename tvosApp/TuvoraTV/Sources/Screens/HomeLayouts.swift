@@ -471,8 +471,9 @@ private struct HomeRowsStates: View {
                     .padding(.leading, dp(48))
                 }
             } else if rows.sections.isEmpty && !hasContinueWatching && !hasCollections {
-                NuvioStateMessage(title: StoreCopy.emptyHomeTitle,
-                                  message: rows.errorMessage ?? StoreCopy.emptyHomeMessage)
+                let hint = TvHome.shared.emptyHomeHint()
+                NuvioStateMessage(title: StoreCopy.emptyHomeTitle(hint),
+                                  message: rows.errorMessage ?? StoreCopy.emptyHomeMessage(hint))
                     .frame(height: dp(200))
             }
         }

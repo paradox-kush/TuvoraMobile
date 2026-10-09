@@ -11,10 +11,16 @@ enum StoreCopy {
     /// Settings > Content & Discovery is the add-on/plugin manager: nothing to show without either.
     static var showsContentDiscovery: Bool { hasAddons || hasPlugins }
 
-    static var emptyHomeTitle: String { hasAddons ? "Nothing to show yet" : "No content yet" }
-    static var emptyHomeMessage: String {
-        hasAddons ? "Install add-ons or add a playlist to fill your home screen."
-            : "Add your IPTV playlist in Settings to see your channels, movies, and series here."
+    /// Empty Home copy for TvHome.emptyHomeHint(): a viewer who already has a playlist is never asked to add one.
+    static func emptyHomeTitle(_ hint: TvEmptyHomeHint) -> String {
+        hint == .addPlaylist ? "No content yet" : "Nothing to show yet"
+    }
+    static func emptyHomeMessage(_ hint: TvEmptyHomeHint) -> String {
+        switch hint {
+        case .addPlaylist: return "Add your IPTV playlist in Settings to see your channels, movies, and series here."
+        case .playlistInIptvTab: return "Your playlist's channels, movies, and series are in the IPTV tab, and Search finds them too."
+        default: return "Install add-ons or add a playlist to fill your home screen."
+        }
     }
     static var noSourcesMessage: String {
         hasAddons ? "None of your add-ons or playlists have this title." : "None of your playlists have this title."

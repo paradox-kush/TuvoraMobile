@@ -2,6 +2,8 @@ package com.tuvora.tvos.screens
 
 import co.touchlab.kermit.Logger
 import com.nuvio.app.features.addons.AddonRepository
+import com.nuvio.app.features.iptv.XtreamRepository
+import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.features.addons.enabledAddons
 import com.nuvio.app.features.addons.isWaitingForFirstEnabledManifest
 import com.nuvio.app.features.home.HomeCatalogSettingsRepository
@@ -131,6 +133,15 @@ object TvHome {
     }
 
     fun refresh() = HomeRepository.refresh(AddonRepository.uiState.value.addons.enabledAddons(), force = true)
+
+    /** What an empty Home should say; a store build must not ask a playlist owner to add one (UX38). */
+    fun emptyHomeHint(): TvEmptyHomeHint {
+        XtreamRepository.ensureLoaded()
+        return TvEmptyHomeHintPolicy.hint(
+            addonsEnabled = AppFeaturePolicy.addonsEnabled,
+            hasAnyIptvPlaylist = XtreamRepository.hasAnyPlaylist.value,
+        )
+    }
 
     private fun publish() {
         _continueWatching.value = TvContinueWatching.merge(inProgress, nextUp)

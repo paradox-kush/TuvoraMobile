@@ -137,8 +137,9 @@ struct HomeScreen: View {
                         }
                     }
                     if entries.isEmpty && !rows.isLoading && continueWatching.isEmpty {
-                        NuvioStateMessage(title: StoreCopy.emptyHomeTitle,
-                                          message: rows.errorMessage ?? StoreCopy.emptyHomeMessage)
+                        let hint = TvHome.shared.emptyHomeHint()
+                        NuvioStateMessage(title: StoreCopy.emptyHomeTitle(hint),
+                                          message: rows.errorMessage ?? StoreCopy.emptyHomeMessage(hint))
                             .frame(height: dp(200))
                     }
                 }

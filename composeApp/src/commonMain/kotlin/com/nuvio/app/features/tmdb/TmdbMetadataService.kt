@@ -730,13 +730,13 @@ object TmdbMetadataService {
         id: String,
         settings: TmdbSettings,
     ): MetaDetails? {
-        val tmdbId = id
-            .takeIf { it.startsWith("tmdb:", ignoreCase = true) }
-            ?.substringAfter(':')
-            ?.substringBefore(':')
-            ?.toIntOrNull()
-            ?: return null
         val tmdbType = normalizeMetaType(type)
+        val fallbackId = TmdbFallbackIdPolicy.classify(id) ?: return null
+        val tmdbId = when (fallbackId) {
+            is TmdbFallbackId.Tmdb -> fallbackId.tmdbId
+            is TmdbFallbackId.Imdb ->
+                TmdbService.ensureTmdbId(fallbackId.imdbId, tmdbType)?.toIntOrNull() ?: return null
+        }
         val enrichment = fetchEnrichment(
             tmdbId = tmdbId.toString(),
             mediaType = tmdbType,
@@ -749,6 +749,7 @@ object TmdbMetadataService {
             id = id,
             tmdbId = tmdbId,
             enrichment = enrichment,
+            imdbId = (fallbackId as? TmdbFallbackId.Imdb)?.imdbId,
         )
     }
 
@@ -757,10 +758,12 @@ object TmdbMetadataService {
         id: String,
         tmdbId: Int,
         enrichment: TmdbEnrichment,
+        imdbId: String? = null,
     ): MetaDetails =
         MetaDetails(
             id = id,
             type = type,
+            imdbId = imdbId,
             name = enrichment.localizedTitle ?: "TMDB $tmdbId",
             poster = enrichment.poster,
             background = enrichment.backdrop,

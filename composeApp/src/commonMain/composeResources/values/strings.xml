@@ -2526,6 +2526,9 @@
     <string name="theme_marigold">Marigold</string>
     <string name="home_empty_iptv_hint_title">No content yet</string>
     <string name="home_empty_iptv_hint_message">Add your IPTV playlist in Settings to see your channels, movies, and series here.</string>
+    <string name="discover_empty_playlist_only_title">Nothing to discover yet</string>
+    <string name="discover_empty_playlist_only_message">Your playlist's movies and series are in the IPTV tab, and Search finds them too.</string>
+    <string name="streams_empty_no_playlist_match_message">None of your playlists have this title.</string>
     <string name="profile_save_failed">Couldn't save your changes. Check your connection and try again.</string>
     <string name="profile_upload_photo">Upload a photo</string>
     <string name="profile_upload_photo_description">Pick a picture from this device. It is resized and stored on your account, so it appears on every device you sign in to.</string>

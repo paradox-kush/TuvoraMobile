@@ -20,6 +20,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.nuvio.app.core.build.AppFeaturePolicy
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.app.features.home.HomeNoAddonsCard
+import com.nuvio.app.features.home.HomeNoAddonsCardPolicy
 import com.nuvio.app.core.network.NetworkCondition
 import com.nuvio.app.core.ui.NuvioDropdownChip
 import com.nuvio.app.core.ui.NuvioDropdownOption
@@ -214,20 +219,33 @@ private fun DiscoverEmptyStateCard(
         return
     }
 
+    val hasAnyIptvPlaylist by remember {
+        com.nuvio.app.core.contracts.IptvCatalogAccess.catalogOrNull?.hasAnyPlaylist
+            ?: kotlinx.coroutines.flow.MutableStateFlow(false)
+    }.collectAsStateWithLifecycle()
+    val noAddonsCard = HomeNoAddonsCardPolicy.card(
+        addonsEnabled = AppFeaturePolicy.addonsEnabled,
+        hasAnyIptvPlaylist = hasAnyIptvPlaylist,
+    )
     val title: String
     val message: String
 
     when (reason) {
-        DiscoverEmptyStateReason.NoActiveAddons -> {
-            // Store builds hide the addon system, so point at IPTV setup instead.
-            title = stringResource(
-                if (AppFeaturePolicy.addonsEnabled) Res.string.compose_search_empty_no_active_addons_title
-                else Res.string.home_empty_iptv_hint_title
-            )
-            message = stringResource(
-                if (AppFeaturePolicy.addonsEnabled) Res.string.discover_empty_no_active_addons_message
-                else Res.string.home_empty_iptv_hint_message
-            )
+        // Store builds hide the addon system, so point at IPTV setup — unless a playlist is already
+        // there, whose content lives in the IPTV tab rather than Discover's addon catalogs (UX38).
+        DiscoverEmptyStateReason.NoActiveAddons -> when (noAddonsCard) {
+            HomeNoAddonsCard.NoActiveAddons -> {
+                title = stringResource(Res.string.compose_search_empty_no_active_addons_title)
+                message = stringResource(Res.string.discover_empty_no_active_addons_message)
+            }
+            HomeNoAddonsCard.AddIptvPlaylist -> {
+                title = stringResource(Res.string.home_empty_iptv_hint_title)
+                message = stringResource(Res.string.home_empty_iptv_hint_message)
+            }
+            HomeNoAddonsCard.None -> {
+                title = stringResource(Res.string.discover_empty_playlist_only_title)
+                message = stringResource(Res.string.discover_empty_playlist_only_message)
+            }
         }
 
         DiscoverEmptyStateReason.NoDiscoverCatalogs -> {
