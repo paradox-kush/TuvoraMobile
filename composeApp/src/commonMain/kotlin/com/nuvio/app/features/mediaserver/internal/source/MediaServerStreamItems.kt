@@ -33,6 +33,7 @@ internal object MediaServerStreamItems {
     ): StreamItem = StreamItem(
         name = source?.label ?: "Direct play",
         title = title,
+        description = source?.description,
         url = MediaServerIds.deferredUrl(entry.serverKey, itemId, source?.id),
         addonName = entry.name,
         addonId = groupId,

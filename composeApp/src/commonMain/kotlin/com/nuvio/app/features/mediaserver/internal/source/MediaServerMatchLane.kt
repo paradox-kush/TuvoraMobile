@@ -8,6 +8,7 @@ import com.nuvio.app.features.mediaserver.internal.client.MediaServerException
 import com.nuvio.app.features.mediaserver.internal.client.MediaServerServices
 import com.nuvio.app.features.mediaserver.internal.client.mediabrowser.ItemDto
 import com.nuvio.app.features.mediaserver.internal.client.mediabrowser.MediaBrowserDialect
+import com.nuvio.app.features.mediaserver.internal.client.mediabrowser.MediaSourceDto
 import com.nuvio.app.features.mediaserver.internal.policy.MatchCache
 import com.nuvio.app.features.mediaserver.internal.policy.MatchLookupPolicy
 import com.nuvio.app.features.mediaserver.internal.policy.MediaServerIds
@@ -73,7 +74,7 @@ internal class MediaServerMatchLane(
                 // every cached id is gone (deleted on the server): forget the answer so the next page asks again
                 cache.invalidate(cacheKey(serverKey, kind, facts) ?: return emptyList())
             }
-            playable.flatMap { item -> streamsOf(entry, item, kind, groupId, headers) }
+            playable.flatMap { item -> streamsOf(entry, item, MediaServerVersions.of(client, item), kind, groupId, headers) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: MediaServerException.Http) {
@@ -142,6 +143,7 @@ internal class MediaServerMatchLane(
     private fun streamsOf(
         entry: MediaServerEntry,
         item: ItemDto,
+        versions: List<MediaSourceDto>,
         kind: MatchLookupPolicy.ItemKind,
         groupId: String,
         headers: Map<String, String>?,
@@ -152,9 +154,10 @@ internal class MediaServerMatchLane(
             MatchLookupPolicy.ItemKind.SERIES ->
                 listOfNotNull(item.parentIndexNumber?.let { s -> item.indexNumber?.let { e -> "S${s}E$e" } }, item.name).joinToString(" · ").ifBlank { null }
         }
-        val sources = item.mediaSources.mapNotNull { s -> s.id?.let { MediaServerItemMapper.sourceFacts(s) } }
-        // an item the server lists without sources still plays (the mint step asks PlaybackInfo): one default entry
-        if (sources.isEmpty()) return listOf(MediaServerStreamItems.build(entry, itemId, title, null, groupId, headers))
+        val sources = MediaServerItemMapper.sourcesOf(itemId, versions)
+        // an item the server lists without sources still plays (the mint step asks PlaybackInfo): one default entry; an item
+        // whose only "versions" are stand-ins (the server found nothing to play) offers nothing
+        if (sources.isEmpty()) return if (versions.isEmpty()) listOf(MediaServerStreamItems.build(entry, itemId, title, null, groupId, headers)) else emptyList()
         return sources.map { source -> MediaServerStreamItems.build(entry, itemId, title, source, groupId, headers) }
     }
 
