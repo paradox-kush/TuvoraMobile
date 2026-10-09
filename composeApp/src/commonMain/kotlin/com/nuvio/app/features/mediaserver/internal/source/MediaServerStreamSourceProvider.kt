@@ -14,6 +14,7 @@ import com.nuvio.app.features.mediaserver.internal.policy.MediaServerIds
 import com.nuvio.app.features.mediaserver.internal.policy.MintFailurePolicy
 import com.nuvio.app.features.mediaserver.internal.policy.PlaybackDecisionPolicy
 import com.nuvio.app.features.mediaserver.internal.policy.ServerAudioChoicePolicy
+import com.nuvio.app.features.mediaserver.internal.policy.VersionPickPolicy
 import com.nuvio.app.features.mediaserver.internal.store.MediaServerEntryStore
 import com.nuvio.app.features.streams.StreamItem
 import kotlinx.coroutines.CancellationException
@@ -98,7 +99,7 @@ internal class MediaServerStreamSourceProvider(
             fun pick(n: PlaybackNegotiation) = if (deferred.mediaSourceId != null)
                 n.sources.firstOrNull { s -> s.id.equals(deferred.mediaSourceId, ignoreCase = true) }
                 else n.sources.firstOrNull()
-            fun usable(s: MediaSourceDto?) = s != null && !MintFailurePolicy.isServerPlaceholder(s.path)
+            fun usable(s: MediaSourceDto?) = s != null && !MintFailurePolicy.isServerPlaceholder(s.path) && !VersionPickPolicy.isPlaceholder(s.type)
             var retryTranscode = forceMint
             var negotiation = negotiate(null)
             var chosen = pick(negotiation)
