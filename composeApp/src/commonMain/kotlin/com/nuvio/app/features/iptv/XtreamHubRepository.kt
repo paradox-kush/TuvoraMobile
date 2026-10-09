@@ -57,6 +57,14 @@ object XtreamHubRepository {
     val epg: StateFlow<Map<String, ChannelEpg>> = _epg.asStateFlow()
     private val epgFetched = mutableSetOf<String>()
 
+    /**
+     * Bumped every time new guide data lands ([onGuideDataChanged]). Open guide surfaces (docked
+     * guide, hub tiles) watch it to re-ask rows that answered empty before the data arrived — see
+     * [GuideDataRefreshPolicy].
+     */
+    private val _guideDataGeneration = MutableStateFlow(0L)
+    val guideDataGeneration: StateFlow<Long> = _guideDataGeneration.asStateFlow()
+
     // (accountId, section) -> category list, each carrying its own lazily-loaded items.
     // Guarded by categoryLock: several item fetches run at once and every one of them rewrites
     // this map from a background dispatcher.
@@ -758,13 +766,13 @@ object XtreamHubRepository {
      * cold playlist two tiles asked 1s apart, the later one joined the in-flight ingest and got
      * its programmes, the earlier one was stuck on "No information" through a tab switch.
      *
-     * Clearing both means the next time a tile is asked for it actually resolves. It does not by
-     * itself repaint a tile already on screen — that needs the row to be asked again — so a
-     * visible self-heal is still owed.
+     * Clearing both means the next time a tile is asked for it actually resolves; bumping
+     * [guideDataGeneration] is what asks the rows already on screen again (the visible self-heal).
      */
     fun onGuideDataChanged() {
         epgFetched.clear()
         TileEpgQueue.invalidate()
+        _guideDataGeneration.update { it + 1 }
     }
 
     fun ensureEpg(contentId: String) {

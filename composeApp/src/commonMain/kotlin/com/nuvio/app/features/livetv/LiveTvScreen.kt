@@ -72,6 +72,7 @@ import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.core.ui.nuvioSafeBottomPadding
 import com.nuvio.app.features.iptv.CatchUpDialectWalk
 import com.nuvio.app.features.iptv.CatchUpPlayback
+import com.nuvio.app.features.iptv.GuideDataRefreshPolicy
 import com.nuvio.app.features.iptv.TileEpgQueue
 import com.nuvio.app.features.iptv.XtreamCatchUp
 import com.nuvio.app.features.iptv.XtreamProgram
@@ -192,6 +193,9 @@ fun LiveTvScreen(
     }
     val programmes = remember { mutableStateMapOf<String, List<XtreamProgram>>() }
     val requestedProgrammes = remember { mutableSetOf<String>() }
+    // The grid's last settled window of rows — what GuideDataRefreshPolicy re-asks when new guide
+    // data lands while this screen is open.
+    var lastGuideWindow by remember { mutableStateOf<List<String>>(emptyList()) }
 
     /**
      * The (channel, window) pairs whose stored history has been drawn.
@@ -472,6 +476,23 @@ fun LiveTvScreen(
                 }
             }
         }
+    }
+    // New guide data landed while the guide was open (typically: the playlist's XMLTV ingest
+    // finished after the rows had already asked and been stamped empty). Re-ask the focused
+    // channel and the visible rows that answered empty — see GuideDataRefreshPolicy.
+    val guideDataGeneration by LiveTvData.guideDataGeneration.collectAsState()
+    val seenGuideDataGeneration = remember { guideDataGeneration }
+    LaunchedEffect(guideDataGeneration) {
+        if (!GuideDataRefreshPolicy.changedSince(seenGuideDataGeneration, guideDataGeneration)) return@LaunchedEffect
+        val plan = GuideDataRefreshPolicy.plan(
+            requestedStamps = requestedProgrammes.toSet(),
+            hasProgrammes = { !programmes[it].isNullOrEmpty() },
+            visible = lastGuideWindow,
+            current = currentContentId,
+            anchorMs = guideAnchorMs,
+        )
+        requestedProgrammes.removeAll(plan.dropStamps)
+        onNeedProgrammes(plan.reask)
     }
     // The FOCUSED channel — and only it — gets its full history pulled. A page of rows each
     // fetching its own table is exactly how a guide turns 2 MB into 40 MB on a 1 GB box.
@@ -886,7 +907,10 @@ fun LiveTvScreen(
                     // stays permissive: `tv_archive` is the real flag.
                     catchUpDays = channels.maxOfOrNull { it.catchUpDays } ?: 0,
                     programmesOf = { programmes[it] },
-                    onNeedProgrammes = onNeedProgrammes,
+                    onNeedProgrammes = { window ->
+                        lastGuideWindow = window
+                        onNeedProgrammes(window)
+                    },
                     onSelectChannel = ::switchTo,
                     // UX36: long-press opens Favourite / Hide (it used to hide instantly, silently).
                     onLongPressChannel = { ch -> channelMenu = ch },

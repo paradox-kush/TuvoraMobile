@@ -9,6 +9,7 @@ import com.nuvio.app.features.iptv.CatchUpWinnerStore
 import com.nuvio.app.features.iptv.IptvClient
 import com.nuvio.app.features.iptv.IptvPanelGuard
 import com.nuvio.app.features.iptv.XtreamAccount
+import com.nuvio.app.features.iptv.XtreamHubRepository
 import com.nuvio.app.features.iptv.displayChannelName
 import com.nuvio.app.features.iptv.XtreamItemRegistry
 import com.nuvio.app.features.iptv.XtreamKind
@@ -21,6 +22,7 @@ import com.nuvio.app.features.iptv.overlay.IptvHiddenItemsPolicy
 import com.nuvio.app.features.iptv.XtreamSearchIndex
 import com.nuvio.app.features.iptv.resolveLivePlaybackUrl
 import com.nuvio.app.features.trakt.TraktPlatformClock
+import kotlinx.coroutines.flow.StateFlow
 
 /** A resolved, ready-to-play live source (post DoH/IP-rewrite). */
 data class LiveChannelSource(
@@ -64,6 +66,12 @@ data class LiveGuideChannel(
  * windows. Stateless — callers own their own coroutine scope and caches.
  */
 object LiveTvData {
+
+    /**
+     * Bumped when new guide data lands (XMLTV ingest, mirror sync, manual guide pick). The docked
+     * guide re-asks rows that answered empty before it — see GuideDataRefreshPolicy.
+     */
+    val guideDataGeneration: StateFlow<Long> get() = XtreamHubRepository.guideDataGeneration
 
     /**
      * Resolves the playable source for a live channel id, mirroring `App.launchLiveChannel`:
