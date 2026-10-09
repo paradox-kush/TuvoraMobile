@@ -1233,7 +1233,9 @@ private fun LibmpvPlayerSurface(
                     }
                     MPV.mpvEvent.MPV_EVENT_END_FILE -> {
                         coroutineScope.launch(Dispatchers.Main.immediate) {
-                            val snapshot = view.snapshot()
+                            val snapshot = LivePlaybackStartupPolicy.endFileSnapshot(
+                                view.snapshot(), data.nodeString("reason"), isLiveStream,
+                            )
                             Log.w(
                                 PLAYER_DIAGNOSTIC_TAG,
                                 "mpv_event=END_FILE attempt=${playbackDiagnostics.attempt} " +
