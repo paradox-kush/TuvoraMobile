@@ -692,3 +692,18 @@ configurations.all {
     exclude(group = "androidx.media3", module = "media3-common")
     exclude(group = "androidx.media3", module = "media3-ui")
 }
+
+// JVM tests run in their own process: daemon heap settings do not size this worker.
+// JDK 21 supports the Android SDK used by Robolectric; app bytecode targets stay unchanged.
+val testJavaLauncher = extensions.getByType<org.gradle.jvm.toolchain.JavaToolchainService>().launcherFor {
+    languageVersion.set(JavaLanguageVersion.of(21))
+}
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    javaLauncher.set(testJavaLauncher)
+    maxHeapSize = "4g"
+    maxParallelForks = 1
+    testLogging {
+        events("failed", "skipped")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
