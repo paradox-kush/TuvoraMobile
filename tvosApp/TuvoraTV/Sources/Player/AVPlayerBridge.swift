@@ -12,6 +12,13 @@ import UIKit
 /// streams needing them are routed to libmpv by the policy.
 final class AVPlayerBridgeImpl: NSObject, NuvioPlayerBridge {
     private let player = AVPlayer()
+    private let makeAsset: (URL, [String: Any]) -> AVURLAsset
+
+    init(makeAsset: @escaping (URL, [String: Any]) -> AVURLAsset = { AVURLAsset(url: $0, options: $1) }) {
+        self.makeAsset = makeAsset
+        super.init()
+    }
+    private var requestOptions: [String: Any] = [:]
     private lazy var controller = AVPlayerLaneViewController(player: player)
     private var statusObservation: NSKeyValueObservation?
     private var itemObservation: NSKeyValueObservation?
@@ -35,7 +42,8 @@ final class AVPlayerBridgeImpl: NSObject, NuvioPlayerBridge {
             // Not public API, but the long-standing way to pass request headers to AVURLAsset.
             options["AVURLAssetHTTPHeaderFieldsKey"] = headers
         }
-        let item = AVPlayerItem(asset: AVURLAsset(url: url, options: options))
+        requestOptions = options
+        let item = AVPlayerItem(asset: makeAsset(url, requestOptions))
         ended = false
         errorMessage = ""
         observe(item)
@@ -81,7 +89,7 @@ final class AVPlayerBridgeImpl: NSObject, NuvioPlayerBridge {
     func retry() {
         guard let asset = player.currentItem?.asset as? AVURLAsset else { return }
         let position = getPositionMs()
-        let item = AVPlayerItem(asset: AVURLAsset(url: asset.url))
+        let item = AVPlayerItem(asset: makeAsset(asset.url, requestOptions))
         errorMessage = ""
         observe(item)
         player.replaceCurrentItem(with: item)

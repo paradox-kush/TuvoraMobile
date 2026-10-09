@@ -70,4 +70,13 @@ class StreamUserAgentPolicyTest {
         val item = resolvedItem().toStreamItem(accountName = "My Playlist", userAgent = null)
         assertNull(item?.behaviorHints?.proxyHeaders, "no override -> playback is byte-identical to before")
     }
+    @Test
+    fun applyingAccountUserAgentPreservesOtherHeadersAndReplacesMixedCaseOverride() {
+        val stream = com.nuvio.app.features.streams.StreamItem(name = "Episode", addonId = "own", addonName = "own",
+            behaviorHints = com.nuvio.app.features.streams.StreamBehaviorHints(proxyHeaders =
+                com.nuvio.app.features.streams.StreamProxyHeaders(request = mapOf("user-agent" to "old", "Referer" to "https://portal"), response = mapOf("x-test" to "keep"))))
+        val result = StreamUserAgentPolicy.applyTo(stream, account(" VLC/3 "))
+        assertEquals(mapOf("User-Agent" to "VLC/3", "Referer" to "https://portal"), result.behaviorHints.proxyHeaders?.request)
+        assertEquals(mapOf("x-test" to "keep"), result.behaviorHints.proxyHeaders?.response)
+    }
 }

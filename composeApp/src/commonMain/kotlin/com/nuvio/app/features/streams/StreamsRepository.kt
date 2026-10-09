@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.update
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 
 object StreamsRepository {
     private val log = Logger.withTag("StreamsRepo")
@@ -137,6 +138,12 @@ object StreamsRepository {
             )
         }
 
+        fun completeDirectSourceState(state: StreamsUiState): StreamsUiState =
+            if (streamProvider.isHandledId(videoId)) DirectSourceCompletionPolicy.complete(
+                state, playerSettings, manualSelection, persistedBingeGroup,
+                debridSettings.canResolvePlayableLinks, debridSettings.activeResolverProviderId,
+            ) else state
+
         val embeddedStreams = MetaDetailsRepository.findEmbeddedStreams(videoId)
         if (embeddedStreams.isNotEmpty()) {
             log.d { "Using ${embeddedStreams.size} embedded streams for type=$type id=$videoId" }
@@ -150,13 +157,13 @@ object StreamsRepository {
                 groups = listOf(group),
                 rules = streamBadgeRules,
             ).firstOrNull() ?: group
-            _uiState.value = StreamsUiState(
+            _uiState.value = completeDirectSourceState(StreamsUiState(
                 requestToken = requestToken,
                 groups = listOf(presentedGroup),
                 autoPlayDecided = true,
                 activeAddonIds = setOf("embedded"),
                 isAnyLoading = false,
-            )
+            ))
             return
         }
 
@@ -168,7 +175,7 @@ object StreamsRepository {
             // registry-cached one (it was consumed by the last play) — force a fresh mint every
             // stream-list build. Xtream/M3U URLs are stable, so the cache stays their fast path.
             val isStalkerSource = streamProvider.isStalkerSource(videoId)
-            val directStreams = if (isStalkerSource) emptyList() else streamProvider.directStreamItems(videoId)
+            val directStreams = if (isStalkerSource || streamProvider.needsStreamRegistration(videoId)) emptyList() else streamProvider.directStreamItems(videoId)
             val xtreamStream = directStreams.firstOrNull()
             if (xtreamStream != null) {
                 val group = directStreams.asDirectSourceGroup()
@@ -176,12 +183,12 @@ object StreamsRepository {
                     groups = listOf(group),
                     rules = streamBadgeRules,
                 ).firstOrNull() ?: group
-                _uiState.value = StreamsUiState(
+                _uiState.value = completeDirectSourceState(StreamsUiState(
                     requestToken = requestToken,
                     groups = listOf(presentedGroup),
                     activeAddonIds = setOf(xtreamStream.addonId),
                     isAnyLoading = false,
-                )
+                ))
             } else {
                 // Registry miss (persisted id not browsed this session) OR a Stalker source whose
                 // cached single-use URL must not be replayed: rebuild/re-mint + re-register via
@@ -193,6 +200,7 @@ object StreamsRepository {
                     val rebuilt = runCatchingUnlessCancelled {
                         MetaDetailsRepository.ensureXtreamStreamRegistered(videoId, forceFresh = isStalkerSource)
                     }.getOrDefault(false)
+                    ensureActive()
                     val retriedStreams = if (rebuilt) streamProvider.directStreamItems(videoId) else emptyList()
                     val retried = retriedStreams.firstOrNull()
                     if (retried != null) {
@@ -201,19 +209,19 @@ object StreamsRepository {
                             groups = listOf(group),
                             rules = streamBadgeRules,
                         ).firstOrNull() ?: group
-                        _uiState.value = StreamsUiState(
+                        _uiState.value = completeDirectSourceState(StreamsUiState(
                             requestToken = requestToken,
                             groups = listOf(presentedGroup),
                             activeAddonIds = setOf(retried.addonId),
                             isAnyLoading = false,
-                        )
+                        ))
                     } else {
                         log.w { "Xtream stream short-circuit: no registered item for id=$videoId" }
-                        _uiState.value = StreamsUiState(
+                        _uiState.value = completeDirectSourceState(StreamsUiState(
                             requestToken = requestToken,
                             isAnyLoading = false,
-                            emptyStateReason = StreamsEmptyStateReason.NoStreamsFound,
-                        )
+                            emptyStateReason = StreamsEmptyStateReason.ProviderSourceUnavailable,
+                        ))
                     }
                 }
             }

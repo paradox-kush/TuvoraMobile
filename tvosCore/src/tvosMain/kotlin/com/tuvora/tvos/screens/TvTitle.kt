@@ -167,6 +167,21 @@ object TvTitle {
             initialPositionMs = resumeMs,
         )
         StreamsRepository.cancelLoading()
-        return TvOpenResult.Play(TvPlayerSession(launch))
+        val retryResolver: (suspend () -> com.tuvora.tvos.player.TvResolvedSource?)? = when {
+            access.isDeferredUrl(stream.playableDirectUrl) -> suspend {
+                access.resolveDeferredUrl(stream.playableDirectUrl.orEmpty(), forceMint = true)?.let {
+                    com.tuvora.tvos.player.TvResolvedSource(it, launch.sourceHeaders)
+                }
+            }
+            access.isStalkerSource(videoId) -> suspend {
+                if (com.nuvio.app.core.contracts.MetaSourceAccess.current().ensureStreamRegistered(videoId, true, true)) {
+                    access.directStreamItem(videoId)?.let { fresh -> fresh.playableDirectUrl?.let {
+                        com.tuvora.tvos.player.TvResolvedSource(it, TvPlaybackHeaders.sanitize(fresh.behaviorHints.proxyHeaders?.request))
+                    } }
+                } else null
+            }
+            else -> null
+        }
+        return TvOpenResult.Play(TvPlayerSession(launch, vodReresolve = retryResolver))
     }
 }

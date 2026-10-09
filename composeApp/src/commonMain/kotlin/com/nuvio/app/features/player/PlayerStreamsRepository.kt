@@ -252,16 +252,17 @@ object PlayerStreamsRepository {
             val isStalkerSource = streamProvider.isStalkerSource(videoId)
             stateFlow.value = StreamsUiState(isAnyLoading = true)
             val job = scope.launch {
-                if (isStalkerSource || streamProvider.directStreamItems(videoId).isEmpty()) {
+                val needsRegistration = isStalkerSource || streamProvider.needsStreamRegistration(videoId)
+                val rebuilt = if (needsRegistration) {
                     runCatchingUnlessCancelled {
                         MetaDetailsRepository.ensureXtreamStreamRegistered(
                             videoId,
                             forceFresh = isStalkerSource,
                             forceMint = forceMintIptv && isStalkerSource,
                         )
-                    }
-                }
-                val directStreams = streamProvider.directStreamItems(videoId)
+                    }.getOrDefault(false)
+                } else true
+                val directStreams = if (rebuilt) streamProvider.directStreamItems(videoId) else emptyList()
                 val stream = directStreams.firstOrNull()
                 stateFlow.value = if (stream != null) {
                     val group = directStreams.asDirectSourceGroup()
@@ -278,7 +279,7 @@ object PlayerStreamsRepository {
                     log.w { "Player xtream lane: no stream for id=$videoId" }
                     StreamsUiState(
                         isAnyLoading = false,
-                        emptyStateReason = com.nuvio.app.features.streams.StreamsEmptyStateReason.NoStreamsFound,
+                        emptyStateReason = com.nuvio.app.features.streams.StreamsEmptyStateReason.ProviderSourceUnavailable,
                     )
                 }
             }

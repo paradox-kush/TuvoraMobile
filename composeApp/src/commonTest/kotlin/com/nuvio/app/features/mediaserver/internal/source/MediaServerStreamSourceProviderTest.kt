@@ -196,4 +196,20 @@ class MediaServerStreamSourceProviderTest {
         val noAddress = TestRig(clientFactory = { client }).also { r -> val e = entry(address = null); r.store.applyFromRemote(1, listOf(e)); r.credentials.save(e.serverKey, StoredCredential("t")) }
         assertNull(provider(noAddress).resolveDeferredUrl(deferred(), false))
     }
+    @Test
+    fun aSelectedVersionThatDisappearsCannotSilentlyPlayAnotherVersion() = runTest {
+        val rig = rig()
+        client.negotiation = PlaybackNegotiation(listOf(source("other-version")), "ps")
+        assertNull(provider(rig).resolveDeferredUrl(deferred(source = "selected-version"), false))
+        assertNull(MediaServerPlaybackSessions.latestFor("jellyfin:$M:$U"))
+    }
+
+    @Test
+    fun anEmptyForcedTranscodeResponseFallsBackToTheSameOriginalVersionOnce() = runTest {
+        val rig = rig()
+        client.negotiationFor = { request -> PlaybackNegotiation(if (request.forceTranscode) emptyList() else listOf(source("srcA")), "ps") }
+        val url = provider(rig).resolveDeferredUrl(deferred(), true)
+        assertTrue(url!!.contains("Static=true&MediaSourceId=srcA"))
+        assertEquals(listOf(true, false), client.playbackRequests.map { it.second.forceTranscode })
+    }
 }

@@ -6,6 +6,7 @@ import com.nuvio.app.features.mediaserver.internal.policy.PlaybackDecisionPolicy
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class PlaybackDecisionPolicyTest {
     private fun source(
@@ -13,6 +14,17 @@ class PlaybackDecisionPolicyTest {
         direct: Boolean = true, stream: Boolean = true, transcode: Boolean = true,
         directUrl: String? = null, transcodeUrl: String? = "/videos/1/master.m3u8?MediaSourceId=src1&ApiKey=server-built",
     ) = SourceFacts(id, protocol, container, direct, stream, transcode, directUrl, transcodeUrl)
+
+    @Test
+    fun jellyfinHttpDirectPlayUsesTheServerProxyWithoutOptionalUrls() {
+        val decision = PlaybackDecisionPolicy.decide(source(protocol="Http", directUrl=null, transcodeUrl=null), null, false, supportsStaticHttp=true)
+        assertEquals(Plan.StaticStream("src1"), decision.plan)
+        assertEquals(PlaybackPlayMethod.DIRECT_PLAY, decision.method)
+        val other = PlaybackDecisionPolicy.decide(source(protocol="Rtmp", directUrl=null, transcodeUrl=null), null, false, supportsStaticHttp=true)
+        assertTrue(other.plan is Plan.NotPlayable)
+        val disabled = PlaybackDecisionPolicy.decide(source(protocol="Http", direct=false, stream=false, transcode=false, transcodeUrl=null), null, false, supportsStaticHttp=true)
+        assertTrue(disabled.plan is Plan.NotPlayable)
+    }
 
     @Test
     fun directPlayIsTheDefaultAndPinsTheMediaSource() {
@@ -42,7 +54,7 @@ class PlaybackDecisionPolicyTest {
 
     @Test
     fun aNonFileSourceNeverUsesTheStaticStream() {
-        // .strm / remote: Static=true is rejected by the server
+        // Unverified dialects keep explicit server URLs; Jellyfin HTTP is tested separately.
         val d = PlaybackDecisionPolicy.decide(source(protocol = "Http", directUrl = "https://cdn.example/x.mp4"), null, false)
         assertEquals(Plan.ServerUrl("https://cdn.example/x.mp4"), d.plan)
         assertEquals(PlaybackPlayMethod.DIRECT_STREAM, d.method)

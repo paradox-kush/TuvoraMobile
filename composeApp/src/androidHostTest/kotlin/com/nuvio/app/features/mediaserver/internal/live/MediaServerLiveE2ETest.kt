@@ -51,7 +51,17 @@ import kotlin.test.assertTrue
 class MediaServerLiveE2ETest {
     private class Target(val url: String, val user: String, val password: String)
 
-    private fun target(env: String): Target? = System.getenv(env)?.split('|')?.takeIf { it.size == 3 }?.let { Target(it[0], it[1], it[2]) }
+    private fun target(env: String): Target? {
+        val raw = System.getenv(env)
+        if (raw.isNullOrBlank()) {
+            check(System.getenv("TUVORA_MS_E2E_REQUIRED") != "true") { "Required live target is missing: $env" }
+            org.junit.Assume.assumeTrue("Live target not configured: $env", false)
+            return null
+        }
+        val parts = raw.split('|')
+        require(parts.size == 3 && parts.all { it.isNotBlank() }) { "Invalid live target configuration: $env" }
+        return Target(parts[0], parts[1], parts[2])
+    }
 
     /** The production wiring (real HTTP stack, in-memory secure store/persistence) as a separate "install". */
     private class LiveRig {

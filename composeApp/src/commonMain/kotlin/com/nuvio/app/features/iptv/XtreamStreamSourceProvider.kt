@@ -61,7 +61,7 @@ internal object XtreamStreamSourceProvider : StreamSourceProvider {
         val accountId = sourceId.removePrefix(XtreamStreamSource.GROUP_ID_PREFIX)
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }
             ?: return emptyList()
-        return XtreamStreamSource.streamsFor(account, type, videoId, season, episode)
+        return XtreamStreamSource.streamsFor(account, type, videoId, season, episode).map { StreamUserAgentPolicy.applyTo(it, account) }
     }
 
     override fun isMatchSourceId(providerAddonId: String): Boolean =

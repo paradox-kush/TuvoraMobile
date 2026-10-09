@@ -63,7 +63,7 @@ targets:
         Debug: { PRODUCT_BUNDLE_IDENTIFIER: com.tuvora.app }
         Release: { PRODUCT_BUNDLE_IDENTIFIER: com.tuvora.media }
     scheme:
-      testTargets: [TuvoraTVUITests]
+      testTargets: [TuvoraTVTests, TuvoraTVUITests]
     preBuildScripts:
       - name: Build TuvoraCore (Kotlin)
         script: exec "$SRCROOT/Scripts/build-tuvoracore.sh"
@@ -117,3 +117,12 @@ targets:
       configs:
         Debug: { PRODUCT_BUNDLE_IDENTIFIER: com.tuvora.app.topshelf }
         Release: { PRODUCT_BUNDLE_IDENTIFIER: com.tuvora.media.topshelf }
+
+  TuvoraTVTests:
+    type: bundle.unit-test
+    platform: tvOS
+    sources: [TuvoraTVTests]
+    dependencies: [{ target: TuvoraTV }]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

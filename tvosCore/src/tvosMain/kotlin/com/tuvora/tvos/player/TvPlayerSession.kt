@@ -137,6 +137,7 @@ class TvPlayerSession(
      * so replaying the old URL fails; Xtream/M3U just return the same address. Null = replay.
      */
     private val liveReresolve: (suspend () -> TvResolvedSource?)? = null,
+    private val vodReresolve: (suspend () -> TvResolvedSource?)? = null,
 ) {
     private val log = Logger.withTag("TvPlayerSession")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -150,6 +151,26 @@ class TvPlayerSession(
     private var displayModeSwitching = false
     private val clock = TimeSource.Monotonic.markNow()
 
+    private var vodRetryFailure: String? = null
+    private var activeSourceUrl = launch.sourceUrl
+    private var activeSourceHeaders = launch.sourceHeaders
+    private val vodRetry = TvVodSourceRetry(scope,
+        resolve = { vodReresolve?.invoke() },
+        reopen = { fresh: TvResolvedSource, position: Long, paused: Boolean ->
+            activeSourceUrl = fresh.url
+            activeSourceHeaders = fresh.headers
+            val headers = TvPlaybackHeaders.sanitize(fresh.headers)
+            bridge?.loadFileWithAudio(fresh.url, launch.sourceAudioUrl,
+                headers.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
+                launch.externalSubtitles.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
+                MpvStartPosition.loadOption(position, false))
+            if (paused) bridge?.pause()
+        },
+        failed = {
+            vodRetryFailure = "Could not reopen this source. Try again or choose another source."
+            _state.value = _state.value.copy(isLoading = false, errorMessage = vodRetryFailure)
+        },
+    )
     private var bridge: NuvioPlayerBridge? = null
     /** Final: once closed no engine is ever opened again (a late attach / re-embed / zap would play with no screen). */
     private var closed = false
@@ -279,6 +300,7 @@ class TvPlayerSession(
     }
 
     fun detach() {
+        vodRetry.cancel()
         pollJob?.cancel()
         pollJob = null
         save(flush = true)
@@ -286,6 +308,7 @@ class TvPlayerSession(
     }
 
     fun close() {
+        vodRetry.cancel()
         if (closed) return
         closed = true
         detach()
@@ -368,8 +391,13 @@ class TvPlayerSession(
     fun setSpeed(speed: Float) { bridge?.setPlaybackSpeed(speed) }
 
     fun retry() {
+        if (closed) return
+        vodRetryFailure = null
         _state.value = _state.value.copy(errorMessage = null, isLoading = true)
-        bridge?.retry()
+        if (!isLive && vodReresolve != null) {
+            val position = if (snapshot.positionMs > 0) snapshot.positionMs else resumeTargetMs
+            vodRetry.retry(position, !wantsToPlay)
+        } else bridge?.retry()
     }
 
     // ---- Skip intro / recap / ending ---------------------------------------------------------
@@ -678,9 +706,9 @@ class TvPlayerSession(
             subtitleStyleSupported = lane == PlaybackLane.Libmpv,
         )
         created.setIsLiveStream(isLive)
-        val headers = TvPlaybackHeaders.sanitize(launch.sourceHeaders)
+        val headers = TvPlaybackHeaders.sanitize(activeSourceHeaders)
         created.loadFileWithAudio(
-            videoUrl = launch.sourceUrl,
+            videoUrl = activeSourceUrl,
             audioUrl = launch.sourceAudioUrl,
             headersJson = headers.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
             subtitlesJson = launch.externalSubtitles.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
@@ -693,6 +721,8 @@ class TvPlayerSession(
     }
 
     private fun poll() {
+        // The old engine still reports its previous failure while a replacement link is minted.
+        if (vodRetry.isResolving || vodRetryFailure != null) return
         val b = bridge ?: return
         val error = b.getErrorMessage().takeIf { it.isNotBlank() }
         snapshot = PlayerPlaybackSnapshot(

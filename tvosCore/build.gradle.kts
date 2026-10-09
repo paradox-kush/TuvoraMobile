@@ -233,7 +233,9 @@ kotlin {
                 implementation(libs.ksoup)
             }
         }
+        commonTest { kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/mediaserver")) }
         commonTest.dependencies {
+            implementation("io.ktor:ktor-client-mock:${libs.versions.ktor.get()}")
             implementation(libs.kotlin.test)
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:${libs.versions.kotlinx.coroutines.get()}")
         }
