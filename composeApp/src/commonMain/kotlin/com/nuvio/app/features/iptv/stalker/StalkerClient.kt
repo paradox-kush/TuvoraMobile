@@ -325,7 +325,10 @@ object StalkerClient : IptvClient {
             val streamed = runCatching { streamAllChannels(acc) }.getOrNull().orEmpty()
             val mapped = streamed.ifEmpty {
                 // A portal without get_all_channels: bounded paged fetch (rowCache keeps the raw rows).
-                orderedList(acc, "itv", null).mapNotNull { liveRowOf(it) }
+                // Each page is import progress: it keeps the IPTV page's stall deadline open (BoundedLoad).
+                orderedList(acc, "itv", null, onPage = {
+                    com.nuvio.app.features.iptv.IptvImportProgress.tick(acc.id)
+                }).mapNotNull { liveRowOf(it) }
             }
             // The raw rows are dropped after mapping, so the static-vs-mint flags were picked off
             // per row; recorded here, on this coroutine, not on the transport's reader thread.
@@ -380,6 +383,7 @@ object StalkerClient : IptvClient {
                 onChunk = {
                     delivered = true
                     parser.accept(it)
+                    // Each streamed chunk is import progress (keeps the IPTV page's stall deadline open).
                     com.nuvio.app.features.iptv.IptvImportProgress.tick(acc.id)
                 },
             )
@@ -1217,6 +1221,7 @@ object StalkerClient : IptvClient {
         stopWhen: ((JsonObject) -> Boolean)? = null,
         /** F48: a failed FIRST page throws (the hub search shows Failed + Retry) instead of reading as an empty list. */
         failFast: Boolean = false,
+        onPage: (() -> Unit)? = null,
     ): List<JsonObject> {
         val out = ArrayList<JsonObject>()
         var page = 1
@@ -1233,6 +1238,7 @@ object StalkerClient : IptvClient {
             // Every row carries its `cmd` — keep them so play/detail never re-pages to find one.
             cacheRows(acc.id, type, rows)
             out += rows
+            onPage?.invoke()
             if (stopWhen != null && rows.any(stopWhen)) break   // found the target — stop paging
             page++
         }
