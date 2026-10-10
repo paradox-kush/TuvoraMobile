@@ -299,7 +299,10 @@ fun LiveTvScreen(
 
     // Each attempt the dialect walk hands back becomes a real playback try — never an out-of-band
     // probe, which on a max_connections=1 account kicks the viewer's own live stream.
-    LaunchedEffect(catchUp?.attempt?.token) {
+    // Bumped by a Retry during a replay: re-opens the SAME attempt (its archive URL re-resolved),
+    // since the live resolve above stands down for a replay and nothing else would refill the player.
+    var replayRetryTick by remember { mutableStateOf(0) }
+    LaunchedEffect(catchUp?.attempt?.token, replayRetryTick) {
         val session = catchUp ?: return@LaunchedEffect
         source = null
         resolveError = false
@@ -312,10 +315,17 @@ fun LiveTvScreen(
     // fast-fail — the AUTOMATIC one-shot re-resolve below must not reset.
     val onRetry: () -> Unit = {
         LiveTvData.resetPanelGuard(currentContentId)
-        source = null
-        controller = null
-        snapshot = PlayerPlaybackSnapshot()
-        retryTick++
+        // A replay refills through its own attempt, not the live re-mint (LiveTvRetryPolicy).
+        val plan = LiveTvRetryPolicy.onRetry(replayActive = replayOnScreen())
+        if (plan.tearDownSurface) {
+            // A fresh attempt: tear the dead surface down so the engine re-opens the URL.
+            source = null
+            controller = null
+            snapshot = PlayerPlaybackSnapshot()
+            playbackError = null
+        }
+        if (plan.reResolveLive) retryTick++
+        if (plan.reopenReplay) replayRetryTick++
     }
 
     // One AUTOMATIC fresh re-resolve per resolved URL: a mid-watch 401 (token expired, or the
