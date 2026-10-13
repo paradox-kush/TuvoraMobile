@@ -1,11 +1,8 @@
 package com.nuvio.app.features.servers.mediabrowser
 
-/**
- * Fork policy (ported from the retired fork features/mediaserver VersionPickPolicy/MediaServerVersions): decides whether an item
- * page's MediaSources are only on-demand stand-ins, so the real version list has to be asked for.
- */
+/** Decides when the item page needs a PlaybackInfo lookup to discover its real sources. */
 internal object VersionListPolicy {
-    /** True when the item lists sources, and every one of them is a Placeholder. */
+    /** Empty listings and on-demand placeholders may resolve to playable versions. */
     fun needsPlaybackInfo(sources: List<MediaSource>): Boolean =
-        sources.isNotEmpty() && sources.all { it.isPlaceholder }
+        sources.all { it.isPlaceholder }
 }

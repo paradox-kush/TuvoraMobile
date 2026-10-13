@@ -306,6 +306,7 @@ internal object XtreamTmdbResolver {
             if (now() - (lastFailedBuildMs[key] ?: 0) < BUILD_BACKOFF_MS) return
             val d = CompletableDeferred<Unit>()
             inFlightBuilds[key] = d
+            XtreamMatchIndex.startBuildProgress(acc.id, hasExistingIndex = existing != null)
             markIndexingLocked(acc.id, +1)
             d to true
         }

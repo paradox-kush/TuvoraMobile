@@ -2561,7 +2561,7 @@
     <string name="settings_playback_stream_info_description">Briefly show quality, codec and bitrate when playback starts</string>
     <string name="theme_marigold">Marigold</string>
     <string name="home_empty_iptv_hint_title">No content yet</string>
-    <string name="home_empty_iptv_hint_message">Add your IPTV playlist in Settings to see your channels, movies, and series here.</string>
+    <string name="home_empty_iptv_hint_message">Open the IPTV tab and choose Add IPTV provider to add your playlist.</string>
     <string name="discover_empty_playlist_only_title">Nothing to discover yet</string>
     <string name="discover_empty_playlist_only_message">Your playlist's movies and series are in the IPTV tab, and Search finds them too.</string>
     <string name="streams_empty_no_playlist_match_message">None of your playlists have this title.</string>

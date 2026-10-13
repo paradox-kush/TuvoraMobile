@@ -15,6 +15,8 @@ package com.nuvio.app.features.iptv.match
 internal data class IndexBuildProgress(
     val itemsWritten: Int,
     val totalItems: Int? = null,
+    /** A usable index existed before this run; search/playback can keep using it. */
+    val isRefresh: Boolean = false,
 ) {
     /** True only when a real total is known; a zero/negative total is a broken answer, not a total. */
     val isDeterminate: Boolean get() = (totalItems ?: 0) > 0
@@ -39,6 +41,7 @@ internal data class IndexBuildProgress(
     fun mergeWith(other: IndexBuildProgress): IndexBuildProgress = IndexBuildProgress(
         itemsWritten = maxOf(itemsWritten, other.itemsWritten),
         totalItems = totalItems ?: other.totalItems,
+        isRefresh = isRefresh || other.isRefresh,
     )
 }
 
@@ -71,6 +74,8 @@ internal fun groupThousands(n: Int): String {
  */
 internal fun indexingStatusLine(isIndexing: Boolean, progress: IndexBuildProgress?): String? = when {
     !isIndexing -> null
+    progress?.isRefresh == true -> "Updating catalog in the background…" +
+        if (progress.itemsWritten > 0) " ${groupThousands(progress.itemsWritten)} items" else ""
     progress == null || progress.itemsWritten <= 0 -> "Preparing catalog for search & playback…"
     else -> "Preparing catalog… ${groupThousands(progress.itemsWritten)} items"
 }

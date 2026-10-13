@@ -148,6 +148,14 @@ internal object XtreamMatchIndex {
      */
     internal val buildProgress: StateFlow<Map<String, IndexBuildProgress>> = _buildProgress.asStateFlow()
 
+    /** Called before indexing becomes visible, including while the build is queued for a slot. */
+    internal fun startBuildProgress(provider: String, hasExistingIndex: Boolean) {
+        _buildProgress.update { current ->
+            val started = IndexBuildProgress(0, isRefresh = hasExistingIndex)
+            current + (provider to (current[provider]?.mergeWith(started) ?: started))
+        }
+    }
+
     private fun advanceBuildProgress(provider: String, delta: Int) {
         _buildProgress.update { current ->
             val next = IndexBuildProgress((current[provider]?.itemsWritten ?: 0) + delta)
