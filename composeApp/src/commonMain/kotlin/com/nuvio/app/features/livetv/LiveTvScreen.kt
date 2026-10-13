@@ -987,23 +987,14 @@ private fun GuideSearchField(query: String, onQueryChange: (String) -> Unit, mod
 }
 
 /** now + next titles for the current channel, for the docked now-bar. */
-private data class NowNext(val now: XtreamProgram?, val next: XtreamProgram?)
-
-private fun nowNextOf(list: List<XtreamProgram>?, nowMs: Long): NowNext {
-    if (list.isNullOrEmpty()) return NowNext(null, null)
-    val sorted = list.sortedBy { it.startMs }
-    val nowIdx = sorted.indexOfFirst { nowMs in it.startMs until it.endMs }
-        .takeIf { it >= 0 }
-        ?: sorted.indexOfFirst { it.startMs > nowMs }.takeIf { it >= 0 }?.let { it - 1 }
-        ?: 0
-    return NowNext(sorted.getOrNull(nowIdx), sorted.getOrNull(nowIdx + 1))
-}
+private fun nowNextOf(list: List<XtreamProgram>?, nowMs: Long): GuideNowNext =
+    GuideNowNextPolicy.select(list.orEmpty(), nowMs)
 
 @Composable
 private fun NowBar(
     logo: String?,
     title: String,
-    nowNext: NowNext,
+    nowNext: GuideNowNext,
     nowMs: Long,
     colors: com.nuvio.app.core.ui.NuvioColorTokens,
 ) {
