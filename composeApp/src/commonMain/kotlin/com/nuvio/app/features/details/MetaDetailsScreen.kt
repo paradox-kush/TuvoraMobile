@@ -409,7 +409,7 @@ fun MetaDetailsScreen(
         tmdbSettingsUiState.language,
         mdbListSettings,
     ) {
-        if (displayedMeta != null && !uiState.isLoading) {
+        if (DetailsSettingsRefreshPolicy.shouldRefresh(id, displayedMeta != null, uiState.isLoading)) {
             MetaDetailsRepository.load(type, id)
         }
     }
