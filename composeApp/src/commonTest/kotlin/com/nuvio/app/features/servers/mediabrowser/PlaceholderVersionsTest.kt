@@ -43,11 +43,11 @@ class PlaceholderVersionsTest {
     }
 
     @Test
-    fun `needsPlaybackInfo is true only when every source is a placeholder`() {
+    fun `needsPlaybackInfo is true for empty listings or only placeholders`() {
         val placeholder = MediaSource(id = "p", type = "Placeholder")
         val real = MediaSource(id = "r", type = "Default")
         assertTrue(VersionListPolicy.needsPlaybackInfo(listOf(placeholder)), "all placeholders")
         assertFalse(VersionListPolicy.needsPlaybackInfo(listOf(placeholder, real)), "mixed")
-        assertFalse(VersionListPolicy.needsPlaybackInfo(emptyList()), "empty")
+        assertTrue(VersionListPolicy.needsPlaybackInfo(emptyList()), "empty")
     }
 }
