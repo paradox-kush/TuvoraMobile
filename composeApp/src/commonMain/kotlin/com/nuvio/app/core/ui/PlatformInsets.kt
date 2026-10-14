@@ -20,6 +20,9 @@ internal expect fun platformPhysicalTopInset(): Dp
 
 internal val LocalNuvioBottomNavigationOverlayPadding = staticCompositionLocalOf { 0.dp }
 
+/** Space below the status bar occupied by the native phone profile avatar. */
+internal val LocalNuvioCornerProfileOverlayPadding = staticCompositionLocalOf { 0.dp }
+
 /**
  * Height of a navigation bar drawn OVER the top of tab content (the tablet floating tab-bar pill),
  * status bar included; 0 when the tab bar is not at the top. Measured, so it changes once after

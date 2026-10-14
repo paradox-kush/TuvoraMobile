@@ -54,6 +54,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.nuvio.app.core.ui.LocalNuvioCornerProfileOverlayPadding
 import com.nuvio.app.core.ui.NuvioDropdownChip
 import com.nuvio.app.core.ui.NuvioDropdownOption
 import com.nuvio.app.core.ui.NuvioPosterCard
@@ -246,7 +247,10 @@ fun XtreamHubScreen(
         // In the wide/tablet layout the app's floating top nav bar overlays the top of the content,
         // which would hide this fixed section-chip header — pad it down to clear the bar.
         val tabletTopInset = if (maxWidth >= 768.dp) TABLET_TOP_BAR_INSET else 0.dp
-        Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(top = tabletTopInset)) {
+        Column(
+            modifier = Modifier.fillMaxSize().statusBarsPadding()
+                .padding(top = tabletTopInset + LocalNuvioCornerProfileOverlayPadding.current),
+        ) {
             if (openCategory != null) {
                 XtreamHubCategoryPage(
                     category = openCategory,

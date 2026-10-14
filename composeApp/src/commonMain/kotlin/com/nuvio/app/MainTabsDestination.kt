@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.app.core.ui.LocalNuvioBottomNavigationOverlayPadding
+import com.nuvio.app.core.ui.LocalNuvioCornerProfileOverlayPadding
 import com.nuvio.app.core.ui.LocalNuvioNavBarScrollState
 import com.nuvio.app.core.ui.LocalNuvioTopNavigationOverlayPadding
 import com.nuvio.app.core.ui.NuvioNavBarScrollState
@@ -195,6 +196,9 @@ internal fun MainTabsDestination(
             Box(modifier = Modifier.fillMaxSize()) {
                 CompositionLocalProvider(
                     LocalNuvioBottomNavigationOverlayPadding provides if (useNativeBottomTabs) 49.dp else if (!isTabletLayout && navBarStyleSetting != NavBarStyle.CLASSIC) 72.dp else 0.dp,
+                    // Native iPhone chrome places a 30pt avatar 4pt below the safe top.
+                    LocalNuvioCornerProfileOverlayPadding provides
+                        if (useNativeNavigation && useNativeBottomTabs && !isTabletLayout) 34.dp else 0.dp,
                     LocalNuvioNavBarScrollState provides navBarScrollState,
                     LocalNuvioTopNavigationOverlayPadding provides
                         if (isTabletLayout && !useNativeBottomTabs) tabletTopNavHeight else 0.dp,
