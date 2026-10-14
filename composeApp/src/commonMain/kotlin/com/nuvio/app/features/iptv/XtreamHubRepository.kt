@@ -350,8 +350,12 @@ object XtreamHubRepository {
         val policy = com.nuvio.app.features.iptv.overlay.IptvChannelQuickActionsPolicy
         return shown.map { cat ->
             val kept = if (isCustomGroupRow(cat.id)) {
-                // A custom group's row keeps the group's own order and names; only hides apply.
-                policy.visibleInHub(cat.items, channels) { entities[it.id] }
+                // Channel names are shared across rows; the group's own member order stays put.
+                policy.visibleInHub(
+                    cat.items, channels,
+                    withName = { card, newName -> card.copy(name = newName) },
+                    entityOf = { entities[it.id] },
+                )
             } else {
                 policy.hubRow(
                     items = cat.items,
