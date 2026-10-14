@@ -67,15 +67,36 @@ internal object IptvChannelQuickActionsPolicy {
     }
 
     /**
-     * The hub's rows without the channels the viewer hid — hide only, no rename or pin. Used for a
-     * custom group's row, whose order and names are the group's own; provider rows go through
-     * [hubRow]. A card whose identity is unknown ([entityOf] null) stays. Returns [items] itself
-     * when nothing in it is hidden.
+     * Custom-group rows share channel hides and names with provider rows, but retain the group's
+     * explicit member order: pins and provider positions must not reorder it. Apply to raw cached
+     * cards at display time so clearing a rename or hide restores the provider value immediately.
+     * Unknown identities stay untouched; an unchanged row is returned as is.
      */
-    fun <T> visibleInHub(items: List<T>, overlay: Map<String, ChannelOverlay>, entityOf: (T) -> String?): List<T> {
-        if (items.isEmpty() || overlay.values.none { it.hidden }) return items
-        val kept = items.filter { item -> entityOf(item)?.let { overlay[it]?.hidden } != true }
-        return if (kept.size == items.size) items else kept
+    fun <T> visibleInHub(
+        items: List<T>,
+        overlay: Map<String, ChannelOverlay>,
+        withName: (T, String) -> T = { row, _ -> row },
+        entityOf: (T) -> String?,
+    ): List<T> {
+        if (items.isEmpty() || overlay.isEmpty()) return items
+        var changed = false
+        val shown = buildList {
+            items.forEach { item ->
+                val edit = entityOf(item)?.let { overlay[it] }
+                if (edit?.hidden == true) {
+                    changed = true
+                } else {
+                    val rename = edit?.rename?.takeIf { it.isNotBlank() }
+                    if (rename != null) {
+                        changed = true
+                        add(withName(item, rename))
+                    } else {
+                        add(item)
+                    }
+                }
+            }
+        }
+        return if (changed) shown else items
     }
 }
 
