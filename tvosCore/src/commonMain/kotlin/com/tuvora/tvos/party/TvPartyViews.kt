@@ -112,16 +112,7 @@ object TvPartyViews {
      * A party code from a link that opens the app: `tuvora://party/<code>` (Apple TV's own scheme), or any link
      * the phone accepts (`https://tuvora.co/party/<code>`, `nuvio://party/<code>`). Null for anything else.
      */
-    fun codeFromLink(url: String): String? {
-        val trimmed = url.trim()
-        val prefix = "tuvora://party"
-        if (trimmed.startsWith(prefix, ignoreCase = true)) {
-            return parseAppDeepLink("nuvio://party" + trimmed.substring(prefix.length)).partyCode()
-        }
-        return parseAppDeepLink(trimmed).partyCode()
-    }
-
-    private fun AppDeepLink?.partyCode(): String? = (this as? AppDeepLink.Party)?.code
+    fun codeFromLink(url: String): String? = (parseAppDeepLink(url.trim()) as? AppDeepLink.Party)?.code
 
     /** The phone's join-screen lookup rule (PartyScreen.lookUp), as data. */
     fun lookup(preview: PartyPreview): TvPartyLookup {

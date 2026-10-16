@@ -50,6 +50,8 @@
                     android:scheme="nuvio"
                     android:host="auth"
                     android:path="/simkl" />
+                <!-- tuvora:// is an exact alias of nuvio:// (data elements combine: tuvora://auth/... too). -->
+                <data android:scheme="tuvora" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -61,6 +63,8 @@
                     android:scheme="nuvio"
                     android:host="auth"
                     android:path="/trakt" />
+                <!-- tuvora:// is an exact alias of nuvio:// (data elements combine: tuvora://auth/... too). -->
+                <data android:scheme="tuvora" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -69,6 +73,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data android:scheme="nuvio" />
+                <data android:scheme="tuvora" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

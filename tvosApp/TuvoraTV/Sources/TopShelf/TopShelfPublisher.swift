@@ -50,7 +50,7 @@ struct DeepLink: Equatable {
     }
 
     init?(url: URL) {
-        guard url.scheme == "tuvora", url.host == "title",
+        guard let scheme = url.scheme?.lowercased(), scheme == "tuvora" || scheme == "nuvio", url.host == "title",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
               let type = items.first(where: { $0.name == "type" })?.value,
               let id = items.first(where: { $0.name == "id" })?.value else { return nil }

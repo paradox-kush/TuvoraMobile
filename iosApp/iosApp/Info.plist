@@ -42,6 +42,7 @@
 			<string>com.nuvio.app.auth</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>tuvora</string>
 				<string>nuvio</string>
 				<string>stremio</string>
 			</array>

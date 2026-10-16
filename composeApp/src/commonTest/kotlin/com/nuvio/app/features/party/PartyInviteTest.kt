@@ -14,7 +14,7 @@ class PartyInviteTest {
 
     @Test
     fun `a custom server invites with the app scheme`() {
-        assertEquals("nuvio://party/K7M2QX", partyInviteLink("K7M2QX", isCustomServer = true))
+        assertEquals("tuvora://party/K7M2QX", partyInviteLink("K7M2QX", isCustomServer = true))
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.nuvio.app.features.party
 import co.touchlab.kermit.Logger
 import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
+import com.nuvio.app.core.deeplink.APP_URL_SCHEME
 import com.nuvio.app.core.network.BackendFailurePolicy
 import com.nuvio.app.core.network.ServerConfigurationRepository
 import com.nuvio.app.core.sync.AppForegroundMonitor
@@ -734,7 +735,7 @@ fun partyInviteLink(code: String): String =
  * party is not on tuvora.co, so its invite uses the app scheme.
  */
 internal fun partyInviteLink(code: String, isCustomServer: Boolean): String =
-    if (isCustomServer) "nuvio://party/$code" else "https://tuvora.co/party/$code"
+    if (isCustomServer) "$APP_URL_SCHEME://party/$code" else "https://tuvora.co/party/$code"
 
 /** The name other members see: the active profile's, trimmed and capped, else the brand. */
 internal fun partyDisplayName(profileName: String?): String =

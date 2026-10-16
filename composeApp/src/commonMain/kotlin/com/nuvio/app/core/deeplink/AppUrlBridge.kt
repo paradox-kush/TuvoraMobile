@@ -67,13 +67,19 @@ fun buildMetaDeepLinkUrl(
     type: String,
     id: String,
 ): String = buildString {
-    append("nuvio://meta?type=")
+    append("$APP_URL_SCHEME://meta?type=")
     append(type.trim().encodeURLParameter())
     append("&id=")
     append(id.trim().encodeURLParameter())
 }
 
-fun buildDownloadsDeepLinkUrl(): String = "nuvio://downloads"
+fun buildDownloadsDeepLinkUrl(): String = "$APP_URL_SCHEME://downloads"
+
+/** The scheme of every app link Tuvora generates. Both [APP_URL_SCHEMES] open the app on every platform. */
+const val APP_URL_SCHEME = "tuvora"
+
+/** `tuvora://` and the inherited `nuvio://` are exact aliases for every route. */
+val APP_URL_SCHEMES = setOf("tuvora", "nuvio")
 
 internal fun parseAppDeepLink(url: String): AppDeepLink? {
     val parsedUrl = runCatching { Url(url) }.getOrNull() ?: return null
@@ -99,7 +105,7 @@ internal fun parseAppDeepLink(url: String): AppDeepLink? {
     }
     val host = parsedUrl.host.lowercase()
     val pathSegments = parsedUrl.pathSegments.map(String::trim).filter(String::isNotBlank)
-    if (scheme != "nuvio") return null
+    if (scheme !in APP_URL_SCHEMES) return null
 
     return when (host) {
         "meta" -> {

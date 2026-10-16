@@ -29,6 +29,29 @@ class AppUrlBridgeTest {
     }
 
     @Test
+    fun `the tuvora scheme is an exact alias of nuvio for every route`() {
+        val routes = listOf(
+            "://party/k7m-2qx", "://party?code=K7M2QX", "://meta?type=series&id=tt0944947",
+            "://free.nebulapro.xyz/sports/i/free/manifest.json", "://series/tt0944947", "://imdb/series/tt0944947",
+            "://tmdb/tv/1399", "://downloads", "://s/TUV-ABCD-EFGH-JKMN", "://detail/movie/tt1", "://auth/trakt?code=abc", "://s",
+        )
+        routes.forEach { route ->
+            assertEquals(parseAppDeepLink("nuvio$route"), parseAppDeepLink("tuvora$route"), "tuvora$route")
+        }
+        assertEquals(AppDeepLink.Party("K7M2QX"), parseAppDeepLink("TUVORA://party/K7M2QX"))
+        assertEquals(AppDeepLink.Downloads, parseAppDeepLink("tuvora://downloads"))
+    }
+
+    @Test
+    fun `links the app generates use the tuvora scheme and parse back`() {
+        val meta = buildMetaDeepLinkUrl("series", "tt0944947")
+        assertEquals("tuvora://meta?type=series&id=tt0944947", meta)
+        assertEquals(AppDeepLink.Meta(type = "series", id = "tt0944947"), parseAppDeepLink(meta))
+        assertEquals("tuvora://downloads", buildDownloadsDeepLinkUrl())
+        assertEquals(AppDeepLink.Downloads, parseAppDeepLink(buildDownloadsDeepLinkUrl()))
+    }
+
+    @Test
     fun `parses existing notification meta deeplink`() {
         assertEquals(
             AppDeepLink.Meta(type = "series", id = "tt0944947"),
