@@ -16,3 +16,12 @@ This merge starts from Tuvora `org/main` and preserves the released fork history
 ## iOS and Android adapters
 
 Keep the patched MPVKit revision and existing iOS PiP/render-thread/rotation guards. Port upstream call-aware audio session behavior and the PiP placeholder into that existing controller; omit the competing upstream PiP controller. Swift syntax is checked separately from the Kotlin simulator compilation. Adapt the Android subtitle MP4 parser to Media3 1.11's additional argument.
+
+## Validation
+
+- Android Kotlin and iOS Simulator Arm64 Kotlin compilation passed.
+- `:androidApp:assembleFullDebug` passed.
+- `testAndroidHostTest`: 1407 tests, 0 skipped, 0 failures, 0 errors.
+- `iosSimulatorArm64Test`: 3701 tests, 4 skipped, 0 failures, 0 errors.
+- The iOS runner covers the full native suite. JVM testing covers architecture, core, party, player, MDBList, servers, and settings. The initial unfiltered JVM suite was stopped after it stalled in the unchanged Stalker Ministra series test.
+- All architecture checks passed with no baseline growth. Swift syntax, resource XML duplicate checks, conflict-marker checks, and whitespace checks passed. A full Xcode application build was not run.
