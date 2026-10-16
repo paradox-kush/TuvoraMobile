@@ -660,7 +660,7 @@ object PartyRepository {
         val profile = ProfileRepository.state.value.activeProfile
         return PartyIdentity(
             deviceId = deviceId(),
-            displayName = profile?.name?.trim()?.takeIf { it.isNotEmpty() }?.take(40) ?: DEFAULT_NAME,
+            displayName = partyDisplayName(profile?.name),
             avatarUrl = profile?.let { AvatarRepository.shareableImageUrl(it) }?.takeIf { it.startsWith("https://") && it.length <= 512 },
             avatarColor = profile?.avatarColorHex?.takeIf { COLOR_PATTERN.matches(it) },
         )
@@ -707,7 +707,6 @@ object PartyRepository {
         )
     }
 
-    private const val DEFAULT_NAME = "Nuvio"
     private val COLOR_PATTERN = Regex("^#[0-9A-Fa-f]{6}$")
     private val HEARTBEAT_INTERVAL = 2.minutes
     private val PERSIST_DELAY = 1.5.seconds
@@ -727,7 +726,22 @@ fun formatPartyCode(code: String): String =
     normalizePartyCode(code).let { if (it.length == PARTY_CODE_LENGTH) "${it.take(3)} ${it.drop(3)}" else it }
 
 fun partyInviteLink(code: String): String =
-    if (ServerConfigurationRepository.active.value.isCustom) "nuvio://party/$code" else "https://nuvio.tv/party/$code"
+    partyInviteLink(code, isCustomServer = ServerConfigurationRepository.active.value.isCustom)
+
+/**
+ * The official server's invites are https links on tuvora.co (the web page previews the party and offers
+ * "Open in app"; the Android App Link / iOS Universal Link opens the app directly). A custom server's
+ * party is not on tuvora.co, so its invite uses the app scheme.
+ */
+internal fun partyInviteLink(code: String, isCustomServer: Boolean): String =
+    if (isCustomServer) "nuvio://party/$code" else "https://tuvora.co/party/$code"
+
+/** The name other members see: the active profile's, trimmed and capped, else the brand. */
+internal fun partyDisplayName(profileName: String?): String =
+    profileName?.trim()?.takeIf { it.isNotEmpty() }?.take(PARTY_DISPLAY_NAME_MAX) ?: PARTY_DEFAULT_DISPLAY_NAME
+
+private const val PARTY_DISPLAY_NAME_MAX = 40
+private const val PARTY_DEFAULT_DISPLAY_NAME = "Tuvora"
 
 const val PARTY_CODE_LENGTH = 6
 private const val PARTY_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"

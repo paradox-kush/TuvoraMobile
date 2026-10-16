@@ -7,14 +7,25 @@ import kotlin.test.assertNull
 class AppUrlBridgeTest {
 
     @Test
-    fun `parses party invites from the app and the website`() {
+    fun `parses party invites from the app and the Tuvora website`() {
         assertEquals(AppDeepLink.Party("K7M2QX"), parseAppDeepLink("nuvio://party/k7m-2qx"))
-        assertEquals(AppDeepLink.Party("K7M2QX"), parseAppDeepLink("https://nuvio.tv/party/K7M2QX"))
-        assertEquals(AppDeepLink.Party("K7M2QX"), parseAppDeepLink("https://NUVIO.tv/party/K7M2QX/"))
-        assertNull(parseAppDeepLink("https://nuvio.tv/party/K7M2Q"))
-        assertNull(parseAppDeepLink("https://nuvio.tv/link?code=K7M2QX"))
+        assertEquals(AppDeepLink.Party("K7M2QX"), parseAppDeepLink("nuvio://party?code=K7M2QX"))
+        assertEquals(AppDeepLink.Party("K7M2QX"), parseAppDeepLink("https://tuvora.co/party/K7M2QX"))
+        assertEquals(AppDeepLink.Party("K7M2QX"), parseAppDeepLink("https://TUVORA.co/party/K7M2QX/"))
+        assertEquals(AppDeepLink.Party("K7M2QX"), parseAppDeepLink("https://tuvora.co/party/k7m2qx?utm=x"))
+        assertNull(parseAppDeepLink("https://tuvora.co/party/K7M2Q"))
+        assertNull(parseAppDeepLink("https://tuvora.co/party"))
+        assertNull(parseAppDeepLink("https://tuvora.co/link?code=K7M2QX"))
         assertNull(parseAppDeepLink("https://evil.example/party/K7M2QX"))
-        assertNull(parseAppDeepLink("http://nuvio.tv/party/K7M2QX"))
+        assertNull(parseAppDeepLink("https://tuvora.co.evil.example/party/K7M2QX"))
+    }
+
+    @Test
+    fun `party links are exactly https on tuvora dot co like the manifest filter and the app-site association`() {
+        assertNull(parseAppDeepLink("http://tuvora.co/party/K7M2QX"), "plain http")
+        assertNull(parseAppDeepLink("https://www.tuvora.co/party/K7M2QX"), "www is not a claimed host")
+        // Upstream's site: we cannot verify nuvio.tv, and its invites point at upstream's backend.
+        assertNull(parseAppDeepLink("https://nuvio.tv/party/K7M2QX"), "nuvio.tv is upstream's host")
     }
 
     @Test

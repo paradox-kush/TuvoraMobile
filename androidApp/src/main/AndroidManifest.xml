@@ -92,11 +92,13 @@
                     android:host="tuvora.co"
                     android:pathPrefix="/s/" />
             </intent-filter>
+            <!-- Watch party invites (https://tuvora.co/party/<code>) open the join screen. Same autoVerify
+                 contract as /s/ above: nuvio-web's assetlinks.json must list this app. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="nuvio.tv" android:pathPrefix="/party/" />
+                <data android:scheme="https" android:host="tuvora.co" android:pathPrefix="/party/" />
             </intent-filter>
         </activity>
 

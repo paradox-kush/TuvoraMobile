@@ -79,15 +79,15 @@ internal fun parseAppDeepLink(url: String): AppDeepLink? {
     val parsedUrl = runCatching { Url(url) }.getOrNull() ?: return null
     val scheme = parsedUrl.protocol.name.lowercase()
     if (scheme == "https" || scheme == "http") {
-        // Exactly what the manifest filter and the app-site association claim: https on tuvora.co (not www, not http).
+        // Exactly what the manifest filters and the app-site association claim: https on tuvora.co (not www,
+        // not http), /s/ and /party/ only. Upstream's nuvio.tv party links are not ours to open.
         val host = parsedUrl.host.lowercase()
         val segments = parsedUrl.pathSegments.map(String::trim).filter(String::isNotBlank)
-        return if (scheme == "https" && host == "tuvora.co" && segments.firstOrNull() == "s") {
-            segments.getOrNull(1)?.let(AppDeepLink::SetupCode)
-        } else if (scheme == "https" && host == "nuvio.tv" && segments.firstOrNull() == "party") {
-            partyDeepLink(segments.getOrNull(1))
-        } else {
-            null
+        if (scheme != "https" || host != "tuvora.co") return null
+        return when (segments.firstOrNull()) {
+            "s" -> segments.getOrNull(1)?.let(AppDeepLink::SetupCode)
+            "party" -> partyDeepLink(segments.getOrNull(1))
+            else -> null
         }
     }
     if (scheme == "stremio") {
