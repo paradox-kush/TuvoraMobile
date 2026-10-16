@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
 class PartyServerContractTest {
 
     @Test
-    fun `a signed-out or anonymous caller is told to sign in, not that the network failed`() {
+    fun `a signed-out or anonymous caller is told to sign in - not that the network failed`() {
         // The backend answers HTTP 200 {"error":"sign_in_required"} instead of RAISE.
         assertEquals(PartyError.SignInRequired, partyErrorOf("sign_in_required"))
         assertEquals(PartyError.Network, partyErrorOf("not_host"), "other unknown codes stay generic")
