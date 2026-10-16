@@ -433,6 +433,7 @@
 		3BEA88C53B91734AEB44313E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = iosApp/iosApp.entitlements;
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = (
 					AppIconArcticBlue,
@@ -479,6 +480,7 @@
 		4322E267F98B668D798FAEEE /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = iosApp/iosApp.entitlements;
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = (
 					AppIconArcticBlue,

@@ -2,11 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Step 2: https://tuvora.co/s/<code> opens the app on the setup preview (Universal Links).
-	     NOT yet referenced by the Xcode project (CODE_SIGN_ENTITLEMENTS) on purpose: the manual App Store
-	     provisioning profiles for com.tuvora.media must first be regenerated with the Associated Domains
-	     capability, and https://tuvora.co/.well-known/apple-app-site-association must list /s/*. Wire it in
-	     with the next iOS build (see the Step 2 report). -->
+	<!-- Universal Links: https://tuvora.co/s/<code> (provider setup) and https://tuvora.co/party/<code> (Watch Party
+	     invite) open the app; iOSApp's onOpenURL hands them to AppUrlBridge.handleAppUrl. Wired 2026-10-16 (CODE_SIGN_ENTITLEMENTS,
+	     Debug + Release). Needs the Associated Domains capability on App ID com.tuvora.media (enabled 2026-10-16) and an
+	     App Store profile generated after that, and tuvora.co's apple-app-site-association listing 8ZLXPVM885.com.tuvora.media
+	     with /s/* and /party/* (nuvio-web src/lib/app-links.ts). www.tuvora.co serves nothing, so it is not claimed. -->
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>applinks:tuvora.co</string>
