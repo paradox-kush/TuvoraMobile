@@ -66,7 +66,7 @@ internal fun CodeField(
     BasicTextField(
         value = TextFieldValue(code, selection = TextRange(code.length)),
         onValueChange = { value ->
-            val next = normalizePartyCode(value.text).take(PARTY_CODE_LENGTH)
+            val next = PartyCode.fromInput(value.text)
             if (next != code) onCodeChange(next)
         },
         enabled = enabled,
