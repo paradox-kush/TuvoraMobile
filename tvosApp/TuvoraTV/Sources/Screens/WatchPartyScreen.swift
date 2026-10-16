@@ -226,8 +226,12 @@ private struct PartyDetailsContent: View {
             SettingsGroupCard {
                 Text(verbatim: String(format: L("The party is watching %@"), title)).font(NuvioType.bodyLarge).foregroundStyle(colors.textPrimary)
                 if let detail = view.mediaDetail { Text(verbatim: detail).font(NuvioType.bodySmall).foregroundStyle(colors.textSecondary) }
-                SettingsActionRow(title: "Watch with the party", leadingIcon: "md_play_arrow") { watchWithParty() }
-                    .accessibilityIdentifier("party.watch")
+                if view.mediaOnUnconnectedServer {
+                    SettingsHelperText(text: TvParty.shared.serverNotConnected()).accessibilityIdentifier("party.serverNotConnected")
+                } else {
+                    SettingsActionRow(title: "Watch with the party", leadingIcon: "md_play_arrow") { watchWithParty() }
+                        .accessibilityIdentifier("party.watch")
+                }
             }
         }
         SettingsGroupCard {
@@ -470,6 +474,8 @@ struct PartyPlayerPanel: View {
                 TvParty.shared.switchTo(session: session); onClose()
             }
             .accessibilityIdentifier("player.party.switch")
+        } else if !here, view.mediaOnUnconnectedServer {
+            SettingsHelperText(text: TvParty.shared.serverNotConnected())
         } else if !here, let type = view.mediaType, let id = view.mediaId {
             SettingsActionRow(title: "Watch with the party", subtitle: view.mediaTitle.map { String(format: L("The party is watching %@"), $0) },
                               showChevron: false, leadingIcon: "md_play_arrow") {

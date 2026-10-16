@@ -12,6 +12,7 @@ import com.nuvio.app.features.party.PartyMemberStatus
 import com.nuvio.app.features.party.PartyPlayback
 import com.nuvio.app.features.party.PartySync
 import com.nuvio.app.features.party.PartyPreview
+import com.nuvio.app.features.party.PartyServerResolution
 import com.nuvio.app.features.party.PartySource
 import com.nuvio.app.features.party.formatPartyCode
 import com.nuvio.app.features.party.isValidPartyCode
@@ -71,6 +72,8 @@ data class TvPartyView(
     val mediaId: String?,
     val mediaVideoId: String?,
     val mediaKey: String?,
+    /** The party watches a media-server title on a server this device is not connected to. */
+    val mediaOnUnconnectedServer: Boolean = false,
 )
 
 /** The join screen's preview card: shown only for a usable answer (the phone's rule). */
@@ -144,8 +147,11 @@ object TvPartyViews {
         canUse: Boolean,
         inviteLink: String,
         selfBehindMs: Long? = null,
+        /** The party's media mapped onto this device's own server record ([PartyServerTitleMatch.localize]). */
+        resolution: PartyServerResolution = PartyServerResolution.NotServer,
     ): TvPartyView {
         val media = party?.media
+        val local = (resolution as? PartyServerResolution.Local)?.media ?: media
         val members = party?.let { p -> p.members.map { row(p, it, selfBehindMs) } }.orEmpty()
         return TvPartyView(
             available = available,
@@ -168,9 +174,10 @@ object TvPartyViews {
             mediaDetail = media?.let(::detail),
             mediaPoster = media?.let { it.poster ?: it.background },
             mediaType = media?.metaType,
-            mediaId = media?.metaId,
-            mediaVideoId = media?.videoId,
+            mediaId = local?.metaId,
+            mediaVideoId = local?.videoId,
             mediaKey = media?.key,
+            mediaOnUnconnectedServer = party != null && resolution == PartyServerResolution.NotConnected,
         )
     }
 

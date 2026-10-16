@@ -33,9 +33,11 @@ data class PartyMedia(
     val background: String? = null,
     val logo: String? = null,
     val source: PartySource? = null,
+    /** A media-server title's account-independent identity (null for catalog titles); older clients ignore it. */
+    val server: PartyServerRef? = null,
 ) {
     val key: String
-        get() = partyMediaKey(metaType, metaId, season, episode)
+        get() = partyMediaKey(metaType, server?.let(PartyServerTitleMatch::portableId) ?: metaId, season, episode)
 }
 
 @Serializable
@@ -77,9 +79,12 @@ internal fun isShareableStreamUrl(url: String): Boolean = SHAREABLE_URL.contains
 
 private val SHAREABLE_URL = Regex("^https?://(?!localhost|127\\.|0\\.0\\.0\\.0|\\[::1])[^\\s/]+", RegexOption.IGNORE_CASE)
 
-internal fun partyMediaKey(metaType: String, metaId: String, season: Int?, episode: Int?): String =
-    listOf(metaType.lowercase(), metaId, season?.toString().orEmpty(), episode?.toString().orEmpty())
+internal fun partyMediaKey(metaType: String, metaId: String, season: Int?, episode: Int?): String {
+    // A media-server title is keyed by its server's identity, not this device's record id (PartyServerTitles).
+    val id = if (com.nuvio.app.features.servers.ServerItemRef.isServerId(metaId)) PartyServerTitles.portableMetaId(metaId) ?: metaId else metaId
+    return listOf(metaType.lowercase(), id, season?.toString().orEmpty(), episode?.toString().orEmpty())
         .joinToString("|")
+}
 
 @Serializable
 data class PartyPlayback(

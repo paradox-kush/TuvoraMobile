@@ -6,6 +6,8 @@ import com.nuvio.app.features.party.PartyAction
 import com.nuvio.app.features.party.PartyError
 import com.nuvio.app.features.party.PartyEvent
 import com.nuvio.app.features.party.PartyRepository
+import com.nuvio.app.features.party.PartyServerTitles
+import nuvio.composeapp.generated.resources.party_server_not_connected
 import com.nuvio.app.features.party.partyInviteLink
 import com.nuvio.app.features.player.PlayerLaunch
 import com.tuvora.tvos.player.TvPlayerSession
@@ -80,6 +82,7 @@ object TvParty {
             canUse = PartyRepository.canUse,
             inviteLink = party?.code?.let(::partyInviteLink).orEmpty(),
             selfBehindMs = behind,
+            resolution = party?.media?.let(PartyServerTitles::localize) ?: com.nuvio.app.features.party.PartyServerResolution.NotServer,
         )
 
     /**
@@ -159,6 +162,9 @@ object TvParty {
         PartyError.Unavailable -> text(Res.string.party_unavailable)
         PartyError.Network -> text(Res.string.party_error_network)
     }
+
+    /** "This title is on a media server you're not connected to." */
+    fun serverNotConnected(): String = text(Res.string.party_server_not_connected)
 
     internal fun hostOnlyNote(): String = text(Res.string.party_host_only_note)
     internal fun caughtUp(): String = text(Res.string.party_caught_up)

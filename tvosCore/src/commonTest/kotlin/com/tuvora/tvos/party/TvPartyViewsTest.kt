@@ -185,3 +185,29 @@ class TvPartyLineTest {
         assertEquals(TvPartyLineKind.None, TvPartyViews.lineOf(null, null, true, 4_000, true).kind)
     }
 }
+
+class TvPartyServerViewTest {
+    private val shared = PartyMedia(
+        type = "movie", metaId = "srv1:hostrecord:item9", metaType = "movie", title = "Film",
+        server = com.nuvio.app.features.party.PartyServerRef("jellyfin", "machine", "item9"),
+    )
+    private fun party() = ActiveParty(
+        id = "p", code = "K7M2QX", memberId = "me", hostMemberId = "h", members = listOf(PartyMember("h", "Host")),
+        presence = emptyMap(), media = shared, maxMembers = 3, connected = true,
+    )
+
+    @Test
+    fun `Watch with the party opens the guest's own server record`() {
+        val local = shared.copy(metaId = "srv1:guestrecord:item9")
+        val view = TvPartyViews.view(party(), false, true, true, "", resolution = com.nuvio.app.features.party.PartyServerResolution.Local(local))
+        assertEquals("srv1:guestrecord:item9", view.mediaId)
+        assertFalse(view.mediaOnUnconnectedServer)
+        assertEquals(shared.key, view.mediaKey, "the key stays the party's")
+    }
+
+    @Test
+    fun `a server the guest is not connected to is said plainly`() {
+        val view = TvPartyViews.view(party(), false, true, true, "", resolution = com.nuvio.app.features.party.PartyServerResolution.NotConnected)
+        assertTrue(view.mediaOnUnconnectedServer)
+    }
+}

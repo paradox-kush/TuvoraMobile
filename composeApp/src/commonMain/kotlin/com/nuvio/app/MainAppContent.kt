@@ -145,6 +145,8 @@ import com.nuvio.app.features.party.PartyEvent
 import com.nuvio.app.features.party.PartyMedia
 import com.nuvio.app.features.party.PartyRepository
 import com.nuvio.app.features.party.PartyScreen
+import com.nuvio.app.features.party.PartyServerResolution
+import com.nuvio.app.features.party.PartyServerTitles
 import com.nuvio.app.features.party.PartySync
 import com.nuvio.app.features.player.ExternalPlayerIntentResult
 import com.nuvio.app.features.player.externalPlaybackSession
@@ -414,6 +416,7 @@ internal fun MainAppContent(
     val newCollectionTitle = stringResource(Res.string.collections_new)
     val detailsFallbackTitle = stringResource(Res.string.meta_section_details_title)
     val watchPartyTitle = stringResource(Res.string.party_title)
+    val partyServerNotConnected = stringResource(Res.string.party_server_not_connected)
     val isRemoteLibrarySource = libraryUiState.sourceMode != LibrarySourceMode.LOCAL
     val appContentGeneration = if (ownsAppRuntime && appGateController != null) {
         val generation by appGateController.contentGeneration.collectAsStateWithLifecycle()
@@ -1279,10 +1282,19 @@ internal fun MainAppContent(
             )
         }
 
-        fun openPartyMedia(media: PartyMedia) {
+        fun openPartyMedia(sharedMedia: PartyMedia) {
+            // A media-server title names the host's own server record: play it from OUR record of that server.
+            val media = when (val local = PartyServerTitles.localize(sharedMedia)) {
+                PartyServerResolution.NotServer -> sharedMedia
+                is PartyServerResolution.Local -> local.media
+                PartyServerResolution.NotConnected -> {
+                    NuvioToastController.show(partyServerNotConnected)
+                    return
+                }
+            }
             if (navController.currentRoute is PlayerRoute) navController.popBackStack()
             val resumePositionMs = PartyRepository.playback.value
-                ?.takeIf { it.mediaKey == null || it.mediaKey == media.key }
+                ?.takeIf { it.mediaKey == null || it.mediaKey == sharedMedia.key }
                 ?.let { PartySync.expectedPositionMs(it, PartyRepository.nowMs()) }
             launchPlaybackWithDownloadPreference(
                 type = media.type,

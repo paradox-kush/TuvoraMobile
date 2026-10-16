@@ -117,7 +117,7 @@ object PartyRepository {
     fun nowMs(): Long = clock.nowMs()
 
     suspend fun create(media: PartyMedia): PartyError? =
-        start { identity -> PartyApi.create(identity, media, null) }
+        start { identity -> PartyApi.create(identity, PartyServerTitles.withServer(media), null) }
 
     suspend fun join(code: String): PartyError? =
         start { identity -> PartyApi.join(normalizePartyCode(code), identity) }
@@ -195,8 +195,9 @@ object PartyRepository {
         scope.launch { publish(paused = paused, positionMs = positionMs, rate = rate, waiting = false, at = at) }
     }
 
-    fun publishMedia(media: PartyMedia, positionMs: Long) {
+    fun publishMedia(localMedia: PartyMedia, positionMs: Long) {
         scope.launch {
+            val media = PartyServerTitles.withServer(localMedia)
             val party = _state.value.party ?: return@launch
             if (media == party.media || !party.isHost) return@launch
             val sameContent = media.key == party.media.key
