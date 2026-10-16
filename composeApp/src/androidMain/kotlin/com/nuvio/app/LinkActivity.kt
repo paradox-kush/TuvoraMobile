@@ -12,7 +12,8 @@ class LinkActivity : Activity() {
             startActivity(
                 Intent(Intent.ACTION_MAIN).apply {
                     addCategory(Intent.CATEGORY_LAUNCHER)
-                    component = AppIconPlatform.currentLauncherComponent(this@LinkActivity)
+                    val launcher = AppIconPlatform.currentLauncherComponent(this@LinkActivity)
+                    setClassName(this@LinkActivity, LinkHandoffPolicy.target(LiveMainActivities.snapshot(), launcher.className))
                     putExtra(EXTRA_LINK, link)
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TOP or

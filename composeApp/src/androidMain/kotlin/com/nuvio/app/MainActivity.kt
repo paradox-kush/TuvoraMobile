@@ -81,6 +81,7 @@ open class MainActivity : AppCompatActivity() {
     private var pipRemoteActionReceiver: PipRemoteActionReceiver? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        LiveMainActivities.created(javaClass.name)
         installSplashScreen()
         enableEdgeToEdge(
             navigationBarStyle = SystemBarStyle.dark(
@@ -228,6 +229,7 @@ open class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        LiveMainActivities.destroyed(javaClass.name)
         EpisodeReleaseNotificationPlatform.unbindActivity(this)
         val receiver = pipRemoteActionReceiver
         if (receiver != null) {
