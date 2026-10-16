@@ -1,8 +1,10 @@
 package com.nuvio.app.core.analytics
 
+import com.nuvio.app.features.iptv.stalker.StalkerPlaybackTraffic
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 class BreadcrumbsTest {
 
@@ -16,6 +18,17 @@ class BreadcrumbsTest {
     @AfterTest
     fun tearDown() {
         Breadcrumbs.resetForTest()
+    }
+
+    @Test
+    fun resetLeavesNoPlaybackFlagForOtherSuites() {
+        // playbackStarted flips the process-global Stalker "something is playing" flag. Left set, every
+        // later Stalker browse call in the same test JVM waited MAX_DEFER_MS (3 s) per request: the
+        // "stalled" full JVM suite of 2026-10-16 (StalkerMinistraSeriesTest alone took 121 s).
+        arm()
+        Breadcrumbs.playbackStarted("vod", "mpv", "player", "mkv", nowMs = 0L)
+        Breadcrumbs.resetForTest()
+        assertFalse(StalkerPlaybackTraffic.isPlaybackActive, "reset must clear the playback flag it set")
     }
 
     @Test

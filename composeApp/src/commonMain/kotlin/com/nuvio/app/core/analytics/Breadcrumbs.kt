@@ -96,6 +96,9 @@ object Breadcrumbs {
         lastPlaybackKey = null
         lastPlaybackEmitAtMs = 0L
         recentEmitTimestampsMs.clear()
+        // playbackStarted() set the process-global Stalker playback flag; left set, every later Stalker
+        // browse call in the same test JVM is held back MAX_DEFER_MS (the "stalled" JVM suite).
+        com.nuvio.app.features.iptv.stalker.StalkerPlaybackTraffic.resetForTests()
     }
 
     const val SCREEN_EVENT = "\$screen"
