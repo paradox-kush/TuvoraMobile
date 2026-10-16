@@ -55,7 +55,9 @@ internal fun officialConfiguration() = ServerConfiguration(
     capabilities = ServerCapabilities(
         emailPasswordAuth = true,
         tvLogin = true,
-        watchParty = false // Tuvora self-host backend has no Watch Party RPCs.,
+        // nuvio-backend serves the watch_party_* RPCs; watch_party_enabled is the server kill switch, and a
+        // backend without the RPCs turns the feature off at runtime (PartyAvailabilityPolicy).
+        watchParty = true,
     ),
     isCustom = false,
     fallbackBackendUrl = SupabaseConfig.FALLBACK_URL.trim().trimEnd('/').takeIf { it.isNotBlank() },

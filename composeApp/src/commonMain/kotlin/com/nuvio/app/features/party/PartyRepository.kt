@@ -3,12 +3,14 @@ package com.nuvio.app.features.party
 import co.touchlab.kermit.Logger
 import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
+import com.nuvio.app.core.network.BackendFailurePolicy
 import com.nuvio.app.core.network.ServerConfigurationRepository
 import com.nuvio.app.core.sync.AppForegroundMonitor
 import com.nuvio.app.core.sync.AppVisibility
 import com.nuvio.app.core.sync.SyncClientIdentity
 import com.nuvio.app.features.profiles.AvatarRepository
 import com.nuvio.app.features.profiles.ProfileRepository
+import io.github.jan.supabase.exceptions.RestException
 import io.github.jan.supabase.realtime.Presence
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -249,7 +251,13 @@ object PartyRepository {
                     throw error
                 } catch (error: Throwable) {
                     log.w(error) { "Watch party request failed" }
-                    PartyError.Network
+                    if (probeOf(error) == PartyEnabledProbe.MissingFunction) {
+                        // The backend has no watch-party RPCs: say so and hide the entry points.
+                        _enabled.value = false
+                        PartyError.Unavailable
+                    } else {
+                        PartyError.Network
+                    }
                 } finally {
                     _state.update { it.copy(busy = false) }
                 }
@@ -548,9 +556,22 @@ object PartyRepository {
 
     private suspend fun refreshEnabled() {
         if (!ServerConfigurationRepository.active.value.capabilities.watchParty) return
-        val enabled = runRemote { PartyApi.enabled() } ?: return
+        val probe = try {
+            PartyEnabledProbe.Answered(PartyApi.enabled())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            log.w(error) { "Watch party availability check failed" }
+            probeOf(error)
+        }
+        val enabled = PartyAvailabilityPolicy.nextEnabled(previous = _enabled.value, probe = probe)
         _enabled.value = enabled
         if (!enabled) finish(PartyEvent.Ended)
+    }
+
+    private fun probeOf(error: Throwable): PartyEnabledProbe {
+        val rest = generateSequence(error) { it.cause }.take(16).filterIsInstance<RestException>().firstOrNull()
+        return PartyAvailabilityPolicy.probeOfFailure(BackendFailurePolicy.status(error), rest?.message)
     }
 
     private suspend fun refineClock() {
