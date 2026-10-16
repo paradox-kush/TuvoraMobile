@@ -2,6 +2,7 @@ package com.nuvio.app
 
 import android.content.Intent
 import android.content.res.Configuration
+import com.nuvio.app.features.autosync.AutoSyncPreferencesAndroid
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import android.os.Build
@@ -102,6 +103,7 @@ open class MainActivity : AppCompatActivity() {
         // interactive" attempt now. Idempotent per process; markInteractiveReached() fires from the
         // first screen breadcrumb.
         com.nuvio.app.core.journal.StartupJournal.markUiLaunchStarted()
+        AutoSyncPreferencesAndroid.initialize(applicationContext) // AutoSync hook
         window.setBackgroundDrawableResource(R.color.nuvio_background)
         // Opt the whole window out of autofill.
         //
@@ -247,11 +249,14 @@ open class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIncomingAppIntent(intent: Intent?, restoredFromSavedState: Boolean) {
-        val dataString = intent?.dataString
+        val dataString = intent?.dataString ?: intent?.getStringExtra(LinkActivity.EXTRA_LINK)
         val appUrl = IncomingLinkPolicy.linkToHandle(restoredFromSavedState, dataString)
         // Consumed either way: the OS keeps this Intent (and the code in its data) for the task and hands it back
         // on every recreation, so the link is removed from it once seen.
-        if (dataString != null) intent?.data = null
+        if (dataString != null) {
+            intent?.data = null
+            intent?.removeExtra(LinkActivity.EXTRA_LINK)
+        }
         if (appUrl == null) return
         handleAppUrl(appUrl)
     }

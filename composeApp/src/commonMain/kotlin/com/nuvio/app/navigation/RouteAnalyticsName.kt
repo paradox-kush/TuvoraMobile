@@ -31,6 +31,7 @@ fun analyticsNameOf(route: AppRoute): String = when (route) {
     is FolderDetailRoute -> "folder_detail"
     is StreamRoute -> "stream"
     is CatalogRoute -> "catalog"
+    is PartyRoute -> "watch_party"
     is PlayerRoute -> "player"
     is LiveTvRoute -> "live_tv"
     // Settings leaves keep a shared prefix so one query covers the whole section.

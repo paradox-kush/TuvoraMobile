@@ -9,14 +9,19 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.functions.Functions
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.realtime.websocket.KtorRealtimeWebsocketFactory
 import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.storage.Storage
+import io.github.jan.supabase.supabaseJson
 import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.defaultRequest
+import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.http.HttpHeaders
 import io.ktor.http.takeFrom
+import io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
+import kotlin.time.Duration.Companion.seconds
 
 object SupabaseProvider {
     private data class ClientHolder(
@@ -49,11 +54,14 @@ object SupabaseProvider {
             ?.let { return it.client }
 
         val userAgent = "Tuvora/${AppVersionConfig.VERSION_NAME.ifBlank { "dev" }}"
-        val nextClient = createSupabaseClient(
+        val rateLimitCoordinator = BackendRateLimitCoordinator()
+        lateinit var nextClient: SupabaseClient
+        nextClient = createSupabaseClient(
             supabaseUrl = config.normalizedSupabaseUrl,
             supabaseKey = config.anonKey,
         ) {
             httpConfig {
+                install(BackendRateLimitPlugin) { coordinator = rateLimitCoordinator }
                 install(HttpRequestRetry) {
                     // Two unrelated reasons to retry share one plugin instance, because installing
                     // HttpRequestRetry twice would just overwrite the first configuration:
@@ -96,6 +104,9 @@ object SupabaseProvider {
                 defaultRequest {
                     headers.append(HttpHeaders.UserAgent, userAgent)
                 }
+                install(WebSockets) {
+                    contentConverter = KotlinxWebsocketSerializationConverter(supabaseJson)
+                }
             }
             install(Auth) {
                 alwaysAutoRefresh = true
@@ -117,6 +128,11 @@ object SupabaseProvider {
                 // token only: alwaysAutoRefresh keeps it fresh and propagates via setAuth, and a
                 // null (session-less) token is simply omitted so the socket authenticates by apikey.
                 accessToken = { auth.currentAccessTokenOrNull() }
+                customUrl = SupabaseEndpointConfig.realtimeUrl(config.normalizedSupabaseUrl)
+                reconnectDelay = 3.seconds
+                websocketFactory = RealtimeSocketFactory { url ->
+                    KtorRealtimeWebsocketFactory(nextClient.httpClient.httpClient).create(url)
+                }
             }
         }
         holder = ClientHolder(backend = config, client = nextClient)
