@@ -1,6 +1,7 @@
 package com.nuvio.app.features.party
 
 import com.nuvio.app.core.network.SupabaseProvider
+import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.realtime.Presence
 import io.github.jan.supabase.realtime.RealtimeChannel
 import io.github.jan.supabase.realtime.broadcastFlow
@@ -29,7 +30,25 @@ internal class PartyChannel(
         onPresence: (joins: Map<String, Presence>, leaves: Map<String, Presence>) -> Unit,
         onConnected: (Boolean) -> Unit,
     ) {
-        val created = SupabaseProvider.client.channel("watch-party:$partyId") {
+        val created = attach(SupabaseProvider.client, scope, onMessage, onPresence, onConnected)
+        created.subscribe(blockUntilSubscribed = false)
+    }
+
+    /**
+     * Builds the channel and starts every listener, WITHOUT joining yet. Order matters: supabase-kt 3.6.0
+     * asks the server for presence on join only if a presence callback is already registered
+     * (`RealtimeChannelImpl.shouldEnablePresence`; `presence { enabled }` is not settable), and the backend's
+     * Realtime delivers presence only to channels that asked on join. The collectors start UNDISPATCHED and
+     * [yield] lets their producers register before [open] subscribes. Pinned by PartyChannelPresenceTest.
+     */
+    internal suspend fun attach(
+        client: SupabaseClient,
+        scope: CoroutineScope,
+        onMessage: (String, JsonObject) -> Unit,
+        onPresence: (joins: Map<String, Presence>, leaves: Map<String, Presence>) -> Unit,
+        onConnected: (Boolean) -> Unit,
+    ): RealtimeChannel {
+        val created = client.channel("watch-party:$partyId") {
             isPrivate = true
             broadcast {
                 receiveOwnBroadcasts = false
@@ -50,7 +69,7 @@ internal class PartyChannel(
             created.status.collect { status -> onConnected(status == RealtimeChannel.Status.SUBSCRIBED) }
         }
         yield()
-        created.subscribe(blockUntilSubscribed = false)
+        return created
     }
 
     suspend fun send(event: String, payload: JsonObject) {

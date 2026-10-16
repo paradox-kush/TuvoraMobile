@@ -170,6 +170,8 @@ internal fun partyErrorOf(code: String?): PartyError? = when (code) {
     "party_ended" -> PartyError.Ended
     "rate_limited" -> PartyError.RateLimited
     "unavailable" -> PartyError.Unavailable
+    // nuvio-backend answers anonymous / missing sessions in-band instead of raising.
+    "sign_in_required" -> PartyError.SignInRequired
     else -> PartyError.Network
 }
 
