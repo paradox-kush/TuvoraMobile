@@ -319,8 +319,8 @@ struct SetupCodeScreen: View {
     }
 }
 
-/// A key on the compact pad: one focus target, gold ring and a lift on focus.
-private struct KeypadKey: View {
+/// A key on the compact pad: one focus target, gold ring and a lift on focus (also the watch-party keypad).
+struct KeypadKey: View {
     let label: String
     let action: () -> Void
     @Environment(\.nuvio) private var colors
@@ -345,7 +345,8 @@ private struct KeypadKey: View {
 
 /// Continue: dimmed until twelve valid characters are in, but still focusable (a disabled button would drop
 /// focus out from under the viewer mid-typing); pressing it early does nothing.
-private struct ContinueButton: View {
+struct ContinueButton: View {
+    var title = "Continue"
     let enabled: Bool
     let action: () -> Void
     @Environment(\.nuvio) private var colors
@@ -353,7 +354,7 @@ private struct ContinueButton: View {
 
     var body: some View {
         Button { if enabled { action() } } label: {
-            Text("Continue").font(NuvioType.labelLarge)
+            Text(ui: title).font(NuvioType.labelLarge)
                 .foregroundStyle(focused ? Color.black : colors.textPrimary.opacity(enabled ? 1 : 0.4))
                 .padding(.horizontal, dp(22)).padding(.vertical, dp(10))
                 .background(Capsule().fill(focused ? Color.white : (enabled ? colors.focusBackground : colors.backgroundCard)))

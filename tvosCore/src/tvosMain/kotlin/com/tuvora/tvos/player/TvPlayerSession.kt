@@ -28,6 +28,9 @@ import com.nuvio.app.features.player.decodePlayerStreamInfo
 import com.nuvio.app.features.player.skip.SkipInterval
 import com.nuvio.app.features.player.skip.SkipIntroRepository
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
+import com.tuvora.tvos.party.TvParty
+import com.tuvora.tvos.party.TvPartyPlayerControls
+import com.tuvora.tvos.party.TvPartyPlayerLink
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -132,7 +135,7 @@ interface TvVideoFormatSource {
  * when the viewer leaves. State is polled only while attached, so nothing runs off screen.
  */
 class TvPlayerSession(
-    private val launch: PlayerLaunch,
+    internal val launch: PlayerLaunch,
     /**
      * Live only: fetches a fresh address for a reconnect. Stalker links are single-use (create_link),
      * so replaying the old URL fails; Xtream/M3U just return the same address. Null = replay.
@@ -219,6 +222,33 @@ class TvPlayerSession(
     }
     private var wantsToPlay = true
 
+    /**
+     * Watch party (shared PartyRepository / PartySync): while a party is running, remote presses go through
+     * it, so a host-only party is respected and every change is told to the party. Live TV never joins.
+     */
+    val party: TvPartyPlayerLink by lazy { TvPartyPlayerLink(launch, isLive, partyControls) }
+
+    /** Can this title be watched together (not live TV, not catch-up)? */
+    val canWatchTogether: Boolean get() = TvParty.canHost(launch, isLive)
+
+    // What the party loop reads and does (never routed back through the party).
+    private val partyControls = object : TvPartyPlayerControls {
+        override val partyPositionMs: Long get() = _state.value.positionMs
+        override val partyDurationMs: Long get() = _state.value.durationMs
+        override val partyIsPlaying: Boolean get() = _state.value.isPlaying
+        override val partyIsLoading: Boolean get() = _state.value.isLoading
+        override val partyIsEnded: Boolean get() = _state.value.isEnded
+        override val partySpeed: Float get() = _state.value.speed
+        override val partyStarted: Boolean get() = playbackStarted
+        override val partyHasError: Boolean get() = _state.value.errorMessage != null
+        override val partyWantsToPlay: Boolean get() = wantsToPlay
+        override fun partyPlay() { if (!closed) { wantsToPlay = true; bridge?.play() } }
+        override fun partyPause() { wantsToPlay = false; bridge?.pause() }
+        override fun partyAdoptPlaying(playing: Boolean) { wantsToPlay = playing }
+        override fun partySeek(positionMs: Long) { if (!isLive) { bridge?.seekTo(positionMs.coerceAtLeast(0L)); scheduleSeekSave() } }
+        override fun partySpeed(rate: Float) { bridge?.setPlaybackSpeed(rate) }
+    }
+
     // Sources that keep their own watched state (media servers): the neutral session-reporter registry,
     // fed from the same moments as the phone (start once playing, a tick, pause/seek landing, stop on flush).
     private val sessionVideoId = launch.videoId ?: launch.parentMetaId
@@ -304,6 +334,7 @@ class TvPlayerSession(
         loadSkipIntervals()
         fetchAddonSubtitles()
         if (bridge == null) open(_state.value.lane, launch.initialPositionMs)
+        party.attach(scope)
         if (pollJob?.isActive == true) return
         pollJob = scope.launch {
             while (isActive) {
@@ -315,6 +346,7 @@ class TvPlayerSession(
 
     fun detach() {
         vodRetry.cancel()
+        party.detach()
         pollJob?.cancel()
         pollJob = null
         save(flush = true)
@@ -347,9 +379,14 @@ class TvPlayerSession(
         log.i { "display mode switch ${if (inProgress) "started" else "settled"}" }
     }
 
-    fun togglePlayPause() = if (_state.value.isPlaying) pause() else play()
-    fun play() { if (!closed) { wantsToPlay = true; bridge?.play(); reportAfterToggle() } }
-    fun pause() { wantsToPlay = false; bridge?.pause(); reportAfterToggle() }
+    fun togglePlayPause() {
+        if (closed) return
+        if (party.toggle()) { reportAfterToggle(); return }
+        if (_state.value.isPlaying) pause() else play()
+    }
+    fun play() { if (!closed) { if (party.setPlaying(true)) reportAfterToggle() else { wantsToPlay = true; bridge?.play(); reportAfterToggle() } } }
+    fun pause() { if (party.setPlaying(false)) reportAfterToggle() else { wantsToPlay = false; bridge?.pause(); reportAfterToggle() } }
+
 
     /** A pause / resume is told to a source that keeps its own state once the engine has caught up (the next poll). */
     private fun reportAfterToggle() {
@@ -359,12 +396,14 @@ class TvPlayerSession(
 
     fun seekBy(offsetMs: Long) {
         if (isLive) return
+        if (party.seek(_state.value.positionMs + offsetMs)) return
         bridge?.seekBy(offsetMs)
         scheduleSeekSave()
     }
 
     fun seekTo(positionMs: Long) {
         if (isLive) return
+        if (party.seek(positionMs)) return
         bridge?.seekTo(positionMs.coerceAtLeast(0L))
         scheduleSeekSave()
     }
@@ -404,7 +443,7 @@ class TvPlayerSession(
     /** 0 = fit, 1 = fill, 2 = zoom (NuvioPlayerBridge.setResizeMode). */
     fun setResizeMode(mode: Int) { bridge?.setResizeMode(mode) }
 
-    fun setSpeed(speed: Float) { bridge?.setPlaybackSpeed(speed) }
+    fun setSpeed(speed: Float) { if (!party.speed(speed)) bridge?.setPlaybackSpeed(speed) }
 
     fun retry() {
         if (closed) return

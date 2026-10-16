@@ -9,11 +9,15 @@ import TuvoraCore
 /// Categories follow NuvioTV's order. Left out: Advanced and Debug.
 struct SettingsScreen: View {
     enum Category: String, CaseIterable, Identifiable {
-        case account, profiles, appearance, layout, discovery, integrations, playback, tracking, about
+        case account, profiles, appearance, layout, discovery, integrations, playback, tracking, party, about
         var id: String { rawValue }
         /// The rail's categories. Content & Discovery manages add-ons and plugins, which the App Store
         /// build compiles out (the phone's store build drops the same row).
-        static var visible: [Category] { allCases.filter { $0 != .discovery || StoreCopy.showsContentDiscovery } }
+        static var visible: [Category] {
+            allCases.filter { $0 != .discovery || StoreCopy.showsContentDiscovery }
+                // NuvioTV hides Watch party while the server has it off (watch_party_enabled / capability).
+                .filter { $0 != .party || TvParty.shared.state.value.available }
+        }
         var title: String {
             switch self {
             case .account: return "Account"
@@ -24,6 +28,7 @@ struct SettingsScreen: View {
             case .integrations: return "Integrations"
             case .playback: return "Playback"
             case .tracking: return "Tracking"
+            case .party: return "Watch party"
             case .about: return "About"
             }
         }
@@ -37,6 +42,7 @@ struct SettingsScreen: View {
             case .integrations: return "md_link"
             case .playback: return "md_play_arrow"
             case .tracking: return "md_sync"
+            case .party: return "md_people"
             case .about: return "md_info"
             }
         }
@@ -47,6 +53,7 @@ struct SettingsScreen: View {
     @StateObject private var dialogs = SettingsDialogs()
     @StateObject private var integrations = IntegrationsModel()
     @StateObject private var integrationsNav = IntegrationsNav()
+    @StateObject private var party = PartyModel()
     /// Simulator smoke hook: `-smokeSettings <category>` opens a category, `-smokeSettingsDialog <addPlaylist|signOut|engine|playlistDetails|setupCode>` a dialog.
     @State private var selected: Category = {
         let args = AppArguments.list
@@ -119,6 +126,10 @@ struct SettingsScreen: View {
         .environmentObject(dialogs)
         .task { await model.observe() }
         .task { await integrations.observe() }
+        .task { await party.observe() }
+        .onReceive(DeepLinkCenter.shared.$partyCode) { code in if code != nil && party.view.available { selected = .party; railFocus = .party } }
+        // The server turned watch parties off (or has none): leave the category that just disappeared.
+        .onChange(of: party.view.available) { _, available in if !available && selected == .party { selected = .account; railFocus = .account } }
         .task {
             // Land on the selected category's rail item (defaultFocus alone loses to the first item
             // when the screen appears under the shell).
@@ -198,6 +209,7 @@ struct SettingsScreen: View {
         case .integrations: IntegrationsSettingsDetail(nav: integrationsNav, model: integrations, settings: model)
         case .playback: PlaybackSettingsDetail(model: model)
         case .tracking: TrackingSettingsDetail(model: integrations)
+        case .party: WatchPartySettingsDetail(party: party)
         case .about: AboutSettingsDetail()
         }
     }

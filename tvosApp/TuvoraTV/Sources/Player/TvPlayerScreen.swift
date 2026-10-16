@@ -51,6 +51,10 @@ struct TvPlayerScreen: View {
     @FocusState private var startOverFocused: Bool
     /// This screen holds Live TV for display frame-rate matching (LiveDisplayCriteriaController).
     @State private var holdsLiveDisplay = false
+    /// Watch party: the shared party, the player's party line, and the last party message (a few seconds).
+    @StateObject private var party = PartyModel()
+    @State private var partyLine: String?
+    @State private var partyMessage: String?
 
     /// The Skip button is up: a segment is playing and it hasn't auto-hidden (or the controls are showing).
     private var skipVisible: Bool {
@@ -109,10 +113,14 @@ struct TvPlayerScreen: View {
             #endif
 
             if let state {
+                if panel == nil && overlay == nil {
+                    PartyPlayerPill(view: party.view, line: partyLine, message: partyMessage, controlsVisible: controlsVisible)
+                }
                 PlayerChrome(session: session, state: state, scrubMs: scrubMs, visible: controlsVisible || scrubMs != nil,
                              skipFlash: skipFlash,
                              onShowPanel: { panel = $0 }, onShowOverlay: { overlay = $0 }, onActivity: bumpControls,
                              onReport: { report(trigger: state.errorMessage != nil ? "error" : "player") },
+                             partyAvailable: party.view.available || party.view.inParty,
                              onSeekBarFocus: { seekBarFocused = $0 })
                     // Nothing under a dialog or panel may take focus from it.
                     .disabled(panel != nil || overlay != nil)
@@ -167,6 +175,9 @@ struct TvPlayerScreen: View {
                     Color.black.opacity(0.35).ignoresSafeArea().transition(.opacity)
                     if panel == .episodes || panel == .sources {
                         ContentPanel(session: session, kind: panel) { self.panel = nil; bumpControls() }
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    } else if panel == .party {
+                        PartyPlayerPanel(session: session, view: party.view) { self.panel = nil; bumpControls() }
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     } else {
                         TrackPanel(session: session, kind: panel) { self.panel = nil; bumpControls() }
@@ -285,9 +296,19 @@ struct TvPlayerScreen: View {
         .onChange(of: startOverVisible) { _, visible in
             if visible { DispatchQueue.main.async { startOverFocused = true } }
         }
+        .task { await party.observe() }
+        // The party's news, briefly on the player's party line (the shell's toast is under the player).
+        .task {
+            for await text in TvParty.shared.messages {
+                partyMessage = text
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if partyMessage == text { partyMessage = nil }
+            }
+        }
         .task {
             for await next in session.state {
                 state = next
+                partyLine = session.party.line()
                 smokeLog("SMOKE player lane=%@ gen=%d loading=%d playing=%d pos=%lld dur=%lld err=%@ skip=%@ startOver=%@ speed=%.2f subDelay=%d addonSub=%@ segments=%d audioDelay=%d/%d",
                       "\(next.lane)", next.engineGeneration, next.isLoading, next.isPlaying,
                       next.positionMs, next.durationMs, next.errorMessage ?? "-", next.skipSegment?.label ?? "-",
@@ -431,7 +452,7 @@ private struct EmbeddedRemoteCommands: ViewModifier {
     }
 }
 
-enum PlayerPanel: Hashable { case subtitles, audio, aspect, style, episodes, sources }
+enum PlayerPanel: Hashable { case subtitles, audio, aspect, style, episodes, sources, party }
 enum PlayerOverlay: Hashable { case speed, info }
 
 /// Hosts the current engine's view controller; swaps it when the session escalates engines.
@@ -486,6 +507,7 @@ private struct PlayerChrome: View {
     let onShowOverlay: (PlayerOverlay) -> Void
     let onActivity: () -> Void
     let onReport: () -> Void
+    var partyAvailable = false
     var onSeekBarFocus: (Bool) -> Void = { _ in }
     @State private var reported = false
     @Environment(\.nuvio) private var colors
@@ -551,6 +573,9 @@ private struct PlayerChrome: View {
                 PlayerButton(icon: "ic_player_audio_filled") { onShowPanel(.audio) }
                 PlayerButton(icon: "ic_player_aspect_ratio") { onShowPanel(.aspect) }
                 if !state.isLive { PlayerButton(icon: "md_speed") { onShowOverlay(.speed) } }
+                if partyAvailable && session.canWatchTogether {
+                    PlayerButton(icon: "md_people") { onShowPanel(.party) }.accessibilityIdentifier("player.party")
+                }
                 PlayerButton(icon: "md_info") { onShowOverlay(.info) }
                 PlayerButton(icon: reported ? "md_check_circle" : "md_flag") {
                     guard !reported else { return }
@@ -698,7 +723,7 @@ private struct TrackPanel: View {
                             }
                         case .style:
                             SubtitleStyleSection(session: session, supported: session.state.value.subtitleStyleSupported)
-                        case .episodes, .sources:
+                        case .episodes, .sources, .party:
                             EmptyView()
                         }
                     }

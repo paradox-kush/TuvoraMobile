@@ -41,7 +41,11 @@ struct RootView: View {
         .overlay(alignment: .topLeading) { EngineLedgerMarker() }
         #endif
         // Top Shelf items open here (tuvora://title?…); MainShell opens them once the gate reaches Main.
-        .onOpenURL { url in if let link = DeepLink(url: url) { DeepLinkCenter.shared.pending = link } }
+        // Watch-party links (tuvora://party/<code>) open Settings › Watch party with the code typed in.
+        .onOpenURL { url in
+            if let code = TvParty.shared.codeFromLink(url: url.absoluteString) { DeepLinkCenter.shared.partyCode = code }
+            else if let link = DeepLink(url: url) { DeepLinkCenter.shared.pending = link }
+        }
     }
 
     private static func smokeSessionFromArguments() -> TvPlayerSession? {

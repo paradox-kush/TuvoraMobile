@@ -45,6 +45,10 @@ struct DeepLink: Equatable {
         return c.url!
     }
 
+    init(type: String, id: String, videoId: String?, play: Bool) {
+        self.type = type; self.id = id; self.videoId = videoId; self.play = play
+    }
+
     init?(url: URL) {
         guard url.scheme == "tuvora", url.host == "title",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
@@ -63,4 +67,6 @@ final class DeepLinkCenter: ObservableObject {
     @Published var pending: DeepLink?
     /// The IPTV hub's empty state asked for the setup-code screen: the shell switches to Settings, which opens it.
     @Published var openSetupCode = false
+    /// A watch-party link (tuvora://party/<code>): the shell opens Settings › Watch party with the code typed in.
+    @Published var partyCode: String?
 }
