@@ -127,7 +127,7 @@ object SupabaseProvider {
                 // (auth-js#213; see AuthManager single-refresher discipline). Return the CURRENT
                 // token only: alwaysAutoRefresh keeps it fresh and propagates via setAuth, and a
                 // null (session-less) token is simply omitted so the socket authenticates by apikey.
-                accessToken = { auth.currentAccessTokenOrNull() }
+                accessToken = realtimeAccessToken
                 customUrl = SupabaseEndpointConfig.realtimeUrl(config.normalizedSupabaseUrl)
                 reconnectDelay = 3.seconds
                 websocketFactory = RealtimeSocketFactory { url ->
@@ -139,3 +139,11 @@ object SupabaseProvider {
         nextClient
     }
 }
+
+/**
+ * The token every Realtime channel join carries (`access_token`): the signed-in user's session JWT, read, never
+ * refreshed here (Auth's alwaysAutoRefresh is the one refresher). Null when signed out: supabase-kt then sends the
+ * client's API key, which Realtime treats as anon. Private channels (watch-party:<id>, RLS on realtime.messages)
+ * authorise on this JWT. Pinned by RealtimeAccessTokenTest.
+ */
+internal val realtimeAccessToken: suspend SupabaseClient.() -> String? = { auth.currentAccessTokenOrNull() }
