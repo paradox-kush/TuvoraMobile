@@ -65,6 +65,12 @@ val tvosExcludedCommon = listOf(
     "com/nuvio/app/features/player/PlayerAutoSkipNotification.kt",
     // Compose settings page whose UI moved behind shared Chip/Settings* helpers; Apple TV settings are SwiftUI.
     "com/nuvio/app/features/settings/RatingsSettings.kt",
+    // Upstream subtitle AutoSync (16th sync, 2026-10-16): engine glue on the Compose player runtime
+    // (PlayerScreenRuntime / PlayerEngineController) and its Compose settings rows. Apple TV has its own
+    // player session and SwiftUI settings; AutoSync is a named gap there (needs the sidecar API, as on TV).
+    "com/nuvio/app/features/player/PlayerAutoSyncAdapter.kt",
+    "com/nuvio/app/features/player/PlayerRuntimeAutoSync.kt",
+    "com/nuvio/app/features/settings/AutoSyncPlaybackSettings.kt",
 )
 val tvosExcludedIos = listOf(
     // iPhone-only APIs; Apple TV supplies its own actual in tvosCore/src/tvosMain (named gaps).
@@ -241,6 +247,8 @@ kotlin {
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/epg"))
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/iptv/epg"))
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/iptv/overlay/customgroup"))
+            // Watch party: the shared rules Apple TV's party screen and player sync run on.
+            kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/party"))
         }
         commonTest.dependencies {
             implementation("io.ktor:ktor-client-mock:${libs.versions.ktor.get()}")
