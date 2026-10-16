@@ -1,6 +1,8 @@
 package com.nuvio.app.features.player
 
 import android.app.Application
+import android.content.Context
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.nuvio.app.features.details.MetaDetails
@@ -21,6 +23,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -34,6 +37,7 @@ class PlayerAutoPlayTest {
     @get:Rule
     val compose = createComposeRule()
     private val scope = CoroutineScope(StandardTestDispatcher())
+    private val playerVisible = mutableStateOf(true)
     private val episodes = (1..8).map {
         MetaVideo(id = "autoplay-test:1:$it", title = "Episode $it", season = 1, episode = it)
     }
@@ -43,8 +47,13 @@ class PlayerAutoPlayTest {
 
     @After
     fun cleanup() {
+        playerVisible.value = false
+        compose.waitForIdle()
         scope.cancel()
         WatchProgressRepository.clearLocalState()
+        RuntimeEnvironment.getApplication()
+            .getSharedPreferences("nuvio_watch_progress", Context.MODE_PRIVATE)
+            .edit().clear().commit()
     }
 
     @Test
@@ -318,13 +327,14 @@ class PlayerAutoPlayTest {
     }
 
     private fun startRuntime(settings: PlayerSettingsUiState? = null): PlayerScreenRuntime {
+        WatchProgressStorage.initialize(RuntimeEnvironment.getApplication())
         // clearLocalState() only resets memory; ensureLoaded() then reloads the persisted payload.
         // Once another class has initialised WatchProgressStorage, earlier tests' saves would come back.
         WatchProgressStorage.savePayload(ProfileRepository.activeProfileId, "")
         WatchProgressRepository.clearLocalState()
         val runtime = runtime()
         if (settings != null) runtime.playerSettingsUiState = settings
-        compose.setContent { runtime.BindPlayerRuntimeEffects() }
+        compose.setContent { if (playerVisible.value) runtime.BindPlayerRuntimeEffects() }
         compose.runOnIdle { assertEquals(2, runtime.nextEpisodeInfo?.episode) }
         return runtime
     }

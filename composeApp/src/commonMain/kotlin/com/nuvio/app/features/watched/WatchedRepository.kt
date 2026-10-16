@@ -16,6 +16,7 @@ import com.nuvio.app.features.tracking.TrackingSettingsRepository
 import com.nuvio.app.features.tracking.WatchProgressSource
 import com.nuvio.app.features.tracking.effectiveWatchProgressSource
 import com.nuvio.app.features.tracking.providerId
+import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesRepository
 import com.nuvio.app.features.watching.sync.SupabaseWatchedSyncAdapter
 import com.nuvio.app.features.watching.sync.WatchedDeltaEvent
 import com.nuvio.app.features.watching.sync.WatchedSyncAdapter
@@ -829,6 +830,9 @@ object WatchedRepository {
     }
 
     fun markWatched(items: Collection<WatchedItem>) {
+        items.filter { it.isEpisode }.map { it.id }.distinct().forEach {
+            ContinueWatchingPreferencesRepository.removeDismissedNextUpKeysForContent(it)
+        }
         markWatched(items = items, trackerHistorySync = WatchedTrackerHistorySync.Mirror)
     }
 

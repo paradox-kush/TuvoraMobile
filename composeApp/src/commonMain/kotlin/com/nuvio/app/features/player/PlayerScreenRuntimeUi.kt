@@ -9,16 +9,18 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.runtime.mutableStateOf
 import com.nuvio.app.core.analytics.Breadcrumbs
 import com.nuvio.app.core.analytics.LivePlaybackFreezeReporter
 import com.nuvio.app.core.analytics.LivePlaybackReconnector
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.app.features.p2p.P2pStreamingState
+import com.nuvio.app.features.party.PartyRepository
 import com.nuvio.app.features.p2p.formatP2pMegabytes
 import com.nuvio.app.features.p2p.formatP2pSpeed
 import com.nuvio.app.features.player.skip.internalSkipAction
@@ -118,6 +120,8 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
     }
     val gestureCallbacks = rememberSurfaceGestureCallbacks()
     val playbackGesturesEnabled = initialLoadCompleted && errorMessage == null
+
+    BindAutoSyncRuntimeEffects() // AutoSync hook
 
     Box(
         modifier = Modifier
@@ -301,6 +305,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
             p2pRebufferProgress = p2pRebufferProgress,
         )
         RenderPlayerModals(displayedPositionMs = displayedPositionMs)
+        RenderParty(runtime = runtime)
     }
 }
 
@@ -330,6 +335,8 @@ private fun PlayerScreenRuntime.currentInitialPositionRequestKey(): String? {
 @Composable
 private fun PlayerScreenRuntime.RenderPlayerControls(displayedPositionMs: Long, isEpisode: Boolean) {
     val isInPip = rememberIsInPictureInPicture()
+    val partyState by PartyRepository.state.collectAsStateWithLifecycle()
+    val partyActive = partyState.party != null
     AnimatedVisibility(
         visible = PlayerChromeVisibilityPolicy.shellVisible(
             controlsVisible = controlsVisible,
@@ -369,6 +376,15 @@ private fun PlayerScreenRuntime.RenderPlayerControls(displayedPositionMs: Long, 
                 flushWatchProgress()
                 args.onBack()
             },
+            onPartyClick = if (PartyRepository.available.collectAsStateWithLifecycle().value) {
+                {
+                    showPartyPanel = true
+                    controlsVisible = false
+                }
+            } else {
+                null
+            },
+            partyActive = partyActive,
             onTogglePlayback = { togglePlayback() },
             onSeekBack = { seekBy(-10_000L) },
             onSeekForward = { seekBy(10_000L) },
@@ -400,11 +416,13 @@ private fun PlayerScreenRuntime.RenderPlayerControls(displayedPositionMs: Long, 
                 !nextEpisodeAutoPlaySearching && nextEpisodeAutoPlayCountdown == null
             ) {
                 {
-                    cancelNextEpisodeAutoPlay()
-                    nextEpisodeFlowIsManual = true
-                    nextEpisodeCardDismissed = false
-                    showNextEpisodeCard = true
-                    playNextEpisode()
+                    if (!partyBlocksControl()) {
+                        cancelNextEpisodeAutoPlay()
+                        nextEpisodeFlowIsManual = true
+                        nextEpisodeCardDismissed = false
+                        showNextEpisodeCard = true
+                        playNextEpisode()
+                    }
                 }
             } else {
                 null
@@ -469,9 +487,16 @@ private fun PlayerScreenRuntime.RenderPlayerControls(displayedPositionMs: Long, 
                 scrubbingPositionMs = positionMs
             },
             onScrubFinished = { positionMs ->
-                finishTimelineScrub(positionMs)
-                playerController?.seekTo(positionMs)
-                scheduleProgressSyncAfterSeek()
+                val targetMs = if (isPartyControlLocked) ownSeekTarget(positionMs) else positionMs
+                if (targetMs == null) {
+                    isScrubbingTimeline = false
+                    scrubbingPositionMs = null
+                } else {
+                    finishTimelineScrub(targetMs)
+                    playerController?.seekTo(targetMs)
+                    scheduleProgressSyncAfterSeek()
+                    publishPartyPlayback(positionMs = targetMs)
+                }
             },
             horizontalSafePadding = horizontalSafePadding,
             modifier = Modifier.fillMaxSize(),
@@ -534,10 +559,14 @@ private fun BoxScope.RenderPlaybackOverlays(
         onSkipInterval = { interval ->
             interval.internalSkipAction(skipIntervals, playbackSnapshot.durationMs)?.let { action ->
                 val durationMs = playbackSnapshot.durationMs
-                val seekMs = if (durationMs > 0L) action.targetMs.coerceAtMost(durationMs - 1) else action.targetMs
-                playerController?.seekTo(seekMs)
-                scheduleProgressSyncAfterSeek()
-                skipIntervalDismissed = true
+                val requestedMs = if (durationMs > 0L) action.targetMs.coerceAtMost(durationMs - 1) else action.targetMs
+                val seekMs = if (isPartyControlLocked) ownSeekTarget(requestedMs) else requestedMs
+                if (seekMs != null) {
+                    playerController?.seekTo(seekMs)
+                    scheduleProgressSyncAfterSeek()
+                    publishPartyPlayback(positionMs = seekMs)
+                    skipIntervalDismissed = true
+                }
             }
         },
         onDismissSkipInterval = { skipIntervalDismissed = true },
@@ -551,10 +580,12 @@ private fun BoxScope.RenderPlaybackOverlays(
         nextEpisodeAutoPlayCountdown = nextEpisodeAutoPlayCountdown,
         blurUnwatchedEpisodes = metaScreenSettingsUiState.blurUnwatchedEpisodes,
         onPlayNextEpisode = {
+            if (!partyBlocksControl()) {
             // Fork: a user tap supersedes a running auto-advance countdown and takes the manual path.
             cancelNextEpisodeAutoPlay()
             nextEpisodeFlowIsManual = true
             playNextEpisode()
+            }
         },
         onDismissNextEpisode = {
             cancelNextEpisodeAutoPlay()
@@ -640,7 +671,7 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
             useCustomSubtitles = true
             preferredSubtitleSelectionApplied = true
             persistAddonSubtitlePreference(addon)
-            playerController?.setSubtitleUri(addon.url)
+            attachSelectedAddonSubtitleWithAutoSync(addon.url) // AutoSync hook
             if (hasBurnedInServerSubtitle) clearServerSubtitleTrack()
         },
         onFetchAddonSubtitles = { fetchAddonSubtitlesForActiveItem() },

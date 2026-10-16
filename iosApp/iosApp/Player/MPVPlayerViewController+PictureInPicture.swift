@@ -632,6 +632,7 @@ extension MPVPlayerViewController: PictureInPictureControllerDelegate {
     }
 
     func pictureInPictureControllerDidStart(_ controller: PictureInPictureController) {
+        SystemUI.shared.setPictureInPicturePlaceholder(self, visible: true)
         cancelPictureInPictureStartTimeout()
         cancelAutomaticPictureInPictureStart(stopPriming: false)
         isPictureInPictureStarting = false
@@ -641,6 +642,7 @@ extension MPVPlayerViewController: PictureInPictureControllerDelegate {
     }
 
     func pictureInPictureController(_ controller: PictureInPictureController, failedToStart error: Error) {
+        SystemUI.shared.setPictureInPicturePlaceholder(self, visible: false)
         let shouldResumeInlinePlayback = preservePlaybackDuringPictureInPictureStart
         cancelPictureInPictureStartTimeout()
         cancelAutomaticPictureInPictureStart(stopPriming: false)
@@ -676,6 +678,7 @@ extension MPVPlayerViewController: PictureInPictureControllerDelegate {
     }
 
     func pictureInPictureControllerDidStop(_ controller: PictureInPictureController) {
+        SystemUI.shared.setPictureInPicturePlaceholder(self, visible: false)
         cancelPictureInPictureStartTimeout()
         cancelAutomaticPictureInPictureStart(stopPriming: false)
         clearPictureInPictureStartPlaybackPreservation()

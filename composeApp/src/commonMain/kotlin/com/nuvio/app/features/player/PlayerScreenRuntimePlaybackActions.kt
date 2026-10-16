@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.player_engine_switching_manual_message
 import kotlin.math.abs
+import kotlin.time.TimeSource
 
 internal fun PlayerScreenRuntime.finishTimelineScrub(positionMs: Long) {
     lastManualSkipSeekPositions = playbackSnapshot.positionMs to positionMs
@@ -32,12 +33,14 @@ internal fun PlayerScreenRuntime.updatePlaybackSnapshot(
     playbackKey: PlaybackKey = activePlaybackKey,
 ): Boolean {
     if (playbackKey != activePlaybackKey) return false
-    playbackSnapshot = if (snapshot.durationMs <= 0L && playbackSnapshotKey == playbackKey) {
-        snapshot.copy(durationMs = playbackSnapshot.durationMs)
+    val reported = if (partyRateNudge != null) snapshot.copy(playbackSpeed = partyBaseRate()) else snapshot
+    playbackSnapshot = if (reported.durationMs <= 0L && playbackSnapshotKey == playbackKey) {
+        reported.copy(durationMs = playbackSnapshot.durationMs)
     } else {
-        snapshot
+        reported
     }
     playbackSnapshotKey = playbackKey
+    playbackSnapshotMark = TimeSource.Monotonic.markNow()
     val targetPositionMs = scrubbingPositionMs ?: return true
     if (!isScrubbingTimeline && (
             !snapshot.isLoading || snapshot.isEnded ||
@@ -117,6 +120,7 @@ internal fun PlayerScreenRuntime.currentLaunch(launch: PlayerLaunch): PlayerLaun
         torrentFileIdx = activeTorrentFileIdx,
         torrentFilename = activeTorrentFilename,
         torrentTrackers = activeTorrentTrackers,
+        sourceFilename = activeSourceFilename,
         initialPositionMs = positionMs ?: activeInitialPositionMs,
         initialProgressFraction = activeInitialProgressFraction.takeIf { positionMs == null },
     )

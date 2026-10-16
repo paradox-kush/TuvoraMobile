@@ -1,6 +1,8 @@
 package com.nuvio.app.core.deeplink
 
 import com.nuvio.app.core.tracking.ensureTrackingProvidersRegistered
+import com.nuvio.app.features.party.PARTY_CODE_LENGTH
+import com.nuvio.app.features.party.normalizePartyCode
 import com.nuvio.app.features.player.infusePlaybackCallbacks
 import com.nuvio.app.features.tracking.TrackingProviderRegistry
 import io.ktor.http.Url
@@ -29,6 +31,9 @@ internal sealed interface AppDeepLink {
     data class SetupCode(val code: String) : AppDeepLink {
         override fun toString(): String = "SetupCode(code=[redacted])"
     }
+    data class Party(
+        val code: String,
+    ) : AppDeepLink
 }
 
 internal object AppDeepLinkRepository {
@@ -79,6 +84,8 @@ internal fun parseAppDeepLink(url: String): AppDeepLink? {
         val segments = parsedUrl.pathSegments.map(String::trim).filter(String::isNotBlank)
         return if (scheme == "https" && host == "tuvora.co" && segments.firstOrNull() == "s") {
             segments.getOrNull(1)?.let(AppDeepLink::SetupCode)
+        } else if (scheme == "https" && host == "nuvio.tv" && segments.firstOrNull() == "party") {
+            partyDeepLink(segments.getOrNull(1))
         } else {
             null
         }
@@ -90,10 +97,10 @@ internal fun parseAppDeepLink(url: String): AppDeepLink? {
             null
         }
     }
-    if (scheme != "nuvio") return null
-
     val host = parsedUrl.host.lowercase()
     val pathSegments = parsedUrl.pathSegments.map(String::trim).filter(String::isNotBlank)
+    if (scheme != "nuvio") return null
+
     return when (host) {
         "meta" -> {
             parseMetaFromParameters(parsedUrl)
@@ -114,6 +121,7 @@ internal fun parseAppDeepLink(url: String): AppDeepLink? {
 
         // nuvio://s/<code> — the same setup link in the app's own scheme.
         "s" -> pathSegments.firstOrNull()?.let(AppDeepLink::SetupCode)
+        "party" -> partyDeepLink(pathSegments.firstOrNull() ?: firstParameter(parsedUrl, "code"))
 
         "auth" -> null
 
@@ -126,6 +134,9 @@ internal fun parseAppDeepLink(url: String): AppDeepLink? {
         }
     }
 }
+
+private fun partyDeepLink(code: String?): AppDeepLink.Party? =
+    code?.let(::normalizePartyCode)?.takeIf { it.length == PARTY_CODE_LENGTH }?.let(AppDeepLink::Party)
 
 private fun parseMetaFromParameters(parsedUrl: Url): AppDeepLink.Meta? {
     val type = firstParameter(parsedUrl, "type", "mediaType", "media_type")
