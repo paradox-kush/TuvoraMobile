@@ -10,6 +10,11 @@ import com.nuvio.app.features.iptv.XtreamItemRegistry
 import com.nuvio.app.features.iptv.XtreamProgram
 import com.nuvio.app.features.iptv.XtreamRepository
 import com.nuvio.app.features.iptv.XtreamSearchIndex
+import com.nuvio.app.features.iptv.CONTENT_TYPE_LIVE
+import com.nuvio.app.features.iptv.typeEnabled
+import com.nuvio.app.features.iptv.overlay.IptvHiddenItemsPolicy
+import com.nuvio.app.features.iptv.overlay.IptvOverlayRepository
+import com.nuvio.app.features.iptv.overlay.OverlaySnapshot
 import com.nuvio.app.features.iptv.match.MatchKind
 import com.nuvio.app.features.iptv.match.XtreamMatchIndex
 import com.nuvio.app.features.iptv.match.XtreamTmdbResolver
@@ -37,6 +42,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Layered because real-panel EPG is sparse-to-empty: name matches alone must produce results.
  */
 object RadarChannelMatcher {
+
+    private val categoryNameCache = mutableMapOf<String, List<IptvHiddenItemsPolicy.NamedCategory>>()
+    private val categoryNameMutex = Mutex()
 
     data class CandidateChannel(
         val playlistId: String,
@@ -328,7 +336,12 @@ object RadarChannelMatcher {
 
     private suspend fun assembleCandidates(): List<CandidateChannel> {
         XtreamRepository.ensureLoaded()
-        val accounts = XtreamRepository.uiState.value.accounts.filter { it.enabled }
+        val overlay = try { IptvOverlayRepository.freshSnapshot() }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) { OverlaySnapshot.EMPTY }
+        val accounts = XtreamRepository.uiState.value.accounts.filter {
+            it.enabled && it.typeEnabled(CONTENT_TYPE_LIVE) && it.categorySelections.live?.isEmpty() != true
+        }
         return buildList {
             for (account in accounts) {
                 // Ktor and the platform stores are suspend/non-blocking. This runs on Default,
@@ -337,7 +350,22 @@ object RadarChannelMatcher {
                 val channels = if (account.sourceType.isM3u()) {
                     com.nuvio.app.features.iptv.IptvClient.forAccount(account).liveChannels(account).getOrDefault(emptyList())
                 } else XtreamSearchIndex.liveChannelsFor(account)
-                for (ch in channels) {
+                val categoryNames = if (SportsChannelVisibilityPolicy.needsCategoryNames(account, overlay)) {
+                    val key = account.id + ":" + revision + ":" + matcherGeneration.value
+                    categoryNameMutex.withLock {
+                        categoryNameCache[key] ?: run {
+                            val result = com.nuvio.app.features.iptv.IptvClient.forAccount(account).liveCategories(account)
+                            (result.exceptionOrNull() as? CancellationException)?.let { throw it }
+                            val names = result.getOrDefault(emptyList()).map { IptvHiddenItemsPolicy.NamedCategory(it.id, it.name) }
+                            if (result.isSuccess) {
+                                categoryNameCache.keys.removeAll { it.startsWith(account.id + ":") && it != key }
+                                categoryNameCache[key] = names
+                            }
+                            names
+                        }
+                    }
+                } else emptyList()
+                for (ch in SportsChannelVisibilityPolicy.filter(account, channels, categoryNames, overlay)) {
                     add(
                         CandidateChannel(
                             playlistId = account.id,
