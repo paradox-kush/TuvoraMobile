@@ -30,6 +30,9 @@ internal object IptvOverlayRepository {
     private fun now() = TraktPlatformClock.nowEpochMs()
     private fun profile() = ProfileRepository.activeProfileId
 
+    /** Read local edits even when the guide has not loaded its asynchronous UI snapshot yet. */
+    suspend fun freshSnapshot(): OverlaySnapshot = IptvOverlayStore.snapshot(profile())
+
     // The overlay is an OPTIONAL layer: a DB/sync/apply failure must degrade to the unfiltered guide,
     // never crash. Every fire-and-forget op runs through here so a throw can't reach the scope's
     // uncaught handler (parity with the TuvoraTV v1.6.0 IPTV-open crash fix).
