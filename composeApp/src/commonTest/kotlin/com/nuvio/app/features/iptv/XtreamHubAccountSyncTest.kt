@@ -69,4 +69,13 @@ class XtreamHubAccountSyncTest {
             "a disabled playlist is not shown, so it must not force a sync",
         )
     }
+    @Test
+    fun `adding or removing the last disabled playlist updates the empty state`() {
+        val empty = XtreamHubUiState(accountsLoaded = true)
+        val disabled = listOf(account("off", enabled = false))
+        assertTrue(hubNeedsAccountSync(empty, disabled))
+        val savedOff = empty.copy(hasConfiguredAccounts = true)
+        assertFalse(hubNeedsAccountSync(savedOff, disabled))
+        assertTrue(hubNeedsAccountSync(savedOff, emptyList()))
+    }
 }

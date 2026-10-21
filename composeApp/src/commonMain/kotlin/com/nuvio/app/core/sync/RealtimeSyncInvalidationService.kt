@@ -119,6 +119,8 @@ object RealtimeSyncInvalidationService {
                         repeat(3) { catchUpAttempt ->
                             try {
                                 SurfaceCatchUp.run(profileId, "subscribed")
+                                // Unsent local choices need a flush even when the server version did not change.
+                                com.nuvio.app.core.sources.DeviceSources.engine().refresh(profileId,false,false)
                                 return@launch
                             } catch (error: CancellationException) {
                                 throw error
@@ -206,6 +208,8 @@ object RealtimeSyncInvalidationService {
             log.d { "Ignoring self-originated sync invalidation id=$eventId originClientId=$originClientId" }
             return
         }
+        val targetSetup = record["device_setup_id"]?.jsonPrimitive?.contentOrNull
+        if (targetSetup != null && targetSetup != com.nuvio.app.core.sources.DeviceSources.engine().state.value.disk.binding?.id) return
         val surface = record["surface"]?.jsonPrimitive?.contentOrNull ?: run {
             log.w { "Received sync invalidation without surface id=$eventId createdAt=$createdAt keys=${record.keys}" }
             return

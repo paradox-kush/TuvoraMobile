@@ -77,6 +77,7 @@ object AuthRepository {
     fun initialize() {
         if (initialized) return
         initialized = true
+        com.nuvio.app.core.sources.DeviceSources.activate()
 
         scope.launch {
             // Load the persisted sync-backend selection up front so SyncBackendState.isLoaded flips

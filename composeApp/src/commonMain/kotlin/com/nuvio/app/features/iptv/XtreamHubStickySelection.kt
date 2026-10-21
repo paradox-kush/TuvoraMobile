@@ -45,7 +45,7 @@ internal fun resolveStickyAccount(
     remembered: String?,
     accounts: List<XtreamAccount>,
 ): String? {
-    val enabled = accounts.filter { it.enabled }
+    val enabled = accounts.filter { it.availableOnDevice }
     return (current ?: remembered)?.takeIf { id -> enabled.any { it.id == id } }
         ?: enabled.firstOrNull()?.id
 }
@@ -68,4 +68,4 @@ internal fun resolveStickySection(remembered: String?, fallback: XtreamHubSectio
  * repeat emission never re-drives the hub.
  */
 internal fun hubNeedsAccountSync(hub: XtreamHubUiState, playlists: List<XtreamAccount>): Boolean =
-    !hub.accountsLoaded || hub.accounts != playlists.filter { it.enabled }
+    !hub.accountsLoaded || hub.hasConfiguredAccounts != playlists.isNotEmpty() || hub.accounts != playlists.filter { it.availableOnDevice }

@@ -32,6 +32,7 @@ data class XtreamUiState(
     /** accountId -> a non-blocking note about a saved edit (B60: the provider check failed, but the
      *  edit was kept). Shown on the playlist's row; cleared by the next edit of that playlist. */
     val saveWarnings: Map<String, String> = emptyMap(),
+    val availabilityRevision: Long = 0,
 )
 
 /**
@@ -59,9 +60,16 @@ object XtreamRepository : IptvCatalog {
     private val _uiState = MutableStateFlow(XtreamUiState())
     val uiState: StateFlow<XtreamUiState> = _uiState.asStateFlow()
 
+    // Settings descriptors carry account defaults; using effective availability would latch a guest disable off.
+    override val devicePreferenceSources = uiState.map { state -> state.accounts.map {
+        com.nuvio.app.core.sources.DeviceSourceDescriptor(it.id,"iptv",it.id,it.name,it.enabled,ProfileRepository.activeProfileId)
+    } }.stateIn(scope,SharingStarted.Eagerly,emptyList())
+    override fun devicePreferencesChanged() {
+        _uiState.update { state -> state.copy(availabilityRevision = state.availabilityRevision + 1, accounts = state.accounts.map { it.copy(devicePreferenceEpoch = state.availabilityRevision + 1) }) }
+    }
     // --- IptvCatalog read port (S3a) ---
-    override fun hasEnabledAccounts(): Boolean = _uiState.value.accounts.any { it.enabled }
-    override val enabledAccountCount: Int get() = _uiState.value.accounts.count { it.enabled }
+    override fun hasEnabledAccounts(): Boolean = _uiState.value.accounts.any { it.availableOnDevice }
+    override val enabledAccountCount: Int get() = _uiState.value.accounts.count { it.availableOnDevice }
     override val hasAnyPlaylist: StateFlow<Boolean> = uiState
         .map { it.accounts.isNotEmpty() }
         .stateIn(scope, SharingStarted.Eagerly, false)
@@ -913,7 +921,7 @@ internal fun serverListChanged(old: XtreamAccount, new: XtreamAccount): Boolean 
 
 /** Stremio content types the enabled accounts serve through the IPTV source lane (live is not a VOD source). */
 internal fun servedStreamTypesOf(accounts: List<XtreamAccount>): Set<String> =
-    accounts.filter { it.enabled }.flatMap { account ->
+    accounts.filter { it.availableOnDevice }.flatMap { account ->
         buildList {
             if (account.typeEnabled(CONTENT_TYPE_MOVIES)) add("movie")
             if (account.typeEnabled(CONTENT_TYPE_SERIES)) add("series")

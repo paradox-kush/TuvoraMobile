@@ -93,7 +93,7 @@ object XtreamItemRegistry {
     fun registerSeries(accountId: String, series: XtreamSeriesItem) = register(resolvedSeries(accountId, series))
 
     fun get(contentId: String): XtreamResolvedItem? =
-        synchronized(itemsLock) { items[contentId] }?.let(::onActiveServer)
+        synchronized(itemsLock) { items[contentId] }?.takeIf { item -> XtreamRepository.uiState.value.accounts.any { it.id == item.accountId && it.availableOnDevice } }?.let(::onActiveServer)
 
     /**
      * Step 0.3: a registered item keeps the stream URL of the server that served its catalog at the
@@ -117,7 +117,7 @@ object XtreamItemRegistry {
     suspend fun getOrLoad(contentId: String): XtreamResolvedItem? {
         get(contentId)?.let { return it }
         val parsed = parseId(contentId) ?: return null
-        val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return null
+        val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId && it.availableOnDevice } ?: return null
         val sid = parsed.id.toIntOrNull()
         val built: XtreamResolvedItem? = when (account.sourceType) {
             SOURCE_TYPE_XTREAM -> {
@@ -192,7 +192,7 @@ object XtreamItemRegistry {
         val parsed = parseId(contentId) ?: return null
         if (parsed.kind != XtreamKind.LIVE) return null
         val streamId = parsed.id.toIntOrNull() ?: return null
-        val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return null
+        val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId && it.availableOnDevice } ?: return null
         return when (account.sourceType) {
             SOURCE_TYPE_M3U_URL -> {
                 M3UClient.ensureIngested(account)
@@ -294,6 +294,7 @@ fun XtreamResolvedItem.toStreamItem(accountName: String, userAgent: String? = nu
         url = url,
         addonName = accountName,
         addonId = XtreamItemRegistry.DIRECT_GROUP_ID,
+        deviceSourceKind = "iptv", deviceSourceRef = accountId,
         streamType = streamType,
         behaviorHints = behaviorHints,
     )

@@ -45,7 +45,7 @@ internal object XtreamStreamSourceProvider : StreamSourceProvider {
             else -> return emptyList()
         }
         return accounts.filter {
-            it.enabled &&
+            it.availableOnDevice &&
                 (it.sourceType == SOURCE_TYPE_XTREAM || it.sourceType == SOURCE_TYPE_STALKER) &&
                 XtreamStreamSource.offersKind(it, kind)
         }

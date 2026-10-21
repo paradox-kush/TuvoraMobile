@@ -217,6 +217,7 @@ internal fun PlayerScreenRuntime.sourceSwapStart(): SourceSwapStart =
     )
 
 internal fun PlayerScreenRuntime.switchToP2pSourceStream(stream: StreamItem) {
+    if (!stream.availableOnDevice) return
     val infoHash = stream.p2pInfoHash ?: return
     if (!P2pSettingsRepository.isVisible) return
     if (!P2pSettingsRepository.uiState.value.p2pEnabled) {
@@ -262,6 +263,7 @@ internal fun PlayerScreenRuntime.switchToP2pEpisodeStream(
     episode: MetaVideo,
     isAutoPlay: Boolean = false,
 ) {
+    if (!stream.availableOnDevice) return
     val infoHash = stream.p2pInfoHash ?: return
     if (!P2pSettingsRepository.isVisible) return
     if (!P2pSettingsRepository.uiState.value.p2pEnabled) {
@@ -328,6 +330,7 @@ internal fun PlayerScreenRuntime.switchToSource(
     stream: StreamItem,
     saveForReuse: Boolean = true,
 ) {
+    if (!stream.availableOnDevice) return
     if (mintDeferredStreamThen(stream) { minted -> switchToSource(minted, saveForReuse) }) return
     if (prepareServerForPlayer(stream) { switchToSource(it) }) return
     // The resolved URL expires after a few hours, so it isn't kept for reuse.
@@ -397,6 +400,7 @@ internal fun PlayerScreenRuntime.switchToEpisodeStream(
     serverResumeMs: Long? = null,
     saveForReuse: Boolean = true,
 ) {
+    if (!stream.availableOnDevice) return
     if (mintDeferredStreamThen(stream) { minted -> switchToEpisodeStream(minted, episode, serverResumeMs, saveForReuse) }) return
     if (prepareServerForPlayer(stream) { switchToEpisodeStream(it, episode, serverResumeMs = newerServerResumeMs(it, episode)) }) return
     if (

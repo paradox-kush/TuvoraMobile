@@ -33,7 +33,24 @@ data class StreamItem(
     val externalSubtitles: List<StreamSubtitle> = emptyList(),
     val badges: List<StreamBadge> = emptyList(),
     val serverTarget: ServerPlaybackTarget? = null,
+    /** Provenance for device choices, retained when a deferred or cached stream is resolved. */
+    val deviceSourceKind: String? = null,
+    val deviceSourceRef: String? = null,
 ) {
+    val availableOnDevice: Boolean get() {
+        if (!com.nuvio.app.core.sources.DeviceSources.isActive) return true
+        val kind = deviceSourceKind
+        val ref = deviceSourceRef
+        if (kind != null && ref != null && !com.nuvio.app.core.sources.DeviceSources.allows(kind,ref)) return false
+        if (isInstalledAddonStream) {
+            return com.nuvio.app.features.addons.AddonRepository.uiState.value.addons.any {
+                addonId.endsWith(":" + it.manifestUrl) && it.availableOnDevice
+            }
+        }
+        val target = serverTarget
+        if (target != null) return com.nuvio.app.features.servers.ServerRepository.connection(target.item.connectionId)?.availableOnDevice == true
+        return true
+    }
     val streamLabel: String
         get() = name?.takeIf { it.isNotBlank() } ?: "Stream"
 

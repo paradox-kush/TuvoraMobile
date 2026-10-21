@@ -35,7 +35,7 @@ internal object ServerStreams {
     fun isNativeRequest(videoId: String): Boolean = ServerItemRef.isServerId(videoId)
 
     fun canServe(type: String, videoId: String): Boolean {
-        ServerItemRef.parse(videoId)?.let { ref -> return ServerRepository.connection(ref.connectionId)?.enabled == true }
+        ServerItemRef.parse(videoId)?.let { ref -> return ServerRepository.connection(ref.connectionId)?.availableOnDevice == true }
         val connections = ServerRepository.enabledConnections().ifEmpty { return false }
         val request = ServerMatcher.request(type, videoId, season = null, episode = null) ?: return false
         return connections.any { ServerMatcher.supports(it, request.kind) }

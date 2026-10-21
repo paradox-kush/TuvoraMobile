@@ -152,7 +152,7 @@ fun XtreamHubScreen(
     // populated hub for that beat read as data loss (field-reported flash).
     if (state.accounts.isEmpty()) {
         if (state.accountsLoaded) {
-            XtreamHubNoPlaylistState(onAddProvider = onAddProvider, onEnterSetupCode = onEnterSetupCode, modifier = modifier)
+            XtreamHubNoPlaylistState(hasConfiguredAccounts = state.hasConfiguredAccounts, onAddProvider = onAddProvider, onEnterSetupCode = onEnterSetupCode, modifier = modifier)
         }
         return
     }
@@ -967,7 +967,7 @@ private fun XtreamHubMessageCard(
 }
 
 @Composable
-private fun XtreamHubNoPlaylistState(onAddProvider: () -> Unit, onEnterSetupCode: () -> Unit, modifier: Modifier = Modifier) {
+private fun XtreamHubNoPlaylistState(hasConfiguredAccounts: Boolean, onAddProvider: () -> Unit, onEnterSetupCode: () -> Unit, modifier: Modifier = Modifier) {
     val tokens = MaterialTheme.nuvio
     BoxWithConstraints(modifier = modifier.fillMaxSize().background(tokens.colors.background)) {
         val sectionPadding = homeSectionHorizontalPaddingForWidth(maxWidth.value)
@@ -980,12 +980,12 @@ private fun XtreamHubNoPlaylistState(onAddProvider: () -> Unit, onEnterSetupCode
                 .padding(horizontal = sectionPadding, vertical = NuvioTokens.Space.s16),
         ) {
             HomeEmptyStateCard(
-                title = stringResource(Res.string.compose_iptv_hub_no_provider_title),
-                message = stringResource(Res.string.compose_iptv_hub_no_provider_message),
-                actionLabel = stringResource(Res.string.compose_iptv_hub_add_provider),
-                onActionClick = onAddProvider,
-                secondaryActionLabel = stringResource(Res.string.provider_setup_have_code),
-                onSecondaryActionClick = onEnterSetupCode,
+                title = if (hasConfiguredAccounts) "No IPTV playlists enabled" else stringResource(Res.string.compose_iptv_hub_no_provider_title),
+                message = if (hasConfiguredAccounts) "Your playlists are still saved. Check Sources on this device or manage their account settings." else stringResource(Res.string.compose_iptv_hub_no_provider_message),
+                actionLabel = if (hasConfiguredAccounts) "Sources on this device" else stringResource(Res.string.compose_iptv_hub_add_provider),
+                onActionClick = if (hasConfiguredAccounts) ({ com.nuvio.app.core.sources.DeviceSources.showSettings.value = true }) else onAddProvider,
+                secondaryActionLabel = if (hasConfiguredAccounts) "Manage playlists" else stringResource(Res.string.provider_setup_have_code),
+                onSecondaryActionClick = if (hasConfiguredAccounts) onAddProvider else onEnterSetupCode,
             )
         }
     }

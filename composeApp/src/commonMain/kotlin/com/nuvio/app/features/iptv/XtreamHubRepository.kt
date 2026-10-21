@@ -205,7 +205,7 @@ object XtreamHubRepository {
         // now/next whenever the panel's own EPG is missing.
         scope.launch { com.nuvio.app.features.epg.EpgMirrorRepository.ensureFresh() }
         val all = XtreamRepository.uiState.value.accounts
-        val accounts = all.filter { it.enabled }
+        val accounts = all.filter { it.availableOnDevice }
         val current = _uiState.value
         // Fix 1 (sticky provider): a fresh hub state (cold start, or right after resetForProfile)
         // restores the last on-screen provider + tab; a live in-memory selection is the truth.
@@ -215,7 +215,7 @@ object XtreamHubRepository {
         val selected = resolveStickyAccount(current.selectedAccountId, remembered?.accountId, all)
         val wanted = remembered?.let { resolveStickySection(it.section, current.section) } ?: current.section
         val section = clampSection(accounts.firstOrNull { it.id == selected }, wanted)
-        _uiState.update { it.copy(accounts = accounts, accountsLoaded = true, selectedAccountId = selected, section = section) }
+        _uiState.update { it.copy(accounts = accounts, hasConfiguredAccounts = all.isNotEmpty(), accountsLoaded = true, selectedAccountId = selected, section = section) }
         if (selected != null) {
             showSection(selected, section)
             maybePrefetch(selected)

@@ -30,7 +30,7 @@ data class ServersUiState(
     val revision: Int = 0,
 ) {
     val enabledConnections: List<ServerConnection>
-        get() = connections.filter { it.enabled }
+        get() = connections.filter { it.availableOnDevice }
 }
 
 object ServerRepository {
@@ -52,6 +52,11 @@ object ServerRepository {
     private var localVersion = 0L
     private val _localChanges = MutableSharedFlow<Int>(extraBufferCapacity = 8)
     val localChanges: SharedFlow<Int> = _localChanges.asSharedFlow()
+
+    fun onDeviceSourcesChanged() = synchronized(lock) {
+        generation++
+        _uiState.update { it.copy(revision = it.revision + 1) }
+    }
 
     fun ensureLoaded() {
         val profileId = ProfileRepository.activeProfileId
@@ -103,7 +108,7 @@ object ServerRepository {
         "${provider(connection)?.displayName ?: connection.providerId} · ${connection.name}"
 
     fun session(connectionId: String): ServerSession? {
-        val connection = connection(connectionId)?.takeIf { it.enabled } ?: return null
+        val connection = connection(connectionId)?.takeIf { it.availableOnDevice } ?: return null
         val token = synchronized(lock) {
             tokens.getOrPut(connection.credentialRef) {
                 readCredential(connection.credentialRef) ?: return null
@@ -116,14 +121,15 @@ object ServerRepository {
         connectionId: String,
         block: suspend (ServerProvider, ServerSession) -> T,
     ): T {
+        val preferenceEpoch = com.nuvio.app.core.sources.DeviceSources.epoch
         val startedGeneration = generation
         val connection = connection(connectionId) ?: throw ServerException(ServerFailure.NOT_FOUND)
-        if (!connection.enabled) throw ServerException(ServerFailure.UNREACHABLE)
+        if (!connection.availableOnDevice) throw ServerException(ServerFailure.UNREACHABLE)
         val session = session(connectionId) ?: throw ServerException(ServerFailure.AUTH_REQUIRED)
         val provider = provider(session.connection) ?: throw ServerException(ServerFailure.UNSUPPORTED)
         return try {
             block(provider, session).also {
-                if (startedGeneration != generation) throw CancellationException("Server scope changed")
+                if (startedGeneration != generation || preferenceEpoch != com.nuvio.app.core.sources.DeviceSources.epoch) throw CancellationException("Server scope changed")
                 setFailure(connectionId, null)
             }
         } catch (error: ServerException) {
