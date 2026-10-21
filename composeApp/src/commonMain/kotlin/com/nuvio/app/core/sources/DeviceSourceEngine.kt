@@ -149,16 +149,26 @@ class DeviceSourceEngine(
     fun allowsAddonRequest(profile: Int, url: String): Boolean {
         if (state.value.mode == "unavailable") return true
         if (!state.value.ready || (!localOnly && profile !in state.value.disk.sources)) return false
+        val rawRequest = url.trim().substringBefore('#')
+        val requested = DeviceSourcePolicy.addonReference(rawRequest)
         val matches = knownSources(profile).filter {
             if (it.kind != "addon") false else {
                 val base = DeviceSourcePolicy.addonReference(it.sourceRef)
-                val request = DeviceSourcePolicy.addonReference(url)
                 val query = base.substringAfter('?', "")
-                request == base || (url.substringBefore('?').startsWith(base.substringBefore('?') + "/") &&
-                    (query.isEmpty() || url.substringAfter('?', "") == query))
+                requested == base || (rawRequest.substringBefore('?').startsWith(base.substringBefore('?') + "/") &&
+                    ('?' !in base || ('?' in rawRequest && rawRequest.substringAfter('?', "") == query)))
             }
         }
-        return matches.all { it.accountEnabled && choice(profile,it.sourceId) }
+        // Configured addons on one host are independent. Prefer an exact source, then the
+        // longest configured path and its matching query, rather than a broader host/root addon.
+        fun specificity(source: DeviceSourceDescriptor): Int {
+            val base = DeviceSourcePolicy.addonReference(source.sourceRef)
+            return base.substringBefore('?').length * 2 + if ('?' in base) 1 else 0
+        }
+        val exact = matches.filter { DeviceSourcePolicy.addonReference(it.sourceRef) == requested }
+        val longest = matches.maxOfOrNull(::specificity)
+        val selected = if (exact.isNotEmpty()) exact else matches.filter { specificity(it) == longest }
+        return selected.all { it.accountEnabled && choice(profile,it.sourceId) }
     }
 
     fun setChoice(profile: Int, source: String, enabled: Boolean?) {

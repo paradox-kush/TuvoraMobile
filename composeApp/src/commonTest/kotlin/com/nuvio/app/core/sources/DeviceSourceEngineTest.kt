@@ -149,4 +149,21 @@ class DeviceSourceEngineTest {
         assertTrue(restarted.allows(1,"iptv",source.sourceRef))
         assertFalse(restarted.allowsAddonRequest(1,addon.sourceRef))
     }
+
+    @Test fun configuredAddonsOnTheSameHostKeepIndependentChoices() {
+        val root = source.copy(sourceId = "root",kind = "addon",sourceRef = "https://addon.example")
+        val path = root.copy(sourceId = "path",sourceRef = "https://addon.example/config")
+        val query = root.copy(sourceId = "query",sourceRef = "https://addon.example?token=B")
+        val disk = Memory(json.encodeToString(DevicePreferenceDisk(binding = SavedDeviceBinding("setup","Phone","secret"),
+            cursor = 0,sources = mapOf(1 to listOf(root,path,query)))))
+        val device = engine(disk)
+        device.setChoice(1,root.sourceId,false)
+        assertFalse(device.allowsAddonRequest(1,root.sourceRef + "/manifest.json"))
+        assertTrue(device.allowsAddonRequest(1,path.sourceRef + "/manifest.json"))
+        assertTrue(device.allowsAddonRequest(1,path.sourceRef + "/catalog/movie/top.json"))
+        assertTrue(device.allowsAddonRequest(1,"https://addon.example/catalog/movie/top.json?token=B"))
+        device.setChoice(1,query.sourceId,false)
+        assertFalse(device.allowsAddonRequest(1,"https://addon.example/stream/movie/id.json?token=B"))
+        assertTrue(device.allowsAddonRequest(1,path.sourceRef + "/catalog/movie/top.json"))
+    }
 }

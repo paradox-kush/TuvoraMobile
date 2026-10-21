@@ -286,7 +286,7 @@ object AddonRepository {
         }
 
         val manifest = try {
-            withContext(Dispatchers.Default) {
+            withContext(Dispatchers.Default + com.nuvio.app.core.sources.AddonInstallationRequest(manifestUrl)) {
                 val payload = fetchAddonResponseText(manifestUrl)
                 AddonManifestParser.parse(
                     manifestUrl = manifestUrl,
