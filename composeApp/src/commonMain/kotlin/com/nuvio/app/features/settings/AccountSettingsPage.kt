@@ -76,6 +76,9 @@ private fun AccountSettingsBody(
     val canDeleteAccount = AppFeaturePolicy.accountDeletionEnabled && authState is AuthState.Authenticated
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        androidx.compose.material3.Button(onClick = { com.nuvio.app.core.sources.DeviceSources.showSettings.value = true }) {
+            androidx.compose.material3.Text("Sources on this device")
+        }
         NuvioSurfaceCard {
             Text(
                 text = stringResource(Res.string.compose_settings_page_account),

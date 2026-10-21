@@ -28,6 +28,10 @@ class IptvRefreshWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
+        // A headless start cannot treat unresolved account preferences as defaults-on.
+        com.nuvio.app.core.sources.DeviceSources.activate()
+        if (com.nuvio.app.core.auth.AuthRepository.state.value == com.nuvio.app.core.auth.AuthState.Loading) return Result.retry()
+
         // Skip while a player is on screen — a big M3U re-ingest could stutter playback. WorkManager
         // re-runs the periodic work on its next window (or sooner via retry backoff).
         if (IptvPlaybackGate.isPlaybackActive) return Result.retry()

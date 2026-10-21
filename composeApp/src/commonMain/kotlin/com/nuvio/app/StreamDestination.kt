@@ -478,6 +478,7 @@ internal fun StreamDestination(
         } else {
             selectedStream
         }
+        if (!stream.availableOnDevice) return@LaunchedEffect
         // Fork: auto-play of a Stalker source mints its link now (listing left it deferred).
         val streamSources = com.nuvio.app.core.contracts.StreamSourceAccess.current()
         val playableStream = if (streamSources.isDeferredUrl(stream.playableDirectUrl)) {
@@ -608,6 +609,7 @@ internal fun StreamDestination(
         forceInternal: Boolean,
         saveForReuse: Boolean = true,
     ) {
+        if (!stream.availableOnDevice) return
         // Fork: a Stalker source is listed without a play link (deferred until play): mint it now,
         // for this edition only, then re-enter with the real URL.
         if (com.nuvio.app.core.contracts.StreamSourceAccess.current().isDeferredUrl(stream.playableDirectUrl)) {

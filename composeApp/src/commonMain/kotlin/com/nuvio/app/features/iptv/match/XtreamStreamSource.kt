@@ -154,6 +154,7 @@ internal object XtreamStreamSource {
                         url = XtreamClient.movieStreamUrl(acc, item.sid, ext),
                         addonName = acc.name,
                         addonId = groupId(acc),
+                        deviceSourceKind = "iptv", deviceSourceRef = acc.id,
                     )
                 }
             }
@@ -205,6 +206,7 @@ internal object XtreamStreamSource {
                     url = XtreamClient.episodeStreamUrl(acc, ep.episodeId, ep.containerExtension ?: "mp4"),
                     addonName = acc.name,
                     addonId = groupId(acc),
+                        deviceSourceKind = "iptv", deviceSourceRef = acc.id,
                 )
             }
         }
@@ -242,6 +244,7 @@ internal object XtreamStreamSource {
                             url = deferredMovie(acc, movie.streamId, movie.name),
                             addonName = acc.name,
                             addonId = groupId(acc),
+                        deviceSourceKind = "iptv", deviceSourceRef = acc.id,
                         )
                     }
 
@@ -263,6 +266,7 @@ internal object XtreamStreamSource {
                             url = url,
                             addonName = acc.name,
                             addonId = groupId(acc),
+                        deviceSourceKind = "iptv", deviceSourceRef = acc.id,
                         )
                     }
             }

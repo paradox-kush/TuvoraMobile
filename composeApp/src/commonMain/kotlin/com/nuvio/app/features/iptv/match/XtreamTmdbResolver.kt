@@ -85,7 +85,7 @@ internal object XtreamTmdbResolver {
         if (StartupJournal.isSafeMode) return
         // Xtream only (mirrors NuvioTV): M3U/Stalker have no player_api bulk lists to index —
         // a warm-up for them just burns a failed fetch into the build backoff.
-        accounts.filter { it.enabled && it.sourceType == SOURCE_TYPE_XTREAM }.forEach { acc ->
+        accounts.filter { it.availableOnDevice && it.sourceType == SOURCE_TYPE_XTREAM }.forEach { acc ->
             buildScope.launch {
                 if (startDelayMs > 0) delay(startDelayMs)
                 // Contain every failure at the task boundary — this is a bare launch on a

@@ -51,6 +51,7 @@ object M3UClient : IptvClient {
      * present afterwards.
      */
     suspend fun ensureIngested(acc: XtreamAccount, force: Boolean = false): Boolean {
+        com.nuvio.app.core.sources.DeviceSources.guard("iptv",acc.id)
         val meta = IptvContentDb.ingestMeta(acc.id)
         // B64: a catalog built under the pre-B64 ids rebuilds once (and the saved refs follow, below).
         val oldIds = meta != null && meta.idScheme < M3U_ID_SCHEME
@@ -331,9 +332,9 @@ object M3UClient : IptvClient {
     override fun episodeStreamUrl(acc: XtreamAccount, episodeId: String, ext: String): String = ""
 
     /** Suspend URL resolvers that read the stored M3U line — used by the cold-launch play/meta paths. */
-    suspend fun liveUrlFor(acc: XtreamAccount, streamId: Int): String? = IptvContentDb.channelRow(acc.id, streamId)?.url
-    suspend fun movieUrlFor(acc: XtreamAccount, streamId: Int): String? = IptvContentDb.vodRow(acc.id, streamId)?.url
-    suspend fun episodeUrlFor(acc: XtreamAccount, episodeId: String): String? = IptvContentDb.episodeUrl(acc.id, episodeId)?.first
+    suspend fun liveUrlFor(acc: XtreamAccount, streamId: Int): String? { com.nuvio.app.core.sources.DeviceSources.guard("iptv",acc.id); return IptvContentDb.channelRow(acc.id, streamId)?.url }
+    suspend fun movieUrlFor(acc: XtreamAccount, streamId: Int): String? { com.nuvio.app.core.sources.DeviceSources.guard("iptv",acc.id); return IptvContentDb.vodRow(acc.id, streamId)?.url }
+    suspend fun episodeUrlFor(acc: XtreamAccount, episodeId: String): String? { com.nuvio.app.core.sources.DeviceSources.guard("iptv",acc.id); return IptvContentDb.episodeUrl(acc.id, episodeId)?.first }
 
     // --- windowed browse reads (item 5) — also serve the Stalker lineup, which lives in the
     // same channels table. ensure* is the caller's job (hub does it before the first window).

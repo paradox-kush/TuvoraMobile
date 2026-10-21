@@ -101,7 +101,7 @@ private class CatalogDescriptorSignature {
 
     fun addAddon(addon: ManagedAddon) {
         add(addon.userSetName)
-        add(addon.enabled)
+        add(addon.availableOnDevice)
         add(addon.isRefreshing)
         add(addon.errorMessage)
         add(addon.manifestUrl)

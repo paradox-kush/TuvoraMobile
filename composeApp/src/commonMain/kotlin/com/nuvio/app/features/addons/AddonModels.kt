@@ -61,8 +61,11 @@ data class ManagedAddon(
     val isRefreshing: Boolean = false,
     val errorMessage: String? = null,
 ) {
+    val availableOnDevice: Boolean
+        get() = enabled && com.nuvio.app.core.sources.DeviceSources.allowsAddon(manifestUrl)
+
     val isActive: Boolean
-        get() = enabled && manifest != null
+        get() = availableOnDevice && manifest != null
 
     val displayTitle: String
         get() = userSetName?.takeIf { it.isNotBlank() && it != manifest?.name }
@@ -74,6 +77,7 @@ data class ManagedAddon(
 
 data class AddonsUiState(
     val addons: List<ManagedAddon> = emptyList(),
+    val availabilityRevision: Long = 0,
 )
 
 data class AddonOverview(
@@ -86,14 +90,14 @@ internal fun List<ManagedAddon>.toOverview(): AddonOverview =
     AddonOverview(
         totalAddons = size,
         activeAddons = count { it.isActive },
-        totalCatalogs = filter { it.enabled }.sumOf { it.manifest?.catalogs?.size ?: 0 },
+        totalCatalogs = filter { it.availableOnDevice }.sumOf { it.manifest?.catalogs?.size ?: 0 },
     )
 
 internal fun List<ManagedAddon>.enabledAddons(): List<ManagedAddon> =
-    filter { it.enabled }
+    filter { it.availableOnDevice }
 
 internal fun List<ManagedAddon>.hasPendingEnabledManifests(): Boolean =
-    any { addon -> addon.enabled && addon.isRefreshing }
+    any { addon -> addon.availableOnDevice && addon.isRefreshing }
 
 internal fun List<ManagedAddon>.isWaitingForFirstEnabledManifest(): Boolean {
     val enabledAddons = enabledAddons()
@@ -104,7 +108,7 @@ internal fun List<ManagedAddon>.isWaitingForFirstEnabledManifest(): Boolean {
 
 internal fun List<ManagedAddon>.firstEnabledManifestError(): String? =
     asSequence()
-        .filter { addon -> addon.enabled && addon.manifest == null }
+        .filter { addon -> addon.availableOnDevice && addon.manifest == null }
         .mapNotNull { addon -> addon.errorMessage?.takeIf(String::isNotBlank) }
         .firstOrNull()
 

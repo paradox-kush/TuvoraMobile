@@ -10,6 +10,11 @@ import androidx.compose.runtime.staticCompositionLocalOf
  * (add/edit/remove) is a separate port (S3b, IptvAccountManager).
  */
 interface IptvCatalog {
+    /** Neutral descriptors keep shared settings independent of the IPTV implementation. */
+    val devicePreferenceSources: StateFlow<List<com.nuvio.app.core.sources.DeviceSourceDescriptor>>
+        get() = EmptyDeviceSources
+    fun devicePreferencesChanged() {}
+
     /** Warm the account list (idempotent). */
     fun ensureLoaded()
 
@@ -38,6 +43,8 @@ interface IptvCatalog {
      */
     val servedStreamTypes: StateFlow<Set<String>>
 }
+
+private val EmptyDeviceSources = kotlinx.coroutines.flow.MutableStateFlow<List<com.nuvio.app.core.sources.DeviceSourceDescriptor>>(emptyList())
 
 /** Compose provision (root-provided in FeatureWiring). */
 val LocalIptvCatalog = staticCompositionLocalOf<IptvCatalog> {

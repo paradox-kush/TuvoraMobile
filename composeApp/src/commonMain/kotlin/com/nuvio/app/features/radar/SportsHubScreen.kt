@@ -1551,13 +1551,13 @@ internal fun MatchChannelsSheet(
     var recordings by remember(fixture) { mutableStateOf<List<RadarChannelMatcher.RecordingHit>>(emptyList()) }
     var matching by remember(fixture) { mutableStateOf(true) }
     var matchingFailed by remember(fixture) { mutableStateOf(false) }
-    val hasPlaylists = xtreamState.accounts.any { it.enabled }
+    val hasPlaylists = xtreamState.accounts.any { it.availableOnDevice }
     val fixtureStarted = (fixture.startEpochMs ?: Long.MAX_VALUE) <= RadarTime.nowMs()
 
     LaunchedEffect(fixture) {
         try {
             XtreamRepository.ensureLoaded()
-            if (XtreamRepository.uiState.value.accounts.any { it.enabled }) {
+            if (XtreamRepository.uiState.value.accounts.any { it.availableOnDevice }) {
                 // Recordings only make sense once the match has started; probe alongside channels.
                 if (fixtureStarted) {
                     launch {

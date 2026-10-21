@@ -27,7 +27,7 @@ internal fun hasCompatiblePlaybackSource(
     plugins: PluginsUiState,
     type: String,
     videoId: String,
-): Boolean = addons.any { it.enabled && it.manifest?.supportsStream(type, videoId) == true } ||
+): Boolean = addons.any { it.availableOnDevice && it.manifest?.supportsStream(type, videoId) == true } ||
     (plugins.pluginsEnabled && plugins.scrapers.any { it.enabled && it.supportsType(type) })
 
 internal class PlaybackAvailability(

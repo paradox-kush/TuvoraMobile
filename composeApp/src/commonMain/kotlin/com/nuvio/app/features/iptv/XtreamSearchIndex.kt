@@ -47,7 +47,7 @@ object XtreamSearchIndex {
         val q = query.trim()
         if (q.length < 2) return emptyList()
         XtreamRepository.ensureLoaded()
-        val accounts = XtreamRepository.uiState.value.accounts.filter { it.enabled }
+        val accounts = XtreamRepository.uiState.value.accounts.filter { it.availableOnDevice }
         if (accounts.isEmpty()) return emptyList()
         IptvOverlayRepository.ensureLoaded()
         val overlay = IptvOverlayRepository.uiState.value

@@ -580,7 +580,7 @@ object SyncManager {
     /** Surfaces [pullSurface] knows by name (fork surfaces come from their SyncParticipants). */
     internal val namedSurfaces: Set<String> = setOf(
         "addons", "plugins", "library", "watch_progress", "watched_items", "profile_settings",
-        "collections", "home_catalog_settings", "profiles", "provider_credentials", "media_servers",
+        "collections", "home_catalog_settings", "profiles", "provider_credentials", "media_servers", "device_preferences", "device_sources",
     )
 
     /** Every surface this client can pull (B03: what a version-vector catch-up may plan). */
@@ -598,6 +598,8 @@ object SyncManager {
                 .onFailure { log.e(it) { "Realtime $what pull failed" } }
                 .isSuccess
         return when (surface) {
+            "device_preferences" -> attempt("device preferences") { com.nuvio.app.core.sources.DeviceSources.engine().refresh(profileId,false) }
+            "device_sources" -> attempt("device sources") { com.nuvio.app.core.sources.DeviceSources.engine().refresh(profileId,true) }
             "addons" -> attempt("addons") { AddonRepository.pullFromServer(profileId) }
             "plugins" -> if (AppFeaturePolicy.pluginsEnabled) attempt("plugins") { PluginRepository.pullFromServer(profileId) } else true
             "library" -> attempt("library") { LibraryRepository.pullFromServer(profileId) }

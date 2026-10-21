@@ -48,6 +48,9 @@ data class ServerConnection(
     val useCatalogMetadata: Boolean = false,
     val importWatchState: Boolean = false,
 ) {
+    val availableOnDevice: Boolean
+        get() = enabled && com.nuvio.app.core.sources.DeviceSources.allows("media_server", "$providerId|$remoteServerId|$remoteUserId")
+
     val selectedLibraries: List<ServerLibrary>
         get() = libraries.filter { it.selected }
 

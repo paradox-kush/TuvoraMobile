@@ -228,6 +228,7 @@ internal fun MainAppContent(
     onRootContentReady: ((Boolean) -> Unit)? = null,
     onSwitchProfile: () -> Unit = {},
 ) {
+        com.nuvio.app.core.sources.DeviceSourcesHost()
         val navBackStack = rememberNavBackStack(navigationSavedStateConfiguration, initialRoute)
         val posterNavigation = remember { PosterNavigationState() }
         val metaScreenSettings by remember {
@@ -431,7 +432,7 @@ internal fun MainAppContent(
     var networkToastBaselineReady by rememberSaveable { mutableStateOf(false) }
     var lastNetworkToastCondition by rememberSaveable { mutableStateOf(NetworkCondition.Unknown.name) }
     var watchSourceReconnectPending by remember { mutableStateOf(false) }
-    val homeCatalogRefreshKey = remember(addonsUiState.addons) {
+    val homeCatalogRefreshKey = remember(addonsUiState.addons, addonsUiState.availabilityRevision) {
         buildAddonCatalogRefreshSignature(addonsUiState.addons)
     }
 

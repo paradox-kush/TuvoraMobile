@@ -17,7 +17,7 @@ import com.nuvio.app.features.iptv.stalker.StalkerCrypto
 internal object IptvSearchSourceSignature {
 
     fun of(accounts: List<XtreamAccount>, overlay: OverlaySnapshot): String? {
-        val enabled = accounts.filter { it.enabled }
+        val enabled = accounts.filter { it.availableOnDevice }
         if (enabled.isEmpty()) return null
         fun selection(list: List<String>?) = list?.sorted()?.joinToString(",", "[", "]") ?: "all"
         val playlists = enabled.map { acc ->

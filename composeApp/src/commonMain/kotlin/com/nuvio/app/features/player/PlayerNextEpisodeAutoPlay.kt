@@ -158,6 +158,7 @@ internal fun CoroutineScope.launchPlayerNextEpisodeAutoPlay(
         }
 
         fun selectStream(stream: StreamItem) {
+            if (!stream.availableOnDevice) { autoSelectTriggered = true; settleAutoSelect(); return }
             autoSelectTriggered = true
             selectedStream = stream
             settleAutoSelect()

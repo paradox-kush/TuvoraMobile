@@ -73,6 +73,7 @@ object XmltvClient {
      * or the playlist has no resolvable EPG source. Returns true when programmes are available after.
      */
     suspend fun ensureEpg(acc: XtreamAccount, force: Boolean = false): Boolean {
+        com.nuvio.app.core.sources.DeviceSources.guard("iptv",acc.id)
         val partition = partitionOf(acc)
         val meta = IptvContentDb.epgMeta(partition)
         if (!force && meta != null && !isStale(meta.builtAtMs)) return meta.programmeCount > 0

@@ -43,7 +43,7 @@ object IptvRefreshScheduler {
             XtreamRepository.ensureLoaded()
             val profileId = ProfileRepository.activeProfileId
             val now = TraktPlatformClock.nowEpochMs()
-            val accounts = XtreamRepository.uiState.value.accounts.filter { it.enabled && it.autoRefreshHours > 0 }
+            val accounts = XtreamRepository.uiState.value.accounts.filter { it.availableOnDevice && it.autoRefreshHours > 0 }
             if (accounts.isEmpty()) return 0
 
             val xtreamState = loadXtreamRefreshState(profileId).toMutableMap()

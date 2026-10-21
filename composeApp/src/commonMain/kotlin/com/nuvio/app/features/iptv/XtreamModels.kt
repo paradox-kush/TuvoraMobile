@@ -248,7 +248,11 @@ data class XtreamAccount(
      * device-local and never synced.
      */
     val backupUrls: List<String> = emptyList(),
-)
+    @kotlinx.serialization.Transient val devicePreferenceEpoch: Long = 0,
+) {
+    /** Read-only device overlay; enabled remains the account-wide sync value. */
+    val availableOnDevice: Boolean get() = enabled && com.nuvio.app.core.sources.DeviceSources.allows("iptv", id)
+}
 
 /** The manual correction, clamped to the range the settings UI offers, as milliseconds. */
 fun XtreamAccount.catchUpTimeCorrectionMs(): Long =

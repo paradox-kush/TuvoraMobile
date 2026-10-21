@@ -262,7 +262,7 @@ internal object EpgMirrorRepository {
      */
     private suspend fun mapAccountsIfNeeded(nowMs: Long, force: Boolean, generation: String) {
         XtreamRepository.ensureLoaded()
-        val accounts = XtreamRepository.uiState.value.accounts.filter { it.enabled }
+        val accounts = XtreamRepository.uiState.value.accounts.filter { it.availableOnDevice }
         if (accounts.isEmpty()) return
         var agedBudgetLeft = true
         val due = accounts.filter { acc ->

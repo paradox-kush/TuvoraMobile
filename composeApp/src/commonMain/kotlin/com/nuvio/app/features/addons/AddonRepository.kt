@@ -114,6 +114,13 @@ object AddonRepository {
         lastSyncedUrls.value = AddonStorage.loadSyncedAddonUrls(currentProfileId)?.let(::dedupeManifestUrls)
     }
 
+    fun onDeviceSourcesChanged() {
+        activeRefreshJobs.values.toList().forEach { it.cancel() }
+        activeRefreshJobs.clear()
+        _uiState.update { it.copy(availabilityRevision = it.availabilityRevision + 1, addons = it.addons.map { a -> a.copy(isRefreshing = false) }) }
+        _uiState.value.addons.filter { it.availableOnDevice && it.manifest == null && !it.isRefreshing }.forEach { refreshAddon(it.manifestUrl) }
+    }
+
     fun initialize() {
         val effectiveProfileId = resolveEffectiveProfileId(ProfileRepository.activeProfileId)
         if (initialized) return
@@ -376,7 +383,7 @@ object AddonRepository {
     }
 
     fun refreshAll() {
-        _uiState.value.addons.filter { it.enabled }.distinctBy { it.manifestUrl }.forEach { addon ->
+        _uiState.value.addons.filter { it.availableOnDevice }.distinctBy { it.manifestUrl }.forEach { addon ->
             refreshAddon(
                 manifestUrl = addon.manifestUrl,
                 forceRefresh = true,
@@ -388,6 +395,7 @@ object AddonRepository {
         manifestUrl: String,
         forceRefresh: Boolean = false,
     ) {
+        if (!com.nuvio.app.core.sources.DeviceSources.allowsAddon(manifestUrl)) return
         val existingJob = activeRefreshJobs[manifestUrl]
         if (existingJob?.isActive == true) return
 
