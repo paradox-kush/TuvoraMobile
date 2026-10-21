@@ -215,7 +215,7 @@ object XtreamHubRepository {
         val selected = resolveStickyAccount(current.selectedAccountId, remembered?.accountId, all)
         val wanted = remembered?.let { resolveStickySection(it.section, current.section) } ?: current.section
         val section = clampSection(accounts.firstOrNull { it.id == selected }, wanted)
-        _uiState.update { it.copy(accounts = accounts, accountsLoaded = true, selectedAccountId = selected, section = section) }
+        _uiState.update { it.copy(accounts = accounts, hasConfiguredAccounts = all.isNotEmpty(), accountsLoaded = true, selectedAccountId = selected, section = section) }
         if (selected != null) {
             showSection(selected, section)
             maybePrefetch(selected)

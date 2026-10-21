@@ -68,4 +68,4 @@ internal fun resolveStickySection(remembered: String?, fallback: XtreamHubSectio
  * repeat emission never re-drives the hub.
  */
 internal fun hubNeedsAccountSync(hub: XtreamHubUiState, playlists: List<XtreamAccount>): Boolean =
-    !hub.accountsLoaded || hub.accounts != playlists.filter { it.availableOnDevice }
+    !hub.accountsLoaded || hub.hasConfiguredAccounts != playlists.isNotEmpty() || hub.accounts != playlists.filter { it.availableOnDevice }

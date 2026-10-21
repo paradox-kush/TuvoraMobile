@@ -56,6 +56,12 @@ internal fun LazyListScope.contentDiscoveryContent(
             isTablet = isTablet,
         ) {
             SettingsGroup(isTablet = isTablet) {
+                SettingsNavigationRow(
+                    title = "Sources on this device",
+                    description = "Choose addons, media servers and IPTV for this device and profile.",
+                    isTablet = isTablet,
+                    onClick = { com.nuvio.app.core.sources.DeviceSources.showSettings.value = true },
+                )
                 if (showAddonsEntry) {
                     SettingsNavigationRow(
                         title = stringResource(Res.string.compose_settings_page_addons),
