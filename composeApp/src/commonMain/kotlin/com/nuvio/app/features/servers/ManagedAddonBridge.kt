@@ -1,10 +1,10 @@
 package com.nuvio.app.features.servers
 
+import com.nuvio.app.core.auth.hostedAccessTokenOrNull
 import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.core.network.SupabaseProvider
 import com.nuvio.app.core.sync.SyncClientIdentity
 import com.nuvio.app.features.addons.httpRequestRaw
-import com.nuvio.app.features.iptv.hostedAccessTokenOrNull
 import com.nuvio.app.features.profiles.ProfileRepository
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc

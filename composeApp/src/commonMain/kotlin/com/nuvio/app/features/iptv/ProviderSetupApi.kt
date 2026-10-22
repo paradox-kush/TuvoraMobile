@@ -2,6 +2,7 @@ package com.nuvio.app.features.iptv
 
 import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
+import com.nuvio.app.core.auth.hostedAccessTokenOrNull
 import com.nuvio.app.core.build.AppBuildConfig
 import com.nuvio.app.core.network.SupabaseConfig
 import com.nuvio.app.core.network.SupabaseProvider
@@ -285,12 +286,4 @@ internal class HttpProviderSetupApi(
         })
         return ((result as? JsonObject)?.get("detached") as? JsonPrimitive)?.booleanOrNull == true
     }
-}
-
-/** The signed-in (non-anonymous) access token, only while the sync backend is the hosted Tuvora one. */
-internal suspend fun hostedAccessTokenOrNull(): String? {
-    val auth = AuthRepository.state.value as? AuthState.Authenticated ?: return null
-    if (auth.isAnonymous) return null
-    if (!SyncBackendDefaults.hosted().hasSameConnectionIdentity(SyncBackendRepository.selectedBackend)) return null
-    return runCatching { SupabaseProvider.client.auth.currentAccessTokenOrNull() }.getOrNull()
 }

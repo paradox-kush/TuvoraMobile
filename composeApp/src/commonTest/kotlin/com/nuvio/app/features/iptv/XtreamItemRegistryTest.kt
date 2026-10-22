@@ -82,16 +82,38 @@ class XtreamItemRegistryTest {
     @Test
     fun registerAndResolveStreamRoundTrips() {
         val accountId = "http://h:8000|bob"
-        val cid = XtreamItemRegistry.vodId(accountId, 555)
-        XtreamItemRegistry.register(
-            XtreamResolvedItem(cid, accountId, XtreamKind.VOD, "The Movie", "http://h:8000/movie/bob/pw/555.mp4", poster = "p.jpg")
+        // Since #43 (per-device source controls) get() only resolves items whose playlist exists on this
+        // device and is enabled for it, so the round trip needs the account installed, as in production.
+        XtreamRepository.installAccountsForTest(
+            listOf(XtreamAccount(id = accountId, name = "Acct", baseUrl = "http://h:8000", username = "bob", password = "pw")),
         )
-        val item = XtreamItemRegistry.get(cid)
-        assertTrue(item != null)
-        assertEquals("The Movie", item.name)
-        assertEquals("http://h:8000/movie/bob/pw/555.mp4", item.toStreamItem("Acct")?.url)
+        try {
+            val cid = XtreamItemRegistry.vodId(accountId, 555)
+            XtreamItemRegistry.register(
+                XtreamResolvedItem(cid, accountId, XtreamKind.VOD, "The Movie", "http://h:8000/movie/bob/pw/555.mp4", poster = "p.jpg")
+            )
+            val item = XtreamItemRegistry.get(cid)
+            assertTrue(item != null)
+            assertEquals("The Movie", item.name)
+            assertEquals("http://h:8000/movie/bob/pw/555.mp4", item.toStreamItem("Acct")?.url)
 
-        XtreamItemRegistry.resetForProfile()
-        assertNull(XtreamItemRegistry.get(cid))
+            XtreamItemRegistry.resetForProfile()
+            assertNull(XtreamItemRegistry.get(cid))
+        } finally {
+            XtreamRepository.installAccountsForTest(emptyList())
+        }
+    }
+
+    @Test
+    fun anItemWhosePlaylistIsNotOnThisDeviceDoesNotResolve() {
+        val accountId = "http://gone:8000|amy"
+        XtreamRepository.installAccountsForTest(emptyList())
+        val cid = XtreamItemRegistry.vodId(accountId, 1)
+        XtreamItemRegistry.register(XtreamResolvedItem(cid, accountId, XtreamKind.VOD, "Orphan", "http://gone:8000/movie/amy/pw/1.mp4"))
+        try {
+            assertNull(XtreamItemRegistry.get(cid), "device-source control: no playlist, no stream")
+        } finally {
+            XtreamItemRegistry.resetForProfile()
+        }
     }
 }
