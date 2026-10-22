@@ -21,6 +21,8 @@ interface NuvioPlayerBridge {
     fun pause()
     fun seekTo(positionMs: Long)
     fun seekBy(offsetMs: Long)
+    fun setSystemControlHandler(handler: PlayerSystemControlHandler?)
+    fun getKeepsPlaybackInBackground(): Boolean
     fun retry()
     /** Reopen the current source at 0:00 on the same player ("Start from beginning"). */
     fun restartFromBeginning()

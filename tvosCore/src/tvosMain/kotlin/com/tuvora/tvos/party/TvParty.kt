@@ -62,6 +62,12 @@ object TvParty {
     private val log = Logger.withTag("TvParty")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    init {
+        // Party chat (upstream, sync 14) is phone/desktop: Apple TV has no chat surface, so the shared chat
+        // engine stays off here (no history fetches, no held messages).
+        com.nuvio.app.features.party.PartyChat.surfaceEnabled = false
+    }
+
     /** The viewer's own "behind the party" gap, published by the player link while it is behind. */
     internal val selfBehindMs = MutableStateFlow<Long?>(null)
 

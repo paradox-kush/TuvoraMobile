@@ -712,7 +712,7 @@ extension MPVPlayerViewController: PictureInPictureControllerDelegate {
     }
 
     func pictureInPictureControllerPlay(_ controller: PictureInPictureController) {
-        playPlayback()
+        requestSystemPlaying(true)
     }
 
     func pictureInPictureControllerPause(_ controller: PictureInPictureController) {
@@ -737,13 +737,13 @@ extension MPVPlayerViewController: PictureInPictureControllerDelegate {
         }
 
         clearPictureInPictureStartPlaybackPreservation()
-        pausePlayback()
+        requestSystemPlaying(false)
     }
 
     func pictureInPictureController(_ controller: PictureInPictureController, skipBy interval: CMTime) {
         let seconds = CMTimeGetSeconds(interval)
         guard seconds.isFinite else { return }
-        seekByMs(Int64(seconds * 1000.0))
+        requestSystemSeekBy(Int64(seconds * 1000.0))
     }
 
     func pictureInPictureControllerIsPlaying(_ controller: PictureInPictureController) -> Bool {

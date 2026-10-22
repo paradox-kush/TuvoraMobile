@@ -86,6 +86,10 @@ final class AVPlayerBridgeImpl: NSObject, NuvioPlayerBridge {
         player.seek(to: CMTime(value: positionMs, timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
     }
     func seekBy(offsetMs: Int64) { seekTo(positionMs: max(0, getPositionMs() + offsetMs)) }
+    // System-control routing (party rules during PiP) is an iPhone/iPad concern: Apple TV has no PiP and the
+    // Siri Remote already drives the shared session controller. Mirrored from NuvioPlayerBridge (Kotlin).
+    func setSystemControlHandler(handler: PlayerSystemControlHandler?) {}
+    func getKeepsPlaybackInBackground() -> Bool { false }
     func retry() {
         guard let asset = player.currentItem?.asset as? AVURLAsset else { return }
         let position = getPositionMs()

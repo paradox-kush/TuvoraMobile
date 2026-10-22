@@ -18,6 +18,9 @@ internal expect fun nuvioBottomNavigationBarInsets(): WindowInsets
 @Composable
 internal expect fun platformPhysicalTopInset(): Dp
 
+@Composable
+internal expect fun ResizeForKeyboard()
+
 internal val LocalNuvioBottomNavigationOverlayPadding = staticCompositionLocalOf { 0.dp }
 
 /** Space below the status bar occupied by the native phone profile avatar. */

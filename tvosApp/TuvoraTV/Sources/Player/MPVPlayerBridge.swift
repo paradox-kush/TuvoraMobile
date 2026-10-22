@@ -63,6 +63,10 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayContro
     func pause() { playerVC?.pausePlayback() }
     func seekTo(positionMs: Int64) { playerVC?.seekToMs(positionMs) }
     func seekBy(offsetMs: Int64) { playerVC?.seekByMs(offsetMs) }
+    // System-control routing (party rules during PiP) is an iPhone/iPad concern: Apple TV has no PiP and the
+    // Siri Remote already drives the shared session controller. Mirrored from NuvioPlayerBridge (Kotlin).
+    func setSystemControlHandler(handler: PlayerSystemControlHandler?) {}
+    func getKeepsPlaybackInBackground() -> Bool { false }
     func retry() { playerVC?.retryPlayback() }
     func restartFromBeginning() { playerVC?.restartFromBeginning() }
     func setIsLiveStream(isLive: Bool) { ensurePlayerViewController().isLiveStream = isLive }
