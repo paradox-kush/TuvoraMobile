@@ -97,30 +97,6 @@ import nuvio.composeapp.generated.resources.party_tab_chat
 import nuvio.composeapp.generated.resources.party_tab_party
 import org.jetbrains.compose.resources.stringResource
 
-internal data class PartyChatRow(
-    val message: PartyChatMessage,
-    val startsGroup: Boolean,
-    val endsGroup: Boolean,
-    val showTime: Boolean,
-)
-
-internal fun partyChatRows(messages: List<PartyChatMessage>): List<PartyChatRow> =
-    messages.mapIndexed { index, message ->
-        val previous = messages.getOrNull(index - 1)
-        val next = messages.getOrNull(index + 1)
-        val showTime = previous == null || message.sentAt - previous.sentAt > TIME_GAP_MS
-        val nextShowsTime = next != null && next.sentAt - message.sentAt > TIME_GAP_MS
-        PartyChatRow(
-            message = message,
-            startsGroup = showTime || previous?.author != message.author,
-            endsGroup = next == null || nextShowsTime || next.author != message.author,
-            showTime = showTime,
-        )
-    }
-
-private val PartyChatMessage.author: String
-    get() = if (mine) "" else memberId
-
 @Composable
 internal fun PartyChatContent(
     members: List<PartyMember>,
@@ -609,4 +585,3 @@ private val BUBBLE_RADIUS = 18.dp
 private val BUBBLE_JOIN_RADIUS = 6.dp
 private val CONTROL_SIZE = 44.dp
 private val CROWDED_HEIGHT = 340.dp
-private const val TIME_GAP_MS = 10 * 60 * 1000L
