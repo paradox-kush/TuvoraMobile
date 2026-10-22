@@ -10,6 +10,7 @@ actual object SyncClientIdentityStorage {
     private var preferences: SharedPreferences? = null
 
     fun initialize(context: Context) {
+        AndroidDeviceName.initialize(context)
         preferences = context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
     }
 

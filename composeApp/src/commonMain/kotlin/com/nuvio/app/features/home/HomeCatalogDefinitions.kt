@@ -31,6 +31,12 @@ data class HomeCatalogDefinition(
         if (showCatalogType) defaultTitle else catalogName
 }
 
+/** Availability can change while cached manifests remain identical (setup/restore or a source toggle). */
+data class AddonCatalogRefreshKey(val catalogSignature: List<String>, val availabilityRevision: Long)
+
+fun buildAddonCatalogRefreshKey(addons: List<ManagedAddon>, availabilityRevision: Long) =
+    AddonCatalogRefreshKey(buildAddonCatalogRefreshSignature(addons), availabilityRevision)
+
 fun buildAddonCatalogRefreshSignature(addons: List<ManagedAddon>): List<String> =
     addons.enabledAddons().map { addon ->
         val signature = CatalogDescriptorSignature()
