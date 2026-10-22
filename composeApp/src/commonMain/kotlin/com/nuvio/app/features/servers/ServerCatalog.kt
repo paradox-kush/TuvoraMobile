@@ -56,7 +56,7 @@ internal data class ServerSearchRef(
 
 internal object ServerCatalog {
     fun libraries(): List<ServerLibraryRef> =
-        ServerRepository.enabledConnections().flatMap { connection ->
+        ServerRepository.enabledConnections().filter { it.managedBridgeId == null }.flatMap { connection ->
             connection.selectedLibraries.map { ServerLibraryRef(connection, it) }
         }
 
@@ -64,7 +64,7 @@ internal object ServerCatalog {
         libraries().filter { it.library.kind != ServerMediaKind.COLLECTION }
 
     fun searchTargets(): List<ServerSearchRef> =
-        ServerRepository.enabledConnections()
+        ServerRepository.enabledConnections().filter { it.managedBridgeId == null }
             .filter { ServerRepository.provider(it)?.supports(ServerCapability.SEARCH) == true }
             .flatMap { connection ->
                 SEARCH_KINDS.filter { connection.selectedLibraries(it).isNotEmpty() }.map { ServerSearchRef(connection, it) }
@@ -95,7 +95,7 @@ internal object ServerCatalog {
     }
 
     private fun resumeDefinitions(): List<HomeCatalogDefinition> {
-        val connections = ServerRepository.enabledConnections().filter { connection ->
+        val connections = ServerRepository.enabledConnections().filter { it.managedBridgeId == null }.filter { connection ->
             connection.selectedLibraries.isNotEmpty() &&
                 ServerRepository.provider(connection)?.supports(ServerCapability.USER_STATE_READ) == true
         }

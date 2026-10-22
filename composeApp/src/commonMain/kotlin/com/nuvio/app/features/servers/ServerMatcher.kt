@@ -71,7 +71,16 @@ internal object ServerMatcher {
 
     suspend fun match(connection: ServerConnection, request: MatchRequest, forceRefresh: Boolean): List<ServerItemRef> {
         val ids = withConvertedIds(request)
-        val itemIds = connection.selectedLibraries(request.kind)
+        val itemIds = if (connection.managedBridgeId != null) {
+            // Remux resolves titles lazily. Never dump/index its virtual library to match one title.
+            val meta = MetaDetailsRepository.peek(request.kind.contentType, request.parentId)
+                ?: withTimeoutOrNull(15_000) { MetaDetailsRepository.fetch(request.kind.contentType, request.parentId) }
+            val title = meta?.name?.trim()?.takeIf { it.isNotEmpty() } ?: throw ServerException(ServerFailure.INCOMPLETE)
+            val results = ServerRepository.call(connection.id) { provider, session ->
+                provider.search(session, request.kind, connection.selectedLibraries(request.kind), title, 25)
+            }
+            managedItemIds(connection.id, results, ids)
+        } else connection.selectedLibraries(request.kind)
             .flatMap { library -> index(connection, library, forceRefresh).lookup(ids) }
             .distinct()
         if (request.kind == ServerMediaKind.MOVIE) return itemIds.map { ServerItemRef(connection.id, it) }
@@ -90,7 +99,7 @@ internal object ServerMatcher {
     }
 
     fun warm() {
-        ServerRepository.enabledConnections().forEach { connection ->
+        ServerRepository.enabledConnections().filter { it.managedBridgeId == null }.forEach { connection ->
             listOf(ServerMediaKind.MOVIE, ServerMediaKind.SERIES).filter { supports(connection, it) }.forEach { kind ->
                 connection.selectedLibraries(kind).forEach { library -> build(connection, library, forceRefresh = false) }
             }
@@ -218,3 +227,10 @@ private fun TrackingExternalIds.conflictsWith(other: TrackingExternalIds): Boole
 }
 
 private const val MAX_AIR_DATE_DRIFT_DAYS = 2L
+
+/** A title is only a search hint. Require matching external IDs and reject conflicts. */
+internal fun managedItemIds(connectionId: String, titles: List<ServerTitle>, ids: TrackingExternalIds): List<String> =
+    LibraryIndex(titles.mapNotNull { title ->
+        val ref = ServerItemRef.parse(title.preview.id)?.takeIf { it.connectionId == connectionId } ?: return@mapNotNull null
+        ServerIndexEntry(ref.itemId, title.externalIds)
+    }).lookup(ids)

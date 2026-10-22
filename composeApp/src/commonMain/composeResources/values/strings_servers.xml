@@ -59,4 +59,6 @@
     <string name="servers_resume_row">Continue watching</string>
     <string name="servers_failure_unsupported">The server doesn't support this item.</string>
     <string name="servers_failure_incomplete">Still checking this server's library. Try again in a moment.</string>
+    <string name="servers_managed_reconnect">Reconnect this device</string>
+    <string name="servers_managed_help">Manage this connection at addon.thekush.dev. To turn it off only on this device, use Settings → Content &amp; Discovery.</string>
 </resources>

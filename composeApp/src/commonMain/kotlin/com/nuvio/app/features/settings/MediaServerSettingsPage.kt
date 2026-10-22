@@ -57,6 +57,8 @@ import nuvio.composeapp.generated.resources.servers_remove
 import nuvio.composeapp.generated.resources.servers_remove_confirm_message
 import nuvio.composeapp.generated.resources.servers_remove_confirm_title
 import nuvio.composeapp.generated.resources.servers_sign_in_again
+import nuvio.composeapp.generated.resources.servers_managed_reconnect
+import nuvio.composeapp.generated.resources.servers_managed_help
 import nuvio.composeapp.generated.resources.servers_signed_in_as
 import nuvio.composeapp.generated.resources.servers_status_auth
 import nuvio.composeapp.generated.resources.servers_status_cert_changed
@@ -232,16 +234,19 @@ private fun MediaServerSettingsBody(
             )
             SettingsGroupDivider(isTablet = isTablet)
             SettingsNavigationRow(
-                title = stringResource(Res.string.servers_sign_in_again),
+                title = stringResource(if (connection.managedBridgeId == null) Res.string.servers_sign_in_again else Res.string.servers_managed_reconnect),
                 description = null,
                 icon = Icons.Rounded.Lock,
                 isTablet = isTablet,
                 onClick = {
-                    signIn = provider?.let { ServerSignInRequest(it, address = connection.address, username = connection.userName) }
+                    if (connection.managedBridgeId != null) scope.launch {
+                        com.nuvio.app.features.servers.ManagedAddonBridge.refresh(com.nuvio.app.features.profiles.ProfileRepository.activeProfileId, force = true)
+                    } else signIn = provider?.let { ServerSignInRequest(it, address = connection.address, username = connection.userName) }
                 },
             )
         }
 
+        if (connection.managedBridgeId == null) {
         Button(
             onClick = { confirmRemove = true },
             modifier = Modifier
@@ -258,12 +263,14 @@ private fun MediaServerSettingsBody(
                 style = MaterialTheme.typography.titleMedium,
             )
         }
+        } else Text(stringResource(Res.string.servers_managed_help), style = MaterialTheme.typography.bodyMedium)
+
     }
 
     NuvioStatusModal(
         title = stringResource(Res.string.servers_remove_confirm_title),
         message = stringResource(Res.string.servers_remove_confirm_message, connection.name),
-        isVisible = confirmRemove,
+        isVisible = confirmRemove && connection.managedBridgeId == null,
         confirmText = stringResource(Res.string.servers_remove),
         dismissText = stringResource(Res.string.action_cancel),
         onConfirm = {

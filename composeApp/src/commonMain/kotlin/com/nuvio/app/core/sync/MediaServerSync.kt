@@ -66,6 +66,7 @@ object MediaServerSync {
 
     suspend fun syncFromRemote(profileId: Int): Boolean = syncMutex.withLock {
         try {
+            if (canSync(profileId)) com.nuvio.app.features.servers.ManagedAddonBridge.refresh(profileId)
             sync(profileId, pushOnly = false)
         } catch (error: CancellationException) {
             throw error
