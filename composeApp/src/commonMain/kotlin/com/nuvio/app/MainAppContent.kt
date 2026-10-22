@@ -124,7 +124,7 @@ import com.nuvio.app.features.downloads.DownloadsRepository
 import com.nuvio.app.features.home.HomeCatalogSection
 import com.nuvio.app.features.home.HomeCatalogSettingsRepository
 import com.nuvio.app.features.home.HomeRepository
-import com.nuvio.app.features.home.buildAddonCatalogRefreshSignature
+import com.nuvio.app.features.home.buildAddonCatalogRefreshKey
 import com.nuvio.app.features.home.components.shouldBlurContinueWatchingArtwork
 import com.nuvio.app.features.library.LibraryItem
 import com.nuvio.app.features.library.LibraryRepository
@@ -433,7 +433,7 @@ internal fun MainAppContent(
     var lastNetworkToastCondition by rememberSaveable { mutableStateOf(NetworkCondition.Unknown.name) }
     var watchSourceReconnectPending by remember { mutableStateOf(false) }
     val homeCatalogRefreshKey = remember(addonsUiState.addons, addonsUiState.availabilityRevision) {
-        buildAddonCatalogRefreshSignature(addonsUiState.addons)
+        buildAddonCatalogRefreshKey(addonsUiState.addons, addonsUiState.availabilityRevision)
     }
 
     val serversUiState by remember {

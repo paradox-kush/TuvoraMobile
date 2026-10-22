@@ -22,6 +22,17 @@ class HomeCatalogDefinitionTest {
     )
 
     @Test
+    fun `a source availability change reloads cached catalogs without changing their manifests`() {
+        val addons = listOf(ManagedAddon(manifestUrl = "https://example.test/manifest.json"))
+        val beforeSetup = buildAddonCatalogRefreshKey(addons, availabilityRevision = 4)
+        val afterSetup = buildAddonCatalogRefreshKey(addons, availabilityRevision = 5)
+        assertEquals(beforeSetup.catalogSignature, afterSetup.catalogSignature)
+        assertNotEquals(beforeSetup, afterSetup)
+        assertEquals(afterSetup, buildAddonCatalogRefreshKey(addons, availabilityRevision = 5),
+            "No new refresh when source availability has not changed")
+    }
+
+    @Test
     fun `shows the type suffix by default`() {
         assertEquals("Popular - Movie", definition.titleFor(showCatalogType = true))
     }

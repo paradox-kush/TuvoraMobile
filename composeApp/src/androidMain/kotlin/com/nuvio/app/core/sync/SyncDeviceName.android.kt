@@ -1,13 +1,24 @@
 package com.nuvio.app.core.sync
 
+import android.content.Context
 import android.os.Build
+import android.provider.Settings
 
-/**
- * "Pixel 8 Pro", "Samsung SM-S911B". Android phones have no user-assigned name an app can read, so
- * the model is the best available. MODEL sometimes already carries the manufacturer (OnePlus does
- * this), hence the prefix check rather than blind concatenation.
- */
+internal object AndroidDeviceName {
+    private var context: Context? = null
+
+    fun initialize(context: Context) {
+        this.context = context.applicationContext
+    }
+
+    fun configuredName(): String? = runCatching {
+        context?.contentResolver?.let { Settings.Global.getString(it, Settings.Global.DEVICE_NAME) }
+    }.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+}
+
+/** Prefer the name from Android Settings; some manufacturers expose only a model name. */
 internal actual fun syncDeviceName(): String {
+    AndroidDeviceName.configuredName()?.let { return it }
     val manufacturer = Build.MANUFACTURER.orEmpty().trim()
     val model = Build.MODEL.orEmpty().trim()
 

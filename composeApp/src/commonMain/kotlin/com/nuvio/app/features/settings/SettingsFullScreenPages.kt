@@ -19,7 +19,7 @@ import com.nuvio.app.features.collection.CollectionRepository
 import com.nuvio.app.features.details.MetaScreenSettingsRepository
 import com.nuvio.app.features.plugins.PluginRepository
 import com.nuvio.app.features.home.HomeCatalogSettingsRepository
-import com.nuvio.app.features.home.buildAddonCatalogRefreshSignature
+import com.nuvio.app.features.home.buildAddonCatalogRefreshKey
 import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesRepository
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.compose_settings_page_account
@@ -35,8 +35,8 @@ fun HomescreenSettingsScreen(
     onBack: () -> Unit,
 ) {
     val addonsUiState by AddonRepository.uiState.collectAsStateWithLifecycle()
-    val homescreenCatalogRefreshKey = remember(addonsUiState.addons) {
-        buildAddonCatalogRefreshSignature(addonsUiState.addons)
+    val homescreenCatalogRefreshKey = remember(addonsUiState.addons, addonsUiState.availabilityRevision) {
+        buildAddonCatalogRefreshKey(addonsUiState.addons, addonsUiState.availabilityRevision)
     }
     val addonManifestsLoading = addonsUiState.addons.hasPendingEnabledManifests()
     val addonManifestErrorMessage = addonsUiState.addons.firstEnabledManifestError()
