@@ -11,8 +11,20 @@ private const val CLIENT_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 object SyncClientIdentity {
     private var cachedClientId: String? = null
+    private val bootstrapLock = kotlinx.atomicfu.locks.SynchronizedObject()
+
+    // Freeze this before generating an ID. A fresh install must remain fresh after a restart
+    // until the user chooses whether to restore saved device preferences.
+    internal val sourceSetupUpgradeEligible: Boolean
+        get() = kotlinx.atomicfu.locks.synchronized(bootstrapLock) {
+            SyncClientIdentityStorage.loadValue("source_setup_upgrade_eligible")?.toBooleanStrictOrNull()
+                ?: (SyncClientIdentityStorage.loadClientId()?.trim()?.isNotEmpty() == true).also {
+                    SyncClientIdentityStorage.saveValue("source_setup_upgrade_eligible", it.toString())
+                }
+        }
 
     fun currentClientId(): String {
+        sourceSetupUpgradeEligible
         cachedClientId?.let { return it }
 
         val stored = SyncClientIdentityStorage.loadClientId()

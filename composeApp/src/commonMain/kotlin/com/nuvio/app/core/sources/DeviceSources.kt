@@ -40,6 +40,8 @@ object DeviceSources {
                 rpc = { name,args -> checkNotNull(client).postgrest.rpc(name,args).decodeAs<JsonElement>() },
                 uuid = { Uuid.random().toString() }, credential = { secureRandomHex(32) },
                 now = { Clock.System.now().toEpochMilliseconds() }, platform = if (com.nuvio.app.isIos) "ios" else "android", localOnly = auth.isLocalOnly,
+                automaticSetupName = com.nuvio.app.core.sync.syncDeviceName().take(120),
+                existingInstallation = com.nuvio.app.core.sync.SyncClientIdentity.sourceSetupUpgradeEligible,
             )
             key = next
         }
