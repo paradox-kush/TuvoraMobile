@@ -121,6 +121,11 @@ object ServerRepository {
         connectionId: String,
         block: suspend (ServerProvider, ServerSession) -> T,
     ): T {
+        connection(connectionId)?.takeIf { it.managedBridgeId != null && it.availableOnDevice &&
+            (it.managedExpiresAtMs < kotlin.time.Clock.System.now().toEpochMilliseconds() + 15 * 60_000 ||
+                ServerTokenPolicy.needsSignIn(token(it.credentialRef)) || _uiState.value.failures[it.id] == ServerFailure.AUTH_REQUIRED) }?.let {
+            ManagedAddonBridge.refresh(ProfileRepository.activeProfileId, force = _uiState.value.failures[it.id] == ServerFailure.AUTH_REQUIRED)
+        }
         val preferenceEpoch = com.nuvio.app.core.sources.DeviceSources.epoch
         val startedGeneration = generation
         val connection = connection(connectionId) ?: throw ServerException(ServerFailure.NOT_FOUND)
@@ -150,7 +155,18 @@ object ServerRepository {
     suspend fun connectWithQuickConnect(provider: ServerProvider, challenge: QuickConnectChallenge): ServerConnection =
         connectWith(provider) { provider.quickConnectComplete(challenge) }
 
-    private suspend fun connectWith(provider: ServerProvider, signInBlock: suspend () -> ServerSignIn): ServerConnection {
+    internal suspend fun connectManaged(signIn: ServerSignIn, bridgeId: String, expiresAtMs: Long, revision: Long): ServerConnection =
+        connectWith(checkNotNull(ServerProviders.forId("jellyfin")), bridgeId, expiresAtMs, revision) { signIn }
+
+    internal fun forgetManaged(exceptId: String? = null) {
+        ensureLoaded()
+        val removed = _uiState.value.connections.filter { it.managedBridgeId != null && it.managedBridgeId != exceptId }
+        if (removed.isEmpty()) return
+        removed.forEach { deleteCredential(it.credentialRef) }
+        saveConnections(_uiState.value.connections - removed.toSet(), invalidate = true, local = false)
+    }
+
+    private suspend fun connectWith(provider: ServerProvider, managedBridgeId: String? = null, managedExpiresAtMs: Long = 0, managedRevision: Long = 0, signInBlock: suspend () -> ServerSignIn): ServerConnection {
         ensureLoaded()
         val startedGeneration = generation
         val profileId = loadedProfileId ?: ProfileRepository.activeProfileId
@@ -170,7 +186,10 @@ object ServerRepository {
             userName = signIn.userName,
             credentialRef = newId("k"),
             libraries = existing?.libraries.orEmpty(),
-            enabled = true,
+            enabled = if (managedBridgeId != null) existing?.enabled ?: true else true,
+            managedBridgeId = managedBridgeId,
+            managedExpiresAtMs = managedExpiresAtMs,
+            managedRevision = managedRevision,
             useCatalogMetadata = existing?.useCatalogMetadata ?: false,
             importWatchState = existing?.importWatchState ?: false,
         )
@@ -179,17 +198,18 @@ object ServerRepository {
             throw CancellationException("Server scope changed")
         }
         val connection = draft.copy(libraries = mergeLibraries(existing?.libraries.orEmpty(), libraries))
-        store(connection, signIn.token)
+        store(connection, signIn.token, local = managedBridgeId == null)
         existing?.let { deleteCredential(it.credentialRef) }
         return connection
     }
 
-    internal fun store(connection: ServerConnection, token: String) {
+    internal fun store(connection: ServerConnection, token: String, local: Boolean = true) {
         ensureLoaded()
         writeCredential(connection.credentialRef, token)
         saveConnections(
             _uiState.value.connections.filterNot { it.id == connection.id } + connection,
             invalidate = true,
+            local = local,
         )
         setFailure(connection.id, null)
     }
@@ -244,7 +264,7 @@ object ServerRepository {
         return ServerSyncSnapshot(
             profileId = profileId,
             version = localVersion,
-            servers = _uiState.value.connections.map { it.toSynced() },
+            servers = _uiState.value.connections.filter { it.managedBridgeId == null }.map { it.toSynced() },
             pendingPush = syncState.pendingPush,
             syncedKeys = syncState.syncedKeys?.toSet(),
         )
@@ -263,12 +283,13 @@ object ServerRepository {
             // Tokens never sync: keep whatever this device holds, whatever the remote row says.
             server.toConnection(id, credentialRef)
         }
-        current.filter { it.id !in usedIds }.forEach { removed ->
+        val managed = current.filter { it.managedBridgeId != null }
+        current.filter { it.managedBridgeId == null && it.id !in usedIds }.forEach { removed ->
             deleteCredential(removed.credentialRef)
             setFailure(removed.id, null)
         }
         syncState = ServerSyncState(pendingPush = false, syncedKeys = keys.toList())
-        if (connections != current) saveConnections(connections, invalidate = true, local = false)
+        if (connections + managed != current) saveConnections(connections + managed, invalidate = true, local = false)
         persistSyncState()
         markUnauthenticated(connections)
         return true
