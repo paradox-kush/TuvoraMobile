@@ -70,7 +70,7 @@ import com.nuvio.app.features.debrid.DebridSettings
 import com.nuvio.app.features.debrid.DebridSettingsRepository
 import com.nuvio.app.features.home.HomeCatalogSettingsItem
 import com.nuvio.app.features.home.HomeCatalogSettingsRepository
-import com.nuvio.app.features.home.buildAddonCatalogRefreshSignature
+import com.nuvio.app.features.home.buildAddonCatalogRefreshKey
 import com.nuvio.app.features.mdblist.MdbListSettings
 import com.nuvio.app.features.mdblist.MdbListSettingsRepository
 import com.nuvio.app.features.mdblist.MdbListTracker
@@ -223,8 +223,8 @@ fun SettingsScreen(
             AddonRepository.initialize()
             AddonRepository.uiState
         }.collectAsStateWithLifecycle()
-        val homescreenCatalogRefreshKey = remember(addonsUiState.addons) {
-            buildAddonCatalogRefreshSignature(addonsUiState.addons)
+        val homescreenCatalogRefreshKey = remember(addonsUiState.addons, addonsUiState.availabilityRevision) {
+            buildAddonCatalogRefreshKey(addonsUiState.addons, addonsUiState.availabilityRevision)
         }
         val addonManifestsLoading = addonsUiState.addons.hasPendingEnabledManifests()
         val addonManifestErrorMessage = addonsUiState.addons.firstEnabledManifestError()
