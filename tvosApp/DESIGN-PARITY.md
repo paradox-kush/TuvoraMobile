@@ -73,8 +73,8 @@ can leave the hidden field owning keyboard focus; NuvioDialog measures one scrol
 
 `AndroidParityTests` exercises local source persistence after relaunch, guide search keyboard and
 Back behavior, custom category reachability, collection/folder save, Home settings dismissal and
-privacy reachability. The guide tests require `research/tvos-android-parity-2026-10-24/fixture-server.py`
-from the enclosing workspace on loopback port 18124. Use a disposable simulator: these acceptance
+privacy reachability. The guide tests require `python3 tvosApp/Scripts/parity-guide-fixture.py`
+from the repository root on loopback port 18124. Use a disposable simulator: these acceptance
 checks intentionally create local guest data. No production source credentials are needed.
 
 This covers the major missing native workflows, not every Android preference. Full advanced TMDB
