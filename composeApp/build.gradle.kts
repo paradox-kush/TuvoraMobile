@@ -556,7 +556,8 @@ kotlin {
                 // encrypted DoH endpoint on Android; iOS ignores the dnsProvider setting.
                 implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
                 implementation("com.google.code.gson:gson:2.11.0")
-                implementation("io.github.peerless2012:ass-media:0.5.1")
+                // libass - atlas-based subtitle rendering (from NuvioMedia/nuvio-libass)
+                implementation(files("libs/nuvio-libass-release.aar"))
                 implementation(libs.ktor.client.okhttp)
                 implementation(libs.sentry.android)
                 // media3 core, common and hls come from the fork AARs (libs/lib-exoplayer-,
@@ -627,7 +628,7 @@ kotlin {
             }
             // Loopback relay for pinned (self-signed) media servers: players that cannot take a pin read through it.
             implementation("io.ktor:ktor-network:${libs.versions.ktor.get()}")
-            implementation("dev.chrisbanes.haze:haze:1.7.2")
+            implementation("dev.chrisbanes.haze:haze:1.7.3")
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
