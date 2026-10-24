@@ -14,6 +14,8 @@ struct TitleDetailsScreen: View {
     @State private var saved = false
     @State private var smokePressed = false
     @State private var watched = false
+    @State private var presentation: MetaScreenSettingsUiState?
+    @State private var progressRevision = 0
     /// A title or person opened from the lower sections. MetaDetailsRepository holds one title at a time,
     /// so while a child is up this screen ignores its updates and reloads its own (a cache hit) on return.
     @State private var childDetails: PreviewBox?
@@ -40,7 +42,7 @@ struct TitleDetailsScreen: View {
                                 .onGeometryChange(for: Bool.self) { $0.frame(in: .global).minY < -dp(200) } action: { past in
                                     scrolledPastHero = past
                                 }
-                            if isSeries { episodes(meta) }
+                            if isSeries && TvTitlePresentation.shared.sectionEnabled(key: .episodes) { episodes(meta) }
                             DetailLowerSections(meta: meta,
                                                 onOpenTitle: { childDetails = PreviewBox(preview: $0) },
                                                 onOpenPerson: { person, lead in
@@ -73,6 +75,12 @@ struct TitleDetailsScreen: View {
             }
         }
         .task {
+            #if DEBUG && targetEnvironment(simulator)
+            if AppArguments.list.contains("-smokePresentationTitle") {
+                state = MetaDetailsUiState(isLoading: false, meta: TvTitlePresentation.shared.sample(), errorMessage: nil)
+                return
+            }
+            #endif
             TvTitle.shared.load(type: preview.type, id: preview.id)
             for await next in TvTitle.shared.details {
                 if childDetails != nil || personTarget != nil { continue }
@@ -95,6 +103,12 @@ struct TitleDetailsScreen: View {
                 }
             }
         }
+        .task {
+            MetaScreenSettingsRepository.shared.ensureLoaded()
+            for await value in MetaScreenSettingsRepository.shared.uiState { presentation = value }
+        }
+        .task { for await _ in WatchProgressRepository.shared.uiState { progressRevision += 1 } }
+        .task { for await _ in WatchedRepository.shared.uiState { progressRevision += 1 } }
         .fullScreenCover(item: $childDetails, onDismiss: reloadSelf) { box in
             TitleDetailsScreen(preview: box.preview).environmentObject(playback).environment(\.nuvio, colors)
         }
@@ -148,8 +162,8 @@ struct TitleDetailsScreen: View {
             .scrollClipDisabled()
             .focusSection()
             metaRow(meta)
-            ratingsRow(meta)
-            if let description = meta.description_ {
+            if presentation?.showOverallRatings != false { ratingsRow(meta) }
+            if TvTitlePresentation.shared.sectionEnabled(key: .overview), let description = meta.description_ {
                 Text(description).font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary)
                     .lineLimit(4).frame(maxWidth: dp(560), alignment: .leading)
             }
@@ -164,7 +178,7 @@ struct TitleDetailsScreen: View {
                 if index > 0 { Circle().fill(colors.textSecondary).frame(width: dp(3), height: dp(3)) }
                 Text(part).font(NuvioType.labelLarge).foregroundStyle(colors.textSecondary)
             }
-            if let rating = meta.imdbRating,
+            if presentation?.showOverallRatings != false, let rating = meta.imdbRating,
                TvRatingsPolicy.shared.showsImdbLine(imdbRating: rating, ratings: meta.externalRatings, mdbListActive: mdbListActive) {
                 Circle().fill(colors.textSecondary).frame(width: dp(3), height: dp(3))
                 ImdbBadge()
@@ -213,6 +227,7 @@ struct TitleDetailsScreen: View {
 
     // Season tabs (radius 20, padding 20×10, titleMedium) + episode cards (320×207, 2dp ring, no scale).
     private func episodes(_ meta: MetaDetails) -> some View {
+        let _ = progressRevision
         let seasons = Array(Set(meta.videos.compactMap { $0.season?.int32Value })).sorted()
         let current = season ?? seasons.first(where: { $0 > 0 }) ?? seasons.first ?? 1
         return VStack(alignment: .leading, spacing: dp(16)) {
@@ -228,22 +243,26 @@ struct TitleDetailsScreen: View {
                 .scrollClipDisabled()
             .focusSection()
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: dp(16)) {
+            if presentation?.episodeCardStyle == .list {
+                // The season is bounded. Eager focus targets let tvOS move down from the hero
+                // before these rows scroll onscreen; a nested LazyVStack hid every target.
+                VStack(spacing: dp(12)) {
                     ForEach(meta.videos.filter { ($0.season?.int32Value ?? current) == current }, id: \.id) { video in
-                        EpisodeCard(video: video, progress: episodeProgress(meta, video)) { openSources(meta: meta, video: video) }
+                        EpisodeCard(video: video, presentation: TvTitlePresentation.shared.episode(meta: meta, video: video), listStyle: true) { openSources(meta: meta, video: video) }
                     }
-                }
-                .padding(.vertical, dp(8))
+                }.focusSection()
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: dp(16)) {
+                        ForEach(meta.videos.filter { ($0.season?.int32Value ?? current) == current }, id: \.id) { video in
+                            EpisodeCard(video: video, presentation: TvTitlePresentation.shared.episode(meta: meta, video: video)) { openSources(meta: meta, video: video) }
+                        }
+                    }.padding(.vertical, dp(8))
+                }.scrollClipDisabled().focusSection()
             }
-            .scrollClipDisabled()
-            .focusSection()
         }
     }
 
-    private func episodeProgress(_ meta: MetaDetails, _ video: MetaVideo) -> Double {
-        resume(meta, video) > 0 ? 0.5 : 0
-    }
 }
 
 private struct PersonTarget: Identifiable {
@@ -357,36 +376,53 @@ private struct SeasonTab: View {
 
 private struct EpisodeCard: View {
     let video: MetaVideo
-    let progress: Double
+    let presentation: TvEpisodePresentation
+    var listStyle = false
     let action: () -> Void
     @Environment(\.nuvio) private var colors
     @FocusState private var focused: Bool
 
+    private var artwork: some View {
+        CachedPosterArtwork(urlString: video.thumbnail, width: dp(320), height: dp(listStyle ? 140 : 207), maximumWidth: dp(640)) { colors.backgroundCard }
+            .frame(width: dp(320), height: dp(listStyle ? 140 : 207))
+            .blur(radius: presentation.hideSpoilers ? dp(16) : 0).clipped()
+    }
+    private var caption: some View {
+        VStack(alignment: .leading, spacing: dp(4)) {
+            HStack {
+                Text("E\(video.episode?.int32Value ?? 0)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                if presentation.watched { Image("md_check_circle").renderingMode(.template).resizable().frame(width: dp(16), height: dp(16)).foregroundStyle(colors.success).accessibilityLabel("Watched") }
+            }
+            Text(presentation.hideSpoilers ? "Unwatched episode" : video.title).font(NuvioType.titleMedium).foregroundStyle(colors.textPrimary).lineLimit(1)
+            if !presentation.hideSpoilers, let overview = video.overview {
+                Text(overview).font(NuvioType.bodySmall).foregroundStyle(colors.textSecondary).lineLimit(2)
+            }
+            if presentation.progress > 0 {
+                ProgressView(value: presentation.progress).tint(colors.secondary)
+                    .accessibilityLabel("Episode progress").accessibilityValue("\(Int(presentation.progress * 100)) percent")
+            }
+        }.padding(dp(12)).frame(maxWidth: .infinity, alignment: .leading)
+    }
     var body: some View {
         Button(action: action) {
-            ZStack(alignment: .bottomLeading) {
-                CachedPosterArtwork(urlString: video.thumbnail, width: dp(320), height: dp(207), maximumWidth: dp(640)) { colors.backgroundCard }
-                    .frame(width: dp(320), height: dp(207))
-                LinearGradient(stops: [.init(color: .black.opacity(0.04), location: 0.35), .init(color: .black.opacity(0.95), location: 1)],
-                               startPoint: .top, endPoint: .bottom)
-                VStack(alignment: .leading, spacing: dp(4)) {
-                    Text("E\(video.episode?.int32Value ?? 0)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
-                    Text(video.title).font(NuvioType.titleMedium).foregroundStyle(colors.textPrimary).lineLimit(1)
-                    if let overview = video.overview {
-                        Text(overview).font(NuvioType.bodySmall).foregroundStyle(colors.textSecondary).lineLimit(2)
-                    }
+            Group {
+                if listStyle {
+                    HStack(spacing: dp(12)) { artwork; caption }.frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ZStack(alignment: .bottomLeading) {
+                        artwork
+                        LinearGradient(stops: [.init(color: .black.opacity(0.04), location: 0.35), .init(color: .black.opacity(0.95), location: 1)], startPoint: .top, endPoint: .bottom)
+                        caption
+                    }.frame(width: dp(320), height: dp(207))
                 }
-                .padding(dp(12))
             }
-            .frame(width: dp(320), height: dp(207))
-            .clipShape(RoundedRectangle(cornerRadius: NuvioTokens.Radius.posterCard, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: NuvioTokens.Radius.posterCard, style: .continuous)
-                .stroke(focused ? colors.focusRing : .clear, lineWidth: NuvioTokens.Stroke.focus))
+            .background(colors.backgroundCard)
+            .clipShape(RoundedRectangle(cornerRadius: NuvioTokens.Radius.posterCard))
+            .overlay(RoundedRectangle(cornerRadius: NuvioTokens.Radius.posterCard).stroke(focused ? colors.focusRing : .clear, lineWidth: NuvioTokens.Stroke.focus))
             .hoverEffect(.highlight)
         }
-        .buttonStyle(PlainNoChromeButtonStyle())
-        .focused($focused)
-        .reportsFocus(focused)
+        .accessibilityIdentifier("episode.\(video.id)")
+        .buttonStyle(PlainNoChromeButtonStyle()).focused($focused).reportsFocus(focused)
     }
 }
 

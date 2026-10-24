@@ -87,8 +87,7 @@ struct NuvioPalette {
                                     onSecondary: NuvioPrimitives.neutral925, focusRing: NuvioPrimitives.white,
                                     focusBackground: Color(argb: 0xFF303030), backgroundCard: NuvioPrimitives.neutral850)
 
-    /// ThemeColors.getColorPalette. Supporter/custom themes are the inert membership subsystem
-    /// (CLAUDE.md) and resolve to Marigold, the fork's default.
+    /// Fixed theme previews. Applied custom colors come from the shared palette via TvAppearance.
     static func of(_ theme: AppTheme) -> NuvioPalette {
         switch theme {
         case .crimson: return .crimson
@@ -100,6 +99,19 @@ struct NuvioPalette {
         case .white: return .white
         default: return .marigold
         }
+    }
+
+    /// tvOS settings use a ring as their main focus cue. Preserve visibility even for a black custom accent.
+    static func focusRingArgb(_ ring: UInt32, background: UInt32) -> UInt32 {
+        func luminance(_ c: UInt32) -> Double {
+            func linear(_ byte: UInt32) -> Double {
+                let value = Double(byte) / 255
+                return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear((c >> 16) & 255) + 0.7152 * linear((c >> 8) & 255) + 0.0722 * linear(c & 255)
+        }
+        let a = luminance(ring), b = luminance(background)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05) >= 3 ? ring : 0xFFFFFFFF
     }
 
     /// Color.kt AMOLED: background goes black; "AMOLED surfaces" blacks every surface too.
@@ -126,6 +138,9 @@ final class NuvioThemeModel: ObservableObject {
                 for await theme in ThemeSettingsRepository.shared.selectedTheme { self.apply(theme: theme, amoled: nil) }
             }
             group.addTask { @MainActor in
+                for await _ in ThemeSettingsRepository.shared.customThemeColors { self.apply(theme: nil, amoled: nil) }
+            }
+            group.addTask { @MainActor in
                 for await on in ThemeSettingsRepository.shared.amoledEnabled { self.apply(theme: nil, amoled: on.boolValue) }
             }
         }
@@ -137,7 +152,14 @@ final class NuvioThemeModel: ObservableObject {
     private func apply(theme: AppTheme?, amoled: Bool?) {
         if let theme { self.theme = theme }
         if let amoled { amoledOn = amoled }
-        let base = NuvioPalette.of(self.theme)
+        let base: NuvioPalette
+        if self.theme == .custom {
+            let p = TvAppearance.shared.palette()
+            base = NuvioPalette(secondary: Color(argb: UInt32(p.accent)), secondaryVariant: Color(argb: UInt32(p.variant)),
+                onSecondary: Color(argb: UInt32(p.onAccent)), focusRing: Color(argb: NuvioPalette.focusRingArgb(UInt32(p.focus), background: UInt32(p.background))),
+                focusBackground: Color(argb: UInt32(p.focusBackground)), background: Color(argb: UInt32(p.background)),
+                backgroundElevated: Color(argb: UInt32(p.elevated)), backgroundCard: Color(argb: UInt32(p.card)))
+        } else { base = NuvioPalette.of(self.theme) }
         colors = amoledOn ? base.amoled(surfaces: false) : base
     }
 }

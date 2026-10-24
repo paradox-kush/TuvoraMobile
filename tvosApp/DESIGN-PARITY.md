@@ -77,7 +77,27 @@ privacy reachability. The guide tests require `python3 tvosApp/Scripts/parity-gu
 from the repository root on loopback port 18124. Use a disposable simulator: these acceptance
 checks intentionally create local guest data. No production source credentials are needed.
 
-This covers the major missing native workflows, not every Android preference. Full advanced TMDB
-discovery filters, fine-grained title/episode presentation controls and custom theme authoring still
-need a separate native parity pass. Android APK updates, Compose rendering diagnostics and RGB565
-image preferences have no native counterpart. App Store content-discovery restrictions still apply.
+The follow-up native pass adds TMDB presets/discovery and all 18 shared filter fields, source sorting,
+catalog genres, collection backdrop editing, title section visibility, overall/episode rating controls,
+list or horizontal episodes, spoiler protection and solid custom accent authoring. Filter edits are a
+local draft until Apply; collection edits remain a draft until Save. Invalid input preserves the last
+valid value. Genre lists load on demand, with explicit retry; no recurring fetch was added.
+
+Episode cards derive progress/completion from WatchProgressRepository and WatchedRepository rather
+than a placeholder fraction. Unwatched rating protection also applies to the ratings section. Custom
+colors use the shared solid-color rule and shared text contrast; native ring rendering supplies a
+contrasting focus cue for very dark custom accents. Toggle rows expose On/Off to accessibility.
+
+Android APK updates, Compose rendering diagnostics and RGB565 image preferences have no native
+counterpart. App Store content-discovery restrictions still apply. Native tvOS focus/navigation and
+its existing player remain intentional platform differences; this is functional parity for the
+identified missing workflows, not a byte-for-byte Android layout or a claim about untested hardware.
+
+The additional UI checks validate rejected input, a saved custom color after relaunch, saved episode
+preferences rendered on a synthetic local title, and a discovery filter retained in a saved folder.
+The synthetic title entry point is DEBUG + simulator only; it does not fetch metadata or play media.
+Filter validation and progress/completion rules have native core tests; dark-ring contrast has Swift
+unit tests. See the test logs before treating a run as validated.
+
+API references: [TMDB discovery](https://developer.themoviedb.org/reference/discover-movie) and
+[Apple focus](https://developer.apple.com/documentation/swiftui/focusstate/).

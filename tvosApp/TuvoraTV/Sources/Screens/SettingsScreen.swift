@@ -244,6 +244,8 @@ struct SettingsScreen: View {
         case "deviceSources": dialogs.push(.deviceSources)
         case "collections": dialogs.push(.custom(AnyView(CollectionManagementScreen())))
         case "homeRows": dialogs.push(.custom(AnyView(HomeRowsSettingsScreen())))
+        case "titlePresentation": dialogs.push(.custom(AnyView(TitlePresentationSettingsScreen())))
+        case "customTheme": dialogs.push(.custom(AnyView(CustomThemeSettingsScreen())))
         case "signOut": dialogs.push(.signOut)
         case "mediaServerAdd": dialogs.push(.mediaServerAdd(nil))
         case "mediaServerDetails": if let key = TvMediaServers.shared.firstKey() { dialogs.push(.mediaServerDetails(key)) }
@@ -613,6 +615,7 @@ private struct ProfilesSettingsDetail: View {
 /// ThemeSettingsRepository drives the whole app live. Settings style, launcher artwork, font and app
 /// language have no Apple TV equivalent here; "Pure Black Surfaces" is not in the shared theme settings.
 private struct AppearanceSettingsDetail: View {
+    @EnvironmentObject private var dialogs: SettingsDialogs
     @ObservedObject var model: SettingsModel
     /// The free themes (supporter themes are the inert membership subsystem and resolve to Marigold).
     private let themes: [(AppTheme, String)] = [(.marigold, "Marigold"), (.crimson, "Crimson"), (.ocean, "Ocean"),
@@ -635,6 +638,8 @@ private struct AppearanceSettingsDetail: View {
                 }
                 .scrollClipDisabled()
                 .focusSection()
+                SettingsActionRow(title: "Custom color", value: model.theme == .custom ? "Selected" : nil) { dialogs.push(.custom(AnyView(CustomThemeSettingsScreen()))) }
+                    .accessibilityIdentifier("settings.customColor")
                 SettingsToggleRow(title: "AMOLED Mode", subtitle: "Use pure black for app backgrounds", isOn: model.amoled) {
                     ThemeSettingsRepository.shared.setAmoled(enabled: !model.amoled)
                 }
@@ -698,6 +703,8 @@ private struct LayoutSettingsDetail: View {
         VStack(alignment: .leading, spacing: dp(14)) {
             SettingsDetailHeader(title: "Layout Settings", subtitle: "Adjust home layout, content visibility, and poster behavior")
             SettingsActionRow(title: "Manage Collections") { dialogs.push(.custom(AnyView(CollectionManagementScreen()))) }
+            SettingsActionRow(title: "Title details") { dialogs.push(.custom(AnyView(TitlePresentationSettingsScreen()))) }
+                .accessibilityIdentifier("settings.titleDetails")
             SettingsActionRow(title: "Home catalogs") { dialogs.push(.custom(AnyView(HomeRowsSettingsScreen()))) }
             SettingsGroupCard(title: "Home Layout", subtitle: "Choose structure and hero source.") {
                 HStack(spacing: dp(12)) {
