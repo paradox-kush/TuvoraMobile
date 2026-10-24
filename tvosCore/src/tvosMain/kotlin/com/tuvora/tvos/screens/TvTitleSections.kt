@@ -104,6 +104,13 @@ object TvTitleSections {
             ?: TmdbService.ensureTmdbId(meta.id, meta.type, fallbackImdbId = meta.imdbId)?.toIntOrNull()
         if (imdbId == null && tmdbId == null) return emptyList()
         return ImdbEpisodeRatingsRepository.getEpisodeRatings(imdbId = imdbId, tmdbId = tmdbId)
+            .filter { (key, _) ->
+                MetaScreenSettingsRepository.uiState.value.episodeRatingsVisibility.showRating(
+                    com.nuvio.app.features.watched.WatchedRepository.isWatched(meta.id, meta.type, key.first, key.second) ||
+                        meta.videos.firstOrNull { it.season == key.first && it.episode == key.second }?.let {
+                            com.nuvio.app.features.watchprogress.WatchProgressRepository.progressForVideo(it.id, meta.id, key.first, key.second)?.isEffectivelyCompleted
+                        } == true)
+            }
             .map { (key, rating) -> TvEpisodeRating(key.first, key.second, rating) }
             .sortedWith(compareBy({ it.season }, { it.episode }))
     }

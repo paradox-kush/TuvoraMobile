@@ -94,14 +94,15 @@ final class AndroidParityTests: XCTestCase {
     }
 
     func testCollectionCanBeCreatedWithFolderAndSaved() {
+        let collectionName = "Parity Collection " + UUID().uuidString.prefix(6)
         launch(["-smokeTab", "settings", "-smokeSettingsDialog", "collections"])
         choose(app.buttons["collections.create"])
         let title = app.textFields["collections.title"]
-        choose(title); app.typeText("Parity Collection"); remote.press(.menu)
+        choose(title); app.typeText(collectionName); remote.press(.menu)
         choose(app.buttons["collections.addFolder"])
         choose(app.buttons["collections.saveFolder"])
         choose(app.buttons["collections.save"])
-        let collection = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'collections.edit.' AND label CONTAINS 'Parity Collection'")).firstMatch
+        let collection = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'collections.edit.' AND label CONTAINS %@", collectionName)).firstMatch
         XCTAssertTrue(collection.waitForExistence(timeout: 15))
         snapshot("collection-created")
         choose(collection)
@@ -125,4 +126,95 @@ final class AndroidParityTests: XCTestCase {
         choose(app.buttons["Done"])
         XCTAssertTrue(app.buttons["settings.deviceSources"].waitForExistence(timeout: 10))
     }
+    private func replaceText(_ field: XCUIElement, with text: String) {
+        choose(field)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8))
+        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40) + text)
+        remote.press(.menu)
+    }
+
+    func testCustomColorValidatesAndPersistsAfterRelaunch() {
+        launch(["-smokeTab", "settings", "-smokeSettingsDialog", "customTheme"])
+        let field = app.textFields["theme.hex"]
+        replaceText(field, with: "oops")
+        choose(app.buttons["theme.apply"])
+        XCTAssertTrue(app.staticTexts["theme.error"].waitForExistence(timeout: 5))
+        XCTAssertTrue(field.exists)
+        replaceText(field, with: "#1E88E5")
+        choose(app.buttons["theme.apply"])
+        XCTAssertFalse(field.exists)
+        app.terminate()
+        launch(["-smokeTab", "settings", "-smokeSettingsDialog", "customTheme"])
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        XCTAssertEqual(field.value as? String, "#1E88E5")
+        snapshot("custom-color-persisted")
+        remote.press(.menu)
+    }
+
+    func testTitlePreferencesPersistAndHideEpisodeSpoilers() {
+        launch(["-smokeTab", "settings", "-smokeSettingsDialog", "titlePresentation"])
+        let spoiler = app.buttons["titleSettings.spoilers"]
+        XCTAssertTrue(spoiler.waitForExistence(timeout: 20))
+        if spoiler.value as? String != "On" { choose(spoiler) }
+        let ratings = app.buttons["titleSettings.ratings"]
+        if ratings.value as? String != "Off" { choose(ratings) }
+        let layout = app.buttons["titleSettings.episodeLayout"]
+        if !layout.label.contains("List") { choose(layout) }
+        app.terminate()
+        launch(["-smokeTab", "settings", "-smokeSettingsDialog", "titlePresentation"])
+        XCTAssertTrue(spoiler.waitForExistence(timeout: 20))
+        XCTAssertEqual(spoiler.value as? String, "On")
+        XCTAssertTrue(layout.label.contains("List"))
+        XCTAssertEqual(ratings.value as? String, "Off")
+        app.terminate()
+        launch(["-smokeDetails", "series:parity-sample", "-smokePresentationTitle"])
+        XCTAssertTrue(app.staticTexts["Presentation preview"].waitForExistence(timeout: 20))
+        let episode = app.buttons["episode.parity-episode-1"]
+        for _ in 0..<8 {
+            if episode.exists { break }
+            remote.press(.down)
+        }
+        focus(episode)
+        XCTAssertTrue(episode.label.contains("Unwatched episode"))
+        XCTAssertFalse(episode.label.contains("hidden reveal"))
+        XCTAssertFalse(episode.label.contains("spoiler description"))
+        XCTAssertFalse(app.staticTexts["8.2"].exists)
+        snapshot("episode-spoilers-hidden")
+    }
+
+    func testDiscoveryFiltersValidateAndSaveWithCollection() {
+        let collectionName = "Discovery Parity " + UUID().uuidString.prefix(6)
+        launch(["-smokeTab", "settings", "-smokeSettingsDialog", "collections"])
+        choose(app.buttons["collections.create"])
+        replaceText(app.textFields["collections.title"], with: collectionName)
+        choose(app.buttons["collections.addFolder"])
+        choose(app.buttons["collections.addTmdb"])
+        choose(app.buttons["collectionSource.mode.discover"])
+        choose(app.buttons["collectionSource.filters"])
+        choose(app.buttons["filters.year"])
+        replaceText(app.textFields["filters.value"], with: "wrong")
+        choose(app.buttons["filters.save"])
+        XCTAssertTrue(app.staticTexts["filters.error"].waitForExistence(timeout: 5))
+        replaceText(app.textFields["filters.value"], with: "2024")
+        choose(app.buttons["filters.save"])
+        XCTAssertTrue(app.buttons["filters.year"].waitForExistence(timeout: 5))
+        remote.press(.menu)
+        choose(app.buttons["collectionSource.filters"])
+        XCTAssertTrue(app.buttons["filters.year"].label.contains("Any"), "Back should discard the filter draft")
+        choose(app.buttons["filters.year"])
+        replaceText(app.textFields["filters.value"], with: "2024")
+        choose(app.buttons["filters.save"])
+        choose(app.buttons["filters.apply"])
+        choose(app.buttons["collectionSource.add"])
+        let source = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Release year: 2024'")).firstMatch
+        XCTAssertTrue(source.waitForExistence(timeout: 10))
+        choose(app.buttons["collections.saveFolder"])
+        choose(app.buttons["collections.save"])
+        let collection = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'collections.edit.' AND label CONTAINS %@", collectionName)).firstMatch
+        choose(collection)
+        choose(app.buttons.matching(NSPredicate(format: "label CONTAINS 'New folder' AND label CONTAINS '1 sources'")).firstMatch)
+        XCTAssertTrue(source.waitForExistence(timeout: 10))
+        snapshot("discovery-filter-saved")
+    }
+
 }

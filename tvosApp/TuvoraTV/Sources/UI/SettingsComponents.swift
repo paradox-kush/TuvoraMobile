@@ -103,6 +103,7 @@ struct SettingsToggleRow: View {
             .overlay(Capsule().stroke(focused ? colors.focusRing : .clear, lineWidth: NuvioTokens.Stroke.focus))
             .opacity(enabled ? 1 : 0.4)
         }
+        .accessibilityValue(Text(L(isOn ? "On" : "Off")))
         .buttonStyle(PlainNoChromeButtonStyle())
         .disabled(!enabled)
         .focused($focused)
