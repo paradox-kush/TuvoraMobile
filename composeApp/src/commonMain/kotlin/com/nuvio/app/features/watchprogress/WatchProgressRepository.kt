@@ -1122,8 +1122,10 @@ object WatchProgressRepository {
         snapshot: PlayerPlaybackSnapshot,
         syncRemote: Boolean = true,
     ) {
-        ensureLoaded()
-        upsert(session = session, snapshot = snapshot, persist = true, syncRemote = syncRemote)
+        persistPlaybackProgressOrContinue({ error -> log.e(error) { "Watch progress could not be saved" } }) {
+            ensureLoaded()
+            upsert(session = session, snapshot = snapshot, persist = true, syncRemote = syncRemote)
+        }
     }
 
     fun flushPlaybackProgress(
@@ -1131,8 +1133,10 @@ object WatchProgressRepository {
         snapshot: PlayerPlaybackSnapshot,
         syncRemote: Boolean = true,
     ) {
-        ensureLoaded()
-        upsert(session = session, snapshot = snapshot, persist = true, syncRemote = syncRemote)
+        persistPlaybackProgressOrContinue({ error -> log.e(error) { "Watch progress could not be saved" } }) {
+            ensureLoaded()
+            upsert(session = session, snapshot = snapshot, persist = true, syncRemote = syncRemote)
+        }
     }
 
     fun applyExternalProgress(entries: List<WatchProgressEntry>) {

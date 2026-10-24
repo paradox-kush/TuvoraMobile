@@ -53,7 +53,8 @@ struct MainShell: View {
         return PreviewBox(preview: MetaPreview(id: parts[1], type: parts[0], name: "", poster: nil, banner: nil, logo: nil,
                                                posterShape: .poster, description: nil, releaseInfo: nil, rawReleaseDate: nil,
                                                popularity: nil, voteCount: nil, imdbRating: nil, genres: [], pinned: false,
-                                               rawPosterUrl: nil, landscapePoster: nil, rawLandscapePosterUrl: nil))
+                                               rawPosterUrl: nil, landscapePoster: nil, rawLandscapePosterUrl: nil,
+                                               runtime: nil, status: nil, ageRating: nil, language: nil, externalRatings: []))
     }()
     @AppStorage(NuvioLayoutPrefs.collapseSidebarKey) private var collapseSidebar = false
 
@@ -196,7 +197,8 @@ struct MainShell: View {
                 smokeDetails = PreviewBox(preview: MetaPreview(id: link.id, type: link.type, name: "", poster: nil, banner: nil, logo: nil,
                                                                posterShape: .poster, description: nil, releaseInfo: nil, rawReleaseDate: nil,
                                                                popularity: nil, voteCount: nil, imdbRating: nil, genres: [], pinned: false,
-                                                               rawPosterUrl: nil, landscapePoster: nil, rawLandscapePosterUrl: nil))
+                                                               rawPosterUrl: nil, landscapePoster: nil, rawLandscapePosterUrl: nil,
+                                               runtime: nil, status: nil, ageRating: nil, language: nil, externalRatings: []))
             }
         }
     }

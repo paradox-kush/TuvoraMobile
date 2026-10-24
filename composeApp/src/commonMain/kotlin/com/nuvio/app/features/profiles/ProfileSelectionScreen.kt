@@ -64,6 +64,7 @@ import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
 import com.nuvio.app.core.ui.NuvioBackButton
 import com.nuvio.app.core.ui.NuvioToastHost
+import com.nuvio.app.core.ui.LocalVerticalBarPadding
 import com.nuvio.app.features.membership.CosmeticEntitlement
 import com.nuvio.app.features.settings.MemberBrandWordmark
 import kotlinx.coroutines.delay
@@ -299,6 +300,7 @@ fun ProfileSelectionScreen(
                 onClick = onBack,
                 modifier = Modifier
                     .align(Alignment.TopStart)
+                    .padding(LocalVerticalBarPadding.current)
                     .padding(start = 16.dp, top = statusBarTop + 8.dp),
             )
         }

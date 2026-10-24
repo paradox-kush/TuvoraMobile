@@ -78,6 +78,8 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import coil3.compose.AsyncImage
 import com.nuvio.app.core.ui.nuvioSafeBottomPadding
 import com.nuvio.app.core.ui.shimmer
+import com.nuvio.app.core.ui.LocalVerticalBarPadding
+import com.nuvio.app.core.ui.centeredVerticalBarPadding
 import com.nuvio.app.features.debrid.DebridSettingsRepository
 import com.nuvio.app.features.debrid.DirectDebridPlayableResult
 import com.nuvio.app.features.debrid.DirectDebridPlaybackResolver
@@ -287,6 +289,7 @@ fun StreamsScreen(
         Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
+                .padding(LocalVerticalBarPadding.current)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
                 .padding(start = 12.dp, top = if (useNativeNavigation) 52.dp else 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -613,6 +616,7 @@ private fun MovieHeroBlock(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .padding(centeredVerticalBarPadding())
             .height(140.dp)
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
         contentAlignment = Alignment.Center,
@@ -708,6 +712,7 @@ private fun EpisodeHeroBlock(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                .padding(LocalVerticalBarPadding.current)
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.Bottom,

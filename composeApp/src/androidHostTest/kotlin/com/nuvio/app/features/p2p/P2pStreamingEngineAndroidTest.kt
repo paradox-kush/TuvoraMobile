@@ -121,8 +121,9 @@ class P2pStreamingEngineAndroidTest {
     }
 
     @Test
-    fun commandAndStaleTorrentFailuresAreIgnored() {
-        assertNull(
+    fun matchingCommandFailuresSurfaceAndStaleFailuresAreIgnored() {
+        assertEquals(
+            P2pStreamingState.Error("failed"),
             unexpectedTorrentError(
                 requestId = 9L,
                 eventTorrentId = "torrent",

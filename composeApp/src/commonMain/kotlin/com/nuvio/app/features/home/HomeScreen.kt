@@ -37,6 +37,8 @@ import com.nuvio.app.core.ui.LiveRecentActionTarget
 import com.nuvio.app.core.contracts.IptvContentClassifierAccess
 import com.nuvio.app.core.ui.LocalNuvioBottomNavigationOverlayPadding
 import com.nuvio.app.core.ui.NuvioLiveRecentActionSheet
+import com.nuvio.app.core.ui.LocalVerticalBarPadding
+import com.nuvio.app.core.ui.nuvioHorizontalScrollBleed
 import com.nuvio.app.core.ui.ScreenActivityEffect
 import com.nuvio.app.core.ui.NuvioScreen
 import com.nuvio.app.core.ui.NuvioNetworkOfflineCard
@@ -187,6 +189,7 @@ fun HomeScreen(
 
     val addonsUiState by AddonRepository.uiState.collectAsStateWithLifecycle()
     val homeUiState by HomeRepository.uiState.collectAsStateWithLifecycle()
+    val homeHeroState = rememberHomeHeroState(homeUiState.heroItems)
     val homeSettingsUiState by remember {
         HomeCatalogSettingsRepository.snapshot()
         HomeCatalogSettingsRepository.uiState
@@ -1112,6 +1115,7 @@ fun HomeScreen(
                         }
                         Crossfade(
                             targetState = showHeroSkeleton,
+                            modifier = Modifier.nuvioHorizontalScrollBleed(LocalVerticalBarPadding.current),
                             animationSpec = tween(320),
                             label = "HomeHeroLoading",
                         ) { isLoading ->
@@ -1123,12 +1127,14 @@ fun HomeScreen(
                                 )
 
                                 homeUiState.heroItems.isNotEmpty() -> HomeHeroSection(
-                                    items = homeUiState.heroItems,
+                                    items = homeHeroState.items,
                                     modifier = Modifier,
                                     viewportHeight = heroViewportHeight,
                                     mobileBelowSectionHeightHint = mobileHeroBelowSectionHeightHint,
                                     listState = homeListState,
                                     stretchPx = { heroStretchState.stretchPx },
+                                    showImdbRating = homeHeroState.showImdbRating,
+                                    showMdbListRatings = homeHeroState.showMdbListRatings,
                                     onItemClick = onPosterClick,
                                 )
 

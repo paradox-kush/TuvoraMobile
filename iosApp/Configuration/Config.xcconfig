@@ -10,3 +10,8 @@ PRODUCT_BUNDLE_IDENTIFIER=com.tuvora.app.Tuvora$(TEAM_ID)
 // app must NOT also link the system libsqlite3 (that would duplicate every sqlite3_* symbol).
 // The old sqlite3_load_extension_stub.c is removed too — bundled SQLite exports the real one.
 OTHER_LDFLAGS=$(inherited)
+
+// SDK-gated upstream Duo support. Runtime #available alone cannot compile absent SDK symbols.
+// Current release toolchain stays supported; enable the native APIs when building with SDK 27.1.
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphoneos27.1*] = $(inherited) TUVORA_HAS_IOS_VERTICAL_BAR
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphonesimulator27.1*] = $(inherited) TUVORA_HAS_IOS_VERTICAL_BAR
