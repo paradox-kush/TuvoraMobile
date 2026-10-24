@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import UIKit
 
 /// NuvioDialog (components/NuvioDialog.kt): 520dp wide, BackgroundElevated, radius 16, 1dp Border,
 /// padding 24, 16dp spacing, titleLarge title.
@@ -10,16 +11,22 @@ struct NuvioDialog<Content: View>: View {
     var width: CGFloat = dp(520)
     @ViewBuilder var content: Content
     @Environment(\.nuvio) private var colors
+    @State private var contentHeight: CGFloat = 1
 
     var body: some View {
         VStack(alignment: .leading, spacing: dp(16)) {
             Text(ui: title).font(NuvioType.titleLarge).foregroundStyle(colors.textPrimary)
             if let subtitle { Text(ui: subtitle).font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary) }
-            // Hug short content; scroll only when it outgrows the space the dialog is given.
-            ViewThatFits(in: .vertical) {
+            // One content tree: ViewThatFits instantiated the TextField twice, allowing
+            // a hidden candidate to take keyboard focus from the visible native field.
+            ScrollView {
                 VStack(spacing: dp(8)) { content }
-                ScrollView { VStack(spacing: dp(8)) { content }.padding(.vertical, dp(4)) }
+                    .padding(.vertical, dp(4))
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
+            .frame(height: min(contentHeight, max(dp(80), UIScreen.main.bounds.height - dp(subtitle == nil ? 160 : 220))))
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollClipDisabled()
         }
         .padding(dp(24))
         .frame(width: width)

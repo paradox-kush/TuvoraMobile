@@ -6,10 +6,10 @@ import TuvoraCore
 /// the detail pane (≤ 880dp). On Apple TV a rail item selects when focus rests on it (NuvioTV Horizon's
 /// 140 ms focus-select), so the detail follows the remote without an extra click.
 ///
-/// Categories follow NuvioTV's order. Left out: Advanced and Debug.
+/// Categories follow NuvioTV's order. Android-only debug tooling is omitted.
 struct SettingsScreen: View {
     enum Category: String, CaseIterable, Identifiable {
-        case account, profiles, appearance, layout, discovery, integrations, playback, tracking, party, about
+        case account, profiles, appearance, layout, discovery, integrations, playback, tracking, party, advanced, about
         var id: String { rawValue }
         /// The rail's categories. Content & Discovery manages add-ons and plugins, which the App Store
         /// build compiles out (the phone's store build drops the same row).
@@ -29,6 +29,7 @@ struct SettingsScreen: View {
             case .playback: return "Playback"
             case .tracking: return "Tracking"
             case .party: return "Watch party"
+            case .advanced: return "Advanced"
             case .about: return "About"
             }
         }
@@ -43,6 +44,7 @@ struct SettingsScreen: View {
             case .playback: return "md_play_arrow"
             case .tracking: return "md_sync"
             case .party: return "md_people"
+            case .advanced: return "sidebar_settings"
             case .about: return "md_info"
             }
         }
@@ -210,6 +212,7 @@ struct SettingsScreen: View {
         case .playback: PlaybackSettingsDetail(model: model)
         case .tracking: TrackingSettingsDetail(model: integrations)
         case .party: WatchPartySettingsDetail(party: party)
+        case .advanced: PrivacySettingsDetail()
         case .about: AboutSettingsDetail()
         }
     }
@@ -238,6 +241,9 @@ struct SettingsScreen: View {
             dialogs.push(.playlistForm(form))
         case "stalker":
             let form = PlaylistFormModel(editing: nil); form.sourceType = "stalker"; dialogs.push(.playlistForm(form))
+        case "deviceSources": dialogs.push(.deviceSources)
+        case "collections": dialogs.push(.custom(AnyView(CollectionManagementScreen())))
+        case "homeRows": dialogs.push(.custom(AnyView(HomeRowsSettingsScreen())))
         case "signOut": dialogs.push(.signOut)
         case "mediaServerAdd": dialogs.push(.mediaServerAdd(nil))
         case "mediaServerDetails": if let key = TvMediaServers.shared.firstKey() { dialogs.push(.mediaServerDetails(key)) }
@@ -328,6 +334,7 @@ final class SettingsModel: ObservableObject {
 
 enum SettingsDialogKind {
     case signOut
+    case deviceSources
     case picker(PickerSpec)
     /// Step 2: the full-screen two-pane page for a playlist (replaces the old actions dialog). [banner] is a
     /// persistent line such as "Starshare added your playlist".
@@ -394,6 +401,8 @@ private struct SettingsDialogView: View {
 
     var body: some View {
         switch entry.kind {
+        case .deviceSources:
+            DeviceSourcesSettingsDialog()
         case .signOut:
             // AccountSignOutConfirmationDialog
             NuvioDialog(title: "Sign out?",
@@ -481,6 +490,9 @@ private struct AccountSettingsDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: dp(12)) {
             SettingsDetailHeader(title: "Account", subtitle: "Account and sync status")
+            SettingsActionRow(title: "Sources on this device", subtitle: "Choose which sources this Apple TV uses") {
+                dialogs.push(.deviceSources)
+            }.accessibilityIdentifier("settings.deviceSources")
             SettingsGroupCard {
                 VStack(alignment: .leading, spacing: dp(6)) {
                     switch model.auth.map({ onEnum(of: $0) }) {
@@ -677,6 +689,7 @@ private struct LayoutSettingsDetail: View {
     @AppStorage(NuvioLayoutPrefs.cwStyleKey) private var cwStyle = "card"
     @AppStorage(NuvioLayoutPrefs.homeLayoutKey) private var homeLayout = "modern"
     @Environment(\.nuvio) private var colors
+    @EnvironmentObject private var dialogs: SettingsDialogs
 
     private let widths: [(String, Double)] = [("Compact", 104), ("Dense", 112), ("Standard", 120),
                                               ("Balanced", 126), ("Comfort", 134), ("Large", 140)]
@@ -684,6 +697,8 @@ private struct LayoutSettingsDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: dp(14)) {
             SettingsDetailHeader(title: "Layout Settings", subtitle: "Adjust home layout, content visibility, and poster behavior")
+            SettingsActionRow(title: "Manage Collections") { dialogs.push(.custom(AnyView(CollectionManagementScreen()))) }
+            SettingsActionRow(title: "Home catalogs") { dialogs.push(.custom(AnyView(HomeRowsSettingsScreen()))) }
             SettingsGroupCard(title: "Home Layout", subtitle: "Choose structure and hero source.") {
                 HStack(spacing: dp(12)) {
                     ForEach([("modern", "Modern View"), ("grid", "Grid View"), ("classic", "Classic View")], id: \.0) { key, label in

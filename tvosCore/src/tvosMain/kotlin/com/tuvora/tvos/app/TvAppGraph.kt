@@ -37,6 +37,7 @@ object TvAppGraph {
         )
         StartupJournal.markUiLaunchStarted()
         TvAppLifecycle.start()
+        com.tuvora.tvos.screens.TvDeviceSources.start()
     }
 
     /** SwiftUI calls this on every screen change; the first call also marks the launch interactive. */

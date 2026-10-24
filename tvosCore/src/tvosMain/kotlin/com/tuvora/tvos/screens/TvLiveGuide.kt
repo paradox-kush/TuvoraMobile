@@ -36,6 +36,11 @@ object TvLiveGuide {
 
     suspend fun programmes(contentId: String): List<XtreamProgram> = LiveTvData.programmes(contentId, limit = 8)
 
+    fun customGroups(accountId: String, lineup: List<LiveGuideChannel>): List<TvGuideGroup> {
+        com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.ensureLoaded()
+        return TvGuideGroups.rows(accountId, lineup, com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.uiState.value)
+    }
+
     val recents: StateFlow<List<XtreamLiveRecent>>
         get() {
             XtreamLiveRecents.ensureLoaded()

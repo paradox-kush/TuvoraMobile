@@ -127,7 +127,7 @@ struct RootView: View {
             case .signIn: SignInView()
             case .profilePicker: ProfilePickerView()
             case .switching: SplashView(message: nil)
-            case .main: MainShell()
+            case .main: DeviceSourcesGate { MainShell() }
             }
         }
         .task {
