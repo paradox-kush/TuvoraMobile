@@ -229,7 +229,7 @@ internal fun MainAppContent(
     onRootContentReady: ((Boolean) -> Unit)? = null,
     onSwitchProfile: () -> Unit = {},
 ) {
-        com.nuvio.app.core.sources.DeviceSourcesHost()
+        com.nuvio.app.core.sources.DeviceSourcesHost(ownsAppRuntime = ownsAppRuntime)
         val navBackStack = rememberNavBackStack(navigationSavedStateConfiguration, initialRoute)
         val posterNavigation = remember { PosterNavigationState() }
         val metaScreenSettings by remember {

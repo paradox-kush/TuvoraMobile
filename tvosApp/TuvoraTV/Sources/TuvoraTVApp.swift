@@ -15,6 +15,16 @@ struct TuvoraTVApp: App {
         if let i = args.firstIndex(of: "-smokeCollapseSidebar"), i + 1 < args.count {
             UserDefaults.standard.set(args[i + 1] != "false", forKey: NuvioLayoutPrefs.collapseSidebarKey)
         }
+        #if DEBUG && targetEnvironment(simulator)
+        // Disposable simulator acceptance tests: local-only profile, no account sign-in or telemetry.
+        if args.contains("-smokeLocalGuest") {
+            if AuthStorage.shared.loadAnonymousUserId() == nil {
+                AuthStorage.shared.saveAnonymousUserId(userId: UUID().uuidString)
+            }
+            UserDefaults.standard.set(false, forKey: "sentry_enabled")
+            RecEventSettings.shared.setEnabled(value: false)
+        }
+        #endif
         // PostHog with crash autocapture, the iPhone app's scrubbing and its consent switch.
         TuvoraTelemetry.start()
         AnalyticsSink.shared.register { event, properties in

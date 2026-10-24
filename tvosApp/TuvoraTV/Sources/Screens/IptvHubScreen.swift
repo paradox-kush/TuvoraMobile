@@ -238,6 +238,9 @@ private struct LiveGuideView: View {
     /// never "this category is empty on your provider".
     @State private var channelsFailed = false
     @State private var category: String = "all"
+    @State private var customGroups: [TvGuideGroup] = []
+    @State private var guideQuery = ""
+    @State private var searchOpen = false
     @State private var focusedChannel: LiveGuideChannel?
     @State private var previewing: LiveGuideChannel?
     @State private var previewSession: TvPlayerSession?
@@ -289,6 +292,7 @@ private struct LiveGuideView: View {
 
     private var visible: [LiveGuideChannel] {
         switch category {
+        case "search": return TvGuideSearch.shared.channels(lineup: channels, query: guideQuery)
         case "all": return channels
         // F03: favourites rows keep the synced favourites order; this playlist's rows reuse the full
         // channel (schedule, pin, archive flags), another playlist's come from the library entry.
@@ -305,7 +309,7 @@ private struct LiveGuideView: View {
         case "recent":
             let ids = recents.map(\.contentId)
             return ids.compactMap { id in channels.first { $0.contentId == id } }
-        default: return channels.filter { $0.categoryId == category }
+        default: return customGroups.first(where: { $0.id == category })?.channels ?? channels.filter { $0.categoryId == category }
         }
     }
 
@@ -341,6 +345,14 @@ private struct LiveGuideView: View {
                                     self.hideAsk = nil
                                 },
                                 onCancel: { self.hideAsk = nil })
+            }
+        }
+        .sheet(isPresented: $searchOpen, onDismiss: { categoryFocus = "search" }) {
+            GuideChannelSearchDialog(initialQuery: guideQuery) { query in
+                guideQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                leaveTimeline()
+                category = "search"
+                searchOpen = false
             }
         }
         .animation(NuvioTokens.Motion.medium, value: channelsFocused)
@@ -430,7 +442,7 @@ private struct LiveGuideView: View {
     }
 
     /// What re-asks the loader: the settled focus, the window, and the list being shown.
-    private var prefetchKey: String { "\(focusedChannel?.contentId ?? "-")|\(windowStart)|\(category)|\(visible.count)|\(loading)" }
+    private var prefetchKey: String { "\(focusedChannel?.contentId ?? "-")|\(windowStart)|\(category)|\(guideQuery)|\(visible.count)|\(loading)" }
 
     static func windowKey(_ contentId: String, _ windowStart: Int64) -> String { "\(contentId)@\(windowStart)" }
 
@@ -539,6 +551,14 @@ private struct LiveGuideView: View {
         let loaded = try? await TvLiveGuide.shared.channels(accountId: accountId)
         channelsFailed = loaded == nil
         channels = loaded ?? []
+        customGroups = TvLiveGuide.shared.customGroups(accountId: accountId, lineup: channels)
+        #if DEBUG && targetEnvironment(simulator)
+        // In-memory UI acceptance sample, like TvCollections' existing smoke sample; never stored or synced.
+        if AppArguments.list.contains("-smokeGuideGroup"), !channels.isEmpty {
+            customGroups.append(TvGuideGroup(id: "grp:smoke-parity", name: "Parity group", channels: Array(channels.prefix(2))))
+        }
+        #endif
+        if category.hasPrefix("grp:"), !customGroups.contains(where: { $0.id == category }) { category = "all" }
         refreshFavorites()
     }
 
@@ -546,6 +566,9 @@ private struct LiveGuideView: View {
     private var categoryColumn: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(alignment: .leading, spacing: dp(2)) {
+                GuideCategoryRow(title: guideQuery.isEmpty ? "Search" : "Search: “\(guideQuery)”", selected: category == "search") { searchOpen = true }
+                    .focused($categoryFocus, equals: "search")
+                    .accessibilityIdentifier("guide.search")
                 GuideCategoryRow(title: "All favorites", selected: category == "allfavorites") { category = "allfavorites" }
                     .focused($categoryFocus, equals: "allfavorites")
                 GuideCategoryRow(title: "Favorites", selected: category == "favorites") { category = "favorites" }
@@ -554,6 +577,11 @@ private struct LiveGuideView: View {
                     .focused($categoryFocus, equals: "recent")
                 GuideCategoryRow(title: "All channels", selected: category == "all") { category = "all" }
                     .focused($categoryFocus, equals: "all")
+                ForEach(customGroups, id: \.id) { group in
+                    GuideCategoryRow(title: group.name, selected: category == group.id) { category = group.id }
+                        .focused($categoryFocus, equals: group.id)
+                        .accessibilityIdentifier("guide.customGroup.\(group.id)")
+                }
                 ForEach(categories, id: \.0) { id, name in
                     GuideCategoryRow(title: name, selected: category == id) { category = id }
                         .focused($categoryFocus, equals: id)
@@ -658,7 +686,12 @@ private struct LiveGuideView: View {
                     Task { loading = true; await reloadChannels(); loading = false }
                 }
             } else if visible.isEmpty {
-                NuvioStateMessage(title: "No channels here", message: category == "recent" ? "Channels you watch show up here." : "This category is empty on your provider.")
+                if category == "search" {
+                    NuvioStateMessage(title: guideQuery.isEmpty ? "Search channels" : "No channels match “\(guideQuery)”",
+                                      message: "Press OK on Search to type a channel name", actionTitle: "Search") { searchOpen = true }
+                } else {
+                    NuvioStateMessage(title: "No channels here", message: category == "recent" ? "Channels you watch show up here." : "This category is empty on your provider.")
+                }
             } else {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: dp(4)) {
@@ -876,8 +909,9 @@ private struct LiveGuideView: View {
             self.previewSession = nil
             previewing = nil
             // T4: zapping from All favorites stays inside the playing channel's own playlist.
-            let zapIds = Set(TvFavouriteRows.shared.zapIds(rowIds: visible.map(\.contentId), playingId: channel.contentId))
-            let list = visible.filter { zapIds.contains($0.contentId) }
+            let zapRows = category == "search" ? channels : visible
+            let zapIds = Set(TvFavouriteRows.shared.zapIds(rowIds: zapRows.map(\.contentId), playingId: channel.contentId))
+            let list = zapRows.filter { zapIds.contains($0.contentId) }
             var index = list.firstIndex { $0.contentId == channel.contentId } ?? 0
             playback.play(previewSession) { offset in
                 guard !list.isEmpty else { return nil }
@@ -1262,5 +1296,26 @@ private enum LiveGuideViewClock {
     static func clock(_ ms: Int64) -> String {
         let f = DateFormatter(); f.dateFormat = DateFormatter.dateFormat(fromTemplate: "jmm", options: 0, locale: .current)
         return f.string(from: Date(timeIntervalSince1970: TimeInterval(ms) / 1000))
+    }
+}
+
+private struct GuideChannelSearchDialog: View {
+    @State private var query: String
+    let onSearch: (String) -> Void
+    init(initialQuery: String, onSearch: @escaping (String) -> Void) {
+        _query = State(initialValue: initialQuery)
+        self.onSearch = onSearch
+    }
+    var body: some View {
+        NuvioDialog(title: "Search channels") {
+            TextField("Channel name", text: $query)
+                .onSubmit { onSearch(query) }
+                .accessibilityIdentifier("guide.search.input")
+            SettingsActionRow(title: "Search", showChevron: false) { onSearch(query) }
+                .accessibilityIdentifier("guide.search.submit")
+            if !query.isEmpty {
+                SettingsActionRow(title: "Clear search", showChevron: false) { onSearch("") }
+            }
+        }
     }
 }

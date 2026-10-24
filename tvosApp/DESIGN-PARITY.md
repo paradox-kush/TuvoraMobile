@@ -58,3 +58,26 @@ Swift sees only PUBLIC Kotlin. Most repositories are public (`SearchRepository`,
 For internal logic add a small public facade in `tvosCore/src/tvosMain/kotlin/com/tuvora/tvos/screens/`
 (same compilation module as the shared code, so internals are reachable) — see TvHome.kt / TvTitle.kt.
 Pure decisions go in `tvosCore/src/commonMain/.../tvos/…` with tests in commonTest.
+
+
+## 5. Non-player parity, October 2026
+
+Native tvOS now exposes device-source choices and saved setup recovery, guide channel search,
+synced custom guide categories, collection/folder authoring, Home row controls and privacy consent.
+These screens reuse the shared repositories and policies; playback remains owned by the native
+player. Device-source invalidation has one process owner, with refresh on foreground rather than a
+new polling loop. The existing backend setup platform is `tv`.
+
+Dialogs must instantiate input content once. Duplicating a TextField inside ViewThatFits candidates
+can leave the hidden field owning keyboard focus; NuvioDialog measures one scrollable content tree.
+
+`AndroidParityTests` exercises local source persistence after relaunch, guide search keyboard and
+Back behavior, custom category reachability, collection/folder save, Home settings dismissal and
+privacy reachability. The guide tests require `python3 tvosApp/Scripts/parity-guide-fixture.py`
+from the repository root on loopback port 18124. Use a disposable simulator: these acceptance
+checks intentionally create local guest data. No production source credentials are needed.
+
+This covers the major missing native workflows, not every Android preference. Full advanced TMDB
+discovery filters, fine-grained title/episode presentation controls and custom theme authoring still
+need a separate native parity pass. Android APK updates, Compose rendering diagnostics and RGB565
+image preferences have no native counterpart. App Store content-discovery restrictions still apply.

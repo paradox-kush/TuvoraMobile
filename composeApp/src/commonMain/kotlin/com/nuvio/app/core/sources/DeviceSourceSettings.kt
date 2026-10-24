@@ -32,7 +32,7 @@ import kotlinx.coroutines.launch
 import kotlin.uuid.Uuid
 
 @Composable
-fun DeviceSourcesHost() {
+fun DeviceSourcesHost(ownsAppRuntime: Boolean) {
     val auth by AuthRepository.state.collectAsStateWithLifecycle()
     val profiles by ProfileRepository.state.collectAsStateWithLifecycle()
     if (auth == com.nuvio.app.core.auth.AuthState.Loading) return
@@ -53,7 +53,10 @@ fun DeviceSourcesHost() {
             awaitCancellation()
         }
     }
-    LaunchedEffect(engine) {
+    LaunchedEffect(engine, ownsAppRuntime) {
+        // Native destinations each embed a host. Only the app runtime invalidates shared
+        // caches: a new player host must not clear the retained source screen on first emission.
+        if (!ownsAppRuntime) return@LaunchedEffect
         engine.state.map { it.availabilityEpoch }.distinctUntilChanged().collect {
             com.nuvio.app.features.details.MetaDetailsRepository.clear()
             com.nuvio.app.features.search.SearchRepository.clear()
