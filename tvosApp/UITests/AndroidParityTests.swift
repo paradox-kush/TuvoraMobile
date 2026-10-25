@@ -22,6 +22,7 @@ final class AndroidParityTests: XCTestCase {
         for _ in 0..<40 {
             guard target.exists else { break }
             if target.hasFocus { return }
+            if !focused.exists { remote.press(.down); continue }
             let origin = focused.frame, destination = target.frame
             let dx = destination.midX - origin.midX, dy = destination.midY - origin.midY
             if focused.identifier.hasPrefix("sidebar.") || (focused.identifier.hasPrefix("settings.rail.") && !target.identifier.hasPrefix("settings.rail.")) {
@@ -45,6 +46,54 @@ final class AndroidParityTests: XCTestCase {
     private func snapshot(_ name: String) {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    func testStalkerAdvancedFieldsExpandAndCollapseWithRemote() {
+        launch(["-smokeTab", "settings", "-smokeSettings", "integrations",
+                "-smokeSettingsDialog", "addPlaylist", "-smokeFormSource", "stalker"])
+        let advanced = app.buttons["stalker.advanced"]
+        XCTAssertFalse(app.staticTexts["Device ID (optional)"].exists)
+        choose(advanced)
+        XCTAssertTrue(app.staticTexts["Device ID (optional)"].waitForExistence(timeout: 10))
+        snapshot("stalker-advanced-expanded")
+        remote.press(.down)
+        XCTAssertTrue(app.textFields.matching(NSPredicate(format: "hasFocus == true")).firstMatch.exists)
+        remote.press(.up)
+        choose(advanced)
+        XCTAssertFalse(app.staticTexts["Device ID (optional)"].exists)
+        XCTAssertTrue(advanced.hasFocus)
+        snapshot("stalker-advanced-collapsed")
+    }
+
+    func testEmptyBackupRowUsesSelectWording() {
+        // Empty rows are discarded when their editor closes; render this state directly.
+        launch(["-smokeTab", "settings", "-smokeSettings", "integrations",
+                "-smokeSettingsDialog", "addPlaylist", "-smokeFormSource", "m3u_url", "-smokeBackupRows", ","])
+        let row = app.buttons["backup.row.0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 30))
+        XCTAssertTrue(row.label.contains("select to enter an address"), row.label)
+        XCTAssertFalse(row.label.contains("press OK"))
+        snapshot("backup-select-wording")
+    }
+
+    func testSavedMdbKeyExplainsDisabledRatings() {
+        launch(["-smokeTab", "settings", "-smokeSettings", "integrations", "-smokeIntegration", "mdblist"])
+        choose(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'API Key'")).firstMatch)
+        let key = app.textFields.firstMatch
+        choose(key)
+        app.typeText("synthetic-ui-test-key")
+        remote.press(.menu)
+        choose(app.buttons["Save"])
+        let hint = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Ratings are off.'")).firstMatch
+        XCTAssertTrue(hint.waitForExistence(timeout: 10), app.debugDescription)
+        snapshot("mdb-key-saved-ratings-off")
+    }
+
+    func testRatingBadgesExposeProviderNames() {
+        launch(["-smokeDetails", "series:parity-sample", "-smokePresentationTitle", "-smokeMdbRatings"])
+        let imdb = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'IMDb '")).firstMatch
+        XCTAssertTrue(imdb.waitForExistence(timeout: 30), app.debugDescription)
+        snapshot("ratings-accessibility-names")
     }
 
     func testSourcesChoiceSurvivesRelaunch() {

@@ -15,7 +15,19 @@ import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 
 /** One MDBList rating in the details hero: the logo asset and the formatted score. */
-data class TvRatingChip(val source: String, val logo: String, val text: String)
+data class TvRatingChip(val source: String, val logo: String, val text: String) {
+    val sourceName: String get() = when (source) {
+        PROVIDER_TRAKT -> "Trakt"
+        PROVIDER_IMDB -> "IMDb"
+        PROVIDER_TMDB -> "TMDB"
+        PROVIDER_LETTERBOXD -> "Letterboxd"
+        PROVIDER_MAL -> "MyAnimeList"
+        PROVIDER_TOMATOES -> "Rotten Tomatoes"
+        PROVIDER_AUDIENCE -> "Audience Score"
+        PROVIDER_METACRITIC -> "Metacritic"
+        else -> source
+    }
+}
 
 /**
  * MDBList ratings on the details hero. MetaDetailsRepository.load already enriches the title with

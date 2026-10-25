@@ -237,7 +237,7 @@ struct SettingsScreen: View {
             func arg(_ name: String) -> String? { args.firstIndex(of: name).flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } }
             if let type = arg("-smokeFormSource") { form.sourceType = type }
             if let url = arg("-smokeFormM3u") { form.m3uUrl = url }
-            if let rows = arg("-smokeBackupRows") { form.backupUrls = rows.split(separator: ",").map(String.init) }
+            if let rows = arg("-smokeBackupRows") { form.backupUrls = rows.split(separator: ",", omittingEmptySubsequences: false).map(String.init) }
             dialogs.push(.playlistForm(form))
         case "stalker":
             let form = PlaylistFormModel(editing: nil); form.sourceType = "stalker"; dialogs.push(.playlistForm(form))
@@ -1139,13 +1139,14 @@ private struct PlaylistFormDialog: View {
     @State private var returnFocus: BackupFocus?
     @State private var depth = 0
 
+    @State private var showIdentityOptions = false
     private let sources = [("m3u_url", "URL"), ("m3u_file", "File"), ("xtream", "Xtream"), ("stalker", "Stalker")]
 
     var body: some View {
         let validating = xtream?.isValidating ?? false
         NuvioDialog(title: form.editing != nil ? "Edit Playlist" : "Add Playlist",
                     subtitle: form.editing != nil ? "Update this playlist's source and options" : "Add an IPTV source and choose its options",
-                    width: dp(760)) {
+                    width: dp(760), clipsContent: true) {
             VStack(alignment: .leading, spacing: dp(16)) {
                 label("Source Type")
                 HStack(spacing: dp(8)) {
@@ -1217,7 +1218,7 @@ private struct PlaylistFormDialog: View {
         ForEach(Array(form.backupUrls.enumerated()), id: \.offset) { index, value in
             SettingsActionRow(title: BackupServerCopy.row(index + 1),
                               // P4: a read-only row — the login is masked; the editor it opens keeps the raw value.
-                              subtitle: value.isEmpty ? L("Not set — press OK to enter an address")
+                              subtitle: value.isEmpty ? L("Not set — select to enter an address")
                                   : TvIptvSettingsPolicy.shared.maskedAddress(url: value),
                               value: problems[index].map(L), valueColor: colors.error) {
                 openEditor(index: index)
@@ -1257,16 +1258,23 @@ private struct PlaylistFormDialog: View {
             SettingsActionRow(title: "Randomize MAC", subtitle: "Generate a virtual STB MAC (Infomir range)") {
                 form.macAddress = TvPlaylistFormPolicy.shared.randomStbMac()
             }
-            SettingsTextField(label: "Username (optional)", text: $form.stalkerUsername, onSubmit: submit)
-            SettingsTextField(label: "Password (optional)", text: $form.stalkerPassword, secure: true, onSubmit: submit)
-            SettingsTextField(label: "Serial Number (optional)", text: $form.serialNumber, onSubmit: submit)
-            SettingsTextField(label: "Device ID (optional)", text: $form.deviceId, onSubmit: submit)
-            SettingsTextField(label: "Device ID 2 (optional)", text: $form.deviceId2, onSubmit: submit)
-            SettingsTextField(label: "Signature (optional)", text: $form.signature, onSubmit: submit)
-            SettingsTextField(label: "STB Model (optional, e.g. MAG254)", text: $form.stbModel, onSubmit: submit)
-            SettingsTextField(label: "Hardware Version (optional, e.g. 2.6-IB-00)", text: $form.hwVersion, onSubmit: submit)
-            SettingsActionRow(title: "Send Device ID", subtitle: "Include device identifier in portal requests",
-                              value: form.sendDeviceId ? "On" : "Off") { form.sendDeviceId.toggle() }
+            SettingsActionRow(title: "Advanced", subtitle: "Identity details supplied by your provider",
+                              value: showIdentityOptions ? "Expanded" : "Collapsed") {
+                showIdentityOptions.toggle()
+            }
+            .accessibilityIdentifier("stalker.advanced")
+            if showIdentityOptions {
+                SettingsTextField(label: "Username (optional)", text: $form.stalkerUsername, onSubmit: submit)
+                SettingsTextField(label: "Password (optional)", text: $form.stalkerPassword, secure: true, onSubmit: submit)
+                SettingsTextField(label: "Serial Number (optional)", text: $form.serialNumber, onSubmit: submit)
+                SettingsTextField(label: "Device ID (optional)", text: $form.deviceId, onSubmit: submit)
+                SettingsTextField(label: "Device ID 2 (optional)", text: $form.deviceId2, onSubmit: submit)
+                SettingsTextField(label: "Signature (optional)", text: $form.signature, onSubmit: submit)
+                SettingsTextField(label: "STB Model (optional, e.g. MAG254)", text: $form.stbModel, onSubmit: submit)
+                SettingsTextField(label: "Hardware Version (optional, e.g. 2.6-IB-00)", text: $form.hwVersion, onSubmit: submit)
+                SettingsActionRow(title: "Send device signature", subtitle: "Device IDs are still sent. Turn off only if your provider requires it.",
+                                  value: form.sendDeviceId ? "On" : "Off") { form.sendDeviceId.toggle() }
+            }
             SettingsHelperText(text: "Enter your portal URL and the MAC registered with the provider. The serial, device IDs and signature are derived from the MAC and Tuvora presents itself as a MAG250 — only fill in the optional fields if your provider (or your old box) gave you specific values. Long values are easier to enter from your phone: use \"Add from phone\".")
         default:
             HStack(spacing: dp(8)) {

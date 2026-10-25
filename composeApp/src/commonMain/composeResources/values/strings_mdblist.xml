@@ -51,4 +51,5 @@
     <string name="library_list_friends">Friends</string>
     <string name="library_list_private_description">Only you can see this list.</string>
     <string name="library_list_public_description">Anyone can see this list.</string>
+    <string name="settings_mdb_ratings_off_hint">Ratings are off. Turn on Enable MDBList Ratings to show them.</string>
 </resources>

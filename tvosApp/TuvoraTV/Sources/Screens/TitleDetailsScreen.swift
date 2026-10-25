@@ -77,7 +77,10 @@ struct TitleDetailsScreen: View {
         .task {
             #if DEBUG && targetEnvironment(simulator)
             if AppArguments.list.contains("-smokePresentationTitle") {
-                state = MetaDetailsUiState(isLoading: false, meta: TvTitlePresentation.shared.sample(), errorMessage: nil)
+                let sample = TvTitlePresentation.shared.sample()
+                state = MetaDetailsUiState(isLoading: false,
+                                           meta: Self.smokeMdbRatings ? TvTitle.shared.smokeWithMdbRatings(meta: sample) : sample,
+                                           errorMessage: nil)
                 return
             }
             #endif
@@ -199,9 +202,11 @@ struct TitleDetailsScreen: View {
                         Image(chip.logo).resizable().scaledToFit().frame(width: dp(24), height: dp(24))
                         Text(verbatim: chip.text).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(L(chip.sourceName)) \(chip.text)")
                 }
             }
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .contain)
         }
     }
 

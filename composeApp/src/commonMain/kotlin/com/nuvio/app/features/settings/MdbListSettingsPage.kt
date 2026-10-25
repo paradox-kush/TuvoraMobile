@@ -22,6 +22,7 @@ import com.nuvio.app.features.mdblist.MdbListSettings
 import com.nuvio.app.features.mdblist.MdbListSettingsRepository
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.action_save
+import nuvio.composeapp.generated.resources.settings_mdb_ratings_off_hint
 import nuvio.composeapp.generated.resources.settings_mdb_ratings_credentials_required
 import nuvio.composeapp.generated.resources.settings_mdb_ratings_key_override_description
 import nuvio.composeapp.generated.resources.settings_mdb_ratings_connected_account
@@ -59,7 +60,10 @@ internal fun LazyListScope.mdbListSettingsContent(
             SettingsGroup(isTablet = isTablet) {
                 SettingsSwitchRow(
                     title = stringResource(Res.string.settings_mdb_enable_ratings),
-                    description = stringResource(Res.string.settings_mdb_enable_ratings_description),
+                    description = stringResource(
+                        if (settings.hasCredentials && !settings.enabled) Res.string.settings_mdb_ratings_off_hint
+                        else Res.string.settings_mdb_enable_ratings_description,
+                    ),
                     checked = settings.enabled,
                     isTablet = isTablet,
                     onCheckedChange = MdbListSettingsRepository::setEnabled,

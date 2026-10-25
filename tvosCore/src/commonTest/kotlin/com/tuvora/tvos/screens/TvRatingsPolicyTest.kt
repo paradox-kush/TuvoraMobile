@@ -37,6 +37,12 @@ class TvRatingsPolicyTest {
     }
 
     @Test
+    fun `accessible rating source names are human readable`() {
+        val names = TvRatingsPolicy.chips(fetched, mdbListActive = true).map { it.sourceName }
+        assertEquals(listOf("Trakt", "IMDb", "TMDB", "Letterboxd", "Rotten Tomatoes", "Audience Score", "Metacritic"), names)
+    }
+
+    @Test
     fun `no chips while MDBList ratings are off`() {
         assertTrue(TvRatingsPolicy.chips(fetched, mdbListActive = false).isEmpty())
     }

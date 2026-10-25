@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,9 +32,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.rounded.Lock
 import nuvio.composeapp.generated.resources.Res
+import nuvio.composeapp.generated.resources.compose_settings_page_advanced
+import nuvio.composeapp.generated.resources.action_expand
+import nuvio.composeapp.generated.resources.action_collapse
 import nuvio.composeapp.generated.resources.provider_setup_chip_code
 import nuvio.composeapp.generated.resources.provider_edit_type_locked_note
 import org.jetbrains.compose.resources.stringResource
@@ -309,11 +314,13 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
                 onEpgUrlChange = { epgUrl = it },
             )
 
-            DnsProviderSection(
-                isTablet = isTablet,
-                selected = dnsProvider,
-                onSelected = { dnsProvider = it },
-            )
+            if (perPlaylistDnsSupported) {
+                DnsProviderSection(
+                    isTablet = isTablet,
+                    selected = dnsProvider,
+                    onSelected = { dnsProvider = it },
+                )
+            }
 
             AutoRefreshSection(
                 isTablet = isTablet,
@@ -569,64 +576,78 @@ private fun StalkerFieldsSection(
                 onValueChange = onNameChange,
                 label = "Name (optional)",
             )
-            Text(
-                text = "Stalker portals sign in with the MAC address — no username or password. The " +
-                    "device serial and IDs are derived from the MAC and Tuvora presents itself as a " +
-                    "MAG250; only fill in the fields below if your provider (or your old box) gave you " +
-                    "specific values. Leave them empty otherwise.",
-                style = MaterialTheme.typography.bodySmall,
-                color = tokens.colors.textMuted,
-            )
-            FormOutlinedField(
-                value = serial,
-                onValueChange = onSerialChange,
-                label = "Serial number (optional)",
-            )
-            FormOutlinedField(
-                value = deviceId,
-                onValueChange = onDeviceIdChange,
-                label = "Device ID (optional)",
-            )
-            FormOutlinedField(
-                value = deviceId2,
-                onValueChange = onDeviceId2Change,
-                label = "Device ID 2 (optional)",
-            )
-            SettingsSwitchRow(
-                title = "Send device signature",
-                description = "Sends the device signature when signing in to the portal. Turn off only if your provider requires it. Device IDs are still sent.",
-                checked = sendDeviceId,
-                isTablet = isTablet,
-                onCheckedChange = onSendDeviceIdChange,
-            )
-            FormOutlinedField(
-                value = signature,
-                onValueChange = onSignatureChange,
-                label = "Signature (optional)",
-            )
-            FormOutlinedField(
-                value = stbModel,
-                onValueChange = onStbModelChange,
-                label = "STB model (optional)",
-                placeholder = "MAG250",
-            )
-            FormOutlinedField(
-                value = hwVersion,
-                onValueChange = onHwVersionChange,
-                label = "Hardware version (optional)",
-                placeholder = "1.7-BD-00",
-            )
-            FormOutlinedField(
-                value = stalkerUser,
-                onValueChange = onStalkerUserChange,
-                label = "Portal username (optional)",
-            )
-            SettingsSecretTextField(
-                value = stalkerPass,
-                onValueChange = onStalkerPassChange,
-                label = "Portal password (optional)",
-                modifier = Modifier.fillMaxWidth(),
-            )
+            var showIdentityOptions by rememberSaveable { mutableStateOf(false) }
+            TextButton(
+                onClick = { showIdentityOptions = !showIdentityOptions },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text(stringResource(Res.string.compose_settings_page_advanced))
+                Icon(
+                    imageVector = if (showIdentityOptions) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = stringResource(if (showIdentityOptions) Res.string.action_collapse else Res.string.action_expand),
+                )
+            }
+            if (showIdentityOptions) {
+                Text(
+                    text = "Stalker portals sign in with the MAC address — no username or password. The " +
+                        "device serial and IDs are derived from the MAC and Tuvora presents itself as a " +
+                        "MAG250; only fill in the fields below if your provider (or your old box) gave you " +
+                        "specific values. Leave them empty otherwise.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tokens.colors.textMuted,
+                )
+                FormOutlinedField(
+                    value = serial,
+                    onValueChange = onSerialChange,
+                    label = "Serial number (optional)",
+                )
+                FormOutlinedField(
+                    value = deviceId,
+                    onValueChange = onDeviceIdChange,
+                    label = "Device ID (optional)",
+                )
+                FormOutlinedField(
+                    value = deviceId2,
+                    onValueChange = onDeviceId2Change,
+                    label = "Device ID 2 (optional)",
+                )
+                SettingsSwitchRow(
+                    title = "Send device signature",
+                    description = "Sends the device signature when signing in to the portal. Turn off only if your provider requires it. Device IDs are still sent.",
+                    checked = sendDeviceId,
+                    isTablet = isTablet,
+                    onCheckedChange = onSendDeviceIdChange,
+                )
+                FormOutlinedField(
+                    value = signature,
+                    onValueChange = onSignatureChange,
+                    label = "Signature (optional)",
+                )
+                FormOutlinedField(
+                    value = stbModel,
+                    onValueChange = onStbModelChange,
+                    label = "STB model (optional)",
+                    placeholder = "MAG250",
+                )
+                FormOutlinedField(
+                    value = hwVersion,
+                    onValueChange = onHwVersionChange,
+                    label = "Hardware version (optional)",
+                    placeholder = "1.7-BD-00",
+                )
+                FormOutlinedField(
+                    value = stalkerUser,
+                    onValueChange = onStalkerUserChange,
+                    label = "Portal username (optional)",
+                )
+                SettingsSecretTextField(
+                    value = stalkerPass,
+                    onValueChange = onStalkerPassChange,
+                    label = "Portal password (optional)",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
         }
     }
 }

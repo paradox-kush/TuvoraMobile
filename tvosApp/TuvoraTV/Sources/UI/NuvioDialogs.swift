@@ -9,6 +9,8 @@ struct NuvioDialog<Content: View>: View {
     var subtitle: String? = nil
     /// NuvioDialog's `width` parameter (default 520dp).
     var width: CGFloat = dp(520)
+    /// Long forms keep scrolled fields out of their fixed title and subtitle.
+    var clipsContent = false
     @ViewBuilder var content: Content
     @Environment(\.nuvio) private var colors
     @State private var contentHeight: CGFloat = 1
@@ -26,7 +28,7 @@ struct NuvioDialog<Content: View>: View {
             }
             .frame(height: min(contentHeight, max(dp(80), UIScreen.main.bounds.height - dp(subtitle == nil ? 160 : 220))))
             .scrollBounceBehavior(.basedOnSize)
-            .scrollClipDisabled()
+            .scrollClipDisabled(!clipsContent)
         }
         .padding(dp(24))
         .frame(width: width)

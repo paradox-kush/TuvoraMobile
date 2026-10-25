@@ -185,6 +185,20 @@ class DeviceSourceEngineTest {
         assertFalse(device.allows(1,"iptv",source.sourceRef))
     }
 
+    // B171 investigation: status checks currently share this discovery guard.
+    @Test fun disabledAccountBlocksGuardedRequestsBeforeNetworkWork() = runTest {
+        val memory = Memory(json.encodeToString(DevicePreferenceDisk(
+            binding = SavedDeviceBinding("setup", "Phone", "secret"), cursor = 0,
+            sources = mapOf(1 to listOf(source.copy(accountEnabled = false))))))
+        val device = engine(memory)
+        var requests = 0
+        assertFailsWith<CancellationException> {
+            device.guarded(1, "iptv", source.sourceRef) { requests++ }
+        }
+        assertEquals(0, requests)
+        assertFalse(device.allows(1, "iptv", source.sourceRef))
+    }
+
     @Test fun sourceDisabledDuringDiscoveryCancelsInFlightWork() = runTest {
         val device = engine(cached())
         val request = async { device.guarded(1,"iptv",source.sourceRef) { awaitCancellation() } }

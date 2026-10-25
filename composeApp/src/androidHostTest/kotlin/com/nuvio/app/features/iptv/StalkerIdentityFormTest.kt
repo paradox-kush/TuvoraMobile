@@ -35,10 +35,10 @@ class StalkerIdentityFormTest {
 
     @Volatile private var saved = false
 
-    private fun showForm() {
+    private fun showForm(deviceId: String = "") {
         val account = XtreamAccount(id = "stalker|http://portal.example.test|00:1A:79:AB:CD:EF",
             name = "Portal", baseUrl = "http://portal.example.test", username = "", password = "",
-            sourceType = SOURCE_TYPE_STALKER, macAddress = "00:1A:79:AB:CD:EF", sendDeviceId = false)
+            sourceType = SOURCE_TYPE_STALKER, macAddress = "00:1A:79:AB:CD:EF", sendDeviceId = false, deviceId = deviceId)
         XtreamRepository.installAccountsForTest(listOf(account))
         XtreamRepository.persistWriteForTest = { _, _ -> }
         XtreamRepository.verifyForTest = { Result.success(Unit) }
@@ -49,8 +49,24 @@ class StalkerIdentityFormTest {
         }
     }
 
+    @Test fun advancedFieldsStartCollapsedAndSavedValuesSurviveCollapse() {
+        showForm(deviceId = "existing-box-id")
+        compose.onNodeWithText("Device ID (optional)").assertDoesNotExist()
+        compose.onNodeWithText("Advanced").performScrollTo().performClick()
+        compose.onNodeWithText("existing-box-id").performScrollTo().assertExists()
+        compose.onNodeWithText("Advanced").performScrollTo().performClick()
+        compose.onNodeWithText("Device ID (optional)").assertDoesNotExist()
+        compose.onNodeWithText("Save changes").performScrollTo().performClick()
+        compose.waitUntil(10_000) { saved }
+        compose.runOnIdle {
+            kotlin.test.assertEquals("existing-box-id", XtreamRepository.uiState.value.accounts.single().deviceId)
+            assertFalse(XtreamRepository.uiState.value.accounts.single().sendDeviceId)
+        }
+    }
+
     @Test fun savingWithoutChangingToggleKeepsSignatureDisabled() {
         showForm()
+        compose.onNodeWithText("Advanced").performScrollTo().performClick()
         compose.onNodeWithText("Send device signature").performScrollTo()
         compose.onNode(isToggleable()).assertIsOff()
         compose.onNodeWithText("Save changes").performScrollTo().performClick()
@@ -60,6 +76,7 @@ class StalkerIdentityFormTest {
 
     @Test fun freshToggleIsSaved() {
         showForm()
+        compose.onNodeWithText("Advanced").performScrollTo().performClick()
         compose.onNodeWithText("Send device signature").performScrollTo().performClick()
         compose.onNode(isToggleable()).assertIsOn()
         compose.onNodeWithText("Save changes").performScrollTo().performClick()

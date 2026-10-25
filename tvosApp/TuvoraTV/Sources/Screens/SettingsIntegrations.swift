@@ -706,7 +706,9 @@ private struct MdbListSettingsDetail: View {
             SettingsDetailHeader(title: "MDBList Ratings", subtitle: "Configure external ratings shown in the detail hero")
             if let m = model.mdbSettings {
                 SettingsGroupCard {
-                    SettingsToggleRow(title: "Enable MDBList Ratings", subtitle: "Fetch ratings from external providers in metadata detail screen", isOn: m.enabled) {
+                    SettingsToggleRow(title: "Enable MDBList Ratings", subtitle: m.hasCredentials && !m.enabled
+                                      ? "Ratings are off. Turn on Enable MDBList Ratings to show them."
+                                      : "Fetch ratings from external providers in metadata detail screen", isOn: m.enabled) {
                         repo.setEnabled(value: !m.enabled)
                     }
                     SettingsActionRow(title: "API Key",
