@@ -260,8 +260,14 @@ extension MPVPlayerViewController {
         guard mpv != nil else { return }
         if experimentalSinglePrimaryPictureInPictureEnabled {
             if isPictureInPictureActive() || isPictureInPictureStarting { return }
-            restoreVideoTrackAfterBackgroundIfNeeded()
+            // PiP is on by default, so this is the path most users take. A live stream suspended
+            // for the background was paused there too: rejoin the live edge rather than resume the
+            // stale buffer, which played slow and choppy before stalling (sports, 2026-10-25). The
+            // reload re-creates the video decoder, so the track restore skips its own reload.
+            let rejoinLive = isLiveStream && videoTrackSuspendedForBackground
+            restoreVideoTrackAfterBackgroundIfNeeded(reloadDecoder: !rejoinLive)
             primaryRenderSurface?.requestRenderBurst(reason: "foreground", count: 4)
+            if rejoinLive { rejoinLiveEdgeAfterBackground() }
             playPlayback()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                 self?.prewarmAutomaticPictureInPictureSource(reason: "foreground")
@@ -274,14 +280,18 @@ extension MPVPlayerViewController {
         // A live stream paused in the background goes stale (dead socket, old buffer): unpausing
         // plays the leftover buffer then stalls. Reload to rejoin the live edge. This is our
         // nuvio-live-resume fix; the fork has no live-TV path and drops straight into playPlayback.
-        // Main thread: the observed path, not a synchronous mpv read (see MPVPropertyShadow).
-        if isLiveStream, let path = propertyShadow.snapshot.path {
-            clearPlaybackError()
-            applyRequestHeaders(activeRequestHeaders)
-            command("loadfile", args: [path, "replace"])
-        }
+        if isLiveStream { rejoinLiveEdgeAfterBackground() }
         // ---- end LOCAL ----
         playPlayback()
+    }
+
+    /// Re-open the current live stream at the live edge. Main thread: the observed path, not a
+    /// synchronous mpv read (see MPVPropertyShadow); the writes are queued (onMpvQueue).
+    private func rejoinLiveEdgeAfterBackground() {
+        guard let path = propertyShadow.snapshot.path else { return }
+        clearPlaybackError()
+        applyRequestHeaders(activeRequestHeaders)
+        command("loadfile", args: [path, "replace"])
     }
 
     func isPictureInPictureSupported() -> Bool {

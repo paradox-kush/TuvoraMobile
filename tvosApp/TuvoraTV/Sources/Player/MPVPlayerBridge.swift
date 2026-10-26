@@ -317,6 +317,16 @@ final class MPVPlayerViewController: UIViewController {
     private var cachedNowPlayingMetadata: CachedNowPlayingMetadata?
     private lazy var nowPlayingController = PlayerNowPlayingController(owner: self)
     private lazy var eventQueue = DispatchQueue(label: "mpv-events", qos: .userInitiated)
+
+    /// B187: every libmpv client call waits for the core lock, and the core holds it while the
+    /// demuxer waits on the network — a seek in a remote file re-reads it. Made on Main, a burst of
+    /// seeks blocked past the system watchdog deadline (0x8badf00d, iPad). Writes therefore run in
+    /// order on the serial event queue with the handle captured when queued; destroyPlayer
+    /// terminates on the same queue, after them. Same rule as Android/TV: never wait on mpv on Main.
+    private func onMpvQueue(_ work: @escaping (OpaquePointer) -> Void) {
+        guard let ctx = mpv else { return }
+        eventQueue.async { work(ctx) }
+    }
     private var recentPlaybackLogs: [String] = []
     var activeRequestHeaders: [String: String] = [:]
     private var preferredAudioLanguages: [String] = []
@@ -1020,8 +1030,10 @@ final class MPVPlayerViewController: UIViewController {
 
     func setSpeed(_ speed: Float) {
         guard mpv != nil else { return }
-        var s = Double(speed)
-        mpv_set_property(mpv, "speed", MPV_FORMAT_DOUBLE, &s)
+        onMpvQueue { ctx in
+            var s = Double(speed)
+            mpv_set_property(ctx, "speed", MPV_FORMAT_DOUBLE, &s)
+        }
     }
 
     func setMuted(_ muted: Bool) {
@@ -1048,8 +1060,10 @@ final class MPVPlayerViewController: UIViewController {
 
     func selectAudio(_ trackId: Int) {
         guard mpv != nil else { return }
-        var id = Int64(trackId)
-        mpv_set_property(mpv, "aid", MPV_FORMAT_INT64, &id)
+        onMpvQueue { ctx in
+            var id = Int64(trackId)
+            mpv_set_property(ctx, "aid", MPV_FORMAT_INT64, &id)
+        }
     }
 
     func applyAudioLanguagePreferences(_ languages: [String]) {
@@ -1067,8 +1081,10 @@ final class MPVPlayerViewController: UIViewController {
         if trackId < 0 {
             setStringProperty("sid", "no")
         } else {
-            var id = Int64(trackId)
-            mpv_set_property(mpv, "sid", MPV_FORMAT_INT64, &id)
+            onMpvQueue { ctx in
+                var id = Int64(trackId)
+                mpv_set_property(ctx, "sid", MPV_FORMAT_INT64, &id)
+            }
         }
     }
 
@@ -1131,15 +1147,19 @@ final class MPVPlayerViewController: UIViewController {
 
     func setSubtitleDelayMs(_ delayMs: Int) {
         guard mpv != nil else { return }
-        var delaySeconds = Double(max(-60_000, min(60_000, delayMs))) / 1000.0
-        checkError(mpv_set_property(mpv, "sub-delay", MPV_FORMAT_DOUBLE, &delaySeconds))
+        onMpvQueue { [self] ctx in
+            var delaySeconds = Double(max(-60_000, min(60_000, delayMs))) / 1000.0
+            checkError(mpv_set_property(ctx, "sub-delay", MPV_FORMAT_DOUBLE, &delaySeconds))
+        }
     }
 
     /// NuvioTV's Audio Delay: mpv's `audio-delay` (seconds; positive delays the audio).
     func setAudioDelayMs(_ delayMs: Int) {
         guard mpv != nil else { return }
-        var delaySeconds = Double(max(-3_000, min(3_000, delayMs))) / 1000.0
-        checkError(mpv_set_property(mpv, "audio-delay", MPV_FORMAT_DOUBLE, &delaySeconds))
+        onMpvQueue { [self] ctx in
+            var delaySeconds = Double(max(-3_000, min(3_000, delayMs))) / 1000.0
+            checkError(mpv_set_property(ctx, "audio-delay", MPV_FORMAT_DOUBLE, &delaySeconds))
+        }
     }
 
     func applySubtitleStyle(
@@ -1153,24 +1173,25 @@ final class MPVPlayerViewController: UIViewController {
         stripSdh: Bool
     ) {
         guard mpv != nil else { return }
+        onMpvQueue { [self] ctx in
+            checkError(mpv_set_property_string(ctx, "sub-ass-override", "no"))
+            checkError(mpv_set_property_string(ctx, "sub-color", textColor))
+            checkError(mpv_set_property_string(ctx, "sub-back-color", backgroundColor))
+            checkError(mpv_set_property_string(ctx, "sub-outline-color", outlineColor))
+            checkError(mpv_set_property_string(ctx, "sub-border-style", backgroundColor.hasPrefix("#00") ? "outline-and-shadow" : "opaque-box"))
+            checkError(mpv_set_property_string(ctx, "sub-bold", bold ? "yes" : "no"))
 
-        checkError(mpv_set_property_string(mpv, "sub-ass-override", "no"))
-        checkError(mpv_set_property_string(mpv, "sub-color", textColor))
-        checkError(mpv_set_property_string(mpv, "sub-back-color", backgroundColor))
-        checkError(mpv_set_property_string(mpv, "sub-outline-color", outlineColor))
-        checkError(mpv_set_property_string(mpv, "sub-border-style", backgroundColor.hasPrefix("#00") ? "outline-and-shadow" : "opaque-box"))
-        setStringProperty("sub-bold", bold ? "yes" : "no")
+            var outline = Double(outlineSize)
+            checkError(mpv_set_property(ctx, "sub-outline-size", MPV_FORMAT_DOUBLE, &outline))
 
-        var outline = Double(outlineSize)
-        checkError(mpv_set_property(mpv, "sub-outline-size", MPV_FORMAT_DOUBLE, &outline))
+            var size = Double(fontSize)
+            checkError(mpv_set_property(ctx, "sub-font-size", MPV_FORMAT_DOUBLE, &size))
 
-        var size = Double(fontSize)
-        checkError(mpv_set_property(mpv, "sub-font-size", MPV_FORMAT_DOUBLE, &size))
-
-        var position = Int64(subPos)
-        checkError(mpv_set_property(mpv, "sub-pos", MPV_FORMAT_INT64, &position))
-        setStringProperty("sub-filter-sdh", stripSdh ? "yes" : "no")
-        setStringProperty("sub-filter-sdh-harder", stripSdh ? "yes" : "no")
+            var position = Int64(subPos)
+            checkError(mpv_set_property(ctx, "sub-pos", MPV_FORMAT_INT64, &position))
+            checkError(mpv_set_property_string(ctx, "sub-filter-sdh", stripSdh ? "yes" : "no"))
+            checkError(mpv_set_property_string(ctx, "sub-filter-sdh-harder", stripSdh ? "yes" : "no"))
+        }
     }
 
     func destroyPlayer() {
@@ -1188,7 +1209,15 @@ final class MPVPlayerViewController: UIViewController {
         guard let ctx = mpv else { return }
         mpv = nil  // nil first so event loop stops reading
         detachVideoLayerForVoTeardown(reason: "destroy")
-        mpv_terminate_destroy(ctx)
+        // Demuxer shutdown can block on a dead provider, so drain queued writes and terminate off
+        // Main (as iOS). Retain the controller until the C wakeup callback has been cleared: its
+        // context is passUnretained(self).
+        eventQueue.async { [self] in
+            withExtendedLifetime(self) {
+                mpv_set_wakeup_callback(ctx, nil, nil)
+                mpv_terminate_destroy(ctx)
+            }
+        }
     }
 
     private func activateAudioSessionForPlayback() {
@@ -1638,10 +1667,13 @@ final class MPVPlayerViewController: UIViewController {
 
     func command(_ command: String, args: [String?] = [], checkForErrors: Bool = true) {
         guard mpv != nil else { return }
-        var cargs = makeCArgs(command, args).map { $0.flatMap { UnsafePointer<CChar>(strdup($0)) } }
-        defer { for ptr in cargs where ptr != nil { free(UnsafeMutablePointer(mutating: ptr!)) } }
-        let ret = mpv_command(mpv, &cargs)
-        if checkForErrors { checkError(ret) }
+        let strArgs = makeCArgs(command, args)
+        onMpvQueue { [self] ctx in
+            var cargs = strArgs.map { $0.flatMap { UnsafePointer<CChar>(strdup($0)) } }
+            defer { for ptr in cargs where ptr != nil { free(UnsafeMutablePointer(mutating: ptr!)) } }
+            let ret = mpv_command(ctx, &cargs)
+            if checkForErrors { checkError(ret) }
+        }
     }
 
     private func makeCArgs(_ command: String, _ args: [String?]) -> [String?] {
@@ -1675,19 +1707,25 @@ final class MPVPlayerViewController: UIViewController {
 
     private func setFlag(_ name: String, _ flag: Bool) {
         guard mpv != nil else { return }
-        var data: Int = flag ? 1 : 0
-        mpv_set_property(mpv, name, MPV_FORMAT_FLAG, &data)
+        onMpvQueue { ctx in
+            var data: Int = flag ? 1 : 0
+            mpv_set_property(ctx, name, MPV_FORMAT_FLAG, &data)
+        }
     }
 
     func setStringProperty(_ name: String, _ value: String) {
         guard mpv != nil else { return }
-        checkError(mpv_set_property_string(mpv, name, value))
+        onMpvQueue { [self] ctx in
+            checkError(mpv_set_property_string(ctx, name, value))
+        }
     }
 
     private func setVideoEqualizer(_ name: String, _ value: Int) {
         guard mpv != nil else { return }
-        var clamped = Int64(max(-100, min(100, value)))
-        checkError(mpv_set_property(mpv, name, MPV_FORMAT_INT64, &clamped))
+        onMpvQueue { [self] ctx in
+            var clamped = Int64(max(-100, min(100, value)))
+            checkError(mpv_set_property(ctx, name, MPV_FORMAT_INT64, &clamped))
+        }
     }
 
     private func getInt(_ name: String) -> Int {
@@ -1698,7 +1736,7 @@ final class MPVPlayerViewController: UIViewController {
     }
 
     private func logCurrentAudioOutput() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        eventQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, self.mpv != nil else { return }
             let currentAo = self.getString("current-ao") ?? "unknown"
             let channels = self.getString("audio-out-params/hr-channels")
@@ -1733,21 +1771,23 @@ final class MPVPlayerViewController: UIViewController {
 
     func applyRequestHeaders(_ headers: [String: String]) {
         guard mpv != nil else { return }
-        if headers.isEmpty {
-            checkError(mpv_set_property_string(mpv, "http-header-fields", ""))
-            return
-        }
-
-        let serialized = headers
-            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
-            .map { key, value in
-                let escapedValue = value
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: ",", with: "\\,")
-                return "\(key): \(escapedValue)"
+        onMpvQueue { [self] ctx in
+            if headers.isEmpty {
+                checkError(mpv_set_property_string(ctx, "http-header-fields", ""))
+                return
             }
-            .joined(separator: ",")
-        checkError(mpv_set_property_string(mpv, "http-header-fields", serialized))
+
+            let serialized = headers
+                .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+                .map { key, value in
+                    let escapedValue = value
+                        .replacingOccurrences(of: "\\", with: "\\\\")
+                        .replacingOccurrences(of: ",", with: "\\,")
+                    return "\(key): \(escapedValue)"
+                }
+                .joined(separator: ",")
+            checkError(mpv_set_property_string(ctx, "http-header-fields", serialized))
+        }
     }
 
     private func refreshImmersiveSystemUI() {
