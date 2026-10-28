@@ -48,6 +48,22 @@ final class AndroidParityTests: XCTestCase {
         shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 
+    func testB193EmptyHomeRemoteNavigation() {
+        launch(["-smokeTab", "home"])
+        XCTAssertTrue(app.staticTexts["No content yet"].waitForExistence(timeout: 60), "Expected empty home to reproduce report")
+        remote.press(.left)
+        sleep(2)
+        let rail = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND hasFocus == true", "sidebar.")).firstMatch
+        if !rail.exists { remote.press(.menu); sleep(2) }
+        XCTAssertTrue(rail.exists, "Neither Left nor Menu reached the sidebar")
+        let settings = app.buttons["sidebar.settings"]
+        for _ in 0..<6 where !settings.hasFocus { remote.press(.down) }
+        XCTAssertTrue(settings.hasFocus, "Empty Home must allow reaching Settings")
+        remote.press(.select)
+        XCTAssertTrue(app.buttons["settings.rail.integrations"].waitForExistence(timeout: 15))
+        snapshot("B193-settings-reachable")
+    }
+
     func testStalkerAdvancedFieldsExpandAndCollapseWithRemote() {
         launch(["-smokeTab", "settings", "-smokeSettings", "integrations",
                 "-smokeSettingsDialog", "addPlaylist", "-smokeFormSource", "stalker"])
