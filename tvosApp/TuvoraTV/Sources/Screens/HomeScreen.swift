@@ -135,7 +135,10 @@ struct HomeScreen: View {
                             .frame(height: dp(200))
                     }
                     if rows.sections.isEmpty && rows.isLoading {
-                        ForEach(0..<2, id: \.self) { _ in shimmerRow }
+                        DeadlineLoading(title: "Home is taking a while", message: "Tuvora couldn't load your catalogs yet.",
+                                        compact: true, retry: { TvHome.shared.refresh() }) {
+                            ForEach(0..<2, id: \.self) { _ in shimmerRow }
+                        }
                     }
                     ForEach(entries, id: \.key) { entry in
                         if let section = entry.section {

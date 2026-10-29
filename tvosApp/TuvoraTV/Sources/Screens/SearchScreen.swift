@@ -37,8 +37,9 @@ struct SearchScreen: View {
             .searchable(text: $query, prompt: "Search movies & series")
             .background(colors.background)
         }
-        // Keep the system keyboard row clear of the floating sidebar pill.
-        .padding(.leading, dp(24))
+        // No extra inset: the shell already clears the floating sidebar pill (80 dp), and the system keyboard row
+        // is as wide as the screen's safe area, so any inset pushes its trailing delete key off the right edge
+        // (a further 24 dp here clipped it; trailing padding only crops it harder). Navigation audit 2026-10-28.
         .task {
             TvSearch.shared.start()
             for await next in TvSearch.shared.results {
@@ -93,7 +94,9 @@ struct SearchScreen: View {
                     .padding(.horizontal, dp(52))
             }
         case .loading:
-            ForEach(0..<2, id: \.self) { _ in SkeletonRow() }
+            DeadlineLoading(title: "Search is taking a while", message: "Your add-ons haven't answered yet.", retry: { retry() }) {
+                VStack(spacing: 0) { ForEach(0..<2, id: \.self) { _ in SkeletonRow() } }
+            }
         case .noCatalogs:
             SearchErrorState(message: StoreCopy.noSearchCatalogsMessage) { retry() }
         case .error:
@@ -305,10 +308,13 @@ private struct DiscoverScreen: View {
     private var grid: some View {
         let size = SearchCardSize.poster
         if state.isLoading && state.items.isEmpty {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: size.width), spacing: dp(10))], alignment: .leading, spacing: dp(16)) {
-                ForEach(0..<12, id: \.self) { _ in NuvioShimmer().frame(width: size.width, height: size.height) }
+            DeadlineLoading(title: "Discover is taking a while", message: "Your add-ons haven't answered yet.",
+                            retry: { TvSearch.shared.refreshDiscover() }) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: size.width), spacing: dp(10))], alignment: .leading, spacing: dp(16)) {
+                    ForEach(0..<12, id: \.self) { _ in NuvioShimmer().frame(width: size.width, height: size.height) }
+                }
+                .padding(.top, dp(6))
             }
-            .padding(.top, dp(6))
         } else if !state.items.isEmpty {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: size.width), spacing: dp(10))], alignment: .leading, spacing: dp(16)) {
                 ForEach(Array(state.items.enumerated()), id: \.element.id) { index, item in

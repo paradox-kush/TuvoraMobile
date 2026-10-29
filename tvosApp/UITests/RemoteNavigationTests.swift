@@ -17,6 +17,8 @@ final class RemoteNavigationTests: XCTestCase {
         app.launch()
     }
 
+    private func launchGuest(_ args: [String]) { launch(["-smokeLocalGuest"] + args) }
+
     private var focused: XCUIElement {
         app.descendants(matching: .any).element(matching: NSPredicate(format: "hasFocus == true"))
     }
@@ -116,6 +118,35 @@ final class RemoteNavigationTests: XCTestCase {
         XCTAssertTrue(focusedId().hasPrefix("sidebar."), "LEFT from the category rail should open the sidebar; \(focusedId())")
     }
 
+    /// Navigation audit 2026-10-28 (finding 1): LEFT from a detail row must go back to the SELECTED
+    /// category, never to whichever rail row sits level with the row you left - landing there selects it.
+    func testLeftFromAccountDetailKeepsAccountSelected() {
+        launchGuest(["-smokeTab", "settings"])
+        let account = app.buttons["settings.rail.account"]
+        XCTAssertTrue(account.waitForExistence(timeout: 30), "settings rail never appeared")
+        XCTAssertTrue(waitForFocus(where: { $0 == "settings.rail.account" }), "launch focus is \(focusedId())")
+        press(.right)
+        XCTAssertFalse(focusedId().hasPrefix("settings.rail."), "RIGHT did not enter the detail pane; \(focusedId())")
+        // Rows further down sit level with other rail items: the drift showed there.
+        for row in 0..<3 {
+            press(.left, settle: 1.2)
+            XCTAssertEqual(focusedId(), "settings.rail.account", "row \(row): LEFT went to \(focusedId()), not the selected category")
+            press(.right)
+            for _ in 0...row where !focusedId().hasPrefix("settings.rail.") { press(.down, settle: 0.5) }
+        }
+    }
+
+    /// Navigation audit 2026-10-28 (finding 2): LEFT from a rail whose detail has no control opens the
+    /// app sidebar on the CURRENT tab (Settings), not on Home.
+    func testLeftFromControllessSettingsDetailOpensSidebarOnSettings() throws {
+        launchGuest(["-smokeTab", "settings", "-smokeSettings", "party"])
+        let party = app.buttons["settings.rail.party"]
+        guard party.waitForExistence(timeout: 30) else { throw XCTSkip("Watch party is not available in this build") }
+        XCTAssertTrue(waitForFocus(where: { $0 == "settings.rail.party" }), "launch focus is \(focusedId())")
+        press(.left, settle: 2)
+        XCTAssertEqual(focusedId(), "sidebar.settings", "the sidebar opened on \(focusedId()), not the current tab")
+    }
+
     /// App Store build: add-ons and plugins are compiled out, so the rail has no Content & Discovery
     /// (the add-on installer), and asking for it by launch hook lands on Account instead.
     func testStoreBuildHasNoContentAndDiscovery() {
@@ -144,6 +175,65 @@ final class RemoteNavigationTests: XCTestCase {
         press(.menu, settle: 3)
         XCTAssertTrue(app.buttons["sidebar.home"].waitForExistence(timeout: 10), "Menu on Manage Profiles did not return to the app")
         XCTAssertFalse(app.buttons["profiles.done"].exists, "still on Manage Profiles after Menu")
+    }
+
+    /// Navigation audit 2026-10-28 (finding 5): Back from Manage Profiles returns to Settings > Profiles,
+    /// where the viewer came from - not to Account (or Home).
+    func testManageProfilesBackReturnsToSettingsProfiles() {
+        app.launchArguments = ["-smokeLocalGuest", "-smokeTab", "settings"]   // no auto-pick: the hook masks this
+        app.launch()
+        let profiles = app.buttons["settings.rail.profiles"]
+        XCTAssertTrue(profiles.waitForExistence(timeout: 40), "settings rail never appeared")
+        XCTAssertTrue(waitForFocus(where: { $0.hasPrefix("settings.rail.") }), "no rail focus; \(focusedId())")
+        press(.down); press(.right)   // Account -> Profiles -> its Manage Profiles row
+        press(.select, settle: 3)
+        XCTAssertTrue(app.buttons["profiles.done"].waitForExistence(timeout: 10), "Manage Profiles did not open")
+        press(.menu, settle: 3)
+        XCTAssertTrue(profiles.waitForExistence(timeout: 10), "Back did not return to Settings")
+        XCTAssertTrue(app.staticTexts["Manage user profiles for this account"].waitForExistence(timeout: 5),
+                      "Back returned to a different Settings category than Profiles")
+    }
+
+    // MARK: - Batch 2 (navigation audit 2026-10-28)
+
+    /// Finding 3: the Search keyboard's delete key must be fully on screen (it was drawn past the right edge).
+    func testSearchDeleteKeyIsFullyOnScreen() {
+        launchGuest(["-smokeTab", "search"])
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 30), "Search never appeared")
+        Thread.sleep(forTimeInterval: 2)
+        let delete = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] 'delete'")).firstMatch
+        XCTAssertTrue(delete.exists, "no delete key found on the Search keyboard")
+        let screenWidth = app.windows.firstMatch.frame.width
+        XCTAssertLessThanOrEqual(delete.frame.maxX, screenWidth, "the delete key ends at x=\(delete.frame.maxX), past the \(screenWidth) pt screen edge")
+    }
+
+    /// F1: a failed source must be visible. The toast used to be drawn only under the source picker's
+    /// full-screen cover, so picking a dead source showed nothing. The hook raises the toast as the picker opens.
+    func testSourcePickerShowsPlaybackToast() {
+        launchGuest(["-smokeDetails", "series:parity-sample", "-smokePresentationTitle", "-smokePickerToast"])
+        XCTAssertTrue(app.staticTexts["Presentation preview"].waitForExistence(timeout: 40), "the sample title never loaded")
+        let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "no Play button on the title page")
+        for _ in 0..<6 where !play.hasFocus { press(.up, settle: 0.5) }
+        XCTAssertTrue(play.hasFocus, "could not focus Play; focus on \(focusedId())")
+        press(.select, settle: 1)
+        XCTAssertTrue(app.staticTexts["Smoke source toast"].waitForExistence(timeout: 15), "no playback toast appeared")
+        // Covered views stay in the accessibility tree, so only a toast that is on top (hittable) is one the viewer sees.
+        let visible = app.staticTexts.matching(NSPredicate(format: "label == 'Smoke source toast'")).allElementsBoundByIndex.contains { $0.isHittable }
+        XCTAssertTrue(visible, "the playback toast is hidden under the source picker")
+    }
+
+    /// Bounded loads: a page whose load never answers must stop spinning, say so, and let Retry ask again.
+    func testStalledTitleStopsSpinningAndOffersRetry() {
+        launchGuest(["-smokeDetails", "series:parity-sample", "-smokeStallTitle", "-smokeLoadDeadline", "3"])
+        let message = app.staticTexts["Taking longer than expected"]
+        XCTAssertTrue(message.waitForExistence(timeout: 20), "the stalled title page is still spinning after the deadline")
+        let retry = app.buttons["Retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 5), "no Retry on the timed-out page")
+        for _ in 0..<4 where !retry.hasFocus { press(.down, settle: 0.5) }
+        press(.select, settle: 1)
+        let gone = NSPredicate(format: "exists == false")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: gone, evaluatedWith: message)], timeout: 10), .completed, "Retry did not start a new attempt")
     }
 
     /// "Add the in-app profile switch": the drawer's profile item opens "Who's watching?"; Menu backs

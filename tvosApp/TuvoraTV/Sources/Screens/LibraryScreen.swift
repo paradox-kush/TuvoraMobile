@@ -175,10 +175,13 @@ struct LibraryScreen: View {
     /// NuvioTV shows a spinner and "Syncing library…"; the grid's shimmer stands in for the spinner.
     private var loading: some View {
         let size = SearchCardSize.poster
-        return VStack(alignment: .leading, spacing: dp(14)) {
-            Text("Syncing library…").font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: size.width), spacing: dp(12))], alignment: .leading, spacing: dp(16)) {
-                ForEach(0..<14, id: \.self) { _ in NuvioShimmer().frame(width: size.width, height: size.height) }
+        return DeadlineLoading(title: "Library is taking a while", message: "Tuvora couldn't sync your library yet.",
+                               retry: { TvLibrary.shared.refresh() }) {
+            VStack(alignment: .leading, spacing: dp(14)) {
+                Text("Syncing library…").font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: size.width), spacing: dp(12))], alignment: .leading, spacing: dp(16)) {
+                    ForEach(0..<14, id: \.self) { _ in NuvioShimmer().frame(width: size.width, height: size.height) }
+                }
             }
         }
     }

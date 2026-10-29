@@ -148,16 +148,21 @@ struct ProfilePickerView: View {
                        ? { _ = TvAppLifecycle.shared.closeProfilePicker() } : nil)
     }
 
+    private var profilesLoading: some View {
+        DeadlineLoading(title: "Profiles are taking a while", message: "Tuvora couldn't load your profiles yet.",
+                        retry: { TvAppLifecycle.shared.retryProfiles() }) { ProgressView() }
+    }
+
     @ViewBuilder
     private var grid: some View {
         if profiles.isEmpty && !canAdd {
             if loaded {
                 Text("No profiles found").font(NuvioType.inter(18, .medium)).foregroundStyle(NuvioPrimitives.neutral400)
             } else {
-                ProgressView()
+                profilesLoading
             }
         } else if profiles.isEmpty && !loaded {
-            ProgressView()
+            profilesLoading
         } else {
             GeometryReader { geo in
                 let layout = TvProfileGridLayout.shared.layout(

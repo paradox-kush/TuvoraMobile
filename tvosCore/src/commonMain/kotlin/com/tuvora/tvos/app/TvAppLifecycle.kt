@@ -116,6 +116,11 @@ object TvAppLifecycle {
         }
     }
 
+    /** The picker's Retry after its wait timed out: asks the account for its profiles again (the user's event, never a loop). */
+    fun retryProfiles() {
+        scope.launch { runCatching { ProfileRepository.pullProfiles() }.onFailure { log.w(it) { "retryProfiles" } } }
+    }
+
     /** The picker's choice, after any PIN check the picker performs. */
     fun pickProfile(profileIndex: Int) {
         val profile = ProfileRepository.state.value.profiles.find { it.profileIndex == profileIndex } ?: return

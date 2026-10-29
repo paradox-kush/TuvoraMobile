@@ -656,18 +656,21 @@ private struct MatchChannelsSheet: View {
     @State private var failed = false
     @State private var groups: [TvMatchGroup] = []
     @State private var opening = false
+    @State private var attempt = 0
 
     var body: some View {
         NuvioDialog(title: fixture.displayTitle + (live ? "   🔴 LIVE" : ""), subtitle: TvSports.shared.sheetSubtitle(fixture: fixture, whenText: fixture.startEpochMs == nil ? nil : SportsWhen.label(fixture, now: TvSports.shared.nowMs())), width: dp(620)) {
-            if !hasPlaylists {
+            switch MatchSheetPhase.resolve(hasPlaylists: hasPlaylists, matching: matching, failed: failed, hasGroups: !groups.isEmpty) {
+            case .noPlaylists:
                 message("Add an IPTV playlist to find and watch this match on your channels.")
-            } else if groups.isEmpty && matching {
+            case .finding:
                 message("Finding channels…")
-            } else if groups.isEmpty && failed {
+            case .failed:
                 message("Couldn't load channels from your providers. Please try again.")
-            } else if groups.isEmpty {
+                NuvioTextButton(title: "Retry") { load() }.accessibilityIdentifier("sports.match.retry")
+            case .none:
                 message("None of your channels list this match. Matching depends on your playlist's EPG and channel names.")
-            } else {
+            case .results:
                 ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
                     if let label = group.label {
                         Text(ui: label).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
@@ -696,19 +699,39 @@ private struct MatchChannelsSheet: View {
         }
         .frame(maxHeight: dp(480))
         .onExitCommand { dismiss() }
-        .task {
-            hasPlaylists = TvSports.shared.hasPlaylists()
-            guard hasPlaylists else { matching = false; return }
+        .task { load() }
+        .onDisappear { attempt = -1 }
+    }
+
+    /// Runs the match. The sheet stops waiting after `MatchSheetPhase.deadlineSeconds` even if the matching
+    /// call never returns (it ignores cancellation), and offers Retry; a late result from a stale attempt is dropped.
+    private func load() {
+        hasPlaylists = TvSports.shared.hasPlaylists()
+        guard hasPlaylists else { matching = false; return }
+        attempt += 1
+        let id = attempt
+        matching = true
+        failed = false
+        Task {
             do {
                 let matches = try await TvSports.shared.matchChannels(fixture: fixture, onPartial: { partial in
+                    guard attempt == id else { return }
                     groups = TvSports.shared.groupMatches(fixture: fixture, matches: partial)
                 })
+                guard attempt == id else { return }
                 groups = TvSports.shared.groupMatches(fixture: fixture, matches: matches)
                 smokeLog("SMOKE sports match channels=%d", matches.count)
             } catch {
+                guard attempt == id else { return }
                 failed = true
             }
             matching = false
+        }
+        Task {
+            try? await Task.sleep(nanoseconds: MatchSheetPhase.deadlineSeconds * 1_000_000_000)
+            guard attempt == id, matching else { return }
+            matching = false
+            failed = MatchSheetPhase.failsAtDeadline(hasGroups: !groups.isEmpty)
         }
     }
 

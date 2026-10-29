@@ -464,11 +464,14 @@ private struct HomeRowsStates: View {
     var body: some View {
         if let rows {
             if rows.sections.isEmpty && rows.isLoading {
-                ForEach(0..<2, id: \.self) { _ in
-                    HStack(spacing: NuvioTokens.Layout.itemGap) {
-                        ForEach(0..<7, id: \.self) { _ in NuvioShimmer().frame(width: GridCardSize.poster.width, height: GridCardSize.poster.height) }
+                DeadlineLoading(title: "Home is taking a while", message: "Tuvora couldn't load your catalogs yet.",
+                                compact: true, retry: { TvHome.shared.refresh() }) {
+                    ForEach(0..<2, id: \.self) { _ in
+                        HStack(spacing: NuvioTokens.Layout.itemGap) {
+                            ForEach(0..<7, id: \.self) { _ in NuvioShimmer().frame(width: GridCardSize.poster.width, height: GridCardSize.poster.height) }
+                        }
+                        .padding(.leading, dp(48))
                     }
-                    .padding(.leading, dp(48))
                 }
             } else if rows.sections.isEmpty && !hasContinueWatching && !hasCollections {
                 let hint = TvHome.shared.emptyHomeHint()

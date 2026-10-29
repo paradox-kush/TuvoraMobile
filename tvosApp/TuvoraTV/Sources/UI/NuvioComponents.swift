@@ -186,6 +186,64 @@ struct SeeAllButton: View {
 }
 
 /// ErrorState / EmptyScreenState (shared TV components): centred title + message, optional retry.
+/// The playback toast (`PlaybackCoordinator.message`), same look as MainShell's. A full-screen cover hides the
+/// shell's copy, so every screen presented as one repeats it.
+struct PlaybackToast: View {
+    @EnvironmentObject private var playback: PlaybackCoordinator
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        if let message = playback.message {
+            Text(ui: message).font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary)
+                .padding(.horizontal, dp(20)).padding(.vertical, dp(10))
+                .background(colors.backgroundElevated, in: RoundedRectangle(cornerRadius: NuvioTokens.Radius.dialog))
+                .overlay(RoundedRectangle(cornerRadius: NuvioTokens.Radius.dialog).stroke(colors.border, lineWidth: NuvioTokens.Stroke.hairline))
+                .padding(.bottom, dp(32))
+                .transition(.opacity)
+                .accessibilityIdentifier("playback.toast")
+        }
+    }
+}
+
+/// A loading placeholder that cannot spin forever: shows `spinner` while the load runs, and after
+/// `LoadDeadline` swaps it for a message with Retry. Retry re-asks (it is the viewer's event, never a timer
+/// loop) and starts a fresh wait. Put it only where the placeholder is on screen exactly while loading.
+struct DeadlineLoading<Spinner: View>: View {
+    var title = "Taking longer than expected"
+    var message = "Check your connection, then try again."
+    /// A strip inside a page (a Home row) instead of the whole screen.
+    var compact = false
+    let retry: () -> Void
+    @ViewBuilder let spinner: () -> Spinner
+    @State private var attempt = 0
+    @State private var timedOut = false
+
+    var body: some View {
+        Group {
+            if timedOut {
+                if compact {
+                    NuvioStateMessage(title: title, message: message, retry: restart).frame(height: dp(200))
+                } else {
+                    NuvioStateMessage(title: title, message: message, retry: restart)
+                }
+            } else {
+                spinner()
+            }
+        }
+        .task(id: attempt) {
+            let deadline = LoadDeadline.seconds(arguments: AppArguments.list)
+            try? await Task.sleep(nanoseconds: UInt64(deadline * 1_000_000_000))
+            if !Task.isCancelled { timedOut = true }
+        }
+    }
+
+    private func restart() {
+        timedOut = false
+        attempt += 1
+        retry()
+    }
+}
+
 struct NuvioStateMessage: View {
     let title: String
     let message: String

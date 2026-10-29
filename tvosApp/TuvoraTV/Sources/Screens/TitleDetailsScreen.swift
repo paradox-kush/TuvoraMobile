@@ -59,23 +59,16 @@ struct TitleDetailsScreen: View {
             } else if let error = state?.errorMessage {
                 NuvioStateMessage(title: "Couldn't load this title", message: error) { TvTitle.shared.load(type: preview.type, id: preview.id) }
             } else {
-                ProgressView()
+                DeadlineLoading(retry: { TvTitle.shared.load(type: preview.type, id: preview.id) }) { ProgressView() }
             }
         }
         .ignoresSafeArea()
-        // The shell's toast sits under this full-screen cover; repeat it here (same look as MainShell.toast).
-        .overlay(alignment: .bottom) {
-            if let message = playback.message {
-                Text(ui: message).font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary)
-                    .padding(.horizontal, dp(20)).padding(.vertical, dp(10))
-                    .background(colors.backgroundElevated, in: RoundedRectangle(cornerRadius: NuvioTokens.Radius.dialog))
-                    .overlay(RoundedRectangle(cornerRadius: NuvioTokens.Radius.dialog).stroke(colors.border, lineWidth: NuvioTokens.Stroke.hairline))
-                    .padding(.bottom, dp(32))
-                    .transition(.opacity)
-            }
-        }
+        // The shell's toast sits under this full-screen cover; repeat it here.
+        .overlay(alignment: .bottom) { PlaybackToast() }
         .task {
             #if DEBUG && targetEnvironment(simulator)
+            // Simulator smoke hook: `-smokeStallTitle` never loads the title, so the page waits (with `-smokeLoadDeadline`).
+            if AppArguments.list.contains("-smokeStallTitle") { return }
             if AppArguments.list.contains("-smokePresentationTitle") {
                 let sample = TvTitlePresentation.shared.sample()
                 state = MetaDetailsUiState(isLoading: false,
@@ -481,9 +474,14 @@ struct StreamPickerScreen: View {
             }
             .padding(dp(48))
         }
+        // The title page's toast is under this cover: without one here a dead source gave no feedback.
+        .overlay(alignment: .bottom) { PlaybackToast() }
         .task {
-            TvTitle.shared.loadStreams(type: meta.type, videoId: video?.id ?? meta.id, parentMetaId: meta.id,
-                                       season: video?.season?.int32Value ?? -1, episode: video?.episode?.int32Value ?? -1)
+            #if DEBUG && targetEnvironment(simulator)
+            // Simulator smoke hook: `-smokePickerToast` raises the playback toast as the picker opens.
+            if AppArguments.list.contains("-smokePickerToast") { playback.notify("Smoke source toast") }
+            #endif
+            loadSources()
             for await next in TvTitle.shared.streams {
                 streams = next
                 // Auto Stream Selection (phone parity): play the nominated source without the list.
@@ -503,12 +501,19 @@ struct StreamPickerScreen: View {
         .onDisappear { TvTitle.shared.cancelStreams() }
     }
 
+    private func loadSources() {
+        TvTitle.shared.loadStreams(type: meta.type, videoId: video?.id ?? meta.id, parentMetaId: meta.id,
+                                   season: video?.season?.int32Value ?? -1, episode: video?.episode?.int32Value ?? -1)
+    }
+
     @ViewBuilder
     private var sourceList: some View {
         let groups = (streams?.groups ?? []).filter { !$0.streams.isEmpty }
         if groups.isEmpty {
             if streams?.isAnyLoading ?? true {
-                VStack(spacing: dp(12)) { ForEach(0..<5, id: \.self) { _ in NuvioShimmer().frame(height: dp(84)) } }
+                DeadlineLoading(title: "Sources are taking a while", message: "Your add-ons haven't answered yet.", retry: loadSources) {
+                    VStack(spacing: dp(12)) { ForEach(0..<5, id: \.self) { _ in NuvioShimmer().frame(height: dp(84)) } }
+                }
             } else {
                 NuvioStateMessage(title: "No sources found", message: StoreCopy.noSourcesMessage)
             }

@@ -185,6 +185,7 @@ struct CollectionFolderScreen: View {
     @Environment(\.nuvio) private var colors
     @State private var state: FolderDetailUiState?
     @State private var details: PreviewBox?
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -203,18 +204,39 @@ struct CollectionFolderScreen: View {
         }
     }
 
+    private var phase: FolderScreenPhase {
+        FolderScreenPhase.resolve(
+            hasFolder: state?.folder != nil, isLoading: state?.isLoading ?? true, tabCount: state?.tabs.count ?? 0,
+            anyTabLoading: state?.tabs.contains { $0.isLoading } ?? false,
+            anyItems: state?.tabs.contains { !$0.items.isEmpty } ?? false,
+            anyTabError: state?.tabs.contains { $0.error != nil } ?? false)
+    }
+
     @ViewBuilder private var content: some View {
-        if let state, let folder = state.folder {
-            if state.viewMode == .tabbedGrid {
-                TabbedFolderGrid(state: state, folder: folder, onOpen: { details = PreviewBox(preview: $0) })
-            } else {
-                FolderRows(state: state, folder: folder, onOpen: { details = PreviewBox(preview: $0) })
+        switch phase {
+        case .loading:
+            DeadlineLoading(retry: { TvCollections.shared.openFolder(collectionId: target.collectionId, folderId: target.folderId) }) {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        } else if let state, !state.isLoading {
-            Text("Folder not found").font(NuvioType.titleLarge).foregroundStyle(colors.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .notFound:
+            NuvioStateMessage(title: LK("collections_folder_not_found", "Folder not found"),
+                              message: "This folder is no longer in your collection.",
+                              actionTitle: "Back", actionId: "folder.back") { dismiss() }
+        case .empty:
+            VStack(alignment: .leading, spacing: 0) {
+                if let folder = state?.folder { FolderHeader(folder: folder).padding(.horizontal, dp(48)).padding(.top, 60) }
+                NuvioStateMessage(title: "No sources in this folder yet",
+                                  message: "Add sources to this folder from Settings > Layout > Collections.",
+                                  actionTitle: "Back", actionId: "folder.back") { dismiss() }
+            }
+        case .content:
+            if let state, let folder = state.folder {
+                if state.viewMode == .tabbedGrid {
+                    TabbedFolderGrid(state: state, folder: folder, onOpen: { details = PreviewBox(preview: $0) })
+                } else {
+                    FolderRows(state: state, folder: folder, onOpen: { details = PreviewBox(preview: $0) })
+                }
+            }
         }
     }
 }
