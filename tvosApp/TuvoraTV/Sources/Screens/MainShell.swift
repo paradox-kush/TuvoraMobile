@@ -424,12 +424,3 @@ extension Color {
         self.init(argb: cleaned.count == 6 ? 0xFF000000 | value : (cleaned.count == 8 ? value : 0xFF1E88E5))
     }
 }
-
-struct PlaceholderScreen: View {
-    let title: String
-    @Environment(\.nuvio) private var colors
-    var body: some View {
-        Text(ui: title).font(NuvioType.headlineMedium).foregroundStyle(colors.textSecondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}

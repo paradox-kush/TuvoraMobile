@@ -50,6 +50,7 @@ struct ContinueWatchingRow: View {
     var onFocus: (TvCwItem) -> Void = { _ in }
     let onOpen: (TvCwItem) -> Void
     @Environment(\.nuvio) private var colors
+    @State private var pendingRemove: TvCwItem?
 
     var body: some View {
         let gutter = header == .modern ? NuvioTokens.Layout.gutter : dp(48)
@@ -67,10 +68,7 @@ struct ContinueWatchingRow: View {
                     ForEach(items, id: \.videoId) { item in
                         ContinueWatchingCard(item: item, style: style, size: size, onFocus: { onFocus(item) }) { onOpen(item) }
                             .contextMenu {
-                                Button("Remove from Continue Watching", role: .destructive) {
-                                    WatchProgressRepository.shared.removeProgress(
-                                        contentId: item.parentMetaId, seasonNumber: item.seasonNumber, episodeNumber: item.episodeNumber)
-                                }
+                                Button("Remove from Continue Watching", role: .destructive) { pendingRemove = item }
                             }
                     }
                 }
@@ -78,6 +76,17 @@ struct ContinueWatchingRow: View {
             }
             .scrollClipDisabled()
             .focusSection()
+            .fullScreenCover(isPresented: Binding(get: { pendingRemove != nil }, set: { if !$0 { pendingRemove = nil } })) {
+                ConfirmDialog(title: "Remove from Continue Watching?", subtitle: "Your progress for this title is deleted.",
+                              confirmTitle: "Remove", onConfirm: {
+                    if let item = pendingRemove {
+                        WatchProgressRepository.shared.removeProgress(
+                            contentId: item.parentMetaId, seasonNumber: item.seasonNumber, episodeNumber: item.episodeNumber)
+                    }
+                    pendingRemove = nil
+                }, onCancel: { pendingRemove = nil })
+                .environment(\.nuvio, colors)
+            }
         }
     }
 }

@@ -6,6 +6,8 @@ import TuvoraCore
 struct TitleDetailsScreen: View {
     let preview: MetaPreview
     @EnvironmentObject private var playback: PlaybackCoordinator
+    /// Save / Watched in flight: a second Select must not toggle again before the first lands.
+    @State private var toggling = false
     @Environment(\.nuvio) private var colors
     @Environment(\.dismiss) private var dismiss
     @State private var state: MetaDetailsUiState?
@@ -148,11 +150,23 @@ struct TitleDetailsScreen: View {
             HStack(spacing: dp(12)) {
                 PlayPill(title: playLabel(meta)) { openSources(meta: meta, video: isSeries ? resumeEpisode(meta) : nil) }
                     .prefersDefaultFocus(true, in: namespace)
-                CircleIconButton(icon: saved ? "md_check_circle" : "library_add_plus") {
-                    Task { try? await TvTitle.shared.toggleSaved(meta: meta); saved = TvTitle.shared.isSaved(meta: meta) }
+                CircleIconButton(icon: saved ? "md_check_circle" : "library_add_plus", label: saved ? "Remove from library" : "Save to library") {
+                    guard !toggling else { return }
+                    toggling = true
+                    Task {
+                        defer { toggling = false }
+                        do { try await TvTitle.shared.toggleSaved(meta: meta) } catch { playback.notify("Couldn't update your library.") }
+                        saved = TvTitle.shared.isSaved(meta: meta)
+                    }
                 }
-                CircleIconButton(icon: watched ? "md_check_circle" : "md_bookmark_border", filledWhite: watched) {
-                    Task { try? await TvTitle.shared.toggleWatched(meta: meta); watched = TvTitle.shared.isWatched(meta: meta) }
+                CircleIconButton(icon: watched ? "md_check_circle" : "md_bookmark_border", filledWhite: watched, label: watched ? "Mark as unwatched" : "Mark as watched") {
+                    guard !toggling else { return }
+                    toggling = true
+                    Task {
+                        defer { toggling = false }
+                        do { try await TvTitle.shared.toggleWatched(meta: meta) } catch { playback.notify("Couldn't update watched status.") }
+                        watched = TvTitle.shared.isWatched(meta: meta)
+                    }
                 }
             }
             .scrollClipDisabled()
@@ -326,6 +340,7 @@ struct PlayPill: View {
         .buttonStyle(PlainNoChromeButtonStyle())
         .focused($focused)
         .reportsFocus(focused)
+        .accessibilityIdentifier("details.play")
     }
 }
 
@@ -333,6 +348,8 @@ struct PlayPill: View {
 struct CircleIconButton: View {
     let icon: String
     var filledWhite = false   // NuvioTV: watched-selected circle is white
+    /// VoiceOver label and UI-test id; an icon-only button is otherwise unnamed.
+    var label: String? = nil
     let action: () -> Void
     @Environment(\.nuvio) private var colors
     @FocusState private var focused: Bool
@@ -348,6 +365,7 @@ struct CircleIconButton: View {
         .buttonStyle(PlainNoChromeButtonStyle())
         .focused($focused)
         .reportsFocus(focused)
+        .accessibilityLabel(label ?? "")
     }
 }
 

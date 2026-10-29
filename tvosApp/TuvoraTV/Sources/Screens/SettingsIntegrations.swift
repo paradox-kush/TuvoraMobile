@@ -437,15 +437,25 @@ struct KeyEntryDialog: View {
     @ObservedObject var dialogs: SettingsDialogs
     let onSave: (String) -> Void
     @State private var text = ""
+    @State private var confirmingClear = false
 
     var body: some View {
+        if confirmingClear {
+            ConfirmDialogBody(title: "Clear \(title)?", subtitle: "The saved value is removed from this device.",
+                              confirmTitle: "Clear", onConfirm: { onSave(""); dialogs.pop() }, onCancel: { confirmingClear = false })
+        } else {
+            entry
+        }
+    }
+
+    private var entry: some View {
         NuvioDialog(title: title, subtitle: subtitle, width: dp(560)) {
             SettingsTextField(label: title, hint: placeholder, text: $text) { save() }
             HStack(spacing: dp(8)) {
                 Spacer()
                 SettingsDialogButton(title: "Cancel") { dialogs.pop() }
                 if !initial.isEmpty {
-                    SettingsDialogButton(title: "Clear") { onSave(""); dialogs.pop() }
+                    SettingsDialogButton(title: "Clear") { confirmingClear = true }
                 }
                 SettingsDialogButton(title: "Save", primary: true) { save() }
             }
@@ -582,7 +592,9 @@ private struct DebridSettingsDetail: View {
                         TvDebrid.shared.setDescriptionTemplate(value: $0)
                     }
                     SettingsActionRow(title: "Reset formatting", subtitle: "Restore default source formatting.", value: "Reset to Default") {
-                        TvDebrid.shared.resetTemplates()
+                        dialogs.push(.custom(AnyView(ConfirmDialogBody(
+                            title: "Reset formatting?", subtitle: "Your custom name and description templates are replaced with the defaults.",
+                            confirmTitle: "Reset", onConfirm: { TvDebrid.shared.resetTemplates(); dialogs.pop() }, onCancel: { dialogs.pop() }))))
                     }
                 }
             }

@@ -244,6 +244,41 @@ struct DeadlineLoading<Spinner: View>: View {
     }
 }
 
+/// A destructive-action confirm: Cancel holds the default focus (tvOS never rests focus on an irreversible
+/// action). `ConfirmDialogBody` is the card for hosts that supply their own scrim (Settings dialogs).
+struct ConfirmDialogBody: View {
+    let title: String
+    var subtitle: String? = nil
+    let confirmTitle: String
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        NuvioDialog(title: title, subtitle: subtitle, width: dp(420)) {
+            SettingsDialogButton(title: confirmTitle, destructive: true, fullWidth: true, action: onConfirm)
+            SettingsDialogButton(title: "Cancel", fullWidth: true, initialFocus: true, action: onCancel)
+        }
+        .focusSection()
+    }
+}
+
+/// `ConfirmDialogBody` over its own scrim, for a `fullScreenCover`.
+struct ConfirmDialog: View {
+    let title: String
+    var subtitle: String? = nil
+    let confirmTitle: String
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.6).ignoresSafeArea()
+            ConfirmDialogBody(title: title, subtitle: subtitle, confirmTitle: confirmTitle, onConfirm: onConfirm, onCancel: onCancel)
+        }
+        .onExitCommand(perform: onCancel)
+    }
+}
+
 struct NuvioStateMessage: View {
     let title: String
     let message: String

@@ -226,7 +226,10 @@ struct ProfilePickerView: View {
                 ProfileDeleteDialog(profile: profile, onDismiss: closeOverlay) {
                     smokeLog("SMOKE profile delete index=%d", index)
                     closeOverlay()
-                    Task { try? await ProfileRepository.shared.deleteProfile(profileIndex: index) }
+                    Task {
+                        do { try await ProfileRepository.shared.deleteProfile(profileIndex: index) }
+                        catch { toast = "Couldn't delete the profile. Try again." }
+                    }
                 }
             }
         case .pin, .none:

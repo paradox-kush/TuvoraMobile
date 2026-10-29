@@ -16,6 +16,7 @@ struct SearchScreen: View {
     @State private var results: SearchUiState = TvSearch.shared.results.value
     @State private var recent: [String] = []
     @State private var details: PreviewBox?
+    @State private var openingChannel = false
 
     private var mode: TvSearchMode { TvSearchPolicy.shared.mode(query: query, requested: requested, state: results) }
 
@@ -120,7 +121,10 @@ struct SearchScreen: View {
     private func open(_ item: MetaPreview) {
         // IPTV live channels play straight away (the hub does the same); anything else opens Details.
         guard IptvContentClassifierAccess.shared.classifier.isLiveId(id: item.id) else { details = PreviewBox(preview: item); return }
+        guard !openingChannel else { return }
+        openingChannel = true
         Task {
+            defer { openingChannel = false }
             if let session = try? await TvIptvBrowse.shared.playChannel(contentId: item.id, name: item.name, logo: item.logo) {
                 playback.play(session)
             } else {

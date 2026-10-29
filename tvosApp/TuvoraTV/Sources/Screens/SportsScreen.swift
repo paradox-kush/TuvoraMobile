@@ -6,8 +6,8 @@ import TuvoraCore
 // OK on a match opens the channel sheet (MatchChannelsOverlay) and OK on a channel plays it. Data is
 // the shared RadarRepository through TvSports; which rails appear is TvSportsHubPolicy.
 //
-// Not ported yet: the top search field (league / team search + follow), the league drill-in page with
-// recent results, catch-up replays and recordings in the match sheet.
+// Not ported yet: the top search field (league / team search + follow), catch-up replays and recordings
+// in the match sheet. The league drill-in page is LeaguePageView below.
 
 private enum SportsMetrics {
     static let gutter = dp(52)
@@ -530,6 +530,8 @@ private struct LeaguePageView: View {
     let onMatch: (RadarFixture) -> Void
     @Environment(\.nuvio) private var colors
     @FocusState private var followFocused: Bool
+    /// A second Select inside this window would un-follow what the first just followed.
+    @State private var followPending = false
 
     var body: some View {
         let page = TvSports.shared.leaguePage(state: radar, league: league, nowMs: now)
@@ -542,7 +544,12 @@ private struct LeaguePageView: View {
                         Text(ui: page.subtitle).font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary)
                     }
                     Spacer()
-                    Button { TvSports.shared.toggleFollow(league: league) } label: {
+                    Button {
+                        guard !followPending else { return }
+                        followPending = true
+                        TvSports.shared.toggleFollow(league: league)
+                        Task { try? await Task.sleep(nanoseconds: 800_000_000); followPending = false }
+                    } label: {
                         Text(page.followed ? "★ Following" : "Follow").font(NuvioType.labelLarge)
                             .foregroundStyle(page.followed ? (followFocused ? colors.textPrimary : colors.secondary) : colors.textPrimary)
                             .padding(.horizontal, dp(12)).padding(.vertical, dp(8))
@@ -551,6 +558,7 @@ private struct LeaguePageView: View {
                     .buttonStyle(PlainNoChromeButtonStyle())
                     .focused($followFocused)
                     .reportsFocus(followFocused)
+                    .accessibilityIdentifier("sports.follow")
                 }
                 .focusSection()
                 if !page.upcoming.isEmpty { section("Live & Upcoming", page.upcoming) }

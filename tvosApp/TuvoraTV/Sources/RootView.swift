@@ -1,8 +1,7 @@
 import SwiftUI
 import TuvoraCore
 
-/// Follows TvAppLifecycle's gate screen. The screens are placeholders until the Phase 3 UI; the
-/// sign-in screen already runs the real device sign-in against the backend.
+/// Follows TvAppLifecycle's gate screen and hosts the real sign-in, profile picker and main shell.
 struct RootView: View {
     @State private var screen: TvGateScreen = .loading
     /// Simulator smoke hook: `-smokePlay <url> [-smokeLive]` opens the player straight away. With
