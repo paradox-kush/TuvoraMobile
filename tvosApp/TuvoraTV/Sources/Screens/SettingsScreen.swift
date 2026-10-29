@@ -58,6 +58,7 @@ struct SettingsScreen: View {
     @StateObject private var party = PartyModel()
     /// Simulator smoke hook: `-smokeSettings <category>` opens a category, `-smokeSettingsDialog <addPlaylist|signOut|engine|playlistDetails|setupCode>` a dialog.
     @State private var selected: Category = {
+        if let resumed = ShellResume.takeSettingsCategory(), let c = Category(rawValue: resumed), Category.visible.contains(c) { return c }
         let args = AppArguments.list
         if let i = args.firstIndex(of: "-smokeSettings"), i + 1 < args.count, let c = Category(rawValue: args[i + 1]),
            Category.visible.contains(c) { return c }
@@ -186,8 +187,12 @@ struct SettingsScreen: View {
         .background(RoundedRectangle(cornerRadius: dp(28), style: .continuous).fill(colors.backgroundElevated))
         .overlay(RoundedRectangle(cornerRadius: dp(28), style: .continuous).stroke(colors.border, lineWidth: NuvioTokens.Stroke.hairline))
         .padding(.top, 60).padding(.bottom, 60).padding(.leading, dp(16)).padding(.trailing, 80)
-        .onChange(of: railFocus) { _, focused in
+        .onChange(of: railFocus) { old, focused in
             guard let focused else { return }
+            // Focus ENTERING the rail (LEFT from a detail row, RIGHT from the sidebar) lands on whichever
+            // rail row is level with where it came from. Send it to the selected category instead, or
+            // the detail would switch under the viewer (navigation audit 2026-10-28, finding 1).
+            if old == nil && focused != selected { railFocus = selected; return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
                 if railFocus == focused { select(focused) }
             }
@@ -601,6 +606,7 @@ private struct ProfilesSettingsDetail: View {
             SettingsDetailHeader(title: "Profiles", subtitle: "Manage user profiles for this account")
             SettingsGroupCard {
                 SettingsActionRow(title: "Manage Profiles") {
+                    ShellResume.set(destination: .settings, settingsCategory: SettingsScreen.Category.profiles.rawValue)
                     ProfilePickerLaunch.manageRequested = true
                     TvAppLifecycle.shared.openProfilePicker()
                 }

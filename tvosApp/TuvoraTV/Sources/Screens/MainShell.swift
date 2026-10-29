@@ -4,6 +4,19 @@ import TuvoraCore
 /// NuvioTV's legacy sidebar shell (MainActivity.kt:1414-1812), translated: a 72dp icon rail that opens
 /// into a 196dp labelled drawer when it takes focus (LEFT from content), dimming the content; RIGHT or
 /// a selection closes it. Content sits 54dp in from the left edge.
+/// Where to land when the shell is rebuilt after the profile picker (which replaces it): set by the
+/// screen that opened the picker, taken once by the new shell, so Back returns the viewer to that screen.
+enum ShellResume {
+    private static var destination: MainShell.Destination?
+    private static var settingsCategory: String?
+    static func set(destination: MainShell.Destination, settingsCategory: String? = nil) {
+        self.destination = destination
+        self.settingsCategory = settingsCategory
+    }
+    static func takeDestination() -> MainShell.Destination? { defer { destination = nil }; return destination }
+    static func takeSettingsCategory() -> String? { defer { settingsCategory = nil }; return settingsCategory }
+}
+
 struct MainShell: View {
     enum Destination: String, CaseIterable, Identifiable {
         case home, search, library, iptv, sports, settings
@@ -35,6 +48,7 @@ struct MainShell: View {
     @StateObject private var theme = NuvioThemeModel()
     /// Simulator smoke hook: `-smokeTab <home|search|library|iptv|sports|settings>`.
     @State private var destination: Destination = {
+        if let resumed = ShellResume.takeDestination() { return resumed }
         let args = AppArguments.list
         if let i = args.firstIndex(of: "-smokeTab"), i + 1 < args.count, let d = Destination(rawValue: args[i + 1]) { return d }
         return .home
@@ -76,7 +90,7 @@ struct MainShell: View {
         // Enabling the drawer lets tvOS grab its nearest item (the profile item, level with content at the
         // top of the screen) after the first assignment: the drawer always opens on the current tab.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            if railEngaged && profileFocused { railFocus = destination }
+            if railEngaged && (profileFocused || railFocus == nil) { railFocus = destination }
         }
     }
 
@@ -228,6 +242,10 @@ private struct Sidebar: View {
     /// Hand focus to the chosen tab: close the drawer at once (items stop being focus targets).
     let onChoose: () -> Void
     @Environment(\.nuvio) private var colors
+    /// The drawer item focus last rested on while the drawer was open. The top fence bounces to it, so UP
+    /// past Home stays on Home; with none yet (the drawer just opened) it bounces to the current tab,
+    /// not Home (navigation audit 2026-10-28, finding 2).
+    @State private var lastItem: MainShell.Destination?
 
     /// NuvioTV's Modern floating sidebar (ModernSidebarBlurPanel.kt), drawn in Liquid Glass: a rounded
     /// (30dp) panel inset from the edge, icons only until focus arrives, then labels.
@@ -236,7 +254,7 @@ private struct Sidebar: View {
             // Top fence above the profile item when there is one, so UP from Home can reach it.
             SidebarFence(active: engaged) {
                 if profileSwitchable && profile != nil { profileFocus.wrappedValue = true }
-                else { focus.wrappedValue = MainShell.Destination.allCases.first! }
+                else { focus.wrappedValue = lastItem ?? destination }
             }
             if profileSwitchable, expanded, let profile {
                 // Only while the drawer is open, and removed instantly (no transition): a fading view
@@ -270,6 +288,8 @@ private struct Sidebar: View {
         .onMoveCommand { direction in
             if direction == .right { focus.wrappedValue = nil }
         }
+        .onChange(of: focus.wrappedValue) { _, item in if let item { lastItem = item } }
+        .onChange(of: engaged) { _, now in if !now { lastItem = nil } }
     }
 
     /// UP from the first item / DOWN from the last must stay in the drawer (tvOS would otherwise hand
