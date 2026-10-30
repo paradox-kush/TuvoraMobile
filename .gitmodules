@@ -1,9 +1,9 @@
 [submodule "MPVKit"]
 	path = MPVKit
 	url = https://github.com/paradox-kush/MPVKit.git
-	branch = tuvora/smbclient-link-fix
+	branch = tuvora-rebase-04579bd
 	# Ignore the submodule's local build output (build/, .swiftpm xcuserdata) so it stops showing
 	# as " M MPVKit" in git status. "untracked" hides only untracked junk — a real MPVKit commit
-	# move or a tracked-file edit still surfaces. Keeps the pinned commit (tag v0.41.0-tuvora.1)
+	# move or a tracked-file edit still surfaces. Keeps the pinned commit (tag v0.41.0-tuvora.2)
 	# intact, unlike a .gitignore committed inside the submodule which would bump the pointer.
 	ignore = untracked

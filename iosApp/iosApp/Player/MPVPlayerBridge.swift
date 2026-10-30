@@ -11,7 +11,7 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropert
     private var playerVC: MPVPlayerViewController?
     /// Mirrors the user's Picture-in-Picture setting so a view controller created later still gets
     /// it — Kotlin sets this before the surface exists on a cold player open.
-    private var pictureInPictureEnabled = false
+    private var pictureInPictureEnabled = true
 
     func createPlayerViewController() -> UIViewController {
         return ensurePlayerViewController()
@@ -20,7 +20,7 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropert
     private func ensurePlayerViewController() -> MPVPlayerViewController {
         if let playerVC { return playerVC }
         let vc = MPVPlayerViewController()
-        vc.setExperimentalSinglePrimaryPictureInPictureEnabled(pictureInPictureEnabled)
+        vc.pictureInPictureUserEnabled = pictureInPictureEnabled
         self.playerVC = vc
         return vc
     }
@@ -74,13 +74,13 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropert
     func setIsLiveStream(isLive: Bool) { ensurePlayerViewController().isLiveStream = isLive }
     // Picture-in-Picture bridge surface. Mirrored by hand in NuvioPlayerBridge (Kotlin) — Gradle
     // cannot check these signatures, so keep the two in step (the getVideoFrameTicks precedent).
-    func isPictureInPictureSupported() -> Bool { playerVC?.isPictureInPictureSupported() ?? false }
-    func startPictureInPicture() { playerVC?.startPictureInPicture() }
-    func stopPictureInPicture() { playerVC?.stopPictureInPicture(source: "kotlin") }
-    func isPictureInPictureActive() -> Bool { playerVC?.isPictureInPictureActive() ?? false }
+    func isPictureInPictureSupported() -> Bool { playerVC?.pictureInPictureController?.isSupported ?? false }
+    func startPictureInPicture() { playerVC?.pictureInPictureController?.start() }
+    func stopPictureInPicture() { playerVC?.pictureInPictureController?.stop() }
+    func isPictureInPictureActive() -> Bool { playerVC?.keepsPlaybackInBackground ?? false }
     func setPictureInPictureEnabled(enabled: Bool) {
         pictureInPictureEnabled = enabled
-        playerVC?.setExperimentalSinglePrimaryPictureInPictureEnabled(enabled)
+        playerVC?.pictureInPictureUserEnabled = enabled
     }
     func updateNowPlayingMetadata(
         title: String,
@@ -326,9 +326,18 @@ final class MPVPlayerViewController: UIViewController {
     private var styledSubtitleVisible = false
     private var lastSubtitleText = ""
     var systemControlHandler: PlayerSystemControlHandler?
-    // The fork's PiP is the sample-buffer capture path (MPVPlayerViewController+PictureInPicture.swift):
-    // playback must survive the background while PiP is starting or on screen.
-    var keepsPlaybackInBackground: Bool { isPictureInPictureStarting || isPictureInPictureActive() }
+    // Upstream PiP (PlayerPictureInPictureController): playback must survive the background while
+    // PiP is starting or on screen.
+    private(set) var pictureInPictureController: PlayerPictureInPictureController?
+    var keepsPlaybackInBackground: Bool { pictureInPictureController?.keepsPlaybackAlive == true }
+    /// The user's PiP setting. Applied to the controller as soon as it exists.
+    var pictureInPictureUserEnabled = true {
+        didSet { pictureInPictureController?.setEnabled(pictureInPictureUserEnabled) }
+    }
+    /// True once this player paused for the background (no PiP handoff) or a PiP closed there: a
+    /// live stream is then stale and must rejoin the live edge on return (LivePictureInPicturePolicy).
+    private var pausedForBackground = false
+    private var detachedVideoLayerIndex: UInt32?
     private var lastAppliedDrawableSize: CGSize = .zero
     private var externallyManagedViewSize: CGSize?
     private var pendingSurfaceLayoutWorkItems: [DispatchWorkItem] = []
@@ -396,52 +405,6 @@ final class MPVPlayerViewController: UIViewController {
     var currentVideoWidth: Int { Int(propertyShadow.videoSize.width) }
     var currentVideoHeight: Int { Int(propertyShadow.videoSize.height) }
 
-    // The fork carries a Metal device-loss recovery subsystem (part of a larger bridge rework we
-    // did not take) and the PiP code consults it before re-arming capture. We have no such
-    // tracking, so we are never "awaiting recovery" and there is nothing to retry. If Metal device
-    // loss during backgrounding turns out to break PiP on real hardware, THIS is the gap to close.
-    var isAwaitingDeviceLossRecovery: Bool { false }
-    func retryDeviceLossRecoveryNow() {}
-
-    // ---- Picture-in-Picture (ported; see MPVPlayerViewController+PictureInPicture.swift) ----
-    var experimentalSinglePrimaryPictureInPictureEnabled = false
-    var primaryRenderSurface: MPVPictureInPictureFrameCapture?
-    lazy var sampleBufferDisplayView: SampleBufferDisplayView = {
-        // Deliberately 2x2 and offscreen: this layer exists only so AVPictureInPictureController has
-        // something it will accept. The picture the user sees comes from frames blitted into it.
-        let view = SampleBufferDisplayView(frame: CGRect(x: -4, y: -4, width: 2, height: 2))
-        view.alpha = 0.01
-        view.isHidden = false
-        view.pictureInPictureDelegate = self
-        return view
-    }()
-    var isPictureInPictureStarting = false
-    var pipStartTimeoutWorkItem: DispatchWorkItem?
-    var automaticPictureInPictureStartArmed = false
-    var automaticPictureInPicturePrepared = false
-    var automaticPictureInPicturePreparedAt: CFTimeInterval = 0
-    var automaticPictureInPictureStartPreparationInFlight = false
-    var automaticPictureInPictureStartRetryWorkItem: DispatchWorkItem?
-    var automaticPictureInPictureTimeoutWorkItem: DispatchWorkItem?
-    var automaticPictureInPictureBackgroundTask: UIBackgroundTaskIdentifier = .invalid
-    var videoTrackSuspendedForBackground = false
-    var automaticPictureInPictureStartOffered = false
-    private var detachedVideoLayerIndex: UInt32?
-    var resumePlaybackAfterPictureInPictureRestore = false
-    var pipRestoreResumeWorkItem: DispatchWorkItem?
-    var preservePlaybackDuringPictureInPictureStart = false
-    var ignorePictureInPicturePauseCallbacksUntil: CFTimeInterval = 0
-    var automaticPiPHomeSwipeCandidate = false
-    lazy var automaticPiPHomeSwipeRecognizer: UIPanGestureRecognizer = {
-        let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handleAutomaticPiPHomeSwipe(_:)))
-        recognizer.maximumNumberOfTouches = 1
-        recognizer.cancelsTouchesInView = false
-        recognizer.delaysTouchesBegan = false
-        recognizer.delaysTouchesEnded = false
-        recognizer.delegate = self
-        return recognizer
-    }()
-
     // Cached track lists
     var audioTracks: [TrackInfo] = []
     var subtitleTracks: [TrackInfo] = []
@@ -506,18 +469,19 @@ final class MPVPlayerViewController: UIViewController {
         metalLayer.wantsExtendedDynamicRangeContent = true
         metalLayer.anchorPoint = CGPoint(x: 0, y: 0)
         metalLayer.position = .zero
+        // Upstream PiP: the display layer sits BELOW the video layer; frames reach it from libmpv's
+        // VO thread through MetalLayer.pictureInPictureSink.
+        let pip = PlayerPictureInPictureController(owner: self, metalLayer: metalLayer)
+        pip.setEnabled(pictureInPictureUserEnabled)
+        pictureInPictureController = pip
+        view.layer.addSublayer(pip.displayLayer)
         view.layer.addSublayer(metalLayer)
         layoutMetalLayer()
         installRenderThreadExitGuard()
 
         setupMpv()
-        // Must run after setupMpv (it needs the live metalLayer) and before the view is on screen.
-        installExperimentalPictureInPictureCaptureIfNeeded()
         activateAudioSessionForPlayback()
         setupNotifications()
-        if experimentalSinglePrimaryPictureInPictureEnabled {
-            view.addGestureRecognizer(automaticPiPHomeSwipeRecognizer)
-        }
         refreshImmersiveSystemUI()
     }
 
@@ -529,7 +493,7 @@ final class MPVPlayerViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutMetalLayer()
-        layoutExperimentalPictureInPictureSurfaces(in: view.bounds)
+        pictureInPictureController?.displayLayer.frame = view.bounds
         attemptStartPendingLoad()
     }
 
@@ -833,10 +797,68 @@ final class MPVPlayerViewController: UIViewController {
         }, UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()))
     }
 
-    // setupNotifications / enterBackground / enterForeground now live in
-    // MPVPlayerViewController+PictureInPicture.swift, because backgrounding is exactly the moment
-    // PiP has to decide whether to keep the video track alive or suspend it. Our live-edge rejoin
-    // is preserved there — see the LOCAL block in enterForeground().
+    private func setupNotifications() {
+        NotificationCenter.default.addObserver(self, selector: #selector(enterBackground),
+                                               name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(enterForeground),
+                                               name: UIApplication.willEnterForegroundNotification, object: nil)
+    }
+
+    @objc private func enterBackground() {
+        guard mpv != nil else { return }
+        // PiP handoff keeps playback (and the video track) alive; nothing is paused or suspended.
+        if pictureInPictureController?.enteredBackground() == true { return }
+        pauseBackgroundPlayback()
+    }
+
+    /// Background without PiP, or a PiP that closed in the background. Mpv calls here are queued
+    /// (onMpvQueue) — nothing waits on mpv's core lock on Main.
+    func pauseBackgroundPlayback() {
+        pausePlayback()
+        pausedForBackground = true
+        // LOCAL: the layer must leave the window before mpv tears its vo down (vid=no), or the
+        // render thread's exit commits the window's layer tree off Main and crashes Compose.
+        detachVideoLayerForVoTeardown(reason: "background")
+        setStringProperty("vid", "no")
+    }
+
+    func restoreBackgroundVideo() {
+        reattachVideoLayerAfterVoTeardown(reason: "restore-background")
+        setStringProperty("vid", "auto")
+    }
+
+    @objc private func enterForeground() {
+        guard mpv != nil else { return }
+        metalLayer.setRenderingSuspended(false, reason: "enter-foreground")
+        let keptByPiP = pictureInPictureController?.enteredForeground() == true
+        let plan = LivePictureInPicturePolicy.shared.foregroundPlan(
+            isLive: isLiveStream,
+            pausedForBackground: pausedForBackground,
+            pictureInPictureKeptPlayback: keptByPiP
+        )
+        if plan.restoreVideo { restoreBackgroundVideo() }
+        if plan.rejoinLiveEdge {
+            // A live stream paused in the background is stale (dead socket, old buffer): re-open it at
+            // the live edge instead of resuming the leftover buffer.
+            pausedForBackground = false
+            rejoinLiveEdgeAfterBackground()
+        }
+        pausedForBackground = false
+        if plan.resumePlayback { playPlayback() }
+    }
+
+    /// Re-open the current live stream at the live edge. Main thread: the observed path, not a
+    /// synchronous mpv read (see MPVPropertyShadow); the writes are queued (onMpvQueue).
+    private func rejoinLiveEdgeAfterBackground() {
+        guard let path = propertyShadow.snapshot.path else { return }
+        clearPlaybackError()
+        applyRequestHeaders(activeRequestHeaders)
+        command("loadfile", args: [path, "replace"])
+    }
+
+    func setPictureInPicturePlaceholderVisible(_ visible: Bool) {
+        SystemUI.shared.setPictureInPicturePlaceholder(self, visible: visible)
+    }
 
     private func configureBundledSubtitleFont() {
         guard let fontURL = Bundle.main.url(
@@ -1230,6 +1252,8 @@ final class MPVPlayerViewController: UIViewController {
     }
 
     func destroyPlayer() {
+        pictureInPictureController?.invalidate()
+        pictureInPictureController = nil
         NotificationCenter.default.removeObserver(self)
         UIApplication.shared.endReceivingRemoteControlEvents()
         resignFirstResponder()
@@ -1291,14 +1315,6 @@ final class MPVPlayerViewController: UIViewController {
         // 250ms of staleness is irrelevant to "may PiP start"; a watchdog kill is not.
         cachedPaused = paused
         cachedEofReached = eofReached
-        // LOCAL: AVKit's automatic start ignores the playback delegate's paused answer on iPadOS 26
-        // and would PiP a paused video (device-observed). Offer automatic start only while playing.
-        let automaticStartWanted = experimentalSinglePrimaryPictureInPictureEnabled && !paused && !eofReached
-        if automaticStartWanted != automaticPictureInPictureStartOffered {
-            automaticPictureInPictureStartOffered = automaticStartWanted
-            sampleBufferDisplayView.pictureInPictureController?.setAutomaticStartEnabled(automaticStartWanted)
-            InAppLogBridge.shared.info(tag: "PiP/iOS", message: "Automatic PiP start offered=\(automaticStartWanted)")
-        }
         durationMs = Int64(duration * 1000)
         positionMs = Int64(max(position, 0) * 1000)
         bufferedMs = Int64(max(position + cached, 0) * 1000)
@@ -1329,6 +1345,7 @@ final class MPVPlayerViewController: UIViewController {
     }
 
     private func syncNowPlayingPlaybackState(isPlaying: Bool) {
+        pictureInPictureController?.updatePlaybackState()
         nowPlayingController.syncPlayback(
             positionMs: positionMs,
             durationMs: durationMs,
@@ -1638,9 +1655,6 @@ final class MPVPlayerViewController: UIViewController {
                     DispatchQueue.main.async {
                         self.updateState()
                         self.publishNowPlayingForPlaybackSession()
-                        // LOCAL: prepare the PiP source as soon as video is playing, not only after a
-                        // foreground return — otherwise the first minimise has nothing to show.
-                        self.prewarmAutomaticPictureInPictureSource(reason: "playback-restart")
                     }
                 case MPV_EVENT_END_FILE:
                     if let data = eventPtr.pointee.data {

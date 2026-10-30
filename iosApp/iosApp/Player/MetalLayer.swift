@@ -1,65 +1,27 @@
-// Ported from the GPL-3.0 fork luqmanfadlli/NuvioMobile-iOS (branch `enhanced`, 2026-08-18), which
-// forks the same NuvioMedia/NuvioMobile upstream this repo does — so the licence is compatible.
+// iOS video layer. mpv renders libmpv -> libplacebo -> MoltenVK into this CAMetalLayer.
 //
-// Why this approach: AVPictureInPictureController only accepts an AVPlayerLayer or an
-// AVSampleBufferDisplayLayer, and we render libmpv -> libplacebo -> MoltenVK into a CAMetalLayer.
-// Rather than change the renderer (which would cost gpu-next's HDR tone mapping, EDR, deband and
-// interpolation), this taps the RENDERER'S OUTPUT: MetalLayer overrides nextDrawable(), the
-// presented drawable's MTLTexture is GPU-blitted into a CVPixelBuffer, wrapped in a CMSampleBuffer
-// and enqueued into an AVSampleBufferDisplayLayer that PiP is bound to. mpv is untouched.
+// Picture-in-Picture is upstream's: the patched libmpv (MPVKit nuvio_pip.m, VideoToolbox frame
+// handoff) hands decoded VideoToolbox frames to `nuvioEnqueuePiPFrame` on the VO thread, and
+// PlayerPictureInPictureController feeds them to an AVSampleBufferDisplayLayer. While PiP consumes
+// video (`nuvioPiPConsumesVideo`) mpv does not acquire a drawable at all. The fork's older
+// drawable-capture PiP is retired.
 //
-// KEEP THESE FILES CLOSE TO THE UPSTREAM FORK so they can be re-synced with a clean diff. Local
-// adaptations are confined to InAppLogBridge.swift (our logging shim) and the bridge wiring.
+// LOCAL (fork) additions kept here: render-thread exit guard, drawable-acquisition suspension, and
+// the Main-to-render-thread drawableSize hand-over (iOS 26 drawable-pool heap race).
 
 import Foundation
 import UIKit
 import QuartzCore
-// LOCAL: addPresentedHandler is declared on MTLDrawable, not CAMetalLayer's QuartzCore surface.
-// The upstream fork gets it transitively; we do not, so import it explicitly.
+import CoreVideo
 import Metal
 
 class MetalLayer: CAMetalLayer {
-    var onDrawablePresented: ((CAMetalDrawable) -> Void)?
-
     var onRenderingSuspensionChanged: ((Bool, String) -> Void)?
 
     // LOCAL: detaches this layer before a render thread the bridge did not stop exits on screen.
     let renderThreadExitGuard = RenderThreadExitGuard()
 
-    var isDrawableCaptureArmed: Bool {
-        get {
-            captureLock.lock()
-            defer { captureLock.unlock() }
-            return storedIsDrawableCaptureArmed
-        }
-        set {
-            captureLock.lock()
-            storedIsDrawableCaptureArmed = newValue
-            captureLock.unlock()
-        }
-    }
-
-    var capturesWithoutPresentation: Bool {
-        get {
-            captureLock.lock()
-            defer { captureLock.unlock() }
-            return storedCapturesWithoutPresentation
-        }
-        set {
-            captureLock.lock()
-            storedCapturesWithoutPresentation = newValue
-            captureLock.unlock()
-        }
-    }
-
-    private(set) var capturedDrawableCount: UInt64 = 0
-
-    private(set) var nextDrawableCallCount: UInt64 = 0
-
-    private var storedIsDrawableCaptureArmed = false
-    private var storedCapturesWithoutPresentation = false
     private var storedHasAcquiredDrawable = false
-    private var pendingDrawable: CAMetalDrawable?
     // A drawable size handed over from the MAIN thread (layout during a fullscreen/orientation
     // resize) to be applied on the render thread inside nextDrawable(). See setPendingDrawableSize.
     private var pendingDrawableSize: CGSize?
@@ -121,21 +83,9 @@ class MetalLayer: CAMetalLayer {
         isSuspensionLatched = suspended
         consecutiveAcquisitionFailures = 0
         lastSuspendedProbeTime = suspended ? CACurrentMediaTime() : 0
-        let stale = pendingDrawable
-        pendingDrawable = nil
         captureLock.unlock()
-
-        withExtendedLifetime(stale) {}
 
         if changed { onRenderingSuspensionChanged?(suspended, reason) }
-    }
-
-    func releasePendingDrawable() {
-        captureLock.lock()
-        let stale = pendingDrawable
-        pendingDrawable = nil
-        captureLock.unlock()
-        withExtendedLifetime(stale) {}
     }
 
     /// Hand over a new drawable size from the MAIN thread (layout during a fullscreen/orientation
@@ -164,7 +114,6 @@ class MetalLayer: CAMetalLayer {
     override func nextDrawable() -> CAMetalDrawable? {
         renderThreadExitGuard.noteRenderThread(layer: self) // LOCAL
         captureLock.lock()
-        nextDrawableCallCount &+= 1
         // Apply a resize handed over from Main on THIS (render) thread, before acquiring a drawable,
         // so the swapchain is only ever resized here. Both suspended and normal paths fall through
         // this point while the lock is held.
@@ -182,10 +131,7 @@ class MetalLayer: CAMetalLayer {
             if shouldProbe {
                 lastSuspendedProbeTime = now
             }
-            let stale = pendingDrawable
-            pendingDrawable = nil
             captureLock.unlock()
-            withExtendedLifetime(stale) {}
 
             guard shouldProbe else {
                 Thread.sleep(forTimeInterval: Self.suspendedIdleSleep)
@@ -195,6 +141,10 @@ class MetalLayer: CAMetalLayer {
             captureLock.unlock()
         }
 
+        pictureInPictureLock.lock()
+        let generation = presentationObserver?.generation
+        pictureInPictureLock.unlock()
+        // Return the same drawable that MoltenVK would normally acquire.
         let drawable = super.nextDrawable()
         let acquisitionFailed = drawable == nil
 
@@ -218,55 +168,73 @@ class MetalLayer: CAMetalLayer {
                 didResume = true
             }
         }
-
-        let suspendedNow = isRenderingSuspended
-        let armed = storedIsDrawableCaptureArmed
-        let handler = onDrawablePresented
-        // LOCAL: the simulator's Metal has no MTLDrawable.addPresentedHandler (verified absent from
-        // iPhoneSimulator SDK MTLDrawable.h, present in iPhoneOS). The deferred path never calls it
-        // — it hands over the PREVIOUS drawable on the next acquisition — and is the same path the
-        // fork already uses while backgrounded, i.e. while PiP is on screen. Forcing it here keeps
-        // PiP testable in the simulator instead of compiling the feature out.
-        #if targetEnvironment(simulator)
-        let deferred = !suspendedNow
-        #else
-        let deferred = storedCapturesWithoutPresentation && !suspendedNow
-        #endif
-        let previous = pendingDrawable
-        pendingDrawable = deferred ? drawable : nil
         captureLock.unlock()
 
         if didSuspend { onRenderingSuspensionChanged?(true, "drawable-acquisition-stalled") }
         if didResume { onRenderingSuspensionChanged?(false, "drawable-acquired") }
 
-        guard !suspendedNow else { return drawable }
-
-        guard armed, let drawable, let handler else { return drawable }
-
-        if deferred {
-            if let previous {
-                captureLock.lock()
-                capturedDrawableCount &+= 1
-                captureLock.unlock()
-                handler(previous)
+        // Upstream PiP: tell the controller when the first inline drawable is on screen again.
+        guard let drawable, let generation else { return drawable }
+        pictureInPictureLock.lock()
+        let observer = presentationObserver?.generation == generation ? presentationObserver : nil
+        if observer != nil { presentationObserver = nil }
+        pictureInPictureLock.unlock()
+        if let observer {
+            let notify: (TimeInterval) -> Void = { [weak self] time in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.pictureInPictureLock.lock()
+                    let current = self.presentationGeneration == generation
+                    self.pictureInPictureLock.unlock()
+                    if current { observer.callback(time) }
+                }
             }
-            return drawable
+#if targetEnvironment(simulator)
+            notify(CACurrentMediaTime())
+#else
+            drawable.addPresentedHandler { notify($0.presentedTime) }
+#endif
         }
+        return drawable
+    }
 
-        // Unreachable on the simulator: `deferred` is forced true above and returns before here.
-        // Still compiled out, because the symbol does not exist in the simulator SDK.
-        #if !targetEnvironment(simulator)
-        drawable.addPresentedHandler { [weak self] _ in
-            guard let self else { return }
-            self.captureLock.lock()
-            self.capturedDrawableCount &+= 1
-            self.captureLock.unlock()
-            handler(drawable)
+    // ---- Upstream PiP surface (see PlayerPictureInPictureController) ----
+    weak var pictureInPictureSink: PlayerPictureInPictureController?
+    private let pictureInPictureLock = NSLock()
+    private var consumesVideo = false
+    private var presentationGeneration: UInt = 0
+    private var presentationObserver: (generation: UInt, callback: (TimeInterval) -> Void)?
+
+    func observeNextPresentedDrawable(_ callback: @escaping (TimeInterval) -> Void) {
+        pictureInPictureLock.lock()
+        presentationGeneration &+= 1
+        presentationObserver = (presentationGeneration, callback)
+        pictureInPictureLock.unlock()
+    }
+
+    func cancelPresentationObserver() {
+        pictureInPictureLock.lock()
+        presentationGeneration &+= 1
+        presentationObserver = nil
+        pictureInPictureLock.unlock()
+    }
+
+    /// Read by libmpv's VO thread (nuvio_pip.m) before every frame.
+    @objc var nuvioPiPConsumesVideo: Bool {
+        get {
+            pictureInPictureLock.lock()
+            defer { pictureInPictureLock.unlock() }
+            return consumesVideo
         }
+        set {
+            pictureInPictureLock.lock()
+            consumesVideo = newValue
+            pictureInPictureLock.unlock()
+        }
+    }
 
-        return drawable
-        #else
-        return drawable
-        #endif
+    /// Called by libmpv's VO thread with a decoded VideoToolbox frame.
+    @objc func nuvioEnqueuePiPFrame(_ pixelBuffer: CVPixelBuffer, presentationTime: Double, isPictureInPictureFrame: Bool) {
+        pictureInPictureSink?.submit(pixelBuffer, pts: presentationTime, isPictureInPictureFrame: isPictureInPictureFrame)
     }
 }
