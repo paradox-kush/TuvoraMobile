@@ -171,8 +171,10 @@ final class AVPlayerBridgeImpl: NSObject, NuvioPlayerBridge {
     func clearExternalSubtitle() {}
     func clearExternalSubtitleAndSelect(trackId: Int32) { selectSubtitleTrack(trackId: trackId) }
     func setSubtitleDelayMs(delayMs: Int32) {}
+    // Styled-overlay subtitles are an iPhone feature; Apple TV keeps mpv subtitle rendering (styledOverlay = false).
+    func setSubtitleTextHandler(handler: SubtitleTextHandler?) {}
     func applySubtitleStyle(textColor: String, backgroundColor: String, outlineColor: String, outlineSize: Float,
-                            bold: Bool, fontSize: Float, subPos: Int32, stripSdh: Bool) {}
+                            bold: Bool, fontSize: Float, subPos: Int32, stripSdh: Bool, styledOverlay: Bool) {}
 
     func getIsLoading() -> Bool {
         guard let item = player.currentItem else { return true }

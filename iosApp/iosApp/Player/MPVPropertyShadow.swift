@@ -144,6 +144,8 @@ struct MPVPlaybackProperties: Equatable {
     var audioBitrate: Double = 0
     var path: String?
     var aid: String?
+    var subtitleText: String?
+    var subtitleCodec: String?
     var tracks: [MPVTrackShadow] = []
 
     /// Sticky, like the old 250ms-poll cache: the measured rate wins, then the container's
@@ -189,6 +191,9 @@ struct MPVPlaybackProperties: Equatable {
         case "audio-bitrate": audioBitrate = value.doubleValue ?? 0
         case "path": path = value.stringValue
         case "aid": aid = value.stringValue
+        case "sid": break  // observed only to refresh Main on a subtitle-track change
+        case "sub-text": subtitleText = value.stringValue
+        case "current-tracks/sub/codec": subtitleCodec = value.stringValue
         default: return false
         }
         return true
@@ -208,7 +213,8 @@ struct MPVPlaybackProperties: Equatable {
     static let observed: [(name: String, format: Format)] = [
         ("pause", .flag), ("paused-for-cache", .flag), ("core-idle", .flag),
         ("eof-reached", .flag), ("seeking", .flag),
-        ("track-list", .node), ("aid", .string),
+        ("track-list", .node), ("aid", .string), ("sid", .string),
+        ("sub-text", .string), ("current-tracks/sub/codec", .string),
         ("duration", .double), ("time-pos", .double), ("demuxer-cache-time", .double),
         ("speed", .double), ("estimated-vf-fps", .double), ("container-fps", .double),
         ("video-format", .string), ("frame-drop-count", .int64), ("vo-delayed-frame-count", .int64),
@@ -222,7 +228,7 @@ struct MPVPlaybackProperties: Equatable {
     /// per-tick properties (time-pos, fps, counters) update the shadow silently, and Main picks
     /// them up on the Kotlin 250ms poll — exactly the cadence they were read at before.
     static let mainRefreshProperties: Set<String> = [
-        "pause", "paused-for-cache", "core-idle", "eof-reached", "seeking", "track-list", "aid",
+        "pause", "paused-for-cache", "core-idle", "eof-reached", "seeking", "track-list", "aid", "sid",
     ]
 }
 

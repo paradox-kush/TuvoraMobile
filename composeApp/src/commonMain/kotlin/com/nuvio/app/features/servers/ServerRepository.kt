@@ -75,7 +75,7 @@ object ServerRepository {
         runCatching { ServerStorage.clear() }.onFailure { log.w(it) { "Unable to clear server storage" } }
         runCatching { PlatformLegacyMediaServerSource.eraseAll() }
         _uiState.value = ServersUiState(revision = _uiState.value.revision + 1)
-        ServerMatcher.clear()
+        ServerMatcher.shared.clear()
         runCatching { ServerTrust.shared.clearAll() }
     }
 
@@ -321,7 +321,7 @@ object ServerRepository {
         synchronized(lock) { tokens.clear() }
         loadedProfileId = profileId
         syncState = readSyncState(profileId)
-        ServerMatcher.clear()
+        ServerMatcher.shared.clear()
         val connections = readConnections(profileId)
         _uiState.value = ServersUiState(
             connections = connections,

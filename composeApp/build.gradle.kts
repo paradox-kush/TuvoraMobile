@@ -592,6 +592,7 @@ kotlin {
                 // VodCache (upstream 36228818b) uses SimpleCache; media3-database arrives via media3-exoplayer
                 // transitively upstream, but the fork exoplayer AAR (a flat file) carries no POM.
                 implementation("androidx.media3:media3-database:${libs.versions.androidx.media3.get()}")
+                implementation("androidx.media3:media3-effect:${libs.versions.androidx.media3.get()}")
                 implementation("androidx.annotation:annotation-experimental:1.3.1")
                 implementation(libs.mpv.android.lib)
                 implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("lib-*.aar"))))

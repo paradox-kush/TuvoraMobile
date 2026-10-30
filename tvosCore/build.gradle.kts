@@ -65,6 +65,8 @@ val tvosExcludedCommon = listOf(
     "com/nuvio/app/features/player/PlayerAutoSkipNotification.kt",
     // Compose settings page whose UI moved behind shared Chip/Settings* helpers; Apple TV settings are SwiftUI.
     "com/nuvio/app/features/settings/RatingsSettings.kt",
+    // Compose-only page grouping; native TV owns its Settings navigation.
+    "com/nuvio/app/features/settings/PlaybackSettingsModel.kt",
     // Upstream subtitle AutoSync (16th sync, 2026-10-16): engine glue on the Compose player runtime
     // (PlayerScreenRuntime / PlayerEngineController) and its Compose settings rows. Apple TV has its own
     // player session and SwiftUI settings; AutoSync is a named gap there (needs the sidecar API, as on TV).

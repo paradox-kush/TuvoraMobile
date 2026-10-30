@@ -175,6 +175,29 @@ internal object DebridStreamMetadata {
         resolutionRegex("360p?") to DebridStreamResolution.P360,
     )
 
+    // Words release names use for each language besides its code. Short words that are common in
+    // titles ("por", "chi", "fra") are left out so a title is not read as a language.
+    private val languageAliases = mapOf(
+        DebridStreamLanguage.EN to listOf("eng", "english"),
+        DebridStreamLanguage.HI to listOf("hin", "hindi"),
+        DebridStreamLanguage.IT to listOf("ita", "italian", "italiano"),
+        DebridStreamLanguage.ES to listOf("spa", "esp", "spanish", "espanol", "castellano"),
+        DebridStreamLanguage.FR to listOf("fre", "french", "truefrench"),
+        DebridStreamLanguage.DE to listOf("ger", "deu", "german", "deutsch"),
+        DebridStreamLanguage.PT to listOf("portuguese", "portugues"),
+        DebridStreamLanguage.PL to listOf("pol", "polish"),
+        DebridStreamLanguage.CS to listOf("cze", "czech"),
+        DebridStreamLanguage.LA to listOf("latino"),
+        DebridStreamLanguage.JA to listOf("jpn", "japanese"),
+        DebridStreamLanguage.KO to listOf("kor", "korean"),
+        DebridStreamLanguage.ZH to listOf("chinese"),
+        DebridStreamLanguage.HE to listOf("heb", "hebrew"),
+    )
+    private val languageRegexes = DebridStreamLanguage.entries.map { language ->
+        language to languageRegex(listOf(language.code) + languageAliases[language].orEmpty())
+    }
+    private val nonAlphanumericRunRegex = Regex("[^a-z0-9]+")
+
     fun effectivePreferences(settings: DebridSettings): DebridStreamPreferences {
         val default = DebridStreamPreferences()
         if (settings.streamPreferences != default) return settings.streamPreferences.normalized()
@@ -255,30 +278,6 @@ internal object DebridStreamMetadata {
             DebridStreamCodecFilter.AV1 -> preferences.copy(requiredEncodes = listOf(DebridStreamEncode.AV1))
         }.normalized()
     }
-
-    // Words release names use for each language besides its code. Short words that are common in
-    // titles ("por", "chi", "fra") are left out so a title is not read as a language.
-    private val languageAliases = mapOf(
-        DebridStreamLanguage.EN to listOf("eng", "english"),
-        DebridStreamLanguage.HI to listOf("hin", "hindi"),
-        DebridStreamLanguage.IT to listOf("ita", "italian", "italiano"),
-        DebridStreamLanguage.ES to listOf("spa", "esp", "spanish", "espanol", "castellano"),
-        DebridStreamLanguage.FR to listOf("fre", "french", "truefrench"),
-        DebridStreamLanguage.DE to listOf("ger", "deu", "german", "deutsch"),
-        DebridStreamLanguage.PT to listOf("portuguese", "portugues"),
-        DebridStreamLanguage.PL to listOf("pol", "polish"),
-        DebridStreamLanguage.CS to listOf("cze", "czech"),
-        DebridStreamLanguage.LA to listOf("latino"),
-        DebridStreamLanguage.JA to listOf("jpn", "japanese"),
-        DebridStreamLanguage.KO to listOf("kor", "korean"),
-        DebridStreamLanguage.ZH to listOf("chinese"),
-        DebridStreamLanguage.HE to listOf("heb", "hebrew")
-    )
-    private val languageRegexes = DebridStreamLanguage.entries.map { language ->
-        language to languageRegex(listOf(language.code) + languageAliases[language].orEmpty())
-    }
-
-    private val nonAlphanumericRunRegex = Regex("[^a-z0-9]+")
 
     fun facts(stream: StreamItem, preferences: DebridStreamPreferences): DebridStreamFacts {
         val parsed = stream.clientResolve?.stream?.raw?.parsed
@@ -470,7 +469,7 @@ internal object DebridStreamMetadata {
             parsed?.quality,
             parsed?.codec,
             parsed?.hdr?.joinToString(" "),
-            parsed?.audio?.joinToString(" ")
+            parsed?.audio?.joinToString(" "),
         )
         return (streamTexts(stream) + parsedTexts).joinToString(" ").lowercase()
     }
@@ -482,11 +481,12 @@ internal object DebridStreamMetadata {
             stream.name,
             stream.title,
             stream.description,
+            stream.behaviorHints.filename,
+            stream.debridCacheStatus?.cachedName,
             resolve?.torrentName,
             resolve?.filename,
             raw?.torrentName,
             raw?.filename,
-            stream.debridCacheStatus?.cachedName
         )
     }
 
@@ -509,8 +509,6 @@ internal object DebridStreamMetadata {
         if (words.isEmpty()) return null
         return Regex("(^|[^a-z0-9])${words.joinToString("[^a-z0-9]+")}(?=[^a-z0-9]|\$)")
     }
-
-
 }
 
 internal data class DebridStreamFacts(

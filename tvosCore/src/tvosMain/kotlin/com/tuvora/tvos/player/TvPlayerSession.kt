@@ -678,6 +678,8 @@ class TvPlayerSession(
             textColor = subStyle.textColor, backgroundColor = subStyle.backgroundColor, outlineColor = subStyle.outlineColor,
             outlineSize = subStyle.outlineSize, bold = subStyle.bold, fontSize = subStyle.fontSize,
             subPos = subStyle.subPos, stripSdh = subStyle.stripSdh,
+            styledOverlay = false, // native TV retains mpv subtitle rendering
+
         )
         // UX61/F47: shared box/outline/side-padding mapping. Takes effect once the Apple TV MPV bridge
         // adopts NuvioPlayerPropertyBridge (tvosApp, lane E); until then this is a no-op.

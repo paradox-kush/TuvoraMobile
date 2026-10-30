@@ -27,7 +27,7 @@ targets:
       - Shared
       # libmpv/libass renders subtitles only with a font it can find: the same Noto Sans CJK the iOS
       # app bundles (MPVPlayerBridge.configureBundledSubtitleFont), shared rather than copied.
-      - path: ../iosApp/iosApp/Resources/Fonts/NotoSansCJKsc-Regular.otf
+      - path: ../iosApp/iosApp/Resources/Fonts/subfont.ttf
         buildPhase: resources
       # CA list for libmpv (tls-verify=yes needs one: GnuTLS cannot see the system trust store), same file as the iPhone app.
       - path: ../iosApp/iosApp/Resources/cacert.pem

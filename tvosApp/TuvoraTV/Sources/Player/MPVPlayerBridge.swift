@@ -188,6 +188,8 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayContro
     func clearExternalSubtitle() { playerVC?.removeExternalSubtitles() }
     func clearExternalSubtitleAndSelect(trackId: Int32) { playerVC?.removeExternalSubtitlesAndSelect(Int(trackId)) }
     func setSubtitleDelayMs(delayMs: Int32) { playerVC?.setSubtitleDelayMs(Int(delayMs)) }
+    // Styled-overlay subtitles are an iPhone feature; Apple TV keeps mpv subtitle rendering (styledOverlay = false).
+    func setSubtitleTextHandler(handler: SubtitleTextHandler?) {}
     func applySubtitleStyle(
         textColor: String,
         backgroundColor: String,
@@ -196,7 +198,8 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayContro
         bold: Bool,
         fontSize: Float,
         subPos: Int32,
-        stripSdh: Bool
+        stripSdh: Bool,
+        styledOverlay: Bool
     ) {
         playerVC?.applySubtitleStyle(
             textColor: textColor,
@@ -822,8 +825,8 @@ final class MPVPlayerViewController: UIViewController {
 
     private func configureBundledSubtitleFont() {
         guard let fontURL = Bundle.main.url(
-            forResource: "NotoSansCJKsc-Regular",
-            withExtension: "otf"
+            forResource: "subfont",
+            withExtension: "ttf"
         ) else {
             print("[MPV] Bundled CJK subtitle font is missing")
             return

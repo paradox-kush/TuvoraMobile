@@ -63,6 +63,8 @@ interface PlayerEngineController {
     // Upstream's stream-info panel reads this; the fork serves it from getStreamInfo(), which every
     // engine already answers from observed state — no on-demand mpv reads.
     suspend fun getMediaInfo(): PlayerMediaInfo = getStreamInfo().toMediaInfo()
+    /** Chapters of the loaded file; empty if not supported by the engine. */
+    suspend fun getChapters(): List<PlayerChapter> = emptyList()
 }
 
 internal fun sanitizePlaybackHeaders(headers: Map<String, String>?): Map<String, String> {

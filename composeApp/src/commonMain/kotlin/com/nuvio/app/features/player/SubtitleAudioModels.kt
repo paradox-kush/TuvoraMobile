@@ -58,6 +58,7 @@ data class SubtitleStyleState(
     val showOnlyPreferredLanguages: Boolean = false,
     /** F47: percent of the picture width kept clear on each side ([SubtitleSideMargin]). */
     val sideMarginPercent: Int = SubtitleSideMargin.DEFAULT_PERCENT,
+    val appearance: SubtitleAppearance = SubtitleAppearance(),
 ) {
     companion object {
         val DEFAULT = SubtitleStyleState()

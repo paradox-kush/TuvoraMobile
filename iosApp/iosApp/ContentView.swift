@@ -21,6 +21,7 @@ private enum NuvioComposeHost {
         backgroundColor: UIColor = nuvioBackgroundColor,
         disablesInteractiveContentPopGesture: Bool = false,
         verticalBar: VerticalBar? = nil,
+        hinge: Hinge? = nil,
         onTabBarControllerAvailable: ((UITabBarController) -> Void)? = nil
     ) -> RootComposeViewController {
         _ = registerPlayerBridge
@@ -30,6 +31,7 @@ private enum NuvioComposeHost {
             backgroundColor: backgroundColor,
             disablesInteractiveContentPopGesture: disablesInteractiveContentPopGesture,
             verticalBar: verticalBar,
+            hinge: hinge,
             onTabBarControllerAvailable: onTabBarControllerAvailable
         )
     }
@@ -43,21 +45,26 @@ final class RootComposeViewController: UIViewController {
     private let backgroundColor: UIColor
     private let disablesInteractiveContentPopGesture: Bool
     private let verticalBar: VerticalBar?
+    private let hinge: Hinge?
     private let onTabBarControllerAvailable: ((UITabBarController) -> Void)?
     private var leadingConstraint: NSLayoutConstraint?
     private var trailingConstraint: NSLayoutConstraint?
+    private var isHalfOpen = false
+    private var foldBoundsSize = CGSize.zero
 
     init(
         contentController: UIViewController,
         backgroundColor: UIColor,
         disablesInteractiveContentPopGesture: Bool,
         verticalBar: VerticalBar?,
+        hinge: Hinge?,
         onTabBarControllerAvailable: ((UITabBarController) -> Void)?
     ) {
         self.contentController = contentController
         self.backgroundColor = backgroundColor
         self.disablesInteractiveContentPopGesture = disablesInteractiveContentPopGesture
         self.verticalBar = verticalBar
+        self.hinge = hinge
         self.onTabBarControllerAvailable = onTabBarControllerAvailable
         super.init(nibName: nil, bundle: nil)
     }
@@ -93,6 +100,12 @@ final class RootComposeViewController: UIViewController {
                 (controller: RootComposeViewController, _: UITraitCollection) in
                 controller.updateVerticalBar()
             }
+            if hinge != nil {
+                view.addInteraction(UIHingeInteraction { [weak self] _, update in
+                    self?.isHalfOpen = update.hinge?.status == .partiallyOpen
+                    self?.updateFold()
+                })
+            }
         }
         #endif
         contentController.didMove(toParent: self)
@@ -101,6 +114,28 @@ final class RootComposeViewController: UIViewController {
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         updateVerticalBar()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard view.bounds.size != foldBoundsSize else { return }
+        foldBoundsSize = view.bounds.size
+        updateFold()
+    }
+
+    private func updateFold() {
+        guard let hinge else { return }
+        #if TUVORA_HAS_IOS_VERTICAL_BAR
+        guard #available(iOS 27.1, *), isHalfOpen,
+              let fold = view.reservedRegions(kind: .division).first(where: { $0.frame.width > $0.frame.height })
+        else {
+            hinge.clear()
+            return
+        }
+        hinge.update(top: Double(fold.frame.minY), bottom: Double(fold.frame.maxY))
+        #else
+        hinge.clear()
+        #endif
     }
 
     private func updateVerticalBar() {
@@ -848,6 +883,7 @@ struct DetailComposeView: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIViewController {
         let verticalBar = VerticalBar()
+        let hinge = Hinge()
         let controller = MainViewControllerKt.ScreenViewController(
             route: route,
             onNavigate: { newRoute, launchSingleTop in
@@ -866,12 +902,14 @@ struct DetailComposeView: UIViewControllerRepresentable {
             onActivate: { tabName in
                 appCoordinator.activateTab(named: tabName)
             },
-            verticalBar: verticalBar
+            verticalBar: verticalBar,
+            hinge: hinge
         )
         return NuvioComposeHost.wrap(
             controller,
             disablesInteractiveContentPopGesture: route is PlayerRoute,
-            verticalBar: verticalBar
+            verticalBar: verticalBar,
+            hinge: route is PlayerRoute ? hinge : nil
         )
     }
 

@@ -4,6 +4,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.uikit.OnFocusBehavior
 import androidx.compose.ui.window.ComposeUIViewController
+import com.nuvio.app.core.ui.LocalFold
 import com.nuvio.app.core.ui.LocalVerticalBarPadding
 import com.nuvio.app.core.ui.NativeProfileSwitcherController
 import com.nuvio.app.core.analytics.AnalyticsSink
@@ -66,7 +67,8 @@ fun ScreenViewController(
     onReplace: (AppRoute) -> Unit,
     onActivate: (String) -> Unit,
     verticalBar: VerticalBar,
-): UIViewController = nuvioComposeViewController(verticalBar) {
+    hinge: Hinge,
+): UIViewController = nuvioComposeViewController(verticalBar, hinge) {
     App(
         initialRoute = route,
         useNativeNavigation = true,
@@ -81,12 +83,13 @@ fun ScreenViewController(
 
 private fun nuvioComposeViewController(
     verticalBar: VerticalBar = VerticalBar(),
+    hinge: Hinge = Hinge(),
     content: @androidx.compose.runtime.Composable () -> Unit,
 ): UIViewController {
     ensureIosRuntimeBootstrapped()
     return ComposeUIViewController(
         configure = { onFocusBehavior = OnFocusBehavior.DoNothing },
-        content = { CompositionLocalProvider(LocalVerticalBarPadding provides verticalBar.padding, content) },
+        content = { CompositionLocalProvider(LocalVerticalBarPadding provides verticalBar.padding, LocalFold provides hinge.fold, content = content) },
     ).apply {
         view.backgroundColor = nuvioBackgroundColor
     }

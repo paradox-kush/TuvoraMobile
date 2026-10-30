@@ -11,6 +11,8 @@ internal fun PlayerScreenRuntime.fetchAddonSubtitlesForActiveItem() {
         SubtitleRepository.clear()
         return
     }
+    // Upstream skips addon network work while offline; fork supplies resolved catalog identity.
+    if (isNetworkOffline()) return
     val type = addonSubtitleRequestType.takeIf { it.isNotBlank() } ?: return
     val videoId = addonSubtitleRequestVideoId?.takeIf { it.isNotBlank() } ?: return
     SubtitleRepository.fetchAddonSubtitles(type, videoId)
@@ -27,6 +29,8 @@ internal fun PlayerScreenRuntime.setSubtitleDelay(delayMs: Int) {
 internal fun PlayerScreenRuntime.loadSubtitleAutoSyncCues(force: Boolean = false) {
     val subtitle = selectedAddonSubtitle ?: return
     if (!force && subtitleAutoSyncState.cues.isNotEmpty()) return
+    // Offline: the cue download would only hang, so skip it and leave the state as is.
+    if (isNetworkOffline()) return
     subtitleAutoSyncState = subtitleAutoSyncState.copy(isLoading = true, errorMessage = null)
     scope.launch {
         val result = runCatching {
