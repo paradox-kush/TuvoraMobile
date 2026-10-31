@@ -518,7 +518,7 @@ private struct PlayerChrome: View {
                 VStack(spacing: dp(10)) {
                     Text("Playback failed").font(NuvioType.titleLarge).foregroundStyle(colors.textPrimary)
                     Text(error).font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary).multilineTextAlignment(.center)
-                    Text("Press the touch surface to try again").font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary)
+                    Text("Press Play/Pause to try again").font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary)
                     ReportButton(reported: reported) { reported = true; onReport() }
                 }
                 .padding(dp(24))
