@@ -332,9 +332,19 @@ object ServerRepository {
         )
         // A server that holds no library list yet (imported from the released fork stack, or arrived from another device) lists its
         // libraries once in the background, so it is not an empty "No libraries selected" until the user finds Refresh.
+        val discoveryGeneration = generation
         connections
             .filter { ServerLibraryBootstrapPolicy.needsRefresh(it, hasToken = !ServerTokenPolicy.needsSignIn(token(it.credentialRef))) }
-            .forEach { connection -> scope.launch { runCatching { refreshLibraries(connection.id) } } }
+            .forEach { connection -> scope.launch {
+                try {
+                    refreshLibraries(connection.id)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    if (generation == discoveryGeneration) setFailure(connection.id, error.serverFailure())
+                    log.w { "Server library discovery failed: ${error.serverFailure()}" }
+                }
+            } }
     }
 
     /** A server that arrived from another device has no token here: show it as "Sign in again" up front. */
