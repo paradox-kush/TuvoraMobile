@@ -338,6 +338,8 @@ fun XtreamHubScreen(
                 XtreamHubSearchResults(
                     playlistName = account.name,
                     search = search,
+                    live = isLive,
+                    epg = epgMap,
                     sectionPadding = sectionPadding,
                     onPosterClick = onTileClick,
                     onRetry = searchController::retry,
@@ -847,7 +849,7 @@ internal fun xtreamCategoryGridColumns(width: Dp, landscape: Boolean): Int =
     }
 
 @Composable
-private fun XtreamLiveChannelTile(
+internal fun XtreamLiveChannelTile(
     item: MetaPreview,
     epg: ChannelEpg?,
     onClick: () -> Unit,

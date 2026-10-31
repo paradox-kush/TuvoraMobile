@@ -62,20 +62,7 @@ object XtreamSearchIndex {
             // its categoryId: live, match-index, Stalker and M3U alike). F01: what the viewer hid (a
             // channel, or a whole group, on any device or the website) is left out too.
             // UX44: live dividers are dropped inside IptvChannelSearchPolicy.search.
-            if (account.searchIncludesType(CONTENT_TYPE_LIVE)) {
-                val matched = IptvChannelSearchPolicy.search(ensureChannels(account), q) { it.name }
-                val visible = IptvHiddenItemsPolicy.visibleHits(
-                    matched,
-                    hiddenCategoryIds(account, CONTENT_TYPE_LIVE, overlay.categories),
-                    overlay.channels,
-                    categoryOf = { it.categoryId },
-                    entityOf = { IptvIdentity.entityId(account.id, it.name, it.epgChannelId) },
-                )
-                offeredHits(account, CONTENT_TYPE_LIVE, visible) { it.categoryId }
-                    .forEach {
-                        XtreamItemRegistry.registerChannel(account.id, it); channels += it.toMetaPreview(account.id)
-                    }
-            }
+            if (account.searchIncludesType(CONTENT_TYPE_LIVE)) channels += channelsFor(account, q, overlay, PER_TYPE_CAP)
 
             if (account.searchIncludesType(CONTENT_TYPE_MOVIES)) movies += moviesFor(account, q, overlay, PER_TYPE_CAP)
 
@@ -89,7 +76,7 @@ object XtreamSearchIndex {
     }
 
     /**
-     * IPTV-hub search: [type] ([CONTENT_TYPE_MOVIES] or [CONTENT_TYPE_SERIES]) titles of ONE playlist matching
+     * IPTV-hub search: [type] ([CONTENT_TYPE_LIVE], [CONTENT_TYPE_MOVIES] or [CONTENT_TYPE_SERIES]) titles of ONE playlist matching
      * [query], honouring the playlist's content settings and the viewer's hidden groups. Wider than global search
      * ([HUB_RESULT_CAP]) because the viewer is browsing a single playlist. Throws on a failed fetch so the caller
      * can show Failed + Retry instead of "no matches".
@@ -100,6 +87,7 @@ object XtreamSearchIndex {
         IptvOverlayRepository.ensureLoaded()
         val overlay = IptvOverlayRepository.uiState.value
         return when (type) {
+            CONTENT_TYPE_LIVE -> channelsFor(account, q, overlay, HUB_RESULT_CAP, strict = true)
             CONTENT_TYPE_MOVIES -> moviesFor(account, q, overlay, HUB_RESULT_CAP, strict = true)
             CONTENT_TYPE_SERIES -> seriesFor(account, q, overlay, HUB_RESULT_CAP, strict = true)
             else -> emptyList()
@@ -187,6 +175,40 @@ object XtreamSearchIndex {
         }
     
         return out
+    }
+
+    /**
+     * Live channels of [account] matching [q]: word-matched and ranked (UX44: provider divider rows never hit), with the
+     * viewer's hidden channels and groups and the playlist's category settings applied BEFORE the cap. Shared by global
+     * search and the IPTV hub. [strict] (hub only): an unreadable lineup throws instead of reading as "no channels".
+     */
+    private suspend fun channelsFor(account: XtreamAccount, q: String, overlay: OverlaySnapshot, cap: Int, strict: Boolean = false): List<MetaPreview> {
+        val all = if (strict) ensureChannelsStrict(account) else ensureChannels(account)
+        val matched = IptvChannelSearchPolicy.search(all, q) { it.name }
+        val visible = IptvHiddenItemsPolicy.visibleHits(
+            matched,
+            hiddenCategoryIds(account, CONTENT_TYPE_LIVE, overlay.categories),
+            overlay.channels,
+            categoryOf = { it.categoryId },
+            entityOf = { IptvIdentity.entityId(account.id, it.name, it.epgChannelId) },
+        )
+        val out = mutableListOf<MetaPreview>()
+        IptvSourceCategoryPolicy.keepCapped(account, CONTENT_TYPE_LIVE, visible, cap) { it.categoryId }.forEach {
+            XtreamItemRegistry.registerChannel(account.id, it)
+            out += it.toMetaPreview(account.id)
+        }
+        return out
+    }
+
+    /**
+     * The lineup for the hub's strict search. [ensureChannels] caches an EMPTY list when its fetch fails (so a dead
+     * playlist would read as "no channels"); this one trusts only a non-empty cache and otherwise asks again, throwing.
+     */
+    private suspend fun ensureChannelsStrict(account: XtreamAccount): List<XtreamChannel> {
+        mutex.withLock { channelCache[account.id] }?.takeIf { it.isNotEmpty() }?.let { return it }
+        val channels = IptvClient.forAccount(account).liveChannels(account).getOrThrow()
+        if (channels.isNotEmpty()) mutex.withLock { channelCache[account.id] = channels }
+        return channels
     }
 
     /** F01: hits whose group the viewer hid are left out of search. */

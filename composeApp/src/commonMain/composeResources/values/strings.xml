@@ -2690,6 +2690,7 @@
     <string name="iptv_channel_hidden_toast_generic">“%1$s” hidden. Unhide it in Settings → Integrations → IPTV playlists.</string>
     <string name="compose_iptv_hub_search_open">Search</string>
     <string name="compose_iptv_hub_search_close">Close search</string>
+    <string name="compose_iptv_hub_search_channels">Search channels in %1$s</string>
     <string name="compose_iptv_hub_search_movies">Search movies in %1$s</string>
     <string name="compose_iptv_hub_search_series">Search series in %1$s</string>
     <string name="compose_iptv_hub_search_hint">Type at least 2 letters to search %1$s.</string>

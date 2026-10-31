@@ -29,10 +29,10 @@ class XtreamHubSearchTest {
     // --- policy ---------------------------------------------------------------------------------
 
     @Test
-    fun `only the movie and series sections search`() {
+    fun `every hub section searches its own content type`() {
+        assertEquals(CONTENT_TYPE_LIVE, IptvHubSearchPolicy.contentTypeFor(XtreamHubSection.LIVE))
         assertEquals(CONTENT_TYPE_MOVIES, IptvHubSearchPolicy.contentTypeFor(XtreamHubSection.MOVIES))
         assertEquals(CONTENT_TYPE_SERIES, IptvHubSearchPolicy.contentTypeFor(XtreamHubSection.SERIES))
-        assertNull(IptvHubSearchPolicy.contentTypeFor(XtreamHubSection.LIVE))
     }
 
     @Test
@@ -40,7 +40,7 @@ class XtreamHubSearchTest {
         assertNull(IptvHubSearchPolicy.request(XtreamHubSection.MOVIES, ""))
         assertNull(IptvHubSearchPolicy.request(XtreamHubSection.MOVIES, " a "))
         assertEquals("ab", IptvHubSearchPolicy.request(XtreamHubSection.MOVIES, "  ab "))
-        assertNull(IptvHubSearchPolicy.request(XtreamHubSection.LIVE, "bbc one"))
+        assertEquals("bbc one", IptvHubSearchPolicy.request(XtreamHubSection.LIVE, " bbc one "))
     }
 
     // --- controller -----------------------------------------------------------------------------
@@ -124,13 +124,16 @@ class XtreamHubSearchTest {
     }
 
     @Test
-    fun `switching to Live clears the search`(): Unit = runBlocking {
+    fun `switching section re-asks the new scope with the same text`(): Unit = runBlocking {
         val calls = mutableListOf<Triple<String, String, String>>()
         val c = controller(calls) { _, _, q -> listOf(hit(q)) }
-        c.onQueryChange(account, XtreamHubSection.MOVIES, "matrix")
+        c.onQueryChange(account, XtreamHubSection.MOVIES, "bbc")
         c.settled()
         c.onScopeChange(account, XtreamHubSection.LIVE)
-        assertEquals(LoadStatus.Idle, c.state.value.load)
-        assertTrue(c.state.value.items.isEmpty())
+        withTimeout(5_000) { while (calls.size < 2) delay(10) }
+        assertEquals(
+            listOf(Triple("acc1", CONTENT_TYPE_MOVIES, "bbc"), Triple("acc1", CONTENT_TYPE_LIVE, "bbc")),
+            calls,
+        )
     }
 }

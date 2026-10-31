@@ -33,6 +33,7 @@ import com.nuvio.app.features.home.MetaPreview
 import com.nuvio.app.features.home.components.HomePosterCard
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.action_retry
+import nuvio.composeapp.generated.resources.compose_iptv_hub_search_channels
 import nuvio.composeapp.generated.resources.compose_iptv_hub_search_close
 import nuvio.composeapp.generated.resources.compose_iptv_hub_search_empty_message
 import nuvio.composeapp.generated.resources.compose_iptv_hub_search_empty_title
@@ -54,8 +55,9 @@ internal fun XtreamHubSearchBar(
     onClose: () -> Unit,
 ) {
     val label = when (section) {
+        XtreamHubSection.LIVE -> stringResource(Res.string.compose_iptv_hub_search_channels, playlistName)
         XtreamHubSection.SERIES -> stringResource(Res.string.compose_iptv_hub_search_series, playlistName)
-        else -> stringResource(Res.string.compose_iptv_hub_search_movies, playlistName)
+        XtreamHubSection.MOVIES -> stringResource(Res.string.compose_iptv_hub_search_movies, playlistName)
     }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -88,6 +90,8 @@ internal fun XtreamHubSearchBar(
 internal fun XtreamHubSearchResults(
     playlistName: String,
     search: HubSearchUiState,
+    live: Boolean,
+    epg: Map<String, ChannelEpg>,
     sectionPadding: Dp,
     onPosterClick: (MetaPreview) -> Unit,
     onRetry: () -> Unit,
@@ -99,7 +103,7 @@ internal fun XtreamHubSearchResults(
             message = stringResource(Res.string.compose_iptv_hub_search_hint, playlistName),
             sectionPadding = sectionPadding,
         )
-        is LoadStatus.Loading -> XtreamHubSkeleton(live = false, sectionPadding = sectionPadding)
+        is LoadStatus.Loading -> XtreamHubSkeleton(live = live, sectionPadding = sectionPadding)
         is LoadStatus.Failed -> XtreamHubMessageCard(
             title = stringResource(Res.string.compose_iptv_hub_search_failed_title),
             message = stringResource(Res.string.compose_iptv_hub_search_failed_message, playlistName),
@@ -113,7 +117,7 @@ internal fun XtreamHubSearchResults(
             sectionPadding = sectionPadding,
         )
         LoadStatus.Loaded -> BoxWithConstraints(Modifier.fillMaxSize()) {
-            val columns = remember(maxWidth) { xtreamCategoryGridColumns(maxWidth, landscape = false) }
+            val columns = remember(maxWidth, live) { xtreamCategoryGridColumns(maxWidth, landscape = live) }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(columns),
                 state = rememberLazyGridState(),
@@ -127,12 +131,24 @@ internal fun XtreamHubSearchResults(
                 verticalArrangement = Arrangement.spacedBy(MaterialTheme.nuvio.spacing.listGap),
             ) {
                 items(items = search.items, key = { it.id }) { item ->
-                    HomePosterCard(
-                        item = item,
-                        modifier = Modifier.fillMaxWidth(),
-                        compact = true,
-                        onClick = { onPosterClick(item) },
-                    )
+                    if (live) {
+                        // The same tile the category page draws: channel artwork + what is on now (asked once per tile).
+                        LaunchedEffect(item.id) { XtreamHubRepository.ensureEpg(item.id) }
+                        XtreamLiveChannelTile(
+                            item = item,
+                            epg = epg[item.id],
+                            compact = true,
+                            onClick = { onPosterClick(item) },
+                            onLongClick = null,
+                        )
+                    } else {
+                        HomePosterCard(
+                            item = item,
+                            modifier = Modifier.fillMaxWidth(),
+                            compact = true,
+                            onClick = { onPosterClick(item) },
+                        )
+                    }
                 }
             }
         }

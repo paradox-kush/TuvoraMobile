@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * F48: search inside ONE playlist from the IPTV hub's Movies and Series sections. Live keeps its own guide
- * search (F01), and the main Search tab still mixes every playlist with add-ons — this is the scoped one
+ * F48: search inside ONE playlist from the IPTV hub's Live, Movies and Series sections (the Live guide keeps its
+ * own F01 search too). The main Search tab still mixes every playlist with add-ons — this is the scoped one
  * people asked for. Pure decisions only; the I/O lives in [XtreamHubSearchController].
  */
 internal object IptvHubSearchPolicy {
@@ -20,11 +20,11 @@ internal object IptvHubSearchPolicy {
     /** A pause after the last keystroke before asking the playlist, so typing "matrix" is one lookup, not six. */
     const val DEBOUNCE_MS = 350L
 
-    /** The content type a section searches, or null when the section has no hub search (Live). */
+    /** The content type a section searches. Every hub section has one, so Search looks the same on Live, Movies and Series. */
     fun contentTypeFor(section: XtreamHubSection): String? = when (section) {
         XtreamHubSection.MOVIES -> CONTENT_TYPE_MOVIES
         XtreamHubSection.SERIES -> CONTENT_TYPE_SERIES
-        XtreamHubSection.LIVE -> null
+        XtreamHubSection.LIVE -> CONTENT_TYPE_LIVE
     }
 
     /** The trimmed query to send, or null when no request should be made (wrong section, too short). */
