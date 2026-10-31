@@ -52,6 +52,14 @@ object XmltvClient {
      */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /**
+     * Where the parse / match / replay / store work runs. [ensureEpg] is a plain suspend function, so
+     * without this it ran on whatever dispatcher the caller used: a Home/hub tile or an EPG override
+     * asking from Main decoded the whole staged guide on the UI thread (Play ANR cluster
+     * `XmltvGuideReplay.finish` -> `Json.decodeFromString`, 15.8% of users on 1.15.0). Test seam.
+     */
+    internal var ingestDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default
+
     /** Fire-and-forget [ensureEpg] on the ingest's own scope. Safe to call on every visit. */
     fun warm(acc: XtreamAccount) {
         scope.launch { runCatching { ensureEpg(acc) } }
@@ -87,7 +95,7 @@ object XmltvClient {
         }
         if (!shouldRun) return (IptvContentDb.epgMeta(partition)?.programmeCount ?: 0) > 0
         return try {
-            val result = refresh(acc, sources)
+            val result = kotlinx.coroutines.withContext(ingestDispatcher) { refresh(acc, sources) }
             fetchLock.withLock {
                 if (result.isFailure) lastFailedMs[acc.id] = TraktPlatformClock.nowEpochMs()
                 else lastFailedMs.remove(acc.id)
