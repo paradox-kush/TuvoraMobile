@@ -1,7 +1,16 @@
 package com.nuvio.app.features.servers
 
-/** Whether a loaded server should list its libraries now: it has none stored, is enabled and this device can sign in. Pure. */
+/** One discovery per profile load. A legacy bridge may have cached only Collections. */
 internal object ServerLibraryBootstrapPolicy {
-    fun needsRefresh(connection: ServerConnection, hasToken: Boolean): Boolean =
-        connection.libraries.isEmpty() && connection.availableOnDevice && hasToken
+    fun needsRefresh(
+        connection: ServerConnection,
+        hasToken: Boolean,
+        availableOnDevice: Boolean = connection.availableOnDevice,
+    ): Boolean = availableOnDevice && hasToken && (
+        connection.libraries.isEmpty() ||
+            (connection.managedBridgeId != null && (
+                connection.libraries.none { it.holds(ServerMediaKind.MOVIE) } ||
+                    connection.libraries.none { it.holds(ServerMediaKind.SERIES) }
+                ))
+        )
 }
