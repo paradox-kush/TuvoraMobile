@@ -25,16 +25,25 @@ final class PlaylistDetailsModel: ObservableObject {
     let accountId: String
     private let session: TvPlaylistDetailsSession
     @Published var state: TvDetailsState
+    /// UX179: the Refresh now card's words (built by the shared policy).
+    @Published var refreshHint: String
 
     init(accountId: String) {
         self.accountId = accountId
         session = TvPlaylistDetailsSession(accountId: accountId)
         state = session.state.value
+        refreshHint = session.refreshHint.value as String
     }
 
     func observe() async {
         for await next in session.state { state = next }
     }
+
+    func observeRefresh() async {
+        for await next in session.refreshHint { refreshHint = next }
+    }
+
+    func refreshNow() { session.refreshNow() }
 
     func close() { session.close() }
 
@@ -79,6 +88,7 @@ struct PlaylistDetailsPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(colors.background.ignoresSafeArea())
         .task { await details.observe() }
+        .task { await details.observeRefresh() }
         .onAppear {
             depth = dialogs.stack.count
             memory.reset(sizes: state.shelves.map { $0.cards.count })
@@ -210,7 +220,8 @@ struct PlaylistDetailsPage: View {
                                     let key = DetailCardKey(shelf: si, index: ci)
                                     Button { act(card, key: key, state: state) } label: {
                                         DetailCardView(card: card, state: state, account: account,
-                                                       focused: focus == key, rematchStarted: rematchStarted)
+                                                       focused: focus == key, rematchStarted: rematchStarted,
+                                                       refreshHint: details.refreshHint)
                                     }
                                     .buttonStyle(PlainNoChromeButtonStyle())
                                     .focused($focus, equals: key)
@@ -262,6 +273,8 @@ struct PlaylistDetailsPage: View {
         case .editServer:
             TvPlaylists.shared.clearError()
             dialogs.push(.playlistForm(PlaylistFormModel(editing: account)))
+        case .refresh:
+            details.refreshNow()
         case .rematch:
             details.rematch()
             rematchStarted = true
@@ -314,6 +327,7 @@ enum DetailCardCopy {
         case .contentCategories: return "content"
         case .hidden: return "hidden"
         case .toggleEnabled: return "toggle"
+        case .refresh: return "refresh"
         case .editServer: return "edit"
         case .rematch: return "rematch"
         case .catchupContainer: return "catchupContainer"
@@ -330,6 +344,7 @@ enum DetailCardCopy {
         case .contentCategories: return L("Content & categories")
         case .hidden: return L("Hidden channels & groups")
         case .toggleEnabled: return L((account?.enabled ?? state.enabled) ? "Disable" : "Enable")
+        case .refresh: return L("Refresh now")
         case .editServer: return L("Edit URL / credentials")
         case .rematch: return L("Re-match catalog")
         case .catchupContainer: return L("Catch-up container")
@@ -340,13 +355,14 @@ enum DetailCardCopy {
         }
     }
 
-    static func hint(_ card: TvDetailCard, state: TvDetailsState, account: XtreamAccount?, rematchStarted: Bool) -> String {
+    static func hint(_ card: TvDetailCard, state: TvDetailsState, account: XtreamAccount?, rematchStarted: Bool, refreshHint: String) -> String {
         switch card {
         case .contact: return state.contacts.map { $0.label }.joined(separator: " \u{00B7} ")
         case .contentCategories: return L("Choose what to load")
         case .hidden: return L("Bring back what you hid")
         case .toggleEnabled:
             return (account?.enabled ?? state.enabled) ? L("Hide it from Live TV, Movies and Series") : L("Use this playlist for Live TV, Movies and Series")
+        case .refresh: return refreshHint
         case .editServer: return L("Change its server or login")
         case .rematch: return rematchStarted ? L("Checking your catalog again") : L("Look again for missing titles")
         case .catchupContainer: return account.map { $0.catchUpPreferM3u8 ? L("Prefer m3u8") : L("Prefer TS") } ?? ""
@@ -363,6 +379,7 @@ enum DetailCardCopy {
         case .contentCategories: return "md_grid_view"
         case .hidden: return "md_history"
         case .toggleEnabled: return "md_check_circle"
+        case .refresh: return "md_sync"
         case .editServer: return "md_vpn_key"
         case .rematch: return "md_sync"
         case .catchupContainer: return "md_history"
@@ -384,6 +401,7 @@ private struct DetailCardView: View {
     let account: XtreamAccount?
     let focused: Bool
     let rematchStarted: Bool
+    let refreshHint: String
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -397,7 +415,7 @@ private struct DetailCardView: View {
             Text(verbatim: DetailCardCopy.title(card, state: state, account: account))
                 .font(NuvioType.titleMediumSemi).foregroundStyle(destructive && focused ? colors.error : colors.textPrimary)
                 .lineLimit(2).multilineTextAlignment(.leading)
-            Text(verbatim: DetailCardCopy.hint(card, state: state, account: account, rematchStarted: rematchStarted))
+            Text(verbatim: DetailCardCopy.hint(card, state: state, account: account, rematchStarted: rematchStarted, refreshHint: refreshHint))
                 .font(NuvioType.bodySmall).foregroundStyle(colors.textSecondary).lineLimit(2).multilineTextAlignment(.leading)
         }
         .padding(dp(12))

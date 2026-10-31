@@ -1,6 +1,11 @@
 package com.tuvora.tvos.screens
 
+import com.nuvio.app.features.iptv.BoundedLoad
 import com.nuvio.app.features.iptv.ConnectionsDisplay
+import com.nuvio.app.features.iptv.LoadStatus
+import com.nuvio.app.features.iptv.LoadSurface
+import com.nuvio.app.features.iptv.ManualRefreshResult
+import com.nuvio.app.features.iptv.ManualRefreshUiState
 import com.nuvio.app.features.iptv.XtreamAccountInfo
 import com.nuvio.app.features.iptv.DetailsCounts
 import com.nuvio.app.features.iptv.ExpiryDisplay
@@ -66,10 +71,11 @@ class TvPlaylistDetailsPolicyTest {
         val x = shelves(xtream, null)[0].cards
         assertEquals(
             listOf(TvDetailCard.REMATCH, TvDetailCard.CATCHUP_CONTAINER, TvDetailCard.CATCHUP_TIME, TvDetailCard.GUIDE_OFFSET),
-            x.drop(4),
+            x.drop(5),
         )
+        assertEquals(TvDetailCard.REFRESH, x[3], "Refresh now sits right after the three agreed cards")
         val m3u = xtream.copy(sourceType = SOURCE_TYPE_M3U_URL)
-        assertEquals(listOf(TvDetailCard.CONTENT_CATEGORIES, TvDetailCard.HIDDEN, TvDetailCard.TOGGLE_ENABLED, TvDetailCard.EDIT_SERVER), shelves(m3u, null)[0].cards)
+        assertEquals(listOf(TvDetailCard.CONTENT_CATEGORIES, TvDetailCard.HIDDEN, TvDetailCard.TOGGLE_ENABLED, TvDetailCard.REFRESH, TvDetailCard.EDIT_SERVER), shelves(m3u, null)[0].cards)
         val stalker = xtream.copy(sourceType = SOURCE_TYPE_STALKER)
         assertEquals(false, TvDetailCard.REMATCH in shelves(stalker, null)[0].cards)
         assertEquals(false, TvDetailCard.CATCHUP_TIME in shelves(stalker, null)[0].cards)
@@ -240,5 +246,38 @@ class TvPlaylistDetailsPolicyTest {
     @Test
     fun `negative and zero counts hide like unknown ones`() {
         assertEquals(emptyList(), TvPlaylistDetailsPolicy.countLines(DetailsCounts(channels = -1, movies = 0, series = null)))
+    }
+
+    // ---- UX179: the Refresh now card's words ----
+
+    @Test
+    fun `the refresh card always says what happened`() {
+        val now = 10_000_000_000L
+        fun hint(state: ManualRefreshUiState) = TvPlaylistDetailsPolicy.refreshHint(state)
+        assertEquals("Re-download channels, movies and series", hint(ManualRefreshUiState()), "nothing known yet")
+        assertEquals("Refreshing\u2026", hint(ManualRefreshUiState(load = BoundedLoad.begin(LoadSurface.PLAYLIST_REFRESH))), "running")
+        assertEquals(
+            "Updated 5 min ago",
+            hint(ManualRefreshUiState(load = LoadStatus.Loaded, result = ManualRefreshResult.REFRESHED, lastRefreshAtMs = now - 5 * 60_000L - 1_000L, publishedAtMs = now)),
+            "after a refresh",
+        )
+        assertEquals(
+            "Couldn\u2019t refresh. Press to try again.",
+            hint(ManualRefreshUiState(load = LoadStatus.Failed(timedOut = false), result = ManualRefreshResult.FAILED)),
+            "failed",
+        )
+        assertEquals(
+            "Only part updated. Press to try again.",
+            hint(ManualRefreshUiState(load = LoadStatus.Failed(timedOut = false), result = ManualRefreshResult.PARTIAL)),
+            "partial",
+        )
+        assertEquals(
+            "Still working in the background. Check back in a few minutes.",
+            hint(ManualRefreshUiState(load = LoadStatus.Failed(timedOut = true), result = ManualRefreshResult.FAILED)),
+            "a stall deadline is outcome unknown, not failed",
+        )
+        assertEquals("Please wait a minute before refreshing again.", hint(ManualRefreshUiState(load = LoadStatus.Loaded, result = ManualRefreshResult.COOLDOWN)), "cooldown")
+        assertEquals("Reloads each time you open it in the IPTV tab.", hint(ManualRefreshUiState(load = LoadStatus.Loaded, result = ManualRefreshResult.RELOAD_ON_OPEN)), "stalker")
+        assertEquals("No copy of the file here.", hint(ManualRefreshUiState(load = LoadStatus.Loaded, result = ManualRefreshResult.NEEDS_LOCAL_FILE)), "file with no copy")
     }
 }
