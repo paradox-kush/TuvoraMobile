@@ -82,6 +82,7 @@ import org.jetbrains.compose.resources.getString
 import kotlinx.coroutines.flow.emptyFlow
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.iptv_group_hidden_toast
+import nuvio.composeapp.generated.resources.iptv_toast_undo
 import nuvio.composeapp.generated.resources.action_retry
 import nuvio.composeapp.generated.resources.compose_iptv_hub_row_failed
 import nuvio.composeapp.generated.resources.provider_hub_contact_label
@@ -265,6 +266,7 @@ fun XtreamHubScreen(
                         !XtreamHubRepository.isCustomGroupRow(openCategory.id)
                     ) {
                         {
+                            val hiddenFrom = state.section.contentKey
                             XtreamHubRepository.hideCategory(openCategory.id)?.let { name ->
                                 toastScope.launch {
                                     NuvioToastController.show(
@@ -272,6 +274,11 @@ fun XtreamHubScreen(
                                         durationMillis = 4000L,
                                         // UX35: at the top it covered the Live TV / Movies / Series tabs.
                                         placement = NuvioToastPlacement.Bottom,
+                                        // UX130: channel hide has an Undo; group hide matches it.
+                                        actionLabel = getString(Res.string.iptv_toast_undo),
+                                        onAction = {
+                                            com.nuvio.app.features.iptv.overlay.IptvHiddenItems.unhideGroup(account, hiddenFrom, name)
+                                        },
                                     )
                                 }
                             }

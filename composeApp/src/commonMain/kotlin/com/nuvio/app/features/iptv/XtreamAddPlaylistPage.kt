@@ -45,6 +45,8 @@ import nuvio.composeapp.generated.resources.provider_edit_banner_title
 import nuvio.composeapp.generated.resources.provider_edit_locked_field
 import nuvio.composeapp.generated.resources.provider_edit_locked_note
 import nuvio.composeapp.generated.resources.provider_edit_name_label
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nuvio.app.core.ui.NuvioDropdownChip
@@ -887,6 +889,8 @@ private fun BackupServersSection(
                         placeholder = placeholder,
                         isError = index in problems,
                         modifier = Modifier.weight(1f),
+                        // UX96: Next walks the rows; the last one says Done.
+                        imeAction = if (index < rows.lastIndex) ImeAction.Next else ImeAction.Done,
                     )
                     // UX89: the two reorder arrows stack in one narrow column (they fit the field's
                     // height) instead of taking two full-width buttons, so a long URL stays readable.
@@ -1011,7 +1015,9 @@ private fun SaveSection(
             style = MaterialTheme.typography.bodySmall,
             color = tokens.colors.textMuted,
         )
-        Spacer(Modifier.height(NuvioTokens.Space.s8))
+        // UX90/UX95: the floating bottom bar overlays the end of the list; keep the disclaimer and the
+        // button clear of it (same clearance the playlist details screen reserves).
+        Spacer(Modifier.height(FLOATING_BAR_CLEARANCE))
     }
 }
 
@@ -1025,6 +1031,7 @@ internal fun FormOutlinedField(
     isError: Boolean = false,
     modifier: Modifier = Modifier.fillMaxWidth(),
     singleLine: Boolean = true,
+    imeAction: ImeAction = ImeAction.Default,
 ) {
     val tokens = MaterialTheme.nuvio
     OutlinedTextField(
@@ -1032,6 +1039,7 @@ internal fun FormOutlinedField(
         onValueChange = onValueChange,
         modifier = modifier,
         singleLine = singleLine,
+        keyboardOptions = KeyboardOptions(imeAction = imeAction),
         minLines = 1,
         maxLines = if (singleLine) 1 else 5,
         isError = isError,

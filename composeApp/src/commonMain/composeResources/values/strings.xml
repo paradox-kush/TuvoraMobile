@@ -2677,6 +2677,7 @@
     <string name="iptv_playlist_error_wrong_credentials">Wrong username or password</string>
     <string name="iptv_playlist_error_secure_connection">Secure connection failed — try http:// or check the certificate</string>
     <string name="iptv_playlist_error_file_unreadable">Could not read that playlist file</string>
+    <string name="iptv_playlist_saved_provider_says">Saved — the provider says: %1$s</string>
     <string name="iptv_playlist_saved_unverified">Saved, but the provider couldn&apos;t be checked: %1$s</string>
     <string name="details_cast_tmdb_off_hint">Turn on TMDB enrichment to see people</string>
     <string name="addons_not_synced_yet">Not synced yet</string>

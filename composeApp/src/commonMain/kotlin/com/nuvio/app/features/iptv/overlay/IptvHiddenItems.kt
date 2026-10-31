@@ -66,6 +66,16 @@ internal object IptvHiddenItems : IptvHiddenItemsSource {
             account.id, contentType, IptvIdentity.categoryKey(account.id, contentType, categoryName), hidden = true,
         )
 
+    /** UX130: takes back [hideGroup] for the toast's Undo (same key the hide wrote). */
+    fun unhideGroup(account: XtreamAccount, contentType: String, categoryName: String) =
+        unhide(
+            account,
+            HiddenItem(
+                HiddenKind.GROUP, contentType,
+                IptvIdentity.categoryKey(account.id, contentType, categoryName), categoryName,
+            ),
+        )
+
     /** A playlist's category names for [contentType]: the local catalog for Xtream, else one category request. */
     suspend fun categoryNames(account: XtreamAccount, contentType: String): List<NamedCategory> {
         val kind = when (contentType) {

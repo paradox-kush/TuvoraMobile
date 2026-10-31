@@ -12,6 +12,7 @@ import nuvio.composeapp.generated.resources.iptv_playlist_error_missing_xtream_f
 import nuvio.composeapp.generated.resources.iptv_playlist_error_secure_connection
 import nuvio.composeapp.generated.resources.iptv_playlist_error_unreachable
 import nuvio.composeapp.generated.resources.iptv_playlist_error_wrong_credentials
+import nuvio.composeapp.generated.resources.iptv_playlist_saved_provider_says
 import nuvio.composeapp.generated.resources.iptv_playlist_saved_unverified
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
@@ -30,10 +31,23 @@ internal suspend fun PlaylistSaveError.text(): String = resourceOr(fallbackText)
 /** The playlist-row warning when an edit was saved but its live check failed (B60 + UX11). */
 internal suspend fun playlistSavedUnverifiedWarning(failure: PlaylistSaveMessage): String {
     val reason = failure.text()
-    return resourceOr("Saved, but the provider couldn't be checked: $reason") {
-        getString(Res.string.iptv_playlist_saved_unverified, reason)
+    // UX116: a rejected login is the provider's answer, not a failed check.
+    val providerSays = failure is PlaylistSaveMessage.Known && failure.error == PlaylistSaveError.WRONG_CREDENTIALS
+    return resourceOr(savedUnverifiedFallback(failure, reason)) {
+        getString(
+            if (providerSays) Res.string.iptv_playlist_saved_provider_says else Res.string.iptv_playlist_saved_unverified,
+            reason,
+        )
     }
 }
+
+/** The English wording [playlistSavedUnverifiedWarning] falls back to (and the unit tests pin). */
+internal fun savedUnverifiedFallback(failure: PlaylistSaveMessage, reason: String): String =
+    if (failure is PlaylistSaveMessage.Known && failure.error == PlaylistSaveError.WRONG_CREDENTIALS) {
+        "Saved — the provider says: $reason"
+    } else {
+        "Saved, but the provider couldn't be checked: $reason"
+    }
 
 private fun PlaylistSaveError.resource(): StringResource = when (this) {
     PlaylistSaveError.MISSING_XTREAM_FIELDS -> Res.string.iptv_playlist_error_missing_xtream_fields
