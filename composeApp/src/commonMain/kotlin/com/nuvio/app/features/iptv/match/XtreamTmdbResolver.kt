@@ -272,6 +272,14 @@ internal object XtreamTmdbResolver {
     // --- index freshness -------------------------------------------------------
 
     /**
+     * UX179: a manual "Refresh now" is the viewer asking again, so it must not be swallowed by the 1 h backoff that
+     * follows a failed build. Clears only this playlist's failure stamps; the crash-protection journal is untouched.
+     */
+    suspend fun clearFailureBackoff(accountId: String) {
+        buildLock.withLock { lastFailedBuildMs.keys.removeAll { it.startsWith("$accountId#") } }
+    }
+
+    /**
      * Builds the SQLite index when missing or past the playlist's refresh interval.
      * Single-flight per provider+kind; failures back off for an hour. Never throws —
      * resolve degrades to whatever index exists.

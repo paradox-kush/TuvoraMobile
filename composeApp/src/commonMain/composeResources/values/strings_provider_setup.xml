@@ -128,4 +128,17 @@
 
     <!-- Hub -->
     <string name="provider_hub_contact_label">Need help? Contact %1$s</string>
+    <string name="provider_details_refresh_title">Refresh now</string>
+    <string name="provider_details_refresh_hint">Re-download this playlist’s channels, movies and series.</string>
+    <string name="provider_details_refresh_updated_now">Updated just now</string>
+    <string name="provider_details_refresh_updated_minutes">Updated %1$s min ago</string>
+    <string name="provider_details_refresh_updated_hours">Updated %1$s h ago</string>
+    <string name="provider_details_refresh_updated_days">Updated %1$s d ago</string>
+    <string name="provider_details_refresh_running">Refreshing…</string>
+    <string name="provider_details_refresh_failed">Couldn’t refresh. Tap to try again.</string>
+    <string name="provider_details_refresh_partial">Only part of this playlist updated. Tap to try again.</string>
+    <string name="provider_details_refresh_cooldown">Please wait a minute before refreshing again.</string>
+    <string name="provider_details_refresh_reload_on_open">This playlist reloads each time you open it in the IPTV tab.</string>
+    <string name="provider_details_refresh_needs_file">This device has no copy of the file. Re-import it to update.</string>
+    <string name="provider_details_refresh_slow">Still working in the background. Check back in a few minutes.</string>
 </resources>

@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -78,6 +80,19 @@ import nuvio.composeapp.generated.resources.provider_details_locked_title
 import nuvio.composeapp.generated.resources.provider_details_locked_value
 import nuvio.composeapp.generated.resources.provider_details_movies
 import nuvio.composeapp.generated.resources.provider_details_never_expires
+import nuvio.composeapp.generated.resources.provider_details_refresh_title
+import nuvio.composeapp.generated.resources.provider_details_refresh_hint
+import nuvio.composeapp.generated.resources.provider_details_refresh_updated_now
+import nuvio.composeapp.generated.resources.provider_details_refresh_updated_minutes
+import nuvio.composeapp.generated.resources.provider_details_refresh_updated_hours
+import nuvio.composeapp.generated.resources.provider_details_refresh_updated_days
+import nuvio.composeapp.generated.resources.provider_details_refresh_running
+import nuvio.composeapp.generated.resources.provider_details_refresh_slow
+import nuvio.composeapp.generated.resources.provider_details_refresh_failed
+import nuvio.composeapp.generated.resources.provider_details_refresh_partial
+import nuvio.composeapp.generated.resources.provider_details_refresh_cooldown
+import nuvio.composeapp.generated.resources.provider_details_refresh_reload_on_open
+import nuvio.composeapp.generated.resources.provider_details_refresh_needs_file
 import nuvio.composeapp.generated.resources.provider_details_remove
 import nuvio.composeapp.generated.resources.provider_details_rematch_started
 import nuvio.composeapp.generated.resources.provider_details_ribbon
@@ -134,6 +149,11 @@ internal fun LazyListScope.xtreamPlaylistDetailsContent(
         }
         val controller = remember { PlaylistDetailsController() }
         val liveState by controller.live.collectAsStateWithLifecycle()
+        // UX179: "Refresh now". The controller owns the work and the cooldown lives in the engine; this only renders it.
+        val refreshScope = rememberCoroutineScope()
+        val refreshController = remember(account.id, refreshScope) { IptvManualRefreshController(refreshScope) }
+        val refreshState by refreshController.state.collectAsStateWithLifecycle()
+        LaunchedEffect(account.id) { refreshController.load(account) }
         // The wait ends at the check's own deadline even if the panel never answers (BoundedLoad).
         val liveStatus = rememberEffectiveLoadStatus(liveState.load)
         val live = if (liveStatus != liveState.load) liveState.copy(load = liveStatus) else liveState
@@ -183,6 +203,8 @@ internal fun LazyListScope.xtreamPlaylistDetailsContent(
                     model = model,
                     onToggle = { XtreamRepository.setEnabled(account.id, it) },
                     onEdit = { onEdit(account) },
+                    refresh = refreshState,
+                    onRefresh = { refreshController.start(account) },
                     onDetach = { confirming = DestructiveAction.DETACH },
                     onRemove = { confirming = DestructiveAction.REMOVE },
                 )
@@ -496,6 +518,8 @@ private fun ManageTab(
     model: ManagedDetailsModel,
     onToggle: (Boolean) -> Unit,
     onEdit: () -> Unit,
+    refresh: ManualRefreshUiState,
+    onRefresh: () -> Unit,
     onDetach: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -515,6 +539,8 @@ private fun ManageTab(
             isTablet = isTablet,
             onClick = onEdit,
         )
+        SettingsGroupDivider(isTablet = isTablet)
+        RefreshNowRow(state = refresh, isTablet = isTablet, onRefresh = onRefresh)
         if (model.lockedServerLogin) {
             SettingsGroupDivider(isTablet = isTablet)
             SettingsNavigationRow(
@@ -535,6 +561,56 @@ private fun ManageTab(
         }
         DangerButton(text = stringResource(Res.string.provider_details_remove), onClick = onRemove)
     }
+}
+
+/**
+ * UX179: "Refresh now" with its status line. The line always says what happened: running, updated N ago, or why nothing
+ * happened (cooldown, Stalker reloads on open, no local file) — and a failure says so and offers another try.
+ */
+@Composable
+private fun RefreshNowRow(state: ManualRefreshUiState, isTablet: Boolean, onRefresh: () -> Unit) {
+    val tokens = MaterialTheme.nuvio
+    // The wait ends at the load's own deadline even if the work never returns (BoundedLoad).
+    val status = rememberEffectiveLoadStatus(state.load)
+    val running = status is LoadStatus.Loading
+    val description = when {
+        running -> stringResource(Res.string.provider_details_refresh_running)
+        // A stall deadline is "outcome unknown", not "failed": the rebuild keeps going behind the screen.
+        status is LoadStatus.Failed && status.timedOut -> stringResource(Res.string.provider_details_refresh_slow)
+        status is LoadStatus.Failed -> stringResource(
+            if (state.result == ManualRefreshResult.PARTIAL) Res.string.provider_details_refresh_partial else Res.string.provider_details_refresh_failed,
+        )
+        state.result == ManualRefreshResult.COOLDOWN -> stringResource(Res.string.provider_details_refresh_cooldown)
+        state.result == ManualRefreshResult.RELOAD_ON_OPEN -> stringResource(Res.string.provider_details_refresh_reload_on_open)
+        state.result == ManualRefreshResult.NEEDS_LOCAL_FILE -> stringResource(Res.string.provider_details_refresh_needs_file)
+        else -> when (val age = state.age) {
+            null -> stringResource(Res.string.provider_details_refresh_hint)
+            else -> when (age.unit) {
+                IptvManualRefreshPolicy.AgeUnit.JUST_NOW -> stringResource(Res.string.provider_details_refresh_updated_now)
+                IptvManualRefreshPolicy.AgeUnit.MINUTES -> stringResource(Res.string.provider_details_refresh_updated_minutes, age.count.toString())
+                IptvManualRefreshPolicy.AgeUnit.HOURS -> stringResource(Res.string.provider_details_refresh_updated_hours, age.count.toString())
+                IptvManualRefreshPolicy.AgeUnit.DAYS -> stringResource(Res.string.provider_details_refresh_updated_days, age.count.toString())
+            }
+        }
+    }
+    SettingsNavigationRow(
+        title = stringResource(Res.string.provider_details_refresh_title),
+        description = description,
+        isTablet = isTablet,
+        enabled = !running,
+        trailingContent = {
+            if (running) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(tokens.icons.md),
+                    strokeWidth = tokens.borders.medium,
+                    color = tokens.colors.accent,
+                )
+            } else {
+                Icon(Icons.Rounded.Refresh, contentDescription = null, tint = tokens.colors.textMuted, modifier = Modifier.size(tokens.icons.md))
+            }
+        },
+        onClick = onRefresh,
+    )
 }
 
 /** Outlined red button for the destructive area at the bottom of Manage. */
