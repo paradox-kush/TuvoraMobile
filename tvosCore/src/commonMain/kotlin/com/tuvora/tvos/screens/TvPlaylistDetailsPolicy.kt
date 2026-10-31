@@ -5,6 +5,10 @@ import com.nuvio.app.features.iptv.DetailsAction
 import com.nuvio.app.features.iptv.DetailsCounts
 import com.nuvio.app.features.iptv.DetailsGroupKind
 import com.nuvio.app.features.iptv.ExpiryDisplay
+import com.nuvio.app.features.iptv.IptvManualRefreshPolicy
+import com.nuvio.app.features.iptv.LoadStatus
+import com.nuvio.app.features.iptv.ManualRefreshResult
+import com.nuvio.app.features.iptv.ManualRefreshUiState
 import com.nuvio.app.features.iptv.ManagedDetailsModel
 import com.nuvio.app.features.iptv.SOURCE_TYPE_M3U_FILE
 import com.nuvio.app.features.iptv.SOURCE_TYPE_XTREAM
@@ -12,7 +16,7 @@ import com.nuvio.app.features.iptv.XtreamAccount
 
 /** Everything a card on the Apple TV playlist details page can be. */
 enum class TvDetailCard {
-    CONTACT, CONTENT_CATEGORIES, HIDDEN, TOGGLE_ENABLED, EDIT_SERVER, REMATCH,
+    CONTACT, CONTENT_CATEGORIES, HIDDEN, TOGGLE_ENABLED, REFRESH, EDIT_SERVER, REMATCH,
     CATCHUP_CONTAINER, CATCHUP_TIME, GUIDE_OFFSET, DETACH, REMOVE,
 }
 
@@ -31,6 +35,32 @@ data class TvDetailsCount(val label: String, val value: String)
 object TvPlaylistDetailsPolicy {
 
     /**
+     * UX179: what the "Refresh now" card says. Always what happened: running, updated N ago, or why nothing happened — and
+     * a failure says so. A stall deadline is "outcome unknown", not "failed": the rebuild keeps going behind the page.
+     */
+    internal fun refreshHint(state: ManualRefreshUiState): String {
+        val load = state.load
+        return when {
+            state.refreshing -> "Refreshing\u2026"
+            load is LoadStatus.Failed && load.timedOut -> "Still working in the background. Check back in a few minutes."
+            load is LoadStatus.Failed ->
+                if (state.result == ManualRefreshResult.PARTIAL) "Only part updated. Press to try again." else "Couldn\u2019t refresh. Press to try again."
+            state.result == ManualRefreshResult.COOLDOWN -> "Please wait a minute before refreshing again."
+            state.result == ManualRefreshResult.RELOAD_ON_OPEN -> "Reloads each time you open it in the IPTV tab."
+            state.result == ManualRefreshResult.NEEDS_LOCAL_FILE -> "No copy of the file here."
+            else -> when (val age = state.age) {
+                null -> "Re-download channels, movies and series"
+                else -> when (age.unit) {
+                    IptvManualRefreshPolicy.AgeUnit.JUST_NOW -> "Updated just now"
+                    IptvManualRefreshPolicy.AgeUnit.MINUTES -> "Updated ${age.count} min ago"
+                    IptvManualRefreshPolicy.AgeUnit.HOURS -> "Updated ${age.count} h ago"
+                    IptvManualRefreshPolicy.AgeUnit.DAYS -> "Updated ${age.count} d ago"
+                }
+            }
+        }
+    }
+
+    /**
      * Shelves for [account]. [model] must be built with `allowEdit = false` (rename is dropped on Apple TV:
      * typing is costly). The library shelf leads with the three agreed cards and then keeps every other
      * action this playlist already had on Apple TV (edit URL / credentials for a playlist that is the
@@ -46,6 +76,8 @@ object TvPlaylistDetailsPolicy {
                     add(TvDetailCard.CONTENT_CATEGORIES)
                     add(TvDetailCard.HIDDEN)
                     add(TvDetailCard.TOGGLE_ENABLED)
+                    // UX179: Refresh now, right after the three agreed cards (what it does differs per source; the card says so).
+                    add(TvDetailCard.REFRESH)
                     // A managed playlist's server and login are the provider's: no way in (a lock note stands in).
                     // Apple TV has no file picker, so a file playlist cannot be re-picked either.
                     if (!managed && account.sourceType != SOURCE_TYPE_M3U_FILE) add(TvDetailCard.EDIT_SERVER)

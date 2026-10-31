@@ -17,11 +17,13 @@ import com.nuvio.app.features.profiles.ProfileRepository
 import com.nuvio.app.features.trakt.TraktPlatformClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import com.nuvio.app.features.iptv.IptvManualRefreshController
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -58,6 +60,7 @@ data class TvDetailsState(
 class TvPlaylistDetailsSession(private val accountId: String) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val controller = PlaylistDetailsController()
+    private val refreshController = IptvManualRefreshController(scope)
 
     val state: StateFlow<TvDetailsState> = combine(
         XtreamRepository.uiState, ManagedInfoRepository.state, controller.live, XtreamRepository.activeServers,
@@ -71,8 +74,21 @@ class TvPlaylistDetailsSession(private val accountId: String) {
         ),
     )
 
+    /** UX179: the "Refresh now" card's words (policy-built, so they are unit-tested). */
+    val refreshHint: StateFlow<String> = refreshController.state
+        .map { TvPlaylistDetailsPolicy.refreshHint(it) }
+        .stateIn(scope, SharingStarted.Eagerly, TvPlaylistDetailsPolicy.refreshHint(refreshController.state.value))
+
     init {
-        XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }?.let { controller.load(it) }
+        XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }?.let {
+            controller.load(it)
+            refreshController.load(it)
+        }
+    }
+
+    /** UX179: refresh this playlist's catalog now. The engine holds the cooldown; a press while one runs is ignored. */
+    fun refreshNow() {
+        XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }?.let { refreshController.start(it) }
     }
 
     private fun build(ui: XtreamUiState, info: ManagedInfo?, live: PlaylistDetailsLive, active: Map<String, Int>): TvDetailsState {

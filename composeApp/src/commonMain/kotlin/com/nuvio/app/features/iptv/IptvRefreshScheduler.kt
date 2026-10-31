@@ -69,6 +69,66 @@ object IptvRefreshScheduler {
         }
     }
 
+    /** Manual refreshes in flight or recently started, by playlist id: the per-playlist cooldown lives here, not per screen. */
+    private val lastManualStartMark = mutableMapOf<String, kotlin.time.TimeSource.Monotonic.ValueTimeMark>()
+    private val manualStartLock = Mutex()
+
+    /**
+     * UX179 "Refresh now": rebuild one playlist's catalog (and guide) immediately, whatever its interval says. Never
+     * overlaps the scheduled pass ([runLock]). Honest outcomes: [ManualRefreshResult.REFRESHED] only when every enabled
+     * catalogue kind really carries a build time from this run; a deferred, failed or backed-off build is FAILED/PARTIAL,
+     * never "done". Stalker is never refreshed in the background (a handshake can evict another device on the same MAC).
+     */
+    suspend fun refreshNow(acc: XtreamAccount): ManualRefreshResult {
+        val mode = IptvManualRefreshPolicy.modeFor(acc.sourceType, hasLocalCopy = acc.sourceType != SOURCE_TYPE_M3U_FILE || M3UFileStore.hasLocalCopy(acc))
+        if (mode == IptvManualRefreshPolicy.Mode.RELOAD_ON_OPEN) return ManualRefreshResult.RELOAD_ON_OPEN
+        if (mode == IptvManualRefreshPolicy.Mode.NEEDS_LOCAL_FILE) return ManualRefreshResult.NEEDS_LOCAL_FILE
+        manualStartLock.withLock {
+            val since = lastManualStartMark[acc.id]?.elapsedNow()?.inWholeMilliseconds
+            if (IptvManualRefreshPolicy.cooldownRemainingMs(since) > 0L) return ManualRefreshResult.COOLDOWN
+            lastManualStartMark[acc.id] = kotlin.time.TimeSource.Monotonic.markNow()
+        }
+        return runLock.withLock {
+            XtreamRepository.ensureLoaded()
+            runCatching {
+                when {
+                    acc.sourceType.isM3u() -> {
+                        val ok = M3UClient.ingest(acc).isSuccess
+                        if (ok) runCatching { XmltvClient.ensureEpg(acc, force = true) }
+                        if (ok) ManualRefreshResult.REFRESHED else ManualRefreshResult.FAILED
+                    }
+                    else -> {
+                        val kinds = MatchKind.entries.filter { kind ->
+                            acc.typeEnabled(when (kind) {
+                                MatchKind.LIVE -> CONTENT_TYPE_LIVE
+                                MatchKind.MOVIE -> CONTENT_TYPE_MOVIES
+                                MatchKind.SERIES -> CONTENT_TYPE_SERIES
+                            })
+                        }
+                        val before = kinds.map { XtreamMatchIndex.builtAt(acc.id, it) }
+                        XtreamTmdbResolver.clearFailureBackoff(acc.id)
+                        for (kind in kinds) XtreamTmdbResolver.ensureIndexed(acc, kind, force = true, awaitRefresh = true)
+                        when (IptvManualRefreshPolicy.landed(before, kinds.map { XtreamMatchIndex.builtAt(acc.id, it) })) {
+                            IptvManualRefreshPolicy.Landed.ALL -> {
+                                XtreamSearchIndex.invalidate(acc.id)
+                                runCatching { XmltvClient.ensureEpg(acc, force = true) }
+                                ManualRefreshResult.REFRESHED
+                            }
+                            IptvManualRefreshPolicy.Landed.SOME -> ManualRefreshResult.PARTIAL
+                            IptvManualRefreshPolicy.Landed.NONE -> ManualRefreshResult.FAILED
+                        }
+                    }
+                }
+            }.onFailure { if (it is CancellationException) throw it }
+                .onFailure { log.w(it) { "manual refresh failed for ${acc.id}" } }
+                .getOrDefault(ManualRefreshResult.FAILED)
+        }
+    }
+
+    /** When [acc]'s catalog was last rebuilt (M3U: the ingest time; Xtream: the OLDEST enabled index), or null when unknown. */
+    suspend fun lastRefreshAt(acc: XtreamAccount): Long? =
+        lastRefreshMs(acc, emptyMap()).takeIf { it > 0L }
+
     /** Refresh one playlist by source type. Returns true on a usable refresh. */
     private suspend fun refreshOne(acc: XtreamAccount): Boolean = when {
         acc.sourceType.isM3u() -> {

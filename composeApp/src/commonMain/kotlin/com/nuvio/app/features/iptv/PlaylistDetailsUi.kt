@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -78,6 +80,19 @@ import nuvio.composeapp.generated.resources.provider_details_locked_title
 import nuvio.composeapp.generated.resources.provider_details_locked_value
 import nuvio.composeapp.generated.resources.provider_details_movies
 import nuvio.composeapp.generated.resources.provider_details_never_expires
+import nuvio.composeapp.generated.resources.provider_details_refresh_title
+import nuvio.composeapp.generated.resources.provider_details_refresh_hint
+import nuvio.composeapp.generated.resources.provider_details_refresh_updated_now
+import nuvio.composeapp.generated.resources.provider_details_refresh_updated_minutes
+import nuvio.composeapp.generated.resources.provider_details_refresh_updated_hours
+import nuvio.composeapp.generated.resources.provider_details_refresh_updated_days
+import nuvio.composeapp.generated.resources.provider_details_refresh_running
+import nuvio.composeapp.generated.resources.provider_details_refresh_slow
+import nuvio.composeapp.generated.resources.provider_details_refresh_failed
+import nuvio.composeapp.generated.resources.provider_details_refresh_partial
+import nuvio.composeapp.generated.resources.provider_details_refresh_cooldown
+import nuvio.composeapp.generated.resources.provider_details_refresh_reload_on_open
+import nuvio.composeapp.generated.resources.provider_details_refresh_needs_file
 import nuvio.composeapp.generated.resources.provider_details_remove
 import nuvio.composeapp.generated.resources.provider_details_rematch_started
 import nuvio.composeapp.generated.resources.provider_details_ribbon
@@ -134,6 +149,11 @@ internal fun LazyListScope.xtreamPlaylistDetailsContent(
         }
         val controller = remember { PlaylistDetailsController() }
         val liveState by controller.live.collectAsStateWithLifecycle()
+        // UX179: "Refresh now". The controller owns the work and the cooldown lives in the engine; this only renders it.
+        val refreshScope = rememberCoroutineScope()
+        val refreshController = remember(account.id, refreshScope) { IptvManualRefreshController(refreshScope) }
+        val refreshState by refreshController.state.collectAsStateWithLifecycle()
+        LaunchedEffect(account.id) { refreshController.load(account) }
         // The wait ends at the check's own deadline even if the panel never answers (BoundedLoad).
         val liveStatus = rememberEffectiveLoadStatus(liveState.load)
         val live = if (liveStatus != liveState.load) liveState.copy(load = liveStatus) else liveState
@@ -183,6 +203,8 @@ internal fun LazyListScope.xtreamPlaylistDetailsContent(
                     model = model,
                     onToggle = { XtreamRepository.setEnabled(account.id, it) },
                     onEdit = { onEdit(account) },
+                    refresh = refreshState,
+                    onRefresh = { refreshController.start(account) },
                     onDetach = { confirming = DestructiveAction.DETACH },
                     onRemove = { confirming = DestructiveAction.REMOVE },
                 )
@@ -496,6 +518,8 @@ private fun ManageTab(
     model: ManagedDetailsModel,
     onToggle: (Boolean) -> Unit,
     onEdit: () -> Unit,
+    refresh: ManualRefreshUiState,
+    onRefresh: () -> Unit,
     onDetach: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -515,6 +539,8 @@ private fun ManageTab(
             isTablet = isTablet,
             onClick = onEdit,
         )
+        SettingsGroupDivider(isTablet = isTablet)
+        RefreshNowRow(state = refresh, isTablet = isTablet, onRefresh = onRefresh)
         if (model.lockedServerLogin) {
             SettingsGroupDivider(isTablet = isTablet)
             SettingsNavigationRow(
