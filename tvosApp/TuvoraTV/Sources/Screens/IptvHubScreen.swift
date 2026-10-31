@@ -15,6 +15,8 @@ struct IptvHubScreen: View {
     @State private var searchSheet = false
     @State private var search = TvHubSearchState(open: false, query: "", phase: .idle, items: [], msUntilDeadline: nil)
     @State private var lastQuery = ""
+    /// A search was submitted from the sheet: its results, not the header chip, should take focus when the sheet closes.
+    @State private var searchSubmitted = false
     // Live: the guide owns channel search; the header chip asks it to open (bumped per press) so Search sits in one place on every section.
     @State private var liveSearchRequest = 0
     @FocusState private var chipFocus: String?
@@ -71,17 +73,24 @@ struct IptvHubScreen: View {
         // that arrives by sync, or a removal that resets the hub, shows here without leaving the tab.
         // The task ends with the view, so nothing runs for a tab nobody is looking at; it never polls.
         .task { try? await TvIptvBrowse.shared.followPlaylists() }
+        // Menu closes an open search wherever focus is (the header chip as well as the results); nil when closed, so Menu is not swallowed.
+        .onExitCommand(perform: (search.open && hub?.section != .live) ? { TvIptvHubSearch.shared.close(); chipFocus = "search" } : nil)
         .task { for await next in TvIptvHubSearch.shared.state { search = next } }
+        // The chip must not re-claim focus while results are open; once they close the chip is the target again.
+        .onChange(of: search.open) { _, open in
+            if open { chipFocus = nil } else { searchSubmitted = false }
+        }
         // Another playlist or section was picked: the old results no longer describe what is shown.
         .onChange(of: "\(hub?.selectedAccountId ?? "")|\(hub?.section.name ?? "")") { _, _ in
             searchSheet = false
             TvIptvHubSearch.shared.close()
         }
-        .sheet(isPresented: $searchSheet, onDismiss: { if !search.open { chipFocus = "search" } }) {
+        .sheet(isPresented: $searchSheet, onDismiss: { if !searchSubmitted { chipFocus = "search" } }) {
             if let hub, let account = hub.accounts.first(where: { $0.id == hub.selectedAccountId }) ?? hub.accounts.first {
                 HubSearchDialog(playlistName: TvIptvSettingsPolicy.shared.playlistName(name: account.name),
                                 series: hub.section == .series, initialQuery: lastQuery) { query in
                     lastQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                    searchSubmitted = TvIptvHubSearch.shared.willSearch(section: hub.section, query: lastQuery)
                     searchSheet = false
                     TvIptvHubSearch.shared.submit(accountId: account.id, section: hub.section, query: lastQuery)
                 }
@@ -250,6 +259,9 @@ private struct IptvSearchResults: View {
     let onSearchAgain: () -> Void
     let onClose: () -> Void
     @Environment(\.nuvio) private var colors
+    /// Intended: the first result takes focus when the results arrive (the guide's programmatic-FocusState pattern). KNOWN GAP: in the
+    /// simulator focus stays on the header chip (see HubSearchTests.testKnownGapResultsDoNotTakeFocusAutomatically); one DOWN enters the results.
+    @FocusState private var focusedItem: String?
     @State private var deadlineTick = 0
 
     var body: some View {
@@ -265,6 +277,7 @@ private struct IptvSearchResults: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: size.width, maximum: size.width), spacing: dp(12))], alignment: .leading, spacing: dp(24)) {
                         ForEach(state.items, id: \.id) { item in
                             NuvioPosterCard(title: item.name, subtitle: item.releaseInfo, imageURL: item.poster, width: size.width, height: size.height) { onOpen(item) }
+                                .focused($focusedItem, equals: item.id)
                         }
                     }
                     .focusSection()
@@ -288,6 +301,11 @@ private struct IptvSearchResults: View {
             }
         }
         .onExitCommand { onClose() }
+        // Ask for focus on the first result as soon as they are there (see the known gap above).
+        .onChange(of: TvIptvHubSearch.shared.effectivePhase(state: state)) { _, phase in
+            if phase == .loaded { focusedItem = state.items.first?.id }
+        }
+        .onAppear { if TvIptvHubSearch.shared.effectivePhase(state: state) == .loaded { focusedItem = state.items.first?.id } }
         // Wake once at the load's own deadline so a wait that never returns still ends on Retry (no polling).
         .task(id: "\(state.query)|\(state.phase)") {
             if let ms = state.msUntilDeadline?.int64Value {

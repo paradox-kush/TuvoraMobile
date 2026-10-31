@@ -2,6 +2,7 @@ package com.tuvora.tvos.screens
 
 import com.nuvio.app.features.home.MetaPreview
 import com.nuvio.app.features.iptv.BoundedLoad
+import com.nuvio.app.features.iptv.IptvHubSearchPolicy
 import com.nuvio.app.features.iptv.LoadStatus
 import com.nuvio.app.features.iptv.XtreamHubSearchController
 import com.nuvio.app.features.iptv.XtreamHubSection
@@ -60,6 +61,9 @@ object TvIptvHubSearch {
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId } ?: return
         controller.onQueryChange(account, section, query)
     }
+
+    /** Whether submitting [query] on [section] will actually search (the shared policy's minimum length), so the screen can decide where focus goes. */
+    fun willSearch(section: XtreamHubSection, query: String): Boolean = IptvHubSearchPolicy.request(section, query) != null
 
     fun retry() = controller.retry()
 
