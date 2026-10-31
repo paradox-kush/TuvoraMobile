@@ -33,7 +33,7 @@ class IptvManualRefreshControllerTest {
     }
 
     @Test
-    fun `a failed or partial refresh is Failed, never done`(): Unit = runBlocking {
+    fun `a failed or partial refresh is Failed never done`(): Unit = runBlocking {
         for (bad in listOf(ManualRefreshResult.FAILED, ManualRefreshResult.PARTIAL)) {
             val c = controller { bad }
             c.start(account)
@@ -53,7 +53,7 @@ class IptvManualRefreshControllerTest {
     }
 
     @Test
-    fun `cooldown, stalker and missing-file answers are Loaded and carry their own result`(): Unit = runBlocking {
+    fun `cooldown stalker and missing-file answers are Loaded and carry their own result`(): Unit = runBlocking {
         for (answer in listOf(ManualRefreshResult.COOLDOWN, ManualRefreshResult.RELOAD_ON_OPEN, ManualRefreshResult.NEEDS_LOCAL_FILE)) {
             val c = controller { answer }
             c.start(account)
