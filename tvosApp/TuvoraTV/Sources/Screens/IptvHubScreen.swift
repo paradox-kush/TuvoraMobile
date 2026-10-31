@@ -15,6 +15,8 @@ struct IptvHubScreen: View {
     @State private var searchSheet = false
     @State private var search = TvHubSearchState(open: false, query: "", phase: .idle, items: [], msUntilDeadline: nil)
     @State private var lastQuery = ""
+    // Live: the guide owns channel search; the header chip asks it to open (bumped per press) so Search sits in one place on every section.
+    @State private var liveSearchRequest = 0
     @FocusState private var chipFocus: String?
 
     var body: some View {
@@ -36,7 +38,8 @@ struct IptvHubScreen: View {
                     NuvioStateMessage(title: "Couldn't load this playlist", message: error.detail) { TvIptvBrowse.shared.retry() }
                 } else if hub.section == .live {
                     LiveGuideView(accountId: hub.selectedAccountId ?? hub.accounts[0].id,
-                                  categories: hub.categories.map { ($0.id, $0.name) })
+                                  categories: hub.categories.map { ($0.id, $0.name) },
+                                  searchRequest: liveSearchRequest)
                 } else {
                     IptvShelves(hub: hub) { details = PreviewBox(preview: $0) }
                 }
@@ -99,11 +102,11 @@ struct IptvHubScreen: View {
                     .accessibilityIdentifier("hubchip.\(title)")
             }
             Spacer()
-            if hub.section != .live {
-                HubChip(title: "Search", selected: false) { searchSheet = true }
-                    .focused($chipFocus, equals: "search")
-                    .accessibilityIdentifier("hubchip.Search")
+            HubChip(title: "Search", selected: false) {
+                if hub.section == .live { liveSearchRequest += 1 } else { searchSheet = true }
             }
+            .focused($chipFocus, equals: "search")
+            .accessibilityIdentifier("hubchip.Search")
             if let account = hub.accounts.first(where: { $0.id == hub.selectedAccountId }) ?? hub.accounts.first {
                 HubChip(title: TvIptvSettingsPolicy.shared.playlistName(name: account.name), trailingIcon: hub.accounts.count > 1 ? "md_arrow_drop_down" : nil, selected: false) {
                     if hub.accounts.count > 1 { smokeLog("SMOKE playlist chip pressed"); choosingPlaylist = true }
@@ -346,6 +349,8 @@ private struct IptvCategoryScreen: View {
 private struct LiveGuideView: View {
     let accountId: String
     let categories: [(String, String)]
+    /// F48: the hub's Search chip was pressed on Live (bumped per press) — open this guide's own channel search.
+    var searchRequest: Int = 0
     @EnvironmentObject private var playback: PlaybackCoordinator
     @Environment(\.nuvio) private var colors
 
@@ -464,6 +469,7 @@ private struct LiveGuideView: View {
                                 onCancel: { self.hideAsk = nil })
             }
         }
+        .onChange(of: searchRequest) { _, now in if now > 0 { searchOpen = true } }
         .sheet(isPresented: $searchOpen, onDismiss: { categoryFocus = "search" }) {
             GuideChannelSearchDialog(initialQuery: guideQuery) { query in
                 guideQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
