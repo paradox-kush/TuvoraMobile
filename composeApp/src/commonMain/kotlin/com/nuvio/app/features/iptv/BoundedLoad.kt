@@ -43,6 +43,8 @@ enum class LoadSurface(val key: String, val stallMs: Long, val reportsEveryOutco
     /** The docked Live TV screen resolving a channel's stream URL (Stalker create_link etc.). Every zap
      *  resolves, so only failures are reported; a started channel is already `playback_started`. */
     LIVE_RESOLVE("live_resolve", 20_000L, reportsEveryOutcome = false),
+    /** The IPTV hub's Movies/Series search inside one playlist. Every query would report, so only failures do. */
+    HUB_SEARCH("hub_search", 20_000L, reportsEveryOutcome = false),
     /** IPTV settings pages: hidden items, setup codes, content categories. */
     SETTINGS("settings", 25_000L, reportsEveryOutcome = false),
 }

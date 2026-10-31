@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -82,6 +84,7 @@ import org.jetbrains.compose.resources.getString
 import kotlinx.coroutines.flow.emptyFlow
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.iptv_group_hidden_toast
+import nuvio.composeapp.generated.resources.compose_iptv_hub_search_open
 import nuvio.composeapp.generated.resources.iptv_toast_undo
 import nuvio.composeapp.generated.resources.action_retry
 import nuvio.composeapp.generated.resources.compose_iptv_hub_row_failed
@@ -223,6 +226,21 @@ fun XtreamHubScreen(
     val displayedCategories = liveSpecialCategories + renderableCategories
     var openCategoryId by remember(state.selectedAccountId, state.section) { mutableStateOf<String?>(null) }
     val toastScope = rememberCoroutineScope()
+    // F48: search inside the selected playlist's Movies / Series. State lives in the controller (thin composable).
+    val searchController = remember { XtreamHubSearchController(toastScope) }
+    val search by searchController.state.collectAsStateWithLifecycle()
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    val searchApplies = account != null && IptvHubSearchPolicy.contentTypeFor(state.section) != null
+    LaunchedEffect(searchApplies) {
+        if (!searchApplies) {
+            searchOpen = false
+            searchController.clear()
+        }
+    }
+    PlatformBackHandler(enabled = searchOpen && searchApplies) {
+        searchOpen = false
+        searchController.clear()
+    }
     val openCategory = openCategoryId?.let { id -> displayedCategories.firstOrNull { it.id == id } }
 
     val tokens = MaterialTheme.nuvio
@@ -300,7 +318,32 @@ fun XtreamHubScreen(
                 onSelectAccount = { XtreamHubRepository.selectAccount(it) },
                 onSelectSection = { XtreamHubRepository.selectSection(it) },
                 onAddProvider = onAddProvider,
+                onSearch = if (searchApplies && !searchOpen) ({ searchOpen = true }) else null,
             )
+
+            // F48: while searching, the playlist's own results replace the category rows.
+            if (searchOpen && searchApplies && account != null) {
+                LaunchedEffect(account.id, state.section) { searchController.onScopeChange(account, state.section) }
+                XtreamHubSearchBar(
+                    playlistName = account.name,
+                    section = state.section,
+                    query = search.query,
+                    sectionPadding = sectionPadding,
+                    onQueryChange = { searchController.onQueryChange(account, state.section, it) },
+                    onClose = {
+                        searchOpen = false
+                        searchController.clear()
+                    },
+                )
+                XtreamHubSearchResults(
+                    playlistName = account.name,
+                    search = search,
+                    sectionPadding = sectionPadding,
+                    onPosterClick = onTileClick,
+                    onRetry = searchController::retry,
+                )
+                return@Column
+            }
 
             // The wait ends at the load's own deadline even if the work never returns (BoundedLoad).
             val categoriesStatus = rememberEffectiveLoadStatus(state.categoriesLoad)
@@ -475,6 +518,7 @@ private fun XtreamHubHeader(
     onSelectAccount: (String) -> Unit,
     onSelectSection: (XtreamHubSection) -> Unit,
     onAddProvider: () -> Unit,
+    onSearch: (() -> Unit)? = null,
 ) {
     val tokens = MaterialTheme.nuvio
     Row(
@@ -492,6 +536,15 @@ private fun XtreamHubHeader(
             )
         }
         Spacer(Modifier.weight(1f))
+        if (onSearch != null) {
+            IconButton(onClick = onSearch) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = stringResource(Res.string.compose_iptv_hub_search_open),
+                    tint = tokens.colors.textSecondary,
+                )
+            }
+        }
         // Always a dropdown so it's obvious you can switch playlists (and it lists all of them,
         // plus an "Add Playlist" entry so a second provider is one tap away).
         XtreamAccountDropdown(accounts, selectedAccountId, onSelectAccount, onAddProvider)
@@ -773,7 +826,7 @@ private fun XtreamHubCategoryPage(
     }
 }
 
-private fun xtreamCategoryGridColumns(width: Dp, landscape: Boolean): Int =
+internal fun xtreamCategoryGridColumns(width: Dp, landscape: Boolean): Int =
     if (landscape) {
         when {
             width >= 1400.dp -> 6
@@ -862,7 +915,7 @@ private fun XtreamLiveChannelTile(
 
 /** Initial category-list load: home-style shimmer shelves instead of a full-screen spinner. */
 @Composable
-private fun XtreamHubSkeleton(
+internal fun XtreamHubSkeleton(
     live: Boolean,
     sectionPadding: Dp,
 ) {
@@ -950,7 +1003,7 @@ private fun XtreamHubTilePlaceholder(
 
 /** Error / empty vocabulary shared with home: NuvioSurfaceCard + primary action. */
 @Composable
-private fun XtreamHubMessageCard(
+internal fun XtreamHubMessageCard(
     title: String,
     message: String,
     sectionPadding: Dp,

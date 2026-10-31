@@ -10,6 +10,12 @@ struct IptvHubScreen: View {
     @State private var choosingPlaylist = false
     @State private var details: PreviewBox?
     @State private var smokeOpened = false
+    // F48: search inside the selected playlist's Movies / Series. The keyboard is a sheet (the guide's pattern);
+    // submitting shows the results page under the header; Menu closes it and focus returns to the Search chip.
+    @State private var searchSheet = false
+    @State private var search = TvHubSearchState(open: false, query: "", phase: .idle, items: [], msUntilDeadline: nil)
+    @State private var lastQuery = ""
+    @FocusState private var chipFocus: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -19,7 +25,14 @@ struct IptvHubScreen: View {
                     .padding(.bottom, dp(16))
                     .scrollClipDisabled()
             .focusSection()
-                if let error = hub.loadError {
+                if search.open, hub.section != .live {
+                    IptvSearchResults(
+                        playlistName: TvIptvSettingsPolicy.shared.playlistName(name: (hub.accounts.first { $0.id == hub.selectedAccountId } ?? hub.accounts[0]).name),
+                        state: search,
+                        onOpen: { details = PreviewBox(preview: $0) },
+                        onSearchAgain: { searchSheet = true },
+                        onClose: { TvIptvHubSearch.shared.close(); chipFocus = "search" })
+                } else if let error = hub.loadError {
                     NuvioStateMessage(title: "Couldn't load this playlist", message: error.detail) { TvIptvBrowse.shared.retry() }
                 } else if hub.section == .live {
                     LiveGuideView(accountId: hub.selectedAccountId ?? hub.accounts[0].id,
@@ -55,6 +68,22 @@ struct IptvHubScreen: View {
         // that arrives by sync, or a removal that resets the hub, shows here without leaving the tab.
         // The task ends with the view, so nothing runs for a tab nobody is looking at; it never polls.
         .task { try? await TvIptvBrowse.shared.followPlaylists() }
+        .task { for await next in TvIptvHubSearch.shared.state { search = next } }
+        // Another playlist or section was picked: the old results no longer describe what is shown.
+        .onChange(of: "\(hub?.selectedAccountId ?? "")|\(hub?.section.name ?? "")") { _, _ in
+            searchSheet = false
+            TvIptvHubSearch.shared.close()
+        }
+        .sheet(isPresented: $searchSheet, onDismiss: { if !search.open { chipFocus = "search" } }) {
+            if let hub, let account = hub.accounts.first(where: { $0.id == hub.selectedAccountId }) ?? hub.accounts.first {
+                HubSearchDialog(playlistName: TvIptvSettingsPolicy.shared.playlistName(name: account.name),
+                                series: hub.section == .series, initialQuery: lastQuery) { query in
+                    lastQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                    searchSheet = false
+                    TvIptvHubSearch.shared.submit(accountId: account.id, section: hub.section, query: lastQuery)
+                }
+            }
+        }
         .sheet(isPresented: $choosingPlaylist) {
             if let hub { PlaylistDialog(hub: hub) { choosingPlaylist = false } }
         }
@@ -70,6 +99,11 @@ struct IptvHubScreen: View {
                     .accessibilityIdentifier("hubchip.\(title)")
             }
             Spacer()
+            if hub.section != .live {
+                HubChip(title: "Search", selected: false) { searchSheet = true }
+                    .focused($chipFocus, equals: "search")
+                    .accessibilityIdentifier("hubchip.Search")
+            }
             if let account = hub.accounts.first(where: { $0.id == hub.selectedAccountId }) ?? hub.accounts.first {
                 HubChip(title: TvIptvSettingsPolicy.shared.playlistName(name: account.name), trailingIcon: hub.accounts.count > 1 ? "md_arrow_drop_down" : nil, selected: false) {
                     if hub.accounts.count > 1 { smokeLog("SMOKE playlist chip pressed"); choosingPlaylist = true }
@@ -174,6 +208,89 @@ private struct IptvShelf: View {
         }
         .fullScreenCover(item: Binding(get: { seeAll.map(CategoryBox.init) }, set: { seeAll = $0?.id })) { box in
             IptvCategoryScreen(categoryId: box.id, onOpen: onOpen)
+        }
+    }
+}
+
+// MARK: - Hub search (F48)
+
+/// The keyboard step: OK on the hub's Search chip opens this, like the guide's channel search.
+private struct HubSearchDialog: View {
+    let playlistName: String
+    let series: Bool
+    @State private var query: String
+    let onSearch: (String) -> Void
+    init(playlistName: String, series: Bool, initialQuery: String, onSearch: @escaping (String) -> Void) {
+        self.playlistName = playlistName
+        self.series = series
+        _query = State(initialValue: initialQuery)
+        self.onSearch = onSearch
+    }
+    var body: some View {
+        NuvioDialog(title: "Search \(playlistName)") {
+            TextField(series ? "Series title, like “office”" : "Movie title, like “matrix”", text: $query)
+                .onSubmit { onSearch(query) }
+                .accessibilityIdentifier("hub.search.input")
+            SettingsActionRow(title: "Search", showChevron: false) { onSearch(query) }
+                .accessibilityIdentifier("hub.search.submit")
+        }
+    }
+}
+
+/// The results page under the header. Every state ends — shimmer while asking, a grid, "No matches" with
+/// Search again, or a failure with Retry (a failed search never reads as "no matches") — and each leaves
+/// something focusable, so the remote is never dead. Menu closes the search.
+private struct IptvSearchResults: View {
+    let playlistName: String
+    let state: TvHubSearchState
+    let onOpen: (MetaPreview) -> Void
+    let onSearchAgain: () -> Void
+    let onClose: () -> Void
+    @Environment(\.nuvio) private var colors
+    @State private var deadlineTick = 0
+
+    var body: some View {
+        let _ = deadlineTick
+        let size = NuvioCardSize.hubPortrait
+        VStack(alignment: .leading, spacing: dp(16)) {
+            Text("“\(state.query)” in \(playlistName)")
+                .font(NuvioType.headlineSmall).foregroundStyle(colors.textPrimary)
+                .padding(.horizontal, dp(52))
+            switch TvIptvHubSearch.shared.effectivePhase(state: state) {
+            case .loaded:
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: size.width, maximum: size.width), spacing: dp(12))], alignment: .leading, spacing: dp(24)) {
+                        ForEach(state.items, id: \.id) { item in
+                            NuvioPosterCard(title: item.name, subtitle: item.releaseInfo, imageURL: item.poster, width: size.width, height: size.height) { onOpen(item) }
+                        }
+                    }
+                    .focusSection()
+                    .padding(.horizontal, dp(52)).padding(.vertical, dp(12))
+                }
+            case .failed:
+                NuvioStateMessage(title: "Search didn’t finish",
+                                  message: "Couldn’t search \(playlistName) right now. Check the connection and try again.",
+                                  retry: { TvIptvHubSearch.shared.retry() })
+            case .empty:
+                NuvioStateMessage(title: "No matches",
+                                  message: "Nothing in \(playlistName) matches “\(state.query)”. Check the spelling or try a shorter word.",
+                                  actionTitle: "Search again", actionId: "hub.search.again", action: { onSearchAgain() })
+            default:
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: NuvioTokens.Layout.itemGap) {
+                        ForEach(0..<8, id: \.self) { _ in NuvioShimmer().frame(width: size.width, height: size.height) }
+                    }
+                    .padding(.horizontal, dp(52))
+                }
+            }
+        }
+        .onExitCommand { onClose() }
+        // Wake once at the load's own deadline so a wait that never returns still ends on Retry (no polling).
+        .task(id: "\(state.query)|\(state.phase)") {
+            if let ms = state.msUntilDeadline?.int64Value {
+                try? await Task.sleep(nanoseconds: UInt64(ms) * 1_000_000)
+                deadlineTick += 1
+            }
         }
     }
 }

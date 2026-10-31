@@ -14,6 +14,7 @@ import com.nuvio.app.features.iptv.overlay.CategoryOverlay
 import com.nuvio.app.features.iptv.overlay.IptvHiddenItems
 import com.nuvio.app.features.iptv.overlay.IptvHiddenItemsPolicy
 import com.nuvio.app.features.iptv.overlay.IptvOverlayRepository
+import com.nuvio.app.features.iptv.overlay.OverlaySnapshot
 import com.nuvio.app.features.iptv.stalker.StalkerClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -76,79 +77,116 @@ object XtreamSearchIndex {
                     }
             }
 
-            if (account.searchIncludesType(CONTENT_TYPE_MOVIES)) {
-                val hits: List<XtreamMovie> = if (account.sourceType.isM3u()) {
-                    // M3U catalog lives in the content DB (no TMDB match index) — substring the stored rows.
-                    M3UClient.ensureIngested(account)
-                    IptvContentDb.searchByName(account.id, IptvContentKind.VOD, q, scanLimit(account, CONTENT_TYPE_MOVIES))
-                        .map { row -> XtreamMovie(row.sid, row.name, row.logo, row.categoryId, null, row.url, null, row.ext) }
-                } else if (account.sourceType == SOURCE_TYPE_STALKER) {
-                    // Stalker never enters the match index (its player_api builds fail into backoff,
-                    // mirroring NuvioTV) — search the portal directly via get_ordered_list&search=.
-                    StalkerClient.searchMovies(account, q)
-                } else {
-                    withTimeoutOrNull(INDEX_WAIT_MS) { XtreamTmdbResolver.ensureIndexed(account, MatchKind.MOVIE) }
-                    XtreamMatchIndex.searchByName(account.id, MatchKind.MOVIE, q, scanLimit(account, CONTENT_TYPE_MOVIES)).map { item ->
-                        XtreamMovie(
-                            streamId = item.sid,
-                            name = item.name,
-                            poster = item.poster,
-                            categoryId = item.categoryId,
-                            rating = null,
-                            streamUrl = XtreamClient.movieStreamUrl(account, item.sid, item.ext ?: "mp4"),
-                            tmdb = item.tmdb,
-                            containerExtension = item.ext,
-                        )
-                    }
-                }
-                // UX44: provider heading rows are not titles — drop them before the per-type cap.
-                val shownMovies = withoutHiddenGroups(
-                    account, CONTENT_TYPE_MOVIES, overlay.categories,
-                    IptvSearchRowFilter.withoutDividers(hits) { it.name },
-                ) { it.categoryId }
-                offeredHits(account, CONTENT_TYPE_MOVIES, shownMovies) { it.categoryId }.forEach { movie ->
-                    XtreamItemRegistry.registerMovie(account.id, movie)
-                    movies += movie.toMetaPreview(account.id)
-                }
-            }
+            if (account.searchIncludesType(CONTENT_TYPE_MOVIES)) movies += moviesFor(account, q, overlay, PER_TYPE_CAP)
 
-            if (account.searchIncludesType(CONTENT_TYPE_SERIES)) {
-                val hits: List<XtreamSeriesItem> = if (account.sourceType.isM3u()) {
-                    M3UClient.ensureIngested(account)
-                    IptvContentDb.searchByName(account.id, IptvContentKind.SERIES, q, scanLimit(account, CONTENT_TYPE_SERIES))
-                        .map { row -> XtreamSeriesItem(row.sid, row.name, row.logo, row.categoryId, null, null, null, null) }
-                } else if (account.sourceType == SOURCE_TYPE_STALKER) {
-                    StalkerClient.searchSeries(account, q)
-                } else {
-                    withTimeoutOrNull(INDEX_WAIT_MS) { XtreamTmdbResolver.ensureIndexed(account, MatchKind.SERIES) }
-                    XtreamMatchIndex.searchByName(account.id, MatchKind.SERIES, q, scanLimit(account, CONTENT_TYPE_SERIES)).map { item ->
-                        XtreamSeriesItem(
-                            seriesId = item.sid,
-                            name = item.name,
-                            poster = item.poster,
-                            categoryId = item.categoryId,
-                            plot = null,
-                            rating = null,
-                            tmdb = item.tmdb,
-                            year = item.year,
-                        )
-                    }
-                }
-                val shownSeries = withoutHiddenGroups(
-                    account, CONTENT_TYPE_SERIES, overlay.categories,
-                    IptvSearchRowFilter.withoutDividers(hits) { it.name },
-                ) { it.categoryId }
-                offeredHits(account, CONTENT_TYPE_SERIES, shownSeries) { it.categoryId }.forEach { seriesItem ->
-                    XtreamItemRegistry.registerSeries(account.id, seriesItem)
-                    series += seriesItem.toMetaPreview(account.id)
-                }
-            }
+            if (account.searchIncludesType(CONTENT_TYPE_SERIES)) series += seriesFor(account, q, overlay, PER_TYPE_CAP)
         }
         return listOfNotNull(
             section("xtream_channels", "IPTV Channels", "tv", channels),
             section("xtream_movies", "IPTV Movies", "movie", movies),
             section("xtream_series", "IPTV Series", "series", series),
         )
+    }
+
+    /**
+     * IPTV-hub search: [type] ([CONTENT_TYPE_MOVIES] or [CONTENT_TYPE_SERIES]) titles of ONE playlist matching
+     * [query], honouring the playlist's content settings and the viewer's hidden groups. Wider than global search
+     * ([HUB_RESULT_CAP]) because the viewer is browsing a single playlist. Throws on a failed fetch so the caller
+     * can show Failed + Retry instead of "no matches".
+     */
+    suspend fun searchPlaylist(account: XtreamAccount, type: String, query: String): List<MetaPreview> {
+        val q = query.trim()
+        if (q.length < 2 || !account.searchIncludesType(type)) return emptyList()
+        IptvOverlayRepository.ensureLoaded()
+        val overlay = IptvOverlayRepository.uiState.value
+        return when (type) {
+            CONTENT_TYPE_MOVIES -> moviesFor(account, q, overlay, HUB_RESULT_CAP, strict = true)
+            CONTENT_TYPE_SERIES -> seriesFor(account, q, overlay, HUB_RESULT_CAP, strict = true)
+            else -> emptyList()
+        }
+    }
+
+    internal const val HUB_RESULT_CAP = 120
+
+    /** Movies of [account] matching [q] — the persistent match index, M3U content DB or Stalker portal — with the
+     *  playlist's in-app settings and the viewer's hidden groups applied. Shared by global search and the IPTV hub. */
+    private suspend fun moviesFor(account: XtreamAccount, q: String, overlay: OverlaySnapshot, cap: Int, strict: Boolean = false): List<MetaPreview> {
+        val out = mutableListOf<MetaPreview>()
+        val hits: List<XtreamMovie> = if (account.sourceType.isM3u()) {
+            // M3U catalog lives in the content DB (no TMDB match index) — substring the stored rows.
+            val ingested = M3UClient.ensureIngested(account)
+            if (strict) IptvSearchReadiness.require(if (ingested) 1L else null, "Catalog of ${account.name}")
+            IptvContentDb.searchByName(account.id, IptvContentKind.VOD, q, IptvSourceCategoryPolicy.scanLimit(account, CONTENT_TYPE_MOVIES, cap))
+                .map { row -> XtreamMovie(row.sid, row.name, row.logo, row.categoryId, null, row.url, null, row.ext) }
+        } else if (account.sourceType == SOURCE_TYPE_STALKER) {
+            // Stalker never enters the match index (its player_api builds fail into backoff,
+            // mirroring NuvioTV) — search the portal directly via get_ordered_list&search=.
+            if (strict) StalkerClient.searchMoviesOrThrow(account, q) else StalkerClient.searchMovies(account, q)
+        } else {
+            withTimeoutOrNull(INDEX_WAIT_MS) { XtreamTmdbResolver.ensureIndexed(account, MatchKind.MOVIE) }
+            if (strict) IptvSearchReadiness.require(XtreamMatchIndex.builtAt(account.id, MatchKind.MOVIE), "Movies index of ${account.name}")
+            XtreamMatchIndex.searchByName(account.id, MatchKind.MOVIE, q, IptvSourceCategoryPolicy.scanLimit(account, CONTENT_TYPE_MOVIES, cap)).map { item ->
+                XtreamMovie(
+                    streamId = item.sid,
+                    name = item.name,
+                    poster = item.poster,
+                    categoryId = item.categoryId,
+                    rating = null,
+                    streamUrl = XtreamClient.movieStreamUrl(account, item.sid, item.ext ?: "mp4"),
+                    tmdb = item.tmdb,
+                    containerExtension = item.ext,
+                )
+            }
+        }
+        // UX44: provider heading rows are not titles — drop them before the per-type cap.
+        val shownMovies = withoutHiddenGroups(
+            account, CONTENT_TYPE_MOVIES, overlay.categories,
+            IptvSearchRowFilter.withoutDividers(hits) { it.name },
+        ) { it.categoryId }
+        IptvSourceCategoryPolicy.keepCapped(account, CONTENT_TYPE_MOVIES, shownMovies, cap) { it.categoryId }.forEach { movie ->
+            XtreamItemRegistry.registerMovie(account.id, movie)
+            out += movie.toMetaPreview(account.id)
+        }
+    
+        return out
+    }
+
+    /** Series counterpart of [moviesFor]. */
+    private suspend fun seriesFor(account: XtreamAccount, q: String, overlay: OverlaySnapshot, cap: Int, strict: Boolean = false): List<MetaPreview> {
+        val out = mutableListOf<MetaPreview>()
+        val hits: List<XtreamSeriesItem> = if (account.sourceType.isM3u()) {
+            val ingested = M3UClient.ensureIngested(account)
+            if (strict) IptvSearchReadiness.require(if (ingested) 1L else null, "Catalog of ${account.name}")
+            IptvContentDb.searchByName(account.id, IptvContentKind.SERIES, q, IptvSourceCategoryPolicy.scanLimit(account, CONTENT_TYPE_SERIES, cap))
+                .map { row -> XtreamSeriesItem(row.sid, row.name, row.logo, row.categoryId, null, null, null, null) }
+        } else if (account.sourceType == SOURCE_TYPE_STALKER) {
+            if (strict) StalkerClient.searchSeriesOrThrow(account, q) else StalkerClient.searchSeries(account, q)
+        } else {
+            withTimeoutOrNull(INDEX_WAIT_MS) { XtreamTmdbResolver.ensureIndexed(account, MatchKind.SERIES) }
+            if (strict) IptvSearchReadiness.require(XtreamMatchIndex.builtAt(account.id, MatchKind.SERIES), "Series index of ${account.name}")
+            XtreamMatchIndex.searchByName(account.id, MatchKind.SERIES, q, IptvSourceCategoryPolicy.scanLimit(account, CONTENT_TYPE_SERIES, cap)).map { item ->
+                XtreamSeriesItem(
+                    seriesId = item.sid,
+                    name = item.name,
+                    poster = item.poster,
+                    categoryId = item.categoryId,
+                    plot = null,
+                    rating = null,
+                    tmdb = item.tmdb,
+                    year = item.year,
+                )
+            }
+        }
+        val shownSeries = withoutHiddenGroups(
+            account, CONTENT_TYPE_SERIES, overlay.categories,
+            IptvSearchRowFilter.withoutDividers(hits) { it.name },
+        ) { it.categoryId }
+        IptvSourceCategoryPolicy.keepCapped(account, CONTENT_TYPE_SERIES, shownSeries, cap) { it.categoryId }.forEach { seriesItem ->
+            XtreamItemRegistry.registerSeries(account.id, seriesItem)
+            out += seriesItem.toMetaPreview(account.id)
+        }
+    
+        return out
     }
 
     /** F01: hits whose group the viewer hid are left out of search. */
