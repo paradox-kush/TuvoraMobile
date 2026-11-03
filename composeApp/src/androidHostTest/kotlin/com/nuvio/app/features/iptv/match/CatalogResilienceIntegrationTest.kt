@@ -8,7 +8,8 @@ import com.nuvio.app.features.iptv.PlaylistServerFailover
 import com.nuvio.app.features.iptv.XtreamAccount
 import com.nuvio.app.features.iptv.content.IptvContentDbDriver
 import com.nuvio.app.features.tmdb.TmdbTitleBundle
-import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.AfterTest
@@ -29,6 +30,9 @@ class CatalogResilienceIntegrationTest {
     private fun account(id: String) = XtreamAccount(
         id = "http://$id.test|u", name = id, baseUrl = "http://$id.test", username = "u", password = "p",
     )
+
+    /** Hung downloads wait here; tearDown opens it so a leaked build releases the global build permit. */
+    private val gate = CompletableDeferred<Unit>()
 
     private val undekhi = TmdbTitleBundle(primary = "Undekhi", original = null, alternatives = emptyList(), year = 2020)
 
@@ -58,6 +62,11 @@ class CatalogResilienceIntegrationTest {
     @AfterTest
     fun tearDown() {
         IptvTransport.current = IptvTransport.Platform
+        gate.complete(Unit)
+        // Let the builds the hung tests leaked finish (they release their global build permit and stop
+        // touching the journal) BEFORE the next test swaps in its own storage.
+        runBlocking { withTimeoutOrNull(5_000) { XtreamTmdbResolver.indexing.first { it.isEmpty() } } }
+        XtreamTmdbResolver.deadlineOverrideMsForTests = null
         PlaylistServerFailover.resetForTest()
     }
 
@@ -67,7 +76,7 @@ class CatalogResilienceIntegrationTest {
         IptvTransport.current = Panel { action, _ ->
             when (action) {
                 "get_series_categories" -> """[{"category_id":"1","category_name":"Hindi"}]"""
-                else -> awaitCancellation() // the full catalog never arrives
+                else -> { gate.await(); "[]" } // the full catalog never arrives
             }
         }
         XtreamMatchIndex.putMapping(acc.id, MatchKind.SERIES, tmdb = 777, sid = 42, matchedName = "Undekhi")
@@ -84,7 +93,7 @@ class CatalogResilienceIntegrationTest {
         IptvTransport.current = Panel { action, _ ->
             when (action) {
                 "get_series_categories" -> """[{"category_id":"1","category_name":"Hindi"}]"""
-                else -> awaitCancellation()
+                else -> { gate.await(); "[]" }
             }
         }
 
@@ -115,5 +124,28 @@ class CatalogResilienceIntegrationTest {
         assertNotNull(XtreamMatchIndex.builtAt(acc.id, MatchKind.SERIES), "a complete category walk stamps the catalog built")
         val hits = XtreamMatchIndex.searchByName(acc.id, MatchKind.SERIES, "Undekhi", 5)
         assertEquals(listOf(5), hits.map { it.sid })
+    }
+
+    @Test
+    fun a_full_list_that_never_finishes_hits_its_deadline_and_the_category_walk_completes_the_catalog() = runBlocking {
+        val acc = account("trickle")
+        XtreamTmdbResolver.deadlineOverrideMsForTests = 500L
+        IptvTransport.current = Panel { action, category ->
+            when {
+                action == "get_series_categories" ->
+                    """[{"category_id":"1","category_name":"English"},{"category_id":"2","category_name":"Hindi"}]"""
+                // A provider that trickles: the full list never finishes and no read timeout ever trips.
+                action == "get_series" && category == null -> { gate.await(); "[]" }
+                action == "get_series" && category == "1" -> """[{"series_id":1,"name":"Alpha Show","category_id":"1"}]"""
+                action == "get_series" && category == "2" -> """[{"series_id":5,"name":"Undekhi","category_id":"2"}]"""
+                else -> "[]"
+            }
+        }
+
+        val finished = withTimeoutOrNull(8_000) { XtreamTmdbResolver.ensureIndexed(acc, MatchKind.SERIES); true }
+
+        assertEquals(true, finished, "the build must not wait forever on a full list that never finishes")
+        assertNotNull(XtreamMatchIndex.builtAt(acc.id, MatchKind.SERIES), "the category walk completes and stamps the catalog built")
+        assertEquals(listOf(5), XtreamMatchIndex.searchByName(acc.id, MatchKind.SERIES, "Undekhi", 5).map { it.sid })
     }
 }

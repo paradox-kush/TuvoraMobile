@@ -19,6 +19,7 @@ import com.nuvio.app.core.util.containTask
 import com.nuvio.app.core.util.guarded
 import com.nuvio.app.features.trakt.TraktPlatformClock
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -89,6 +90,9 @@ internal object XtreamTmdbResolver {
     /** True when [provider] has no catalog rows for [kind] yet: a lookup had nothing to search. */
     suspend fun catalogPending(provider: String, kind: MatchKind): Boolean =
         XtreamMatchIndex.builtAt(provider, kind) == null && !XtreamMatchIndex.hasItems(provider, kind)
+
+    /** Test seam: shortens both catalog request deadlines. */
+    internal var deadlineOverrideMsForTests: Long? = null
 
     private fun now() = TraktPlatformClock.nowEpochMs()
 
@@ -416,10 +420,18 @@ internal object XtreamTmdbResolver {
             MatchKind.LIVE -> XtreamClient.liveCategories(acc)
         }.getOrThrow()
         val session = XtreamMatchIndex.beginSync(acc.id, kind)
-        suspend fun fetch(categoryId: String?): Result<Int> = when (kind) {
+        suspend fun fetchOnce(categoryId: String?): Result<Int> = when (kind) {
             MatchKind.MOVIE -> XtreamClient.vodIndexItemsInto(acc, session::accept, categoryId)
             MatchKind.SERIES -> XtreamClient.seriesIndexItemsInto(acc, session::accept, categoryId)
             MatchKind.LIVE -> XtreamClient.liveIndexItemsInto(acc, session::accept, categoryId)
+        }
+        // Whole-request deadline (P4 item 5). Expiry cancels the transport read (OkHttp Call.cancel on
+        // Android, Ktor coroutine cancellation on iOS/Desktop) and is an ordinary failure here; a cancel
+        // from OUTSIDE still propagates because withTimeoutOrNull only swallows its own timeout.
+        suspend fun fetch(categoryId: String?): Result<Int> {
+            val limit = deadlineOverrideMsForTests ?: CatalogResiliencePolicy.deadlineMs(fullList = categoryId == null)
+            return withTimeoutOrNull(limit) { fetchOnce(categoryId) }
+                ?: Result.failure(CatalogDeadlineExceededException(limit))
         }
 
         if (CatalogResiliencePolicy.useFullList(buildLock.withLock { avoidFullUntil[key] }, now())) {
@@ -486,3 +498,6 @@ internal object XtreamTmdbResolver {
         _indexing.value = indexingCounts.keys.toSet()
     }
 }
+
+/** A catalog request outlived its whole-call deadline. A plain failure (not a cancellation): the build goes on. */
+internal class CatalogDeadlineExceededException(limitMs: Long) : RuntimeException("catalog request exceeded $limitMs ms")

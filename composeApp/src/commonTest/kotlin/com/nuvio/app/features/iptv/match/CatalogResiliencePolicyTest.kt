@@ -78,4 +78,18 @@ class CatalogResiliencePolicyTest {
         assertEquals(1, CatalogResiliencePolicy.globalBuildPermits(lowMemoryDevice = true))
         assertEquals(2, CatalogResiliencePolicy.globalBuildPermits(lowMemoryDevice = false))
     }
+
+    @Test
+    fun catalog_requests_have_whole_call_deadlines() {
+        assertEquals(10 * 60_000L, CatalogResiliencePolicy.FULL_LIST_DEADLINE_MS)
+        assertEquals(60_000L, CatalogResiliencePolicy.CATEGORY_DEADLINE_MS)
+        assertEquals(CatalogResiliencePolicy.FULL_LIST_DEADLINE_MS, CatalogResiliencePolicy.deadlineMs(fullList = true))
+        assertEquals(CatalogResiliencePolicy.CATEGORY_DEADLINE_MS, CatalogResiliencePolicy.deadlineMs(fullList = false))
+    }
+
+    @Test
+    fun a_category_deadline_expiry_is_a_failure_that_skips_the_category() {
+        // A timeout carries no HTTP status and is not the host guard: skip that category, keep going.
+        assertEquals(CategoryStep.SKIP_CATEGORY, CatalogResiliencePolicy.afterCategoryFailure(httpStatus = null, hostGuardRefused = false))
+    }
 }
