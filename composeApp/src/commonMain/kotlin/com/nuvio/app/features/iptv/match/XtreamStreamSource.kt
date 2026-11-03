@@ -12,6 +12,7 @@ import com.nuvio.app.features.iptv.stalker.StalkerClient
 import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.tmdb.TmdbService
 import com.nuvio.app.features.tmdb.TmdbTitleBundle
+import com.nuvio.app.core.contracts.IptvCatalogPendingException
 
 /**
  * Turns a TMDB movie/episode into playable Xtream [StreamItem]s for one account —
@@ -128,6 +129,21 @@ internal object XtreamStreamSource {
         // the PORTAL to find the title (get_ordered_list&search=, 1-2 requests).
         if (acc.sourceType == SOURCE_TYPE_STALKER) return stalkerStreams(acc, kind, titles, season, episode)
 
+        val streams = xtreamStreams(acc, kind, tmdbId, titles, season, episode)
+        // P3: nothing found AND nothing to search yet is "this playlist is still loading", not "not on
+        // this playlist". The source lane shows it as such instead of folding it into "No streams found".
+        if (streams.isEmpty() && XtreamTmdbResolver.catalogPending(acc.id, kind)) throw IptvCatalogPendingException(acc.name)
+        return streams
+    }
+
+    private suspend fun xtreamStreams(
+        acc: XtreamAccount,
+        kind: MatchKind,
+        tmdbId: Int,
+        titles: TmdbTitleBundle,
+        season: Int?,
+        episode: Int?,
+    ): List<StreamItem> {
         // Series need season-aware gathering across entries (split-season panels give each season
         // its own id), so they don't go through the single-match movie path.
         if (kind == MatchKind.SERIES) return seriesStreams(acc, tmdbId, titles, season, episode)

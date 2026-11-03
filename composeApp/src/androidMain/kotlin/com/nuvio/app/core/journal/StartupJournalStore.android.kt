@@ -21,6 +21,11 @@ internal actual object StartupJournalStore {
         dir = context.filesDir
     }
 
+    /** Host tests have no Application context: point the store at a temp dir so the journal is healthy. */
+    internal fun initializeForTest(directory: File) {
+        dir = directory
+    }
+
     actual fun read(): String? = runCatching {
         val f = File(dir ?: return@runCatching null, FILE)
         if (!f.exists()) return@runCatching null

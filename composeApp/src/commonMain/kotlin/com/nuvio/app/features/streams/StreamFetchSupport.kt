@@ -65,6 +65,8 @@ internal fun List<AddonStreamGroup>.toEmptyStateReason(anyLoading: Boolean): Str
     if (anyLoading || any { it.streams.isNotEmpty() }) {
         return null
     }
+    // A playlist that is still loading its catalog decides the message: its title may well be there.
+    if (any { it.iptvPending }) return StreamsEmptyStateReason.SourcesStillLoading
 
     return if (isNotEmpty() && all { !it.error.isNullOrBlank() }) {
         StreamsEmptyStateReason.StreamFetchFailed

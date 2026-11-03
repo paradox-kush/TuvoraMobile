@@ -504,6 +504,11 @@ struct StreamPickerScreen: View {
         if groups.isEmpty {
             if streams?.isAnyLoading ?? true {
                 VStack(spacing: dp(12)) { ForEach(0..<5, id: \.self) { _ in NuvioShimmer().frame(height: dp(84)) } }
+            } else if streams?.emptyStateReason == .sourcesStillLoading {
+                // A playlist hasn't finished loading its catalog: its title may well be there (shared
+                // StreamsEmptyStateReason, decided in commonMain), so never claim "No sources found".
+                NuvioStateMessage(title: "Your playlist is still loading",
+                                  message: "It hasn't finished loading its catalog on this Apple TV yet, so this title couldn't be checked. Try again in a minute.")
             } else {
                 NuvioStateMessage(title: "No sources found", message: StoreCopy.noSourcesMessage)
             }

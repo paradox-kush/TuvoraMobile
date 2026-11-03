@@ -10,7 +10,9 @@ import com.nuvio.app.features.iptv.XtreamAccount
 import com.nuvio.app.features.iptv.XtreamClient
 import com.nuvio.app.features.iptv.typeEnabled
 import com.nuvio.app.features.tmdb.TmdbTitleBundle
+import com.nuvio.app.core.contracts.MemoryTier
 import com.nuvio.app.core.journal.JournalOutcome
+import com.nuvio.app.core.memory.AppMemory
 import com.nuvio.app.core.journal.StartupJournal
 import com.nuvio.app.core.util.Guarded
 import com.nuvio.app.core.util.containTask
@@ -68,8 +70,25 @@ internal object XtreamTmdbResolver {
     // not kill (and backoff-poison) the build
     private val buildScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    /** Serializes catalog builds across every account — see the use site in [ensureIndexed]. */
-    private val buildSlot = Semaphore(1)
+    /**
+     * Catalog builds: at most [CatalogResiliencePolicy.globalBuildPermits] at once across every account
+     * (memory), and one at a time per provider (a one-connection account must not see two). A dead panel
+     * used to hold the single global slot for minutes and starve every other playlist (P5).
+     */
+    private val buildSlot = Semaphore(
+        CatalogResiliencePolicy.globalBuildPermits(lowMemoryDevice = AppMemory.effectiveTier() == MemoryTier.LOW)
+    )
+    private val providerSlots = mutableMapOf<String, Mutex>()
+    private suspend fun providerSlot(provider: String): Mutex = buildLock.withLock { providerSlots.getOrPut(provider) { Mutex() } }
+
+    /** P4: provider+kind keys whose one-shot full list failed recently, and until when to skip it. */
+    private val avoidFullUntil = mutableMapOf<String, Long>()
+    /** P4: where an interrupted category walk resumes (in memory; a restart walks again from the top). */
+    private val walkCursor = mutableMapOf<String, Int>()
+
+    /** True when [provider] has no catalog rows for [kind] yet: a lookup had nothing to search. */
+    suspend fun catalogPending(provider: String, kind: MatchKind): Boolean =
+        XtreamMatchIndex.builtAt(provider, kind) == null && !XtreamMatchIndex.hasItems(provider, kind)
 
     private fun now() = TraktPlatformClock.nowEpochMs()
 
@@ -107,8 +126,11 @@ internal object XtreamTmdbResolver {
     }
 
     suspend fun resolve(acc: XtreamAccount, kind: MatchKind, tmdbId: Int, titles: TmdbTitleBundle): XtreamMatch? {
-        ensureIndexed(acc, kind)
+        // P2: start (or join) the catalog build, never wait for it. A provider that can't serve its catalog
+        // used to hold every lookup here until the source lane cut it ("No streams found").
+        ensureIndexed(acc, kind, waitIfMissing = false)
         val provider = acc.id
+        // A COMPLETE catalog (stamped built). A partial one has rows but no stamp.
         val indexExists = XtreamMatchIndex.builtAt(provider, kind) != null
 
         // tier 1: the panel told us outright
@@ -119,26 +141,25 @@ internal object XtreamTmdbResolver {
         // tier 2: previously verified (possibly on another device, via Supabase)
         XtreamMatchSyncService.pullOnce(provider)
         XtreamMatchIndex.cachedMapping(provider, kind, tmdbId)?.let { cached ->
-            if (cached.sid != null) {
-                XtreamMatchIndex.item(provider, kind, cached.sid)?.let { return XtreamMatch(it, "cache") }
-                // Item not in the local index. If this provider isn't indexed on THIS device,
-                // trust the synced mapping (another device verified it) and resolve straight
-                // from the sid — that's the whole point of cross-device sync: a match made on
-                // the TV must play on the phone without re-downloading a huge catalog. Only
-                // treat a missing sid as stale-vanished when we actually have the index to check.
-                if (!indexExists) {
-                    return XtreamMatch(IndexedItem(cached.sid, cached.matchedName ?: "", null, tmdbId, null), "cache-synced")
-                }
-                // else: sid vanished from a built catalog — fall through to re-match
-            } else if (now() - cached.updatedAtMs < NEGATIVE_TTL_MS &&
-                cached.updatedAtMs > XtreamMatchIndex.lastAddedAt(provider, kind)
+            val row = cached.sid?.let { XtreamMatchIndex.item(provider, kind, it) }
+            // P1: a verified sid (from this or another device) plays without a local catalog — that is the
+            // point of cross-device sync — and a fresh "not on this provider" holds until titles are added.
+            when (
+                CatalogResiliencePolicy.remembered(
+                    sid = cached.sid,
+                    rowPresent = row != null,
+                    catalogComplete = indexExists,
+                    updatedAtMs = cached.updatedAtMs,
+                    nowMs = now(),
+                    lastAddedAtMs = if (cached.sid == null) XtreamMatchIndex.lastAddedAt(provider, kind) else 0L,
+                    negativeTtlMs = NEGATIVE_TTL_MS,
+                )
             ) {
-                // Fresh "not on this provider" — and the catalog hasn't gained titles since the
-                // verdict. A panel that added items (daily on real providers) falsifies every
-                // older miss, so those fall through to a re-match instead of hiding new content
-                // for NEGATIVE_TTL_MS (measured: a title the panel added 3 days after the synced
-                // verdict stayed invisible on every device).
-                return null
+                CatalogResiliencePolicy.Remembered.USE_ROW -> return XtreamMatch(row!!, "cache")
+                CatalogResiliencePolicy.Remembered.USE_SID ->
+                    return XtreamMatch(IndexedItem(cached.sid!!, cached.matchedName ?: "", null, tmdbId, null), "cache-synced")
+                CatalogResiliencePolicy.Remembered.NOT_ON_PROVIDER -> return null
+                CatalogResiliencePolicy.Remembered.UNKNOWN -> {} // re-match by name below
             }
         }
 
@@ -284,7 +305,13 @@ internal object XtreamTmdbResolver {
      * Single-flight per provider+kind; failures back off for an hour. Never throws —
      * resolve degrades to whatever index exists.
      */
-    suspend fun ensureIndexed(acc: XtreamAccount, kind: MatchKind, force: Boolean = false, awaitRefresh: Boolean = false) {
+    suspend fun ensureIndexed(
+        acc: XtreamAccount,
+        kind: MatchKind,
+        force: Boolean = false,
+        awaitRefresh: Boolean = false,
+        waitIfMissing: Boolean = true,
+    ) {
         val key = "${acc.id}#${kind.slug}"
         // The index-state read is a SQLite query BEFORE the build's own try/catch, on the caller's
         // coroutine (a warm-up launch, a resolve() call, or a headless refresh worker). A
@@ -334,36 +361,7 @@ internal object XtreamTmdbResolver {
                     return@launch
                 }
                 try {
-                    val stats = buildSlot.withPermit {
-                        // One catalog build at a time across ALL accounts, and STREAMED: each
-                        // parsed row goes straight into the SQLite session and is then garbage,
-                        // so a build peaks at one 5k flush-chunk instead of the whole catalog
-                        // (~40-50 MB of IndexedItem on a 175k panel — the allocation that used
-                        // to OOM low-RAM devices right after a playlist was added).
-                        // The category list rides along (P7): stored on success so the hub can
-                        // serve section rows without a per-session network fetch.
-                        val cats = when (kind) {
-                            MatchKind.MOVIE -> XtreamClient.vodCategories(acc)
-                            MatchKind.SERIES -> XtreamClient.seriesCategories(acc)
-                            MatchKind.LIVE -> XtreamClient.liveCategories(acc)
-                        }.getOrThrow()
-                        val session = XtreamMatchIndex.beginSync(acc.id, kind)
-                        val fetched = when (kind) {
-                            MatchKind.MOVIE -> XtreamClient.vodIndexItemsInto(acc, session::accept).getOrThrow()
-                            MatchKind.SERIES -> XtreamClient.seriesIndexItemsInto(acc, session::accept).getOrThrow()
-                            MatchKind.LIVE -> XtreamClient.liveIndexItemsInto(acc, session::accept).getOrThrow()
-                        }
-                        // An empty list where we previously indexed content is a panel glitch, not
-                        // a real catalog — fail into the 1h backoff instead of re-fetching every
-                        // resolve. Checked BEFORE finish() so built_at stays untouched.
-                        check(fetched > 0 || XtreamMatchIndex.builtAt(acc.id, kind) == null) {
-                            "panel returned an empty ${kind.slug} list"
-                        }
-                        // Category failures must not advance the catalogue freshness stamp.
-                        XtreamMatchIndex.replaceCategories(acc.id, kind, cats.map { c -> c.id to c.name })
-                        val st = session.finish()
-                        st
-                    }
+                    val stats = providerSlot(acc.id).withLock { buildSlot.withPermit { buildCatalog(acc, kind, key) } }
                     log.i { "synced ${kind.slug} index for ${acc.name}: +${stats.added} ~${stats.changed} -${stats.removed} (${stats.total} total)" }
                     com.nuvio.app.features.iptv.IptvCatalogChanges.changed(acc.id, kind.name)
                     StartupJournal.record(StartupJournal.OP_INDEX_BUILD, key, token, JournalOutcome.COMPLETED)
@@ -392,12 +390,86 @@ internal object XtreamTmdbResolver {
                 }
             }
         }
-        // A stale-but-present index serves immediately — yesterday's catalog still
-        // resolves, and the rebuild lands in the background. Only a MISSING index is
-        // worth blocking the caller for.
-        if (existing != null && !force && !awaitRefresh) return
+        // A stale-but-present index serves immediately — yesterday's catalog still resolves, and the
+        // rebuild lands in the background. A missing one is waited for only by callers that need it
+        // (search, refresh); a title lookup answers from what is local (P2).
+        if (!CatalogResiliencePolicy.shouldAwaitBuild(existing, force, awaitRefresh, waitIfMissing)) return
         // await is cancellable (the caller's request may die); the build itself is not
         deferred.await()
+    }
+
+    /**
+     * One catalog build, STREAMED: each parsed row goes straight into the SQLite session and is then
+     * garbage, so a build peaks at one 5k flush-chunk instead of the whole catalog (~40-50 MB of
+     * IndexedItem on a 175k panel — the allocation that used to OOM low-RAM devices right after a
+     * playlist was added). The category list rides along (P7): stored on success so the hub can serve
+     * section rows without a per-session network fetch.
+     *
+     * P4: the one-shot full list is tried first unless it failed recently. If the panel cuts it off, the
+     * rows that arrived are kept (a partial, searchable catalog) and the provider is asked category by
+     * category instead — the fallback NuvioPlusIPTV and StreamVault use for the same panels.
+     */
+    private suspend fun buildCatalog(acc: XtreamAccount, kind: MatchKind, key: String): SyncStats {
+        val cats = when (kind) {
+            MatchKind.MOVIE -> XtreamClient.vodCategories(acc)
+            MatchKind.SERIES -> XtreamClient.seriesCategories(acc)
+            MatchKind.LIVE -> XtreamClient.liveCategories(acc)
+        }.getOrThrow()
+        val session = XtreamMatchIndex.beginSync(acc.id, kind)
+        suspend fun fetch(categoryId: String?): Result<Int> = when (kind) {
+            MatchKind.MOVIE -> XtreamClient.vodIndexItemsInto(acc, session::accept, categoryId)
+            MatchKind.SERIES -> XtreamClient.seriesIndexItemsInto(acc, session::accept, categoryId)
+            MatchKind.LIVE -> XtreamClient.liveIndexItemsInto(acc, session::accept, categoryId)
+        }
+
+        if (CatalogResiliencePolicy.useFullList(buildLock.withLock { avoidFullUntil[key] }, now())) {
+            val full = fetch(null)
+            val fetched = full.getOrNull()
+            if (fetched != null) {
+                // An empty list where we previously indexed content is a panel glitch, not a real
+                // catalog — fail into the 1h backoff instead of re-fetching every resolve. Checked
+                // BEFORE finish() so built_at stays untouched.
+                check(fetched > 0 || XtreamMatchIndex.builtAt(acc.id, kind) == null) {
+                    "panel returned an empty ${kind.slug} list"
+                }
+                // Category failures must not advance the catalogue freshness stamp.
+                XtreamMatchIndex.replaceCategories(acc.id, kind, cats.map { c -> c.id to c.name })
+                buildLock.withLock { avoidFullUntil.remove(key); walkCursor.remove(key) }
+                return session.finish()
+            }
+            val error = full.exceptionOrNull()!!
+            if (error is CancellationException) throw error
+            if (error::class.simpleName == "OutOfMemoryError") throw error
+            log.w(error) { "full ${kind.slug} list failed for ${acc.name}; keeping what arrived, walking categories" }
+            session.keepPartial()
+            buildLock.withLock { avoidFullUntil[key] = now() + CatalogResiliencePolicy.AVOID_FULL_MS }
+            com.nuvio.app.features.iptv.IptvCatalogChanges.changed(acc.id, kind.name)
+        }
+
+        XtreamMatchIndex.replaceCategories(acc.id, kind, cats.map { c -> c.id to c.name })
+        val start = buildLock.withLock { walkCursor[key] ?: 0 }.coerceIn(0, cats.size)
+        var done = 0
+        var stoppedAt: Int? = null
+        for (i in start until cats.size) {
+            if (i > start) delay(CatalogResiliencePolicy.CATEGORY_GAP_MS)
+            val r = fetch(cats[i].id)
+            val error = r.exceptionOrNull()
+            if (error == null) { done++; continue }
+            if (error is CancellationException) throw error
+            session.keepPartial()
+            val step = CatalogResiliencePolicy.afterCategoryFailure(
+                httpStatus = (error as? com.nuvio.app.features.addons.HttpStatusException)?.status,
+                hostGuardRefused = error is com.nuvio.app.features.iptv.PanelHostFastFailException,
+            )
+            if (step == CatalogResiliencePolicy.CategoryStep.STOP_AND_BACK_OFF) { stoppedAt = i; break }
+        }
+        session.keepPartial()
+        buildLock.withLock { if (stoppedAt != null) walkCursor[key] = stoppedAt else walkCursor.remove(key) }
+        if (CatalogResiliencePolicy.walkCompletes(cats.size, done, start)) return session.finish()
+        // The rows that arrived are searchable now; say so, then fail into the backoff so the walk
+        // resumes later instead of re-asking a struggling panel on every lookup.
+        com.nuvio.app.features.iptv.IptvCatalogChanges.changed(acc.id, kind.name)
+        throw IllegalStateException("${kind.slug} catalog incomplete: $done of ${cats.size - start} categories")
     }
 
     /** Callers hold [buildLock]. Tracks per-account in-flight build counts for [indexing]. */

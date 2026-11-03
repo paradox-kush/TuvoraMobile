@@ -142,13 +142,13 @@ object XtreamClient : IptvClient {
      * the devices whose heap can't take it. Returns the delivered-row count; throws (like the list
      * variant) on a truncated body, so a partial catalog can't finalize a sync.
      */
-    internal suspend fun vodIndexItemsInto(acc: XtreamAccount, onItem: (IndexedItem) -> Unit): Result<Int> = call {
-        streamArrayInto(acc, { a -> playerApi(a, "get_vod_streams") }, { o -> parseVodIndexItem(o) }, onItem)
+    internal suspend fun vodIndexItemsInto(acc: XtreamAccount, onItem: (IndexedItem) -> Unit, categoryId: String? = null): Result<Int> = call {
+        streamArrayInto(acc, { a -> playerApi(a, "get_vod_streams", categoryId) }, { o -> parseVodIndexItem(o) }, onItem)
     }
 
     /** Series half of [vodIndexItemsInto]. */
-    internal suspend fun seriesIndexItemsInto(acc: XtreamAccount, onItem: (IndexedItem) -> Unit): Result<Int> = call {
-        streamArrayInto(acc, { a -> playerApi(a, "get_series") }, { o -> parseSeriesIndexItem(o) }, onItem)
+    internal suspend fun seriesIndexItemsInto(acc: XtreamAccount, onItem: (IndexedItem) -> Unit, categoryId: String? = null): Result<Int> = call {
+        streamArrayInto(acc, { a -> playerApi(a, "get_series", categoryId) }, { o -> parseSeriesIndexItem(o) }, onItem)
     }
 
     /** One VOD list entry -> index row, skipping the domain model entirely. internal for tests. */
@@ -183,8 +183,8 @@ object XtreamClient : IptvClient {
     }
 
     /** Live half of [vodIndexItemsInto]. */
-    internal suspend fun liveIndexItemsInto(acc: XtreamAccount, onItem: (IndexedItem) -> Unit): Result<Int> = call {
-        streamArrayInto(acc, { a -> playerApi(a, "get_live_streams") }, { o -> parseLiveIndexItem(o) }, onItem)
+    internal suspend fun liveIndexItemsInto(acc: XtreamAccount, onItem: (IndexedItem) -> Unit, categoryId: String? = null): Result<Int> = call {
+        streamArrayInto(acc, { a -> playerApi(a, "get_live_streams", categoryId) }, { o -> parseLiveIndexItem(o) }, onItem)
     }
 
     /** One series list entry -> index row. internal for tests. */

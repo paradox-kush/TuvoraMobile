@@ -293,6 +293,14 @@ internal object XtreamMatchIndex {
      * sheet's catalog counts (item 8): the numbers already exist locally, zero API calls, exactly
      * how the reference client shows "Movies: 60000" (from data it already has).
      */
+    /** True when any row exists for provider+kind, built or partial (see [SyncSession.keepPartial]). */
+    suspend fun hasItems(provider: String, kind: MatchKind): Boolean = mutex.withLock {
+        connection().prepare("SELECT 1 FROM items WHERE provider = ? AND kind = ? LIMIT 1").use { st ->
+            st.bindText(1, provider); st.bindText(2, kind.slug)
+            st.step()
+        }
+    }
+
     suspend fun indexedCount(provider: String, kind: MatchKind): Int? = mutex.withLock {
         connection().prepare("SELECT item_count FROM idx_meta WHERE provider = ? AND kind = ?").use { st ->
             st.bindText(1, provider); st.bindText(2, kind.slug)
@@ -711,6 +719,14 @@ internal object XtreamMatchIndex {
             pending.clear()
             pendingChanged.clear()
         }
+
+        /**
+         * Writes the rows received so far WITHOUT finishing: no deletes, no built_at stamp. A list the
+         * panel cut off part-way (measured: a 200 whose body stops mid-JSON) keeps what arrived, so the
+         * matcher can search a partial catalog instead of an empty one. Rows below one flush chunk used
+         * to be dropped outright.
+         */
+        suspend fun keepPartial() = flush()
 
         /**
          * Flushes the tail, deletes rows the fetch no longer contains, and bumps built_at LAST.

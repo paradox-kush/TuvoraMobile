@@ -1202,6 +1202,11 @@ private fun EmptyStateBlock(
             }
         }
 
+        StreamsEmptyStateReason.SourcesStillLoading -> {
+            title = stringResource(Res.string.streams_empty_iptv_loading_title)
+            message = stringResource(Res.string.streams_empty_iptv_loading_message)
+        }
+
         StreamsEmptyStateReason.NoCompatibleAddons -> {
             title = stringResource(Res.string.playback_unavailable)
             message = stringResource(Res.string.playback_unavailable_message)

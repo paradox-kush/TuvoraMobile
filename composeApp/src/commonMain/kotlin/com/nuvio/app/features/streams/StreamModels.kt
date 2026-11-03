@@ -320,9 +320,13 @@ data class AddonStreamGroup(
     val streams: List<StreamItem>,
     val isLoading: Boolean = false,
     val error: String? = null,
+    /** An IPTV playlist that hasn't finished loading its catalog (or didn't answer in time): not "no streams". */
+    val iptvPending: Boolean = false,
 )
 
 enum class StreamsEmptyStateReason {
+    /** Nothing found yet, but a playlist is still loading its catalog: say so, never "No streams found". */
+    SourcesStillLoading,
     NoAddonsInstalled,
     NoCompatibleAddons,
     NoStreamsFound,

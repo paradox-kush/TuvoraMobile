@@ -1,6 +1,7 @@
 package com.nuvio.app.features.streams
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.core.contracts.IptvCatalogPendingException
 import com.nuvio.app.core.contracts.StreamSourceGroup
 import kotlinx.coroutines.Job
 
@@ -33,9 +34,21 @@ internal object IptvMatchSourceLane {
                     addonId = source.sourceId,
                     streams = streams,
                     isLoading = false,
+                    // Cut before it answered: still loading, not "nothing on this playlist".
+                    iptvPending = resolved == null,
                 )
             },
             onFailure = { err ->
+                if (err is IptvCatalogPendingException) {
+                    log.i { "Xtream match for ${source.addonName}: catalog still loading" }
+                    return@fold AddonStreamGroup(
+                        addonName = source.addonName,
+                        addonId = source.sourceId,
+                        streams = emptyList(),
+                        isLoading = false,
+                        iptvPending = true,
+                    )
+                }
                 log.w(err) { "Xtream match failed for ${source.addonName}" }
                 AddonStreamGroup(
                     addonName = source.addonName,
