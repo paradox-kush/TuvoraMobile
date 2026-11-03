@@ -58,6 +58,7 @@ import com.nuvio.app.core.ui.NuvioScreenHeader
 import com.nuvio.app.core.ui.NuvioSectionLabel
 import com.nuvio.app.core.ui.NuvioStatusModal
 import com.nuvio.app.core.ui.NuvioSurfaceCard
+import com.nuvio.app.features.profiles.ProfileRepository
 import kotlinx.coroutines.launch
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
@@ -111,7 +112,11 @@ internal fun AddonsSettingsPageContent(
         OverviewCard(overview = overview)
 
         SectionHeader(stringResource(Res.string.addons_section_add_addon))
-        AddAddonCard(
+        val profileState by ProfileRepository.state.collectAsStateWithLifecycle()
+        val activeProfile = profileState.activeProfile
+        if (AddonManagementPolicy.isReadOnly(activeProfile?.profileIndex, activeProfile?.usesPrimaryAddons == true)) {
+            ManagedByMainProfileCard()
+        } else AddAddonCard(
             addonUrl = addonUrl,
             formMessage = formMessage,
             usePersonalMediaCopy = usePersonalMediaCopy,
@@ -328,6 +333,22 @@ private fun VerticalSeparator() {
             .height(64.dp)
             .background(MaterialTheme.colorScheme.outline),
     )
+}
+
+@Composable
+private fun ManagedByMainProfileCard() {
+    NuvioSurfaceCard {
+        Text(
+            text = stringResource(Res.string.addons_managed_by_main_title),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(Res.string.addons_managed_by_main_body),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable

@@ -557,12 +557,12 @@ object AddonRepository {
 
     private fun resolveEffectiveProfileId(profileId: Int): Int {
         val active = ProfileRepository.state.value.activeProfile
-        return if (active != null && active.profileIndex != 1 && active.usesPrimaryAddons) 1 else profileId
+        return if (AddonManagementPolicy.isReadOnly(active?.profileIndex, active?.usesPrimaryAddons == true)) 1 else profileId
     }
 
     private fun isUsingPrimaryAddonsFromSecondaryProfile(): Boolean {
         val active = ProfileRepository.state.value.activeProfile
-        return active != null && active.profileIndex != 1 && active.usesPrimaryAddons
+        return AddonManagementPolicy.isReadOnly(active?.profileIndex, active?.usesPrimaryAddons == true)
     }
 }
 

@@ -1798,7 +1798,9 @@
     <string name="profile_pin_offline_verification_requires_online">This PIN can't be verified offline on this device yet. Connect once and unlock it online first.</string>
     <string name="profile_pin_set_failed">Couldn't set PIN. Try again.</string>
     <string name="profile_pin_set_requires_internet">Connect to the internet to set a PIN.</string>
-    <string name="profile_primary_addons_required">This profile uses primary addons.</string>
+    <string name="profile_primary_addons_required">This profile uses the main profile's addons, so they can only be changed there.</string>
+    <string name="addons_managed_by_main_title">Managed by your main profile</string>
+    <string name="addons_managed_by_main_body">This profile uses the main profile's addons. To install or remove addons, switch to the main profile, or turn off "Use primary addons" in this profile's settings.</string>
     <string name="streams_failed_to_load_scraper">Failed to load %1$s</string>
     <string name="stream_default_name">Stream</string>
     <string name="source_embedded">Embedded</string>
