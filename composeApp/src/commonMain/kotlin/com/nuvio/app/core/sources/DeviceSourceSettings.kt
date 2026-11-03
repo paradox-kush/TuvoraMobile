@@ -69,7 +69,9 @@ fun DeviceSourcesHost(ownsAppRuntime: Boolean) {
         }
     }
     LaunchedEffect(view.mode) {
-        if (view.mode in listOf("select","replaced","storage_error")) visible = true
+        // "select" is no longer a question to put to the viewer: a new device sets itself up, and a failed
+        // first attempt retries on the next resume. Only states that need a decision open the dialog.
+        if (view.mode in listOf("replaced","storage_error")) visible = true
     }
     LaunchedEffect(requested) { if (requested) { visible = true; engine.refresh(profile) } }
     LaunchedEffect(engine,profile,addons.addons,servers.connections,iptv) {
