@@ -80,4 +80,12 @@ class AddonSubtitleIdPolicyTest {
             com.nuvio.app.core.contracts.OwnSourcePolicy.resetForTest()
         }
     }
+
+    @Test
+    fun aProviderScopedStreamIsNeverProbedForAnOpenSubtitlesHash() {
+        // The hash reads the first and last bytes of the stream URL, and an IPTV link can be single-use.
+        assertFalse(AddonSubtitleIdPolicy.allowsStreamHashProbe("xtream:http://panel.example:8080|user|movie|42"))
+        assertTrue(AddonSubtitleIdPolicy.allowsStreamHashProbe("tt0133093"))
+        assertTrue(AddonSubtitleIdPolicy.allowsStreamHashProbe(null))
+    }
 }

@@ -65,6 +65,7 @@ data class PlayerLaunch(
     val contentLanguage: String? = null,
     /** Set when this live launch replays one programme through catch-up — see [LiveReplayLaunch]. */
     val liveReplay: LiveReplayLaunch? = null,
+    val subtitleExtras: SubtitleRequestExtras? = null,
     val sourceFilename: String? = null,
     val stream: com.nuvio.app.features.streams.StreamItem? = null,
 )

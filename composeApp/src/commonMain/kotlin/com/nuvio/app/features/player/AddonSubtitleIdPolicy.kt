@@ -22,6 +22,13 @@ object AddonSubtitleIdPolicy {
             // Any other own source (a media server: `ms:` ids embed the server and user ids) is provider-scoped too.
             com.nuvio.app.core.contracts.OwnSourcePolicy.isOwnContentId(id?.trim())
 
+    /**
+     * Whether the stream behind [activeVideoId] may be fetched just to compute an OpenSubtitles hash.
+     * The hash reads the first and last bytes of the stream URL; an IPTV or media-server URL can be a
+     * single-use link, so probing it can burn the link the player is about to use.
+     */
+    fun allowsStreamHashProbe(activeVideoId: String?): Boolean = !isProviderScoped(activeVideoId)
+
     /** The Stremio-style public id for an IPTV item, or null when it cannot be formed. */
     fun publicVideoId(imdbId: String?, isSeries: Boolean, season: Int?, episode: Int?): String? {
         val imdb = imdbId?.trim()?.lowercase()?.takeIf { IMDB_ID.matches(it) } ?: return null
