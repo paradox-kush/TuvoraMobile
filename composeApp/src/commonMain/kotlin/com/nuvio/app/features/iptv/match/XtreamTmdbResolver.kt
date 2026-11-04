@@ -94,6 +94,22 @@ internal object XtreamTmdbResolver {
     /** Test seam: shortens both catalog request deadlines. */
     internal var deadlineOverrideMsForTests: Long? = null
 
+    /**
+     * Test seam: cancel every leaked background build, wait for them to unwind (releasing their build
+     * permit / provider slot), and clear all process-wide bookkeeping so the next test starts cold.
+     */
+    internal suspend fun resetForTests() {
+        val jobs = buildScope.coroutineContext[kotlinx.coroutines.Job]?.children?.toList().orEmpty()
+        jobs.forEach { it.cancel() }
+        jobs.forEach { it.join() }
+        buildLock.withLock {
+            inFlightBuilds.clear(); lastFailedBuildMs.clear(); indexingCounts.clear()
+            providerSlots.clear(); avoidFullUntil.clear(); walkCursor.clear()
+            _indexing.value = emptySet()
+        }
+        deadlineOverrideMsForTests = null
+    }
+
     private fun now() = TraktPlatformClock.nowEpochMs()
 
     /**

@@ -49,6 +49,14 @@ internal class StartupJournalController(
     @Volatile private var uiLaunchMarked = false
     @Volatile private var startupToken: Long? = null
 
+    /** Test seam: forget the latched init/health so the next call re-reads the (re-pointed) store. */
+    internal fun resetForTests() {
+        synchronized(lock) {
+            initialized = false; healthy = false; runId = 0L; journal = Journal()
+            gated = false; safeMode = false; uiLaunchMarked = false; startupToken = null
+        }
+    }
+
     val isHealthy: Boolean get() { ensureInitialized(); return healthy }
     val currentRunId: Long get() { ensureInitialized(); return runId }
 
@@ -181,6 +189,8 @@ internal object StartupJournal {
     val isHealthy: Boolean get() = impl.isHealthy
     val currentRunId: Long get() = impl.currentRunId
     val isSafeMode: Boolean get() = impl.isSafeMode
+
+    internal fun resetForTests() = impl.resetForTests()
 
     fun ensureInitialized() = impl.ensureInitialized()
     fun beginAttempt(op: String, subject: String): Long? = impl.beginAttempt(op, subject)
