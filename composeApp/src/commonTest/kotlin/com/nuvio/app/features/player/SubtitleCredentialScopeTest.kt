@@ -111,4 +111,18 @@ class SubtitleCredentialScopeTest {
             "an unparseable hop fails closed",
         )
     }
+
+    @Test
+    fun mpvSubAddNeverCarriesStreamCredentials() {
+        val out = SubtitleCredentialScope.mpvSubtitleRequestHeaders(null)
+        assertEquals(emptyMap(), out, "no subtitle headers -> nothing, so the stream cookie is cleared for sub-add")
+    }
+
+    @Test
+    fun mpvSubAddKeepsOnlySubtitleOwnForwardableHeaders() {
+        val out = SubtitleCredentialScope.mpvSubtitleRequestHeaders(
+            mapOf("X-Sub-Key" to "k", "Range" to "bytes=0-", "Host" to "evil", " " to "x", "Blank" to " "),
+        )
+        assertEquals(mapOf("X-Sub-Key" to "k"), out, "own header kept; hop-by-hop and blank entries dropped")
+    }
 }

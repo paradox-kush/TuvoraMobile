@@ -1093,27 +1093,26 @@ final class MPVPlayerViewController: UIViewController {
 
     func addSubtitleUrl(_ url: String) {
         guard mpv != nil else { return }
-        command("sub-add", args: [url, "select"])
+        scopedSubAdd(args: [url, "select"], subtitleHeaders: nil, checkForErrors: true)
     }
 
     private func addSubtitle(_ subtitle: PluginSubtitle, mode: String) {
         guard mpv != nil else { return }
-        let subtitleHeaders = sanitizeRequestHeaders(subtitle.headers ?? [:])
-        let previousHeaders = activeRequestHeaders
-
-        if !subtitleHeaders.isEmpty {
-            applyRequestHeaders(previousHeaders.merging(subtitleHeaders) { _, subtitleValue in subtitleValue })
-        }
-
-        command(
-            "sub-add",
+        scopedSubAdd(
             args: [subtitle.url, mode, subtitle.name ?? subtitle.language, subtitle.language],
+            subtitleHeaders: sanitizeRequestHeaders(subtitle.headers ?? [:]),
             checkForErrors: false
         )
+    }
 
-        if !subtitleHeaders.isEmpty {
-            applyRequestHeaders(previousHeaders)
-        }
+    /// B200: mpv's `http-header-fields` is global, so the stream's Cookie/tokens would reach the
+    /// subtitle host. Swap in only the subtitle's own headers for this `sub-add`, then restore the
+    /// stream's. Both header writes and the command run in order on the serial mpv queue, and
+    /// `sub-add` opens the file synchronously, so no stream request sees the scoped value.
+    private func scopedSubAdd(args: [String?], subtitleHeaders: [String: String]?, checkForErrors: Bool) {
+        applyRequestHeaders(SubtitleHeaderScope.requestHeaders(subtitleHeaders: subtitleHeaders))
+        command("sub-add", args: args, checkForErrors: checkForErrors)
+        applyRequestHeaders(activeRequestHeaders)
     }
 
     func removeExternalSubtitles() {
@@ -1826,5 +1825,25 @@ final class MPVPlayerBridgeCreator: NSObject, NuvioPlayerBridgeCreator {
 enum NuvioPlayerRegistration {
     static func register() {
         NuvioPlayerBridgeFactory.shared.registerFactory(creator: MPVPlayerBridgeCreator())
+    }
+}
+
+/// Which request headers an mpv `sub-add` fetch may carry (B200). Mirrors the Kotlin
+/// `SubtitleCredentialScope.mpvSubtitleRequestHeaders`.
+///
+/// mpv's `http-header-fields` is ONE global option applied to every HTTP request the core makes, so
+/// unless it is swapped around `sub-add` the playing stream's Cookie / Authorization / token rides to
+/// the subtitle host. Fail closed: the stream's headers are never included (ffmpeg re-sends custom
+/// headers on a redirect and cannot scope them per hop). Only the subtitle's own headers are kept,
+/// minus hop-by-hop ones and blank entries.
+enum SubtitleHeaderScope {
+    private static let nonForwardable: Set<String> = ["range", "host", "connection", "transfer-encoding"]
+
+    static func requestHeaders(subtitleHeaders: [String: String]?) -> [String: String] {
+        (subtitleHeaders ?? [:]).filter { key, value in
+            let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !k.isEmpty && !v.isEmpty && !nonForwardable.contains(k.lowercased())
+        }
     }
 }
