@@ -49,6 +49,7 @@ import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.compose_player_episode_code_full
 import nuvio.composeapp.generated.resources.compose_player_go_back
 import nuvio.composeapp.generated.resources.compose_player_playback_error
+import nuvio.composeapp.generated.resources.compose_player_retry
 import nuvio.composeapp.generated.resources.compose_player_youre_watching
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
@@ -282,6 +283,7 @@ internal fun PauseMetadataOverlay(
 internal fun ErrorModal(
     message: String,
     onDismiss: () -> Unit,
+    onRetry: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -310,12 +312,32 @@ internal fun ErrorModal(
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (onRetry != null) {
+                Surface(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .widthIn(min = 180.dp, max = 260.dp)
+                        .clickable(onClick = onRetry),
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(
+                        text = stringResource(Res.string.compose_player_retry),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        style = MaterialTheme.nuvioTypeScale.bodyLg.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
             Surface(
                 modifier = Modifier
                     .padding(top = 4.dp)
                     .widthIn(min = 180.dp, max = 260.dp)
                     .clickable(onClick = onDismiss),
-                color = MaterialTheme.colorScheme.primary,
+                color = if (onRetry != null) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
                 shape = RoundedCornerShape(12.dp),
             ) {
                 Text(

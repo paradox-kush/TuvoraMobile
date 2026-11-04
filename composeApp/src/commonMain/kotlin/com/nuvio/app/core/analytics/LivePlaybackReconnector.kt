@@ -12,6 +12,7 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
     private var attempts = 0
     private var lastAttemptAtMs = 0L
     private var gaveUp = false
+    private var attemptsWithoutPlayback = 0
 
     /** Whether the reconnect ladder has been exhausted for the open freeze. */
     val hasGivenUp: Boolean get() = gaveUp
@@ -20,6 +21,17 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
     fun reset() {
         attempts = 0
         lastAttemptAtMs = 0L
+        gaveUp = false
+        attemptsWithoutPlayback = 0
+    }
+
+    /**
+     * A frame is rendering again: the "provider never lets it back" streak ends. Called by the
+     * snapshot adapter on healthy samples; a channel that plays between drops never gives up.
+     */
+    fun onPlaybackConfirmed() {
+        attemptsWithoutPlayback = 0
+        // Playing again (e.g. after the viewer's Retry) re-opens the ladder for later drops.
         gaveUp = false
     }
 
@@ -35,6 +47,8 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
         resetVideo: (() -> Boolean)? = null,
         reconnect: () -> Unit,
     ): Boolean {
+        // Terminal until the viewer retries (which resets this): a Failed channel is not re-asked on a timer.
+        if (gaveUp) return false
         val sinceLastAttemptMs = if (lastAttemptAtMs == 0L) Long.MAX_VALUE else nowMs - lastAttemptAtMs
         return when (
             LivePlaybackRecoveryPolicy.evaluate(
@@ -46,6 +60,7 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
                     // rather than burning two attempts doing nothing.
                     videoResetAttempts = if (resetVideo == null) 0 else LivePlaybackRecoveryPolicy.VIDEO_RESET_ATTEMPTS,
                     retryIndefinitely = true,
+                    attemptsWithoutPlayback = attemptsWithoutPlayback,
                 )
             )
         ) {
@@ -53,6 +68,7 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
 
             LivePlaybackRecoveryPolicy.Decision.ResetVideo -> {
                 attempts += 1
+                attemptsWithoutPlayback += 1
                 lastAttemptAtMs = nowMs
                 reporter.onRecoveryAttempt(nowMs)
                 // An engine that has no video-reset primitive reports false, and the attempt
@@ -72,6 +88,7 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
 
             LivePlaybackRecoveryPolicy.Decision.Reconnect -> {
                 attempts += 1
+                attemptsWithoutPlayback += 1
                 lastAttemptAtMs = nowMs
                 reporter.onRecoveryAttempt(nowMs)
                 reconnect()

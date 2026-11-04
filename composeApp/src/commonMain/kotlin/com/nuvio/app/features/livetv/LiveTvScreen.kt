@@ -154,6 +154,9 @@ fun LiveTvScreen(
     var source by remember { mutableStateOf<LiveChannelSource?>(null) }
     var resolveError by remember { mutableStateOf(false) }
     var playbackError by remember { mutableStateOf<String?>(null) }
+    // The reconnect ladder ran out (several reconnects in a row never rendered a frame). Kept apart
+    // from playbackError so the one-shot automatic re-resolve below does not re-open the ladder.
+    var reconnectGaveUp by remember { mutableStateOf(false) }
     var snapshot by remember { mutableStateOf(PlayerPlaybackSnapshot()) }
     var controller by remember { mutableStateOf<PlayerEngineController?>(null) }
     // Live TV hosts its own player surface rather than going through PlayerScreen, so the
@@ -282,6 +285,7 @@ fun LiveTvScreen(
         source = null
         resolveError = false
         playbackError = null
+        reconnectGaveUp = false
         // Bounded (BoundedLoad): a portal that never answers create_link ends as the error pill + Retry,
         // not a spinner over a black player.
         val resolved = BoundedLoad.run(
@@ -304,6 +308,7 @@ fun LiveTvScreen(
         source = null
         resolveError = false
         playbackError = null
+        reconnectGaveUp = false
         source = LiveTvData.catchUpSource(session.contentId, session.attempt.url)
     }
     // Always re-resolve on retry: live links carry expiring tokens (Stalker create_link is
@@ -312,6 +317,7 @@ fun LiveTvScreen(
     // fast-fail — the AUTOMATIC one-shot re-resolve below must not reset.
     val onRetry: () -> Unit = {
         LiveTvData.resetPanelGuard(currentContentId)
+        reconnectGaveUp = false
         source = null
         controller = null
         snapshot = PlayerPlaybackSnapshot()
@@ -616,7 +622,7 @@ fun LiveTvScreen(
                 }
             }
         }
-        val hasError = resolveError || playbackError != null || startupFailed
+        val hasError = resolveError || playbackError != null || startupFailed || reconnectGaveUp
 
         fun setFullscreen(enabled: Boolean) {
             if (LiveTvFullscreenFollowsWindowAspect) manualOrientation = enabled
@@ -767,6 +773,8 @@ fun LiveTvScreen(
                                 // Video-only freeze: the stream is still delivering audio, so reset
                                 // the decoder before spending a live link on a re-resolve.
                                 resetVideo = { controller?.resetVideoPipeline() == true },
+                                // Ladder exhausted: show the error pill with Retry, not a black frame.
+                                onGaveUp = { reconnectGaveUp = true },
                             )
                         }
                     },
