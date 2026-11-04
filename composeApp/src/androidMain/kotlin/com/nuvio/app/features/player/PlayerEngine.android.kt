@@ -1072,6 +1072,7 @@ private fun ExoPlayerSurface(
             exoPlayer.removeListener(listener)
             playerViewRef?.keepScreenOn = false
             subtitleSelectionJob?.cancel()
+            sidecarController.stopSidecarAddonSubtitle(clearView = true)
         }
     }
 
@@ -1245,6 +1246,7 @@ private fun ExoPlayerSurface(
 
                 override fun selectSubtitleTrack(index: Int) {
                     Log.d(TAG, "selectSubtitleTrack: index=$index")
+                    sidecarController.stopSidecarAddonSubtitle(clearView = true)
                     if (index < 0) {
                         Log.d(TAG, "selectSubtitleTrack: disabling text tracks")
                         exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
@@ -1265,6 +1267,26 @@ private fun ExoPlayerSurface(
                 override fun setSubtitleUri(url: String) {
                     Log.d(TAG, "setSubtitleUri: url=${LogRedaction.url(url)}")
                     subtitleSelectionJob?.cancel()
+                    // UX: a text add-on subtitle is attached as a sidecar (cues fetched and rendered on their
+                    // own) so picking one never re-prepares the stream, which would stall and rebuffer it.
+                    // The subtitle's own headers only: the stream's cookies/tokens never go to the subtitle host.
+                    if (sidecarController.canAttachAddonSubtitleViaSidecar(url, useLibass)) {
+                        Log.d(TAG, "setSubtitleUri: using buffer-preserving sidecar for url=${LogRedaction.url(url)}")
+                        val headers = externalSubtitles.firstOrNull { it.url == url }?.headers.orEmpty()
+                        val attached = sidecarController.startSidecarAddonSubtitle(
+                            url = url,
+                            headers = headers,
+                            useLibass = useLibass,
+                        )
+                        if (attached) {
+                            attachedAddonSubtitleConfig = null
+                            exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                                .buildUpon()
+                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                                .build()
+                            return
+                        }
+                    }
                     subtitleSelectionJob = coroutineScope.launch {
                         val currentPosition = exoPlayer.currentPosition
                         val wasPlaying = exoPlayer.isPlaying
@@ -1308,6 +1330,7 @@ private fun ExoPlayerSurface(
                 override fun clearExternalSubtitle() {
                     Log.d(TAG, "clearExternalSubtitle called")
                     subtitleSelectionJob?.cancel()
+                    sidecarController.stopSidecarAddonSubtitle(clearView = true)
                     selectedExternalSubtitleMimeType = null
                     attachedAddonSubtitleConfig = null
                     val currentPosition = exoPlayer.currentPosition
@@ -1326,6 +1349,7 @@ private fun ExoPlayerSurface(
                 override fun clearExternalSubtitleAndSelect(trackIndex: Int) {
                     Log.d(TAG, "clearExternalSubtitleAndSelect: trackIndex=$trackIndex")
                     subtitleSelectionJob?.cancel()
+                    sidecarController.stopSidecarAddonSubtitle(clearView = true)
                     selectedExternalSubtitleMimeType = null
                     pendingSubtitleTrackIndex.clear()
                     pendingSubtitleTrackIndex.add(trackIndex)
