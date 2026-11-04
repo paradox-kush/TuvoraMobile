@@ -411,6 +411,27 @@ object XtreamRepository : IptvCatalog {
         }
     }
 
+    /**
+     * B205: adds playlists a setup code handed over (a device redeem, or a claim that could not be completed).
+     * No live verify (the provider just issued these logins) and a playlist already held under the same id is
+     * never duplicated or overwritten. Records the durable "added" intent like any add, so a later sign-in sync
+     * uploads it. Returns how many were added, or -1 when the durable write failed (nothing was saved).
+     */
+    internal fun addProvisioned(accounts: List<XtreamAccount>): Int {
+        ensureLoaded()
+        val held = _uiState.value.accounts.map { it.id }.toSet()
+        val fresh = accounts.filter { it.id !in held }.distinctBy { it.id }
+        if (fresh.isEmpty()) return 0
+        _uiState.update { it.copy(accounts = it.accounts + fresh) }
+        XtreamTmdbResolver.warmUp(fresh)
+        if (!persist()) {
+            _uiState.update { st -> st.copy(accounts = st.accounts.filterNot { a -> fresh.any { it.id == a.id } }) }
+            return -1
+        }
+        for (account in fresh) recordPending { it.recordAdd(account) }
+        return fresh.size
+    }
+
     /** Re-verify + replace an existing account from a pasted portal/M3U URL (playlist edit). */
     fun editFromUrl(oldId: String, input: String, onResult: (Boolean) -> Unit) {
         managedRenameCandidate(oldId, null)?.let { candidate ->

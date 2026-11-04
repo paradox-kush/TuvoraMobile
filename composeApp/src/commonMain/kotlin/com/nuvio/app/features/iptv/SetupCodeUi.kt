@@ -43,9 +43,6 @@ import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
 import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.core.ui.DialogButton
-import com.nuvio.app.core.ui.DialogButtonStyle
-import com.nuvio.app.core.ui.DialogButtons
-import com.nuvio.app.core.ui.DialogSurface
 import com.nuvio.app.core.ui.NuvioPrimaryButton
 import com.nuvio.app.core.ui.NuvioSurfaceCard
 import com.nuvio.app.core.ui.NuvioToastController
@@ -58,6 +55,10 @@ import com.nuvio.app.features.settings.SettingsSection
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.action_retry
 import nuvio.composeapp.generated.resources.provider_setup_adding
+import nuvio.composeapp.generated.resources.provider_setup_add_to_device
+import nuvio.composeapp.generated.resources.provider_setup_added_device_toast
+import nuvio.composeapp.generated.resources.provider_setup_preview_device
+import nuvio.composeapp.generated.resources.provider_setup_preview_device_note
 import nuvio.composeapp.generated.resources.provider_setup_add_to
 import nuvio.composeapp.generated.resources.provider_setup_added_other_profile_toast
 import nuvio.composeapp.generated.resources.provider_setup_added_toast
@@ -68,9 +69,6 @@ import nuvio.composeapp.generated.resources.provider_setup_code_label
 import nuvio.composeapp.generated.resources.provider_setup_code_placeholder
 import nuvio.composeapp.generated.resources.provider_setup_continue
 import nuvio.composeapp.generated.resources.provider_setup_enter_other_code
-import nuvio.composeapp.generated.resources.provider_setup_guest_confirm
-import nuvio.composeapp.generated.resources.provider_setup_guest_message
-import nuvio.composeapp.generated.resources.provider_setup_guest_title
 import nuvio.composeapp.generated.resources.provider_setup_paste
 import nuvio.composeapp.generated.resources.provider_setup_preview_account
 import nuvio.composeapp.generated.resources.provider_setup_preview_addons
@@ -82,7 +80,6 @@ import nuvio.composeapp.generated.resources.provider_setup_section_title
 import nuvio.composeapp.generated.resources.provider_setup_nothing_added_toast
 import nuvio.composeapp.generated.resources.provider_setup_skipped_login_toast
 import nuvio.composeapp.generated.resources.provider_setup_skipped_url_toast
-import nuvio.composeapp.generated.resources.provider_setup_sign_in_needed
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
@@ -105,13 +102,10 @@ internal fun SetupCodeEntrySection(isTablet: Boolean, onOpenPreview: () -> Unit)
     val controller = SetupCodeController.shared
     val ui by controller.state.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
-    val signInNeeded = stringResource(Res.string.provider_setup_sign_in_needed)
     val submit = {
+        // Signed in or not: a code can always be looked at (B205). Adding to this device needs no account.
         when (controller.onContinue()) {
             ContinueResult.OPEN_PREVIEW -> onOpenPreview()
-            ContinueResult.NEEDS_SIGN_IN ->
-                // A guest is asked in a dialog instead; a signed-out person goes straight to sign-in.
-                if (!controller.state.value.guestPrompt) NuvioToastController.show(signInNeeded)
             ContinueResult.REJECTED -> Unit
         }
     }
@@ -129,7 +123,6 @@ internal fun SetupCodeEntrySection(isTablet: Boolean, onOpenPreview: () -> Unit)
         field = TextFieldValue(grouped, TextRange(grouped.length))
         controller.onTyped(grouped)
     }
-    GuestSignInDialog(ui, controller)
     SettingsSection(title = stringResource(Res.string.provider_setup_section_title), isTablet = isTablet) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = NuvioTokens.Space.s2),
@@ -203,7 +196,6 @@ internal fun LazyListScope.xtreamSetupPreviewContent(
         val auth by AuthRepository.state.collectAsStateWithLifecycle()
         // Keyed on the held-code generation: a link (or a new Continue) while this page is open restarts the load.
         LaunchedEffect(ui.holdGeneration) { controller.loadPreview() }
-        GuestSignInDialog(ui, controller)
 
         val completion = ui.completed
         if (completion != null) {
@@ -212,6 +204,8 @@ internal fun LazyListScope.xtreamSetupPreviewContent(
                 CompletionKind.NOTHING_MISSING_LOGIN -> stringResource(Res.string.provider_setup_skipped_login_toast, completion.providerName)
                 CompletionKind.NOTHING_INVALID_URL -> stringResource(Res.string.provider_setup_skipped_url_toast, completion.providerName)
                 CompletionKind.NOTHING_ADDED -> stringResource(Res.string.provider_setup_nothing_added_toast)
+                CompletionKind.ADDED_ON_DEVICE ->
+                    stringResource(Res.string.provider_setup_added_device_toast, completion.providerName)
                 CompletionKind.ADDED ->
                     if (completion.profileIndex != profileState.activeProfile?.profileIndex) {
                         stringResource(
@@ -241,6 +235,7 @@ internal fun LazyListScope.xtreamSetupPreviewContent(
                     ui = ui,
                     profileState = profileState,
                     accountEmail = (auth as? AuthState.Authenticated)?.email,
+                    onDevice = accountKindOf(auth) != AccountKind.REAL,
                     onSelectProfile = controller::selectProfile,
                     onConfirm = controller::confirm,
                     onCancel = { controller.cancel(); onCancelled() },
@@ -251,26 +246,6 @@ internal fun LazyListScope.xtreamSetupPreviewContent(
                     onOtherCode = { controller.cancel(); onCancelled() },
                 )
             }
-        }
-    }
-}
-
-/** Asks a guest before signing them out of guest mode to reach sign-in (that wipes what a guest saved on the device). */
-@Composable
-private fun GuestSignInDialog(ui: SetupCodeUiState, controller: SetupCodeController) {
-    if (!ui.guestPrompt) return
-    DialogSurface(
-        onDismissRequest = controller::dismissGuestPrompt,
-        title = stringResource(Res.string.provider_setup_guest_title),
-        message = stringResource(Res.string.provider_setup_guest_message),
-    ) {
-        DialogButtons {
-            DialogButton(text = stringResource(Res.string.provider_setup_cancel), onClick = controller::dismissGuestPrompt)
-            DialogButton(
-                text = stringResource(Res.string.provider_setup_guest_confirm),
-                onClick = controller::confirmGuestSignIn,
-                style = DialogButtonStyle.Primary,
-            )
         }
     }
 }
@@ -324,6 +299,8 @@ private fun PreviewReady(
     ui: SetupCodeUiState,
     profileState: com.nuvio.app.features.profiles.ProfileState,
     accountEmail: String?,
+    /** No real account: the playlists go to this device only, and a later sign-in can claim them. */
+    onDevice: Boolean,
     onSelectProfile: (Int) -> Unit,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
@@ -368,40 +345,51 @@ private fun PreviewReady(
         }
     }
 
-    SettingsSection(title = stringResource(Res.string.provider_setup_preview_profile), isTablet = isTablet) {
-        Column(verticalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s10)) {
-            if (profileState.profiles.size > 1) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8),
-                    verticalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8),
-                ) {
-                    profileState.profiles.forEach { profile ->
-                        FilterChip(
-                            selected = profile.profileIndex == selected?.profileIndex,
-                            onClick = { onSelectProfile(profile.profileIndex) },
-                            label = { Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            border = FilterChipDefaults.filterChipBorder(
-                                enabled = true,
+    if (onDevice) {
+        // B205: no account. Nothing to pick: the playlists land on this device, and the line says how to keep them.
+        SettingsGroup(isTablet = isTablet) {
+            PreviewRow(
+                title = stringResource(Res.string.provider_setup_preview_device),
+                description = stringResource(Res.string.provider_setup_preview_device_note),
+                isTablet = isTablet,
+            )
+        }
+    } else {
+        SettingsSection(title = stringResource(Res.string.provider_setup_preview_profile), isTablet = isTablet) {
+            Column(verticalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s10)) {
+                if (profileState.profiles.size > 1) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8),
+                        verticalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8),
+                    ) {
+                        profileState.profiles.forEach { profile ->
+                            FilterChip(
                                 selected = profile.profileIndex == selected?.profileIndex,
-                                borderColor = tokens.colors.borderDefault.copy(alpha = tokens.opacity.medium),
-                                selectedBorderColor = tokens.colors.accent.copy(alpha = tokens.opacity.strong),
-                            ),
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = tokens.colors.accent.copy(alpha = tokens.opacity.selected),
-                                selectedLabelColor = tokens.colors.textPrimary,
-                                labelColor = tokens.colors.textSecondary,
-                            ),
-                        )
+                                onClick = { onSelectProfile(profile.profileIndex) },
+                                label = { Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = profile.profileIndex == selected?.profileIndex,
+                                    borderColor = tokens.colors.borderDefault.copy(alpha = tokens.opacity.medium),
+                                    selectedBorderColor = tokens.colors.accent.copy(alpha = tokens.opacity.strong),
+                                ),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = tokens.colors.accent.copy(alpha = tokens.opacity.selected),
+                                    selectedLabelColor = tokens.colors.textPrimary,
+                                    labelColor = tokens.colors.textSecondary,
+                                ),
+                            )
+                        }
                     }
                 }
-            }
-            SettingsGroup(isTablet = isTablet) {
-                PreviewRow(
-                    title = stringResource(Res.string.provider_setup_preview_account),
-                    description = accountEmail,
-                    isTablet = isTablet,
-                )
+                SettingsGroup(isTablet = isTablet) {
+                    PreviewRow(
+                        title = stringResource(Res.string.provider_setup_preview_account),
+                        description = accountEmail,
+                        isTablet = isTablet,
+                    )
+                }
             }
         }
     }
@@ -416,7 +404,8 @@ private fun PreviewReady(
         text = if (ui.redeeming) {
             stringResource(Res.string.provider_setup_adding)
         } else {
-            stringResource(Res.string.provider_setup_add_to, selected?.name.orEmpty())
+            if (onDevice) stringResource(Res.string.provider_setup_add_to_device)
+            else stringResource(Res.string.provider_setup_add_to, selected?.name.orEmpty())
         },
         enabled = !ui.redeeming && !dead,
         onClick = onConfirm,

@@ -34,6 +34,21 @@ class SetupCodeControllerTest {
         override suspend fun redeem(code: String, profileIndex: Int, skipAddons: Boolean): RedeemResult {
             redeemCalls++; redeemed += code to profileIndex; skipAddonsSeen += skipAddons; return redeemResult
         }
+        var deviceCalls = 0
+        /** (code, claimToken) of every device redeem. */
+        val deviceRedeems = mutableListOf<Pair<String, String>>()
+        var deviceResult: () -> DeviceRedeemResult = {
+            DeviceRedeemResult.Redeemed(
+                DeviceRedeemSummary(
+                    "Acme TV", false,
+                    listOf(DevicePlaylist("key-1", "Live", "xtream", baseUrl = "http://p.example.com", username = "u", password = "p")),
+                ),
+            )
+        }
+        override suspend fun deviceRedeem(code: String, claimToken: String): DeviceRedeemResult {
+            deviceCalls++; deviceRedeems += code to claimToken; return deviceResult()
+        }
+        override suspend fun claimDeviceSetup(claimToken: String, profileIndex: Int, skipAddons: Boolean): DeviceClaimResult = error("not used")
         override suspend fun managedPlaylists(profileId: Int): List<ManagedInfo> = error("not used")
         override suspend fun detach(profileId: Int, playlistKey: String): Boolean = error("not used")
 
@@ -48,7 +63,6 @@ class SetupCodeControllerTest {
     private var now = 0L
     private val holder = SetupCodeHolder(clock = { now })
     private var kind = AccountKind.REAL
-    private var signOuts = 0
     private var activeProfile = 1
     private var signInRequests = 0
     private val pulls = mutableListOf<Int>()
@@ -57,12 +71,19 @@ class SetupCodeControllerTest {
     private var localKeys = setOf("key-1")
     private var existingProfiles = (1..9).toSet()
     private var skipAddons = false
+    private val stored = mutableListOf<List<XtreamAccount>>()
+    private var localAddResult: (List<XtreamAccount>) -> Int = { it.size }
+    private var rawClaims: String? = null
+    private val claims = PendingDeviceClaimStore(load = { rawClaims }, save = { rawClaims = it })
+    private var tokens = 0
 
     private fun controller() = SetupCodeController(
         api = { api }, holder = holder, accountKind = { kind }, activeProfileIndex = { activeProfile },
         profileExists = { it in existingProfiles }, localAccountKeys = { localKeys }, skipAddons = { skipAddons },
         pullPlaylists = { pulls += it }, refreshManaged = { refreshes += it },
-        requestSignIn = { signInRequests++ }, signOutToSignIn = { signOuts++ }, telemetry = ProviderSetupTelemetry,
+        requestSignIn = { signInRequests++ }, telemetry = ProviderSetupTelemetry,
+        addLocalPlaylists = { stored += it; localAddResult(it) }, claims = claims,
+        newClaimToken = { (++tokens).toString().padStart(64, '0') }, nowMs = { 1234L },
         scope = CoroutineScope(Dispatchers.Unconfined),
     )
 
@@ -112,75 +133,11 @@ class SetupCodeControllerTest {
     }
 
     @Test
-    fun `continue without a real account keeps the code and asks to sign in and resumes once after`() {
-        kind = AccountKind.SIGNED_OUT
-        val c = controller()
-        c.onTyped("TUV-ABCD-EFGH-JKMN")
-        assertEquals(ContinueResult.NEEDS_SIGN_IN, c.onContinue())
-        assertEquals(1, signInRequests)
-        assertEquals("ABCDEFGHJKMN", holder.peek(), "kept in memory for the way back")
-        assertFalse(c.takeResumeAfterSignIn(), "not while still signed out")
-        kind = AccountKind.REAL
-        assertTrue(c.takeResumeAfterSignIn(), "back from sign-in: open the preview")
-        assertFalse(c.takeResumeAfterSignIn(), "only once")
-    }
-
-    @Test
-    fun `a guest is asked before being signed out and the code is kept`() {
-        kind = AccountKind.GUEST
-        val c = controller()
-        c.onTyped("TUV-ABCD-EFGH-JKMN")
-        assertEquals(ContinueResult.NEEDS_SIGN_IN, c.onContinue())
-        assertTrue(c.state.value.guestPrompt, "asks first")
-        assertEquals(0, signOuts, "nothing is signed out yet")
-        assertEquals(0, signInRequests)
-        c.confirmGuestSignIn()
-        assertEquals(1, signOuts, "the guest agreed: sign out of guest mode to reach sign-in")
-        assertFalse(c.state.value.guestPrompt)
-        assertEquals("ABCDEFGHJKMN", holder.peek(), "the code survives the sign-out")
-        kind = AccountKind.REAL
-        assertTrue(c.takeResumeAfterSignIn())
-    }
-
-    @Test
-    fun `a guest who says no stays a guest and nothing resumes`() {
-        kind = AccountKind.GUEST
-        val c = controller()
-        c.onTyped("TUV-ABCD-EFGH-JKMN")
-        c.onContinue()
-        c.dismissGuestPrompt()
-        assertEquals(0, signOuts)
-        kind = AccountKind.REAL
-        assertFalse(c.takeResumeAfterSignIn())
-    }
-
-    @Test
-    fun `a code that expires while signing in is not resumed`() {
-        kind = AccountKind.SIGNED_OUT
-        val c = controller()
-        c.onTyped("TUV-ABCD-EFGH-JKMN")
-        c.onContinue()
-        kind = AccountKind.REAL
-        now += SetupCodeHolder.TTL_MS
-        assertFalse(c.takeResumeAfterSignIn())
-    }
-
-    @Test
     fun `a linked code is held and and a link that is not a code is ignored`() {
         val c = controller()
         assertTrue(c.acceptLinkedCode("https://tuvora.co/s/TUV-ABCD-EFGH-JKMN"))
         assertEquals("ABCDEFGHJKMN", holder.peek())
         assertFalse(c.acceptLinkedCode("https://tuvora.co/s/nope"))
-    }
-
-    @Test
-    fun `a linked code without a real account goes to sign-in first`() {
-        kind = AccountKind.SIGNED_OUT
-        val c = controller()
-        assertTrue(c.acceptLinkedCode("TUV-ABCD-EFGH-JKMN"))
-        assertEquals(1, signInRequests)
-        kind = AccountKind.REAL
-        assertTrue(c.takeResumeAfterSignIn())
     }
 
     @Test
@@ -271,16 +228,162 @@ class SetupCodeControllerTest {
         }
     }
 
+    // ---- B205: a code works with no account -------------------------------------------------------------
+
     @Test
-    fun `confirm without a real account asks to sign in and redeems nothing`() {
+    fun `signed-out continue goes to the preview and never to sign-in`() {
+        for (who in listOf(AccountKind.SIGNED_OUT, AccountKind.GUEST)) {
+            kind = who
+            val c = controller()
+            c.onTyped("TUV-ABCD-EFGH-JKMN")
+            assertEquals(ContinueResult.OPEN_PREVIEW, c.onContinue(), "$who")
+            assertEquals("ABCDEFGHJKMN", holder.peek())
+            assertEquals(0, signInRequests, "$who")
+            c.cancel()
+        }
+    }
+
+    @Test
+    fun `a linked code without a real account is held for the preview without a sign-in detour`() {
+        kind = AccountKind.SIGNED_OUT
+        val c = controller()
+        assertTrue(c.acceptLinkedCode("TUV-ABCD-EFGH-JKMN"))
+        assertEquals("ABCDEFGHJKMN", holder.peek())
+        assertEquals(0, signInRequests)
+        assertFalse(c.takeResumeAfterSignIn(), "there is no sign-in to come back from")
+    }
+
+    @Test
+    fun `signed-out preview loads the same way as signed-in`() {
+        kind = AccountKind.SIGNED_OUT
         val c = controller()
         holder.set("ABCDEFGHJKMN")
         c.loadPreview()
-        kind = AccountKind.SIGNED_OUT
+        assertEquals("Acme TV", c.state.value.preview?.providerName)
+        assertEquals(1, api.previewCalls)
+    }
+
+    private fun addOnDevice(c: SetupCodeController) {
+        holder.set("ABCDEFGHJKMN")
+        c.loadPreview()
         c.confirm()
-        assertEquals(0, api.redeemCalls)
-        assertEquals(1, signInRequests)
+    }
+
+    @Test
+    fun `signed-out add redeems to the device with a 64 hex token and stores the playlists and a pending claim`() {
+        kind = AccountKind.SIGNED_OUT
+        val c = controller()
+        addOnDevice(c)
+        assertEquals(0, api.redeemCalls, "the account RPC is never used without an account")
+        val (code, token) = api.deviceRedeems.single()
+        assertEquals("ABCDEFGHJKMN", code)
+        assertEquals(64, token.length)
+        assertTrue(token.all { it in '0'..'9' || it in 'a'..'f' })
+        assertEquals(listOf("key-1"), stored.single().map { it.id }, "stored like a pulled row, keyed by playlist_key")
+        val claim = claims.list().single()
+        assertEquals(token, claim.token)
+        assertEquals("Acme TV", claim.providerName)
+        assertEquals(1234L, claim.createdAtMs)
+        assertEquals(listOf("key-1"), claim.playlists.map { it.playlistKey })
+        assertEquals(emptyList(), pulls, "there is no account to pull from")
+        assertNull(holder.peek(), "the code is spent")
+        val done = c.state.value.completed!!
+        assertEquals(CompletionKind.ADDED_ON_DEVICE, done.outcome)
+        assertEquals("key-1", done.openPlaylistKey)
+        assertTrue(done.onDevice)
+    }
+
+    @Test
+    fun `a guest adds to the device the same way`() {
+        kind = AccountKind.GUEST
+        addOnDevice(controller())
+        assertEquals(1, api.deviceCalls)
+        assertEquals(1, claims.list().size)
+    }
+
+    @Test
+    fun `a network failure keeps the code and the retry reuses the same token`() {
+        kind = AccountKind.SIGNED_OUT
+        val c = controller()
+        api.deviceResult = { DeviceRedeemResult.Refused(SetupCodeOutcome.Network) }
+        addOnDevice(c)
+        assertEquals(SetupCodeOutcome.Network, c.state.value.redeemRefusal, "a failure is never shown as success")
         assertEquals("ABCDEFGHJKMN", holder.peek())
+        assertEquals(emptyList(), claims.list(), "nothing was stored")
+        assertEquals(emptyList(), stored)
+        assertNull(c.state.value.completed)
+        // The server redeemed it anyway; the retry gets the playlists back as already_redeemed.
+        api.deviceResult = {
+            DeviceRedeemResult.Redeemed(DeviceRedeemSummary("Acme TV", true, listOf(DevicePlaylist("key-1", "Live", "xtream", baseUrl = "http://p.example.com", username = "u", password = "p"))))
+        }
+        c.confirm()
+        assertEquals(2, api.deviceCalls)
+        assertEquals(api.deviceRedeems[0].second, api.deviceRedeems[1].second, "same token on retry")
+        assertEquals(1, claims.list().size)
+        assertEquals(CompletionKind.ADDED_ON_DEVICE, c.state.value.completed?.outcome)
+    }
+
+    @Test
+    fun `a new code gets a new token`() {
+        kind = AccountKind.SIGNED_OUT
+        val c = controller()
+        api.deviceResult = { DeviceRedeemResult.Refused(SetupCodeOutcome.Network) }
+        addOnDevice(c)
+        c.cancel()
+        holder.set("PQRSTUVWXYZ2")
+        c.loadPreview()
+        c.confirm()
+        assertTrue(api.deviceRedeems[0].second != api.deviceRedeems[1].second)
+    }
+
+    @Test
+    fun `a dead code on the device route is forgotten`() {
+        kind = AccountKind.SIGNED_OUT
+        val c = controller()
+        api.deviceResult = { DeviceRedeemResult.Refused(SetupCodeOutcome.Unusable) }
+        addOnDevice(c)
+        assertEquals(SetupCodeOutcome.Unusable, c.state.value.redeemRefusal)
+        assertNull(holder.peek())
+        assertEquals(emptyList(), claims.list())
+    }
+
+    @Test
+    fun `a failed local write after the redeem is an error and keeps the token for a retry`() {
+        kind = AccountKind.SIGNED_OUT
+        val c = controller()
+        localAddResult = { -1 }
+        addOnDevice(c)
+        assertEquals(SetupCodeOutcome.Network, c.state.value.redeemRefusal)
+        assertNull(c.state.value.completed)
+        assertEquals("ABCDEFGHJKMN", holder.peek())
+        localAddResult = { it.size }
+        c.confirm()
+        assertEquals(api.deviceRedeems[0].second, api.deviceRedeems[1].second)
+        assertEquals(CompletionKind.ADDED_ON_DEVICE, c.state.value.completed?.outcome)
+    }
+
+    @Test
+    fun `playlists the provider has not filled in are reported not added and store nothing`() {
+        kind = AccountKind.SIGNED_OUT
+        val c = controller()
+        api.deviceResult = {
+            DeviceRedeemResult.Redeemed(DeviceRedeemSummary("Acme TV", false, listOf(DevicePlaylist("k", "L", "xtream", action = "skipped", reason = "missing_login"))))
+        }
+        addOnDevice(c)
+        assertEquals(emptyList(), stored)
+        assertEquals(emptyList(), claims.list(), "no logins, no claim")
+        assertEquals(CompletionKind.NOTHING_MISSING_LOGIN, c.state.value.completed?.outcome)
+    }
+
+    @Test
+    fun `no analytics event for a device redeem carries the code or the token`() {
+        kind = AccountKind.SIGNED_OUT
+        addOnDevice(controller())
+        val token = api.deviceRedeems.single().second
+        for ((name, props) in events) {
+            assertFalse(props.values.any { it.toString().contains("ABCD") || it.toString().contains(token) }, "$name: $props")
+        }
+        assertEquals("device_redeemed", events.last().second["outcome"])
     }
 
     @Test
@@ -534,7 +637,6 @@ class SetupCodeControllerTest {
         assertTrue(c.holdLinkedCode("https://tuvora.co/s/TUV-ABCD-EFGH-JKMN"))
         assertEquals("ABCDEFGHJKMN", holder.peek())
         assertEquals(0, signInRequests, "no sign-in routing while the picker is showing")
-        assertFalse(c.state.value.guestPrompt)
         assertFalse(c.holdLinkedCode("https://tuvora.co/s/nope"), "a link that is not a code holds nothing")
     }
 
@@ -557,12 +659,12 @@ class SetupCodeControllerTest {
     }
 
     @Test
-    fun `a signed-out person whose link was held is sent to sign in when it is accepted`() {
+    fun `a signed-out person whose link was held opens the preview with no sign-in when it is accepted`() {
         kind = AccountKind.SIGNED_OUT
         val c = controller()
         c.holdLinkedCode("TUV-ABCD-EFGH-JKMN")
         assertEquals(0, signInRequests)
         assertTrue(c.acceptHeldCode())
-        assertEquals(1, signInRequests)
+        assertEquals(0, signInRequests)
     }
 }

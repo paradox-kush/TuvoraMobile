@@ -912,14 +912,10 @@ internal fun MainAppContent(
         val shellReadyNow by rememberUpdatedState(rootContentReady)
 
         fun openSetupLink(entry: com.nuvio.app.core.contracts.SetupCodeEntry) {
-            val guest = AuthRepository.state.value.isLocalOnly
             val route = SetupLinkRoutePolicy.decide(
-                isGuest = guest,
                 onTabs = navController.currentRoute is TabsRoute,
                 canPopToTabs = !useNativeNavigation,
             )
-            // A guest sees the code on the Add Playlist page, where they are asked before being taken to sign-in.
-            if (guest) entry.prepareCodeEntryPage()
             SettingsPageRequest.request(route.settingsPage)
             activateTab(AppScreenTab.Settings)
             // Over the player / stream list the settings shell is hidden: leave it the way Back does (the player

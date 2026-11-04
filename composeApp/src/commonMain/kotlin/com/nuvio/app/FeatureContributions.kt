@@ -16,6 +16,7 @@ import com.nuvio.app.core.rec.RecLocalStateCleaner
 import com.nuvio.app.core.rec.RecPlaybackReporterImpl
 import com.nuvio.app.core.rec.RecSettingsImpl
 import com.nuvio.app.features.iptv.IptvPlaybackGateAdapter
+import com.nuvio.app.features.iptv.DeviceSetupClaimCoordinator
 import com.nuvio.app.features.iptv.IptvProfileChange
 import com.nuvio.app.features.iptv.XtreamAccountsCleaner
 import com.nuvio.app.features.iptv.XtreamLivePlaybackProvider
@@ -65,4 +66,6 @@ fun registerLogicFeatureContributions() {
     LivePlaybackAccess.register(XtreamLivePlaybackProvider)
     // F17: public subtitle ids for IPTV movies/episodes (OpenSubtitles in the IPTV section).
     IptvSubtitleIdAccess.register(XtreamSubtitleIdResolver)
+    // B205: playlists redeemed from a setup code with no account move into the account once one signs in.
+    DeviceSetupClaimCoordinator.shared.start()
 }

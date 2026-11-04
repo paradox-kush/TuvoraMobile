@@ -67,6 +67,19 @@ interface ProviderSetupApi {
      */
     suspend fun redeem(code: String, profileIndex: Int, skipAddons: Boolean = false): RedeemResult
 
+    /**
+     * Redeem [code] for THIS DEVICE, with no account (`POST /api/s/redeem`, B205). [claimToken] is the device's
+     * secret (64 hex); only its SHA-256 is sent. Never throws. A network failure is retried with the SAME token:
+     * the server then answers `already_redeemed` with the same playlists.
+     */
+    suspend fun deviceRedeem(code: String, claimToken: String): DeviceRedeemResult
+
+    /**
+     * `claim_device_setup` as the signed-in user: moves a device redeem into [profileIndex] of the account.
+     * Never throws. [DeviceClaimPolicy] decides what each answer means.
+     */
+    suspend fun claimDeviceSetup(claimToken: String, profileIndex: Int, skipAddons: Boolean = false): DeviceClaimResult
+
     /** `get_managed_playlists` for the profile. Throws on failure (callers keep their cache). */
     suspend fun managedPlaylists(profileId: Int): List<ManagedInfo>
 
@@ -85,6 +98,9 @@ internal class ProviderRpcException(
 /** The two seams the HTTP/RPC implementation runs on; tests replace them. */
 internal interface ProviderPreviewTransport {
     suspend fun get(url: String, headers: Map<String, String>): RawHttpResponse
+
+    /** POST of a JSON [body]; same client rules as [get]. */
+    suspend fun post(url: String, headers: Map<String, String>, body: String): RawHttpResponse
 }
 
 internal interface ProviderRpcTransport {
@@ -100,6 +116,9 @@ internal object ProviderSetupConfig {
     /** The route returns a few hundred bytes; anything bigger is not a preview (security L2). */
     const val PREVIEW_MAX_BODY_CHARS = 64 * 1024
 
+    /** A device redeem carries every playlist's login for a package; generous, but not unbounded. */
+    const val REDEEM_MAX_BODY_CHARS = 512 * 1024
+
     /** The setup-code web host; a debug build may be pointed at a local web server (`PROVIDER_WEB_URL`). */
     val webBaseUrl: String
         get() = SupabaseConfig.PROVIDER_WEB_URL.trim().trimEnd('/')
@@ -107,6 +126,9 @@ internal object ProviderSetupConfig {
             ?: PRODUCTION_WEB_BASE
 
     fun previewUrl(base: String, code: String): String = "$base/api/s/preview?code=${SetupCode.format(code)}"
+
+    /** The device redeem route (B205). The code travels in the POST body, never in the URL. */
+    fun redeemUrl(base: String): String = "$base/api/s/redeem"
 }
 
 internal object PlatformProviderPreviewTransport : ProviderPreviewTransport {
@@ -116,6 +138,13 @@ internal object PlatformProviderPreviewTransport : ProviderPreviewTransport {
         httpRequestRaw(
             method = "GET", url = url, headers = headers, body = "",
             followRedirects = false, maxResponseBodyBytes = ProviderSetupConfig.PREVIEW_MAX_BODY_CHARS + 1024,
+        )
+
+    // The redeem answer carries the playlists' logins: a bigger body than a preview, still bounded.
+    override suspend fun post(url: String, headers: Map<String, String>, body: String): RawHttpResponse =
+        httpRequestRaw(
+            method = "POST", url = url, headers = headers, body = body,
+            followRedirects = false, maxResponseBodyBytes = ProviderSetupConfig.REDEEM_MAX_BODY_CHARS + 1024,
         )
 }
 
@@ -175,6 +204,9 @@ internal class HttpProviderSetupApi(
     private val bearerToken: suspend () -> String? = ::hostedAccessTokenOrNull,
 ) : ProviderSetupApi {
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** A device playlist carries null for fields its source type does not use; null on a defaulted field = its default. */
+    private val playlistJson = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
     override suspend fun preview(code: String): SetupCodeOutcome {
         // A malformed code never reaches the network (and never costs a rate-limit strike).
@@ -274,6 +306,81 @@ internal class HttpProviderSetupApi(
                 skippedReasons = skippedReasons,
             ),
         )
+    }
+
+    override suspend fun deviceRedeem(code: String, claimToken: String): DeviceRedeemResult {
+        val normalized = when (val parsed = SetupCode.normalize(code)) {
+            is SetupCodeParse.Invalid -> return DeviceRedeemResult.Refused(SetupCodeOutcome.fromProblem(parsed.problem))
+            is SetupCodeParse.Valid -> parsed.code
+        }
+        return try {
+            // No Authorization header, ever: a signed-out device has none, and a signed-in one never uses this route.
+            val headers = mapOf("Accept" to "application/json", "Content-Type" to "application/json")
+            val body = buildJsonObject {
+                put("code", normalized)
+                put("claim_hash", DeviceClaimToken.hash(claimToken))
+            }.toString()
+            val url = ProviderSetupConfig.redeemUrl(webBaseUrl())
+            val response = withTimeout(ProviderSetupConfig.PREVIEW_TIMEOUT_MS) { preview.post(url, headers, body) }
+            if (response.url.isNotBlank() && !sameHost(url, response.url)) return DeviceRedeemResult.Refused(SetupCodeOutcome.Unusable)
+            interpretDeviceRedeem(response)
+        } catch (e: TimeoutCancellationException) {
+            DeviceRedeemResult.Refused(SetupCodeOutcome.Network)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            // The error class only: never the body, the code or the token.
+            co.touchlab.kermit.Logger.withTag("ProviderSetupApi").w { "device redeem failed: ${e::class.simpleName}" }
+            DeviceRedeemResult.Refused(SetupCodeOutcome.Network)
+        }
+    }
+
+    internal fun interpretDeviceRedeem(response: RawHttpResponse): DeviceRedeemResult {
+        if (response.body.length > ProviderSetupConfig.REDEEM_MAX_BODY_CHARS) return DeviceRedeemResult.Refused(SetupCodeOutcome.Unusable)
+        val obj = runCatching { json.parseToJsonElement(response.body) as? JsonObject }.getOrNull()
+        if (response.status !in 200..299) {
+            val errorCode = (obj?.get("code") as? JsonPrimitive)?.contentOrNull
+            val retryAfter = response.headers.entries
+                .firstOrNull { it.key.equals("retry-after", ignoreCase = true) }?.value?.trim()?.toIntOrNull()
+            return DeviceRedeemResult.Refused(SetupCodeOutcome.fromPreviewHttp(response.status, errorCode, retryAfter))
+        }
+        // A 200 that is not the documented shape is not a success: never "added" without playlists to add.
+        val rows = (obj?.get("playlists") as? kotlinx.serialization.json.JsonArray)
+            ?: return DeviceRedeemResult.Refused(SetupCodeOutcome.Unusable)
+        val playlists = rows.mapNotNull { el ->
+            runCatching { playlistJson.decodeFromJsonElement(DevicePlaylist.serializer(), el) }.getOrNull()
+        }
+        return DeviceRedeemResult.Redeemed(
+            DeviceRedeemSummary(
+                providerName = (obj["provider"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                alreadyRedeemed = (obj["status"] as? JsonPrimitive)?.contentOrNull == "already_redeemed",
+                playlists = playlists,
+                skippedAddons = (obj["skipped_addons"] as? JsonPrimitive)?.intOrNull ?: 0,
+            ),
+        )
+    }
+
+    override suspend fun claimDeviceSetup(claimToken: String, profileIndex: Int, skipAddons: Boolean): DeviceClaimResult = try {
+        interpretClaim(rpc.call("claim_device_setup", buildJsonObject {
+            put("p_claim_token", claimToken)
+            put("p_profile_index", profileIndex)
+            if (skipAddons) put("p_skip_addons", true)
+        }))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: ProviderRpcException) {
+        // A gateway failure or a missing function says nothing about the claim: null code = retry later.
+        DeviceClaimResult.Failed(if (e.transient) null else e.errorCode)
+    } catch (e: Throwable) {
+        DeviceClaimResult.Failed(null)
+    }
+
+    internal fun interpretClaim(result: JsonElement): DeviceClaimResult {
+        val o = result as? JsonObject ?: return DeviceClaimResult.Failed(null)
+        if ((o["ok"] as? JsonPrimitive)?.booleanOrNull != true) {
+            return DeviceClaimResult.Failed((o["error"] as? JsonPrimitive)?.contentOrNull ?: "unknown")
+        }
+        return DeviceClaimResult.Claimed(alreadyClaimed = (o["status"] as? JsonPrimitive)?.contentOrNull == "already_redeemed")
     }
 
     override suspend fun managedPlaylists(profileId: Int): List<ManagedInfo> =

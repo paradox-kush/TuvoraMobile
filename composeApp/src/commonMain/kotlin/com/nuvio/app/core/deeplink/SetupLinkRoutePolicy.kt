@@ -13,15 +13,15 @@ internal object SetupLinkRoutePolicy {
     const val ADD_PLAYLIST_PAGE = "IptvAddPlaylist"
 
     /**
-     * @param isGuest the person has no real account yet (local-only): they see the code on the Add Playlist
-     *   page, where they are asked before being taken to sign-in.
+     * A setup link opens the preview for everyone: a code needs no account to be looked at or added to the
+     * device (B205), so a signed-out person or a guest is no longer detoured through the Add Playlist page.
      * @param onTabs the visible route is already the tab shell.
      * @param canPopToTabs this platform keeps the route stack here, so the shell can be reached by popping
      *   (native iOS navigation owns its stack in UIKit).
      */
-    fun decide(isGuest: Boolean, onTabs: Boolean, canPopToTabs: Boolean): SetupLinkRoute =
+    fun decide(onTabs: Boolean, canPopToTabs: Boolean): SetupLinkRoute =
         SetupLinkRoute(
-            settingsPage = if (isGuest) ADD_PLAYLIST_PAGE else PREVIEW_PAGE,
+            settingsPage = PREVIEW_PAGE,
             leaveToTabsFirst = !onTabs && canPopToTabs,
         )
 }

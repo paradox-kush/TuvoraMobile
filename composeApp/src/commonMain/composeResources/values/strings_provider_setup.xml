@@ -45,6 +45,10 @@
     <string name="provider_setup_source_stalker">Stalker portal</string>
     <string name="provider_setup_source_other">Playlist</string>
     <string name="provider_setup_add_to">Add to %1$s</string>
+    <string name="provider_setup_add_to_device">Add to this device</string>
+    <string name="provider_setup_preview_device">Will be added to this device</string>
+    <string name="provider_setup_preview_device_note">Sign in any time to keep these in your Tuvora account.</string>
+    <string name="provider_setup_added_device_toast">%1$s added your playlist to this device</string>
     <string name="provider_setup_adding">Adding…</string>
     <string name="provider_setup_cancel">Cancel</string>
     <string name="provider_setup_enter_other_code">Enter a different code</string>

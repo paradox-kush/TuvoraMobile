@@ -13,6 +13,9 @@ import com.nuvio.app.features.iptv.match.MatchDbDriver
 /** Process-scoped storage needed before common feature registration or background workers. */
 fun initializeAndroidProcessStorage(context: Context) {
     RecEventStorage.initialize(context)
+    // B205: pending device claims (own preferences file, never wiped with the account data). Process-scoped,
+    // because the claim coordinator starts with the feature registration, before MainActivity's startup tasks.
+    com.nuvio.app.features.iptv.PendingDeviceClaimStorage.initialize(context)
 }
 
 /**

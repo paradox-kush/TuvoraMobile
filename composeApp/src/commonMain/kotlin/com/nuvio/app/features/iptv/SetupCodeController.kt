@@ -4,6 +4,7 @@ import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
 import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.features.profiles.ProfileRepository
+import com.nuvio.app.features.trakt.TraktPlatformClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,8 +33,6 @@ internal data class SetupCodeUiState(
     val redeemRefusal: SetupCodeOutcome? = null,
     /** Set once a redeem succeeded; the UI navigates and then calls [SetupCodeController.finish]. */
     val completed: SetupCompletion? = null,
-    /** A guest (no account) pressed Continue/Add: ask before signing them out to reach sign-in. */
-    val guestPrompt: Boolean = false,
     /** Bumped every time a (new) code is held, so the preview screen restarts its load for it. */
     val holdGeneration: Int = 0,
 ) {
@@ -60,10 +59,13 @@ internal data class SetupCompletion(
     val skippedReasons: List<String> = emptyList(),
     /** Services the setup had already installed for this account (a second code for the same package). */
     val unchanged: Int = 0,
+    /** B205: redeemed with no account, so the playlists live on this device only (until a sign-in claims them). */
+    val onDevice: Boolean = false,
 ) {
     /** What the person should be told. Pure, so every platform says the same thing for the same redeem. */
     val outcome: CompletionKind
         get() = when {
+            onDevice && added > 0 -> CompletionKind.ADDED_ON_DEVICE
             alreadyRedeemed -> CompletionKind.ALREADY_IN_ACCOUNT
             added + updated > 0 -> CompletionKind.ADDED
             // A second code for a package this account already holds: nothing new, and not "nothing went wrong" either.
@@ -75,17 +77,20 @@ internal data class SetupCompletion(
 }
 
 /** The sentence a finished redeem earns. Nothing-added is NOT "added your playlist". */
-internal enum class CompletionKind { ADDED, ALREADY_IN_ACCOUNT, NOTHING_MISSING_LOGIN, NOTHING_INVALID_URL, NOTHING_ADDED }
+internal enum class CompletionKind { ADDED, ADDED_ON_DEVICE, ALREADY_IN_ACCOUNT, NOTHING_MISSING_LOGIN, NOTHING_INVALID_URL, NOTHING_ADDED }
 
-/** What pressing Continue on the code field did. */
-internal enum class ContinueResult { OPEN_PREVIEW, NEEDS_SIGN_IN, REJECTED }
+/** What pressing Continue on the code field did. A code never needs an account to be looked at (B205). */
+internal enum class ContinueResult { OPEN_PREVIEW, REJECTED }
 
-/** Who is using the app, as far as a setup code is concerned. Only [REAL] can redeem. */
+/**
+ * Who is using the app, as far as a setup code is concerned. [REAL] redeems into the account; the other two redeem
+ * to this device (B205) and claim into an account when one signs in.
+ */
 internal enum class AccountKind {
     REAL,
-    /** "Continue without account": on-device only, no server session. Reaching sign-in means signing out of guest mode. */
+    /** "Continue without account": on-device only, no server session. */
     GUEST,
-    /** Signed out, with the sign-in screen one request away. */
+    /** Signed out. */
     SIGNED_OUT,
 }
 
@@ -114,8 +119,12 @@ internal class SetupCodeController(
     private val refreshManaged: suspend (Int) -> Unit = { ManagedInfoRefresher.refresh(it) },
     /** Store builds hide add-ons, so the redeem asks the server not to install them. */
     private val skipAddons: () -> Boolean = { !AppFeaturePolicy.addonsEnabled },
+    /** B205: where a redeem with no account keeps its playlists (the local store, never synced). */
+    private val addLocalPlaylists: (List<XtreamAccount>) -> Int = { XtreamRepository.addProvisioned(it) },
+    private val claims: PendingDeviceClaimStore = PendingDeviceClaimStore.shared,
+    private val newClaimToken: () -> String = DeviceClaimToken::newToken,
+    private val nowMs: () -> Long = { TraktPlatformClock.nowEpochMs() },
     private val requestSignIn: () -> Unit = { AuthRepository.requestSignIn() },
-    private val signOutToSignIn: suspend () -> Unit = { AuthRepository.signOut() },
     private val telemetry: ProviderSetupTelemetry = ProviderSetupTelemetry,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
@@ -124,26 +133,11 @@ internal class SetupCodeController(
 
     private fun isRealAccount() = accountKind() == AccountKind.REAL
 
-    /** Sends a person without a real account towards sign-in, keeping the code for the way back. */
+    /** The account redeem answered "sign in" (the session lapsed): send the person to sign-in, keeping the code for the way back. */
     private fun routeToSignIn() {
+        if (isRealAccount()) return
         resumeAfterSignIn = true
-        when (accountKind()) {
-            AccountKind.REAL -> resumeAfterSignIn = false
-            // Reaching sign-in from guest mode signs the guest out (it wipes guest data), so ask first.
-            AccountKind.GUEST -> _state.update { it.copy(guestPrompt = true) }
-            AccountKind.SIGNED_OUT -> requestSignIn()
-        }
-    }
-
-    /** The guest agreed: sign out of guest mode, which opens the sign-in screen. The code stays in memory. */
-    fun confirmGuestSignIn() {
-        _state.update { it.copy(guestPrompt = false) }
-        scope.launch { signOutToSignIn() }
-    }
-
-    fun dismissGuestPrompt() {
-        resumeAfterSignIn = false
-        _state.update { it.copy(guestPrompt = false) }
+        requestSignIn()
     }
 
     private var previewJob: Job? = null
@@ -185,9 +179,7 @@ internal class SetupCodeController(
         supersedePreview()
         // A link while the preview page is open must restart ITS load: the generation keys that effect.
         _state.value = SetupCodeUiState(typed = SetupCode.format(code), holdGeneration = _state.value.holdGeneration + 1)
-        if (!holder.set(code)) return false
-        if (!isRealAccount()) routeToSignIn()
-        return true
+        return holder.set(code)
     }
 
     /**
@@ -205,7 +197,7 @@ internal class SetupCodeController(
         return acceptLinkedCode(code)
     }
 
-    /** Continue on the code field. Holds the code in memory; a person without a real account signs in first. */
+    /** Continue on the code field. Holds the code in memory and opens the preview, signed in or not. */
     fun onContinue(): ContinueResult {
         when (val parsed = SetupCode.normalize(_state.value.typed)) {
             is SetupCodeParse.Invalid -> {
@@ -222,10 +214,6 @@ internal class SetupCodeController(
                     )
                 }
             }
-        }
-        if (!isRealAccount()) {
-            routeToSignIn()
-            return ContinueResult.NEEDS_SIGN_IN
         }
         return ContinueResult.OPEN_PREVIEW
     }
@@ -286,10 +274,6 @@ internal class SetupCodeController(
     fun confirm() {
         val preview = _state.value.preview ?: return
         if (_state.value.redeeming) return
-        if (!isRealAccount()) {
-            routeToSignIn()
-            return
-        }
         val code = holder.peek() ?: run {
             _state.update { it.copy(typed = "", redeemRefusal = SetupCodeOutcome.Unusable) }
             return
@@ -298,6 +282,10 @@ internal class SetupCodeController(
             // The preview on screen is for another code than the one held: never redeem what was not shown.
             _state.update { it.copy(previewOutcome = null, redeemRefusal = null) }
             loadPreview(force = true)
+            return
+        }
+        if (!isRealAccount()) {
+            confirmOnDevice(preview, code)
             return
         }
         val chosen = _state.value.selectedProfileIndex ?: activeProfileIndex()
@@ -317,6 +305,64 @@ internal class SetupCodeController(
                 is RedeemResult.Redeemed -> onRedeemed(preview, profile, result.summary)
                 is RedeemResult.Refused -> onRefused(preview, result.outcome)
             }
+        }
+    }
+
+    /** The claim token of the device redeem in progress, reused on a retry so the server answers `already_redeemed`. */
+    private var deviceToken: String? = null
+    private var deviceTokenCode: String? = null
+
+    /** "Add to this device": no account, so the playlists are kept locally and a claim is stored for the next sign-in. */
+    private fun confirmOnDevice(preview: SetupPreview, code: String) {
+        // One token per code: a network failure retried with the same token gets the same playlists back.
+        val token = deviceToken?.takeIf { deviceTokenCode == code } ?: newClaimToken().also {
+            deviceToken = it
+            deviceTokenCode = code
+        }
+        _state.update { it.copy(redeeming = true, redeemRefusal = null) }
+        redeemJob = scope.launch {
+            val result = BoundedLoad.run(LoadSurface.SETTINGS, report = mapOf("row" to "setup_code_device_redeem")) {
+                api().deviceRedeem(code, token)
+            }.valueOrNull() ?: DeviceRedeemResult.Refused(SetupCodeOutcome.Network)
+            when (result) {
+                is DeviceRedeemResult.Redeemed -> onDeviceRedeemed(preview, token, result.summary)
+                is DeviceRedeemResult.Refused -> onRefused(preview, result.outcome)
+            }
+        }
+    }
+
+    private fun onDeviceRedeemed(preview: SetupPreview, token: String, summary: DeviceRedeemSummary) {
+        val accounts = DevicePlaylistMapper.accountsToAdd(summary.playlists)
+        // Remember the claim BEFORE storing the playlists: if the process dies in between, the claim restores them.
+        if (accounts.isNotEmpty()) {
+            val saved = runCatching {
+                claims.put(PendingDeviceClaim(token, summary.providerName.ifBlank { preview.providerName }, nowMs(), summary.playlists.filter { it.added }))
+            }.isSuccess
+            if (!saved) {
+                // Without the claim the account could never get these playlists: say so, keep the code and the token for a retry.
+                onRefused(preview, SetupCodeOutcome.Network)  // keep the token: a retry returns the same playlists
+                return
+            }
+        }
+        val added = if (accounts.isEmpty()) 0 else addLocalPlaylists(accounts)
+        if (added < 0) {
+            onRefused(preview, SetupCodeOutcome.Network)  // keep the token: a retry returns the same playlists
+            return
+        }
+        telemetry.redeemed(added, 0, "device_redeemed")
+        deviceToken = null
+        deviceTokenCode = null
+        holder.clear()
+        val open = accounts.firstOrNull()?.id
+        _state.update {
+            it.copy(
+                redeeming = false,
+                completed = SetupCompletion(
+                    providerName = preview.providerName, profileIndex = activeProfileIndex(),
+                    added = added, updated = 0, alreadyRedeemed = false, openPlaylistKey = open,
+                    skippedReasons = summary.skippedReasons, onDevice = true,
+                ),
+            )
         }
     }
 
@@ -348,7 +394,11 @@ internal class SetupCodeController(
         // The code is dead for Unusable/Expired: forget it (and the field). Network/rate-limit problems keep it
         // for a retry; a vanished profile is recovered by falling back to the active one on the next confirm.
         val dead = shown is SetupCodeOutcome.Unusable || shown is SetupCodeOutcome.Expired
-        if (dead) holder.clear()
+        if (dead) {
+            holder.clear()
+            deviceToken = null
+            deviceTokenCode = null
+        }
         _state.update {
             it.copy(
                 redeeming = false,
@@ -363,6 +413,8 @@ internal class SetupCodeController(
     fun cancel() {
         supersedePreview()
         holder.clear()
+        deviceToken = null
+        deviceTokenCode = null
         _state.value = SetupCodeUiState()
         resumeAfterSignIn = false
     }

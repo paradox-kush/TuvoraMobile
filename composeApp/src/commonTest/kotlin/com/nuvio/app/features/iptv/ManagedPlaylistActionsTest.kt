@@ -22,6 +22,8 @@ class ManagedPlaylistActionsTest {
     private val api = object : ProviderSetupApi {
         override suspend fun preview(code: String): SetupCodeOutcome = error("not used")
         override suspend fun redeem(code: String, profileIndex: Int, skipAddons: Boolean): RedeemResult = error("not used")
+        override suspend fun deviceRedeem(code: String, claimToken: String): DeviceRedeemResult = error("not used")
+        override suspend fun claimDeviceSetup(claimToken: String, profileIndex: Int, skipAddons: Boolean): DeviceClaimResult = error("not used")
         override suspend fun managedPlaylists(profileId: Int): List<ManagedInfo> = error("not used")
         override suspend fun detach(profileId: Int, playlistKey: String): Boolean {
             log += "detach($profileId,$playlistKey)"

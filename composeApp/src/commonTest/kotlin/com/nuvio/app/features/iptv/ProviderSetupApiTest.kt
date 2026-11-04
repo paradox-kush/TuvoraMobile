@@ -19,8 +19,14 @@ class ProviderSetupApiTest {
 
     private class FakePreview(var response: () -> RawHttpResponse) : ProviderPreviewTransport {
         val requests = mutableListOf<Pair<String, Map<String, String>>>()
+        /** (url, headers, body) of every POST. */
+        val posts = mutableListOf<Triple<String, Map<String, String>, String>>()
         override suspend fun get(url: String, headers: Map<String, String>): RawHttpResponse {
             requests += url to headers
+            return response()
+        }
+        override suspend fun post(url: String, headers: Map<String, String>, body: String): RawHttpResponse {
+            posts += Triple(url, headers, body)
             return response()
         }
     }
@@ -209,6 +215,7 @@ class ProviderSetupApiTest {
                 delay(10 * 60_000L)
                 return http(200, previewBody)
             }
+            override suspend fun post(url: String, headers: Map<String, String>, body: String): RawHttpResponse = error("unused")
         }
         val outcome = HttpProviderSetupApi(never, FakeRpc { _, _ -> json("{}") }, { "https://tuvora.co" }, { null }).preview("abcdefghjkmn")
         assertEquals(SetupCodeOutcome.Network, outcome)
@@ -343,5 +350,114 @@ class ProviderSetupApiTest {
         assertEquals(SetupCodeOutcome.Expired(ProviderSupport.NONE), refused("expired"))
         assertEquals(SetupCodeOutcome.Unusable, refused("not_found"))
         assertEquals(SetupCodeOutcome.ProfileGone, refused("profile_not_found"))
+    }
+
+    // ---- B205: redeem to the device, claim into the account later -------------------------------------
+
+    private val token = "a1".repeat(32)
+    private val deviceBody = """
+        {"status":"redeemed","provider":"Acme TV","skipped_addons":1,"playlists":[
+          {"playlist_key":"k-x","name":"Acme Live","source_type":"xtream","action":"added","base_url":"http://p.example.com:8080",
+           "url":null,"portal_url":null,"username":"u1","password":"p1","mac_address":null,"backup_urls":null,"epg_url":null,
+           "user_agent":null,"content_types":["live","movie"],"unknown_future_field":1},
+          {"playlist_key":"k-y","name":"Acme M3U","source_type":"m3u_url","action":"skipped","reason":"missing_login"}]}
+    """.trimIndent()
+
+    @Test
+    fun `the device redeem posts the code and the claim hash and never the token or an Authorization header`() = runBlocking {
+        val fake = FakePreview { http(200, deviceBody) }
+        // Signed in or not, this route carries no bearer: the answer is the device's, not an account's.
+        val result = api(fake, token = "tok123").deviceRedeem("abcdefghjkmn", token)
+        val (url, headers, body) = fake.posts.single()
+        assertEquals("https://tuvora.co/api/s/redeem", url)
+        assertFalse(headers.keys.any { it.equals("Authorization", ignoreCase = true) })
+        assertFalse(url.contains("ABCD"), "the code travels in the body, not the URL")
+        val sent = Json.parseToJsonElement(body) as JsonObject
+        assertEquals("ABCDEFGHJKMN", sent.getValue("code").jsonPrimitive.content)
+        val hash = sent.getValue("claim_hash").jsonPrimitive.content
+        assertEquals(DeviceClaimToken.hash(token), hash)
+        assertEquals(64, hash.length)
+        assertTrue(hash.all { it in '0'..'9' || it in 'a'..'f' })
+        assertFalse(body.contains(token), "only the hash leaves the device")
+        val summary = (result as DeviceRedeemResult.Redeemed).summary
+        assertEquals("Acme TV", summary.providerName)
+        assertFalse(summary.alreadyRedeemed)
+        assertEquals(2, summary.playlists.size)
+        assertEquals(listOf("k-x"), summary.added.map { it.playlistKey })
+        assertEquals(listOf("missing_login"), summary.skippedReasons)
+        assertEquals(listOf("live", "movie"), summary.playlists.first().contentTypes)
+    }
+
+    @Test
+    fun `a malformed code never reaches the device redeem route`() = runBlocking {
+        val fake = FakePreview { http(200, deviceBody) }
+        val result = api(fake).deviceRedeem("ABCD-0000", token)
+        assertEquals(DeviceRedeemResult.Refused(SetupCodeOutcome.Problem(SetupCodeProblem.BAD_CHARACTERS)), result)
+        assertEquals(0, fake.posts.size)
+    }
+
+    @Test
+    fun `already_redeemed is a success carrying the same playlists`() = runBlocking {
+        val fake = FakePreview { http(200, deviceBody.replace("\"redeemed\"", "\"already_redeemed\"")) }
+        val summary = (api(fake).deviceRedeem("abcdefghjkmn", token) as DeviceRedeemResult.Redeemed).summary
+        assertTrue(summary.alreadyRedeemed)
+        assertEquals(1, summary.added.size)
+    }
+
+    @Test
+    fun `device redeem failures are never shown as success`() = runBlocking {
+        suspend fun outcome(status: Int, body: String, headers: Map<String, String> = emptyMap()) =
+            (api(FakePreview { http(status, body, headers) }).deviceRedeem("abcdefghjkmn", token) as DeviceRedeemResult.Refused).outcome
+        assertEquals(SetupCodeOutcome.Unusable, outcome(409, """{"error":"already_used","code":"already_used"}"""))
+        assertEquals(SetupCodeOutcome.Unusable, outcome(404, """{"error":"not_found","code":"not_found"}"""))
+        assertEquals(SetupCodeOutcome.Expired(ProviderSupport.NONE), outcome(410, """{"error":"expired","code":"expired"}"""))
+        assertEquals(SetupCodeOutcome.RateLimited(30), outcome(429, """{"code":"rate_limited"}""", mapOf("Retry-After" to "30")))
+        assertEquals(SetupCodeOutcome.Network, outcome(502, "<html>bad gateway</html>"))
+        // A 200 that is not the documented shape is not "added".
+        assertEquals(SetupCodeOutcome.Unusable, outcome(200, """{"ok":true}"""))
+        assertEquals(SetupCodeOutcome.Unusable, outcome(200, "not json"))
+    }
+
+    @Test
+    fun `a transport failure on the device redeem is a network outcome`() = runBlocking {
+        val throwing = object : ProviderPreviewTransport {
+            override suspend fun get(url: String, headers: Map<String, String>): RawHttpResponse = error("unused")
+            override suspend fun post(url: String, headers: Map<String, String>, body: String): RawHttpResponse = throw IllegalStateException("boom http://x/$token")
+        }
+        val api = HttpProviderSetupApi(throwing, FakeRpc { _, _ -> json("{}") }, webBaseUrl = { "https://tuvora.co" }, bearerToken = { null })
+        assertEquals(DeviceRedeemResult.Refused(SetupCodeOutcome.Network), api.deviceRedeem("abcdefghjkmn", token))
+    }
+
+    @Test
+    fun `claim_device_setup sends the token the profile and skip-addons only when asked`() = runBlocking {
+        val rpc = FakeRpc { _, _ -> json("""{"ok": true, "status": "redeemed"}""") }
+        val a = api(rpc = rpc)
+        assertEquals(DeviceClaimResult.Claimed(alreadyClaimed = false), a.claimDeviceSetup(token, 2, skipAddons = false))
+        assertEquals(DeviceClaimResult.Claimed(false), a.claimDeviceSetup(token, 2, skipAddons = true))
+        val (fn, first) = rpc.calls[0]
+        assertEquals("claim_device_setup", fn)
+        assertEquals(token, first.getValue("p_claim_token").jsonPrimitive.content)
+        assertEquals("2", first.getValue("p_profile_index").jsonPrimitive.content)
+        assertFalse(first.containsKey("p_skip_addons"))
+        assertEquals("true", rpc.calls[1].second.getValue("p_skip_addons").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `claim answers map to claimed or the server's error`() = runBlocking {
+        suspend fun claim(answer: String) = api(rpc = FakeRpc { _, _ -> json(answer) }).claimDeviceSetup(token, 1)
+        assertEquals(DeviceClaimResult.Claimed(true), claim("""{"ok": true, "status": "already_redeemed"}"""))
+        assertEquals(DeviceClaimResult.Failed("unavailable"), claim("""{"ok": false, "error": "unavailable"}"""))
+        assertEquals(DeviceClaimResult.Failed("rate_limited"), claim("""{"ok": false, "error": "rate_limited"}"""))
+        assertEquals(DeviceClaimResult.Failed(null), claim("[]"))
+    }
+
+    @Test
+    fun `a gateway failure or a function the backend lacks is retried not decided`() = runBlocking {
+        val gateway = FakeRpc { _, _ -> throw ProviderRpcException(null, transient = true) }
+        assertEquals(DeviceClaimResult.Failed(null), api(rpc = gateway).claimDeviceSetup(token, 1))
+        val raised = FakeRpc { _, _ -> throw ProviderRpcException("revoked") }
+        assertEquals(DeviceClaimResult.Failed("revoked"), api(rpc = raised).claimDeviceSetup(token, 1))
+        val boom = FakeRpc { _, _ -> throw IllegalStateException("offline") }
+        assertEquals(DeviceClaimResult.Failed(null), api(rpc = boom).claimDeviceSetup(token, 1))
     }
 }

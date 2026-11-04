@@ -12,8 +12,8 @@ package com.nuvio.app.core.contracts
 internal interface SetupCodeEntry {
     /**
      * A code (or a link containing one) arrived from outside the app. Holds it in memory and returns true
-     * when it was a code. A person without a real account is sent to sign in first; the shell is told to
-     * open the preview afterwards through [takeResumeAfterSignIn].
+     * when it was a code. Needs no account (B205): the preview opens for everyone, and a person without a real
+     * account adds the playlists to this device. [takeResumeAfterSignIn] stays for a session that lapsed mid-redeem.
      */
     fun acceptLinkedCode(link: String): Boolean
 
