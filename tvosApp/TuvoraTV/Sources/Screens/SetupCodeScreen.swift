@@ -49,7 +49,7 @@ struct SetupCodeScreen: View {
         .onChange(of: state.phase) { _, phase in
             let target: SetupFocus
             switch phase {
-            case .entry: target = state.needsSignIn ? .back : .key("A")
+            case .entry: target = .key("A")
             case .checking: target = .cancel
             case .preview: target = .add
             case .adding: target = .add
@@ -69,21 +69,31 @@ struct SetupCodeScreen: View {
     private var leftPane: some View {
         VStack(alignment: .leading, spacing: dp(14)) {
             Text("Add a setup code").font(NuvioType.headlineLarge).foregroundStyle(colors.textPrimary)
-            Text("Easiest on your phone").font(NuvioType.labelLarge).foregroundStyle(colors.secondary).padding(.top, dp(4))
-            VStack(alignment: .leading, spacing: dp(8)) {
-                step(1, "Scan this code with your phone.")
-                step(2, "Open your provider's setup link and confirm.")
-                step(3, "This screen finishes by itself.")
+            if state.onDevice {
+                // No account: a phone redeem lands in an account, not here, so there is nothing to wait for.
+                // The code is typed on this screen and the playlists are kept on this Apple TV.
+                Text("Type the code your provider gave you.").font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true).padding(.top, dp(4))
+                Text("No account needed. Sign in any time to keep your playlists in your Tuvora account.")
+                    .font(NuvioType.bodySmall).foregroundStyle(colors.textSecondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("setup.deviceNote")
+            } else {
+                Text("Easiest on your phone").font(NuvioType.labelLarge).foregroundStyle(colors.secondary).padding(.top, dp(4))
+                VStack(alignment: .leading, spacing: dp(8)) {
+                    step(1, "Scan this code with your phone.")
+                    step(2, "Open your provider's setup link and confirm.")
+                    step(3, "This screen finishes by itself.")
+                }
+                if let image = QrCode.image(for: "https://tuvora.co/s") {
+                    Image(decorative: image, scale: 1).interpolation(.none).resizable()
+                        .padding(dp(8)).frame(width: dp(132), height: dp(132))
+                        .background(RoundedRectangle(cornerRadius: dp(8)).fill(Color.white))
+                        .accessibilityLabel("Setup link QR code")
+                }
+                Text("Or type the code here with the keypad.").font(NuvioType.bodySmall).foregroundStyle(colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            if let image = QrCode.image(for: "https://tuvora.co/s") {
-                Image(decorative: image, scale: 1).interpolation(.none).resizable()
-                    .padding(dp(8)).frame(width: dp(132), height: dp(132))
-                    .background(RoundedRectangle(cornerRadius: dp(8)).fill(Color.white))
-                    .accessibilityLabel("Setup link QR code")
-            }
-            Text("Or type the code here with the keypad.").font(NuvioType.bodySmall).foregroundStyle(colors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let profile = state.watchedProfile, !state.needsSignIn {
+            if let profile = state.watchedProfile, !state.onDevice {
                 Text(verbatim: String(format: L("A code redeemed on your phone into %@ shows up here."), profile))
                     .font(NuvioType.bodySmall).foregroundStyle(colors.textTertiary).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("setup.watching")
@@ -131,30 +141,24 @@ struct SetupCodeScreen: View {
 
     private var entryPane: some View {
         VStack(alignment: .leading, spacing: dp(14)) {
-            if state.needsSignIn {
-                Text(verbatim: state.problem ?? "").font(NuvioType.titleMedium).foregroundStyle(colors.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                SettingsDialogButton(title: "Back", primary: true) { dialogs.pop() }.focused($focus, equals: .back)
-            } else {
-                codeBoxes
-                if let problem = state.problem {
-                    Text(verbatim: problem).font(NuvioType.bodyMedium).foregroundStyle(colors.error)
-                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("setup.problem")
-                    contactsLine
-                }
-                keypad
-                HStack(spacing: dp(10)) {
-                    SettingsDialogButton(title: "Delete") { TvProviderSetup.shared.backspace() }
-                        .focused($focus, equals: .delete).accessibilityIdentifier("setup.delete")
-                    ContinueButton(enabled: state.canContinue) { TvProviderSetup.shared.continueWithCode() }
-                        .focused($focus, equals: .continueButton).accessibilityIdentifier("setup.continue")
-                }
-                .padding(.top, dp(4))
-                SettingsTextField(label: "Or use the iPhone keyboard", hint: "TUV-XXXX-XXXX-XXXX",
-                                  text: Binding(get: { state.typed }, set: { TvProviderSetup.shared.typeText(raw: $0) }),
-                                  onSubmit: { TvProviderSetup.shared.continueWithCode() }, id: "setup.field")
-                    .focused($focus, equals: .keyboard)
+            codeBoxes
+            if let problem = state.problem {
+                Text(verbatim: problem).font(NuvioType.bodyMedium).foregroundStyle(colors.error)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("setup.problem")
+                contactsLine
             }
+            keypad
+            HStack(spacing: dp(10)) {
+                SettingsDialogButton(title: "Delete") { TvProviderSetup.shared.backspace() }
+                    .focused($focus, equals: .delete).accessibilityIdentifier("setup.delete")
+                ContinueButton(enabled: state.canContinue) { TvProviderSetup.shared.continueWithCode() }
+                    .focused($focus, equals: .continueButton).accessibilityIdentifier("setup.continue")
+            }
+            .padding(.top, dp(4))
+            SettingsTextField(label: "Or use the iPhone keyboard", hint: "TUV-XXXX-XXXX-XXXX",
+                              text: Binding(get: { state.typed }, set: { TvProviderSetup.shared.typeText(raw: $0) }),
+                              onSubmit: { TvProviderSetup.shared.continueWithCode() }, id: "setup.field")
+                .focused($focus, equals: .keyboard)
         }
         .focusSection()
     }
@@ -245,12 +249,16 @@ struct SetupCodeScreen: View {
                 }
                 .focusSection()
             }
+            if let note = state.deviceNote {
+                Text(verbatim: L(note)).font(NuvioType.bodySmall).foregroundStyle(colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("setup.deviceNote")
+            }
             if let problem = state.problem {
                 Text(verbatim: problem).font(NuvioType.bodyMedium).foregroundStyle(colors.error)
                     .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("setup.problem")
             }
             HStack(spacing: dp(10)) {
-                PrimaryActionButton(title: adding ? L("Adding\u{2026}") : String(format: L("Add to %@"), selectedProfileName)) {
+                PrimaryActionButton(title: adding ? L("Adding\u{2026}") : (state.onDevice ? L("Add to this device") : String(format: L("Add to %@"), selectedProfileName))) {
                     if !adding { TvProviderSetup.shared.confirm() }
                 }
                 .focused($focus, equals: .add).accessibilityIdentifier("setup.add")
@@ -305,12 +313,12 @@ struct SetupCodeScreen: View {
         dialogs.push(.playlistDetails(key, banner: banner))
     }
 
-    private var waitKey: String { "\(scenePhase == .active)-\(typedHere)-\(state.phase == .entry)-\(state.needsSignIn)" }
+    private var waitKey: String { "\(scenePhase == .active)-\(typedHere)-\(state.phase == .entry)-\(state.onDevice)" }
 
     /// The "finishes by itself" wait: only while this screen is showing, the app is active and the code has
     /// not been typed here. Leaving the screen cancels this task, which ends the Kotlin loop at once.
     private func watchForPhone() async {
-        guard scenePhase == .active, !typedHere, state.phase == .entry, !state.needsSignIn else { return }
+        guard scenePhase == .active, !typedHere, state.phase == .entry, !state.onDevice else { return }
         guard let outcome = try? await TvProviderSetup.shared.waitForPhone() else { return }
         if outcome.reason == "timeout" { waitEnded = true }
         guard let key = outcome.foundKey else { return }

@@ -82,16 +82,16 @@ object TvProviderSetup {
 
     /** Continue: hold the code in memory and look at what it would add. One preview request. */
     fun continueWithCode() {
-        if (accountKindOf(AuthRepository.state.value) != AccountKind.REAL) return
+        // Signed in or not (B205): a code can always be looked at, and added to this device without an account.
         when (controller.onContinue()) {
             ContinueResult.OPEN_PREVIEW -> controller.loadPreview(force = true)
-            ContinueResult.NEEDS_SIGN_IN, ContinueResult.REJECTED -> Unit
+            ContinueResult.REJECTED -> Unit
         }
     }
 
     fun selectProfile(index: Int) = controller.selectProfile(index)
 
-    /** "Add to <profile>": one redeem, then ONE playlist pull. */
+    /** "Add to <profile>": one redeem, then ONE playlist pull. Without an account: "Add to this device", no pull. */
     fun confirm() = controller.confirm()
 
     /** Cancel / "Enter a different code" / leaving the screen: the code and everything about it is forgotten. */

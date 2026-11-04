@@ -132,14 +132,34 @@ class TvSetupStateTest {
     }
 
     @Test
-    fun `without a real account the screen says to sign in instead of taking a code`() {
-        val guest = build(kind = AccountKind.GUEST, label = null)
-        assertTrue(guest.needsSignIn)
-        assertEquals(
-            "Sign in to Tuvora on this Apple TV to add a provider's setup. Setup codes need an account.",
-            guest.problem,
-        )
-        assertFalse(build(kind = AccountKind.REAL).needsSignIn)
+    fun `without a real account a code still works and adds to this device`() {
+        for (kind in listOf(AccountKind.GUEST, AccountKind.SIGNED_OUT)) {
+            val entry = build(kind = kind, label = null)
+            assertTrue(entry.onDevice, "$kind")
+            assertNull(entry.problem, "no sign-in wall in front of the keypad")
+            assertNull(entry.watchedProfile, "no phone redeem to wait for without an account")
+            val ready = build(SetupCodeUiState(previewOutcome = SetupCodeOutcome.Ready(preview)), kind = kind, label = null)
+            assertEquals(TvSetupPhase.PREVIEW, ready.phase)
+            assertEquals("Sign in any time to keep these in your Tuvora account.", ready.deviceNote)
+            assertEquals(emptyList(), ready.profiles, "nothing to pick: it goes to this device")
+            assertNull(ready.accountLabel)
+        }
+        val real = build(kind = AccountKind.REAL)
+        assertFalse(real.onDevice)
+        assertNull(real.deviceNote)
+        assertEquals(profiles, real.profiles)
+    }
+
+    @Test
+    fun `a device redeem says it was added to this Apple TV`() {
+        val done = SetupCompletion("Starshare", 1, added = 1, updated = 0, alreadyRedeemed = false, openPlaylistKey = "k9", onDevice = true)
+        assertEquals("Starshare added your playlist to this Apple TV", build(SetupCodeUiState(completed = done), kind = AccountKind.SIGNED_OUT).doneText)
+    }
+
+    @Test
+    fun `a lapsed session on an account redeem asks to sign in again`() {
+        val s = build(SetupCodeUiState(previewOutcome = SetupCodeOutcome.Ready(preview), redeemRefusal = SetupCodeOutcome.NeedsSignIn))
+        assertEquals("Your Tuvora session ended. Sign in again on this Apple TV to add this setup.", s.problem)
     }
 
     @Test

@@ -3,6 +3,8 @@ package com.tuvora.tvos.screens
 import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.features.iptv.AccountKind
 import com.nuvio.app.features.iptv.HttpProviderSetupApi
+import com.nuvio.app.features.iptv.DeviceClaimResult
+import com.nuvio.app.features.iptv.DeviceRedeemResult
 import com.nuvio.app.features.iptv.ManagedInfo
 import com.nuvio.app.features.iptv.ProviderPreviewTransport
 import com.nuvio.app.features.iptv.ProviderRpcTransport
@@ -52,6 +54,8 @@ class TvStoreAddonsTest {
             skipSeen += skipAddons
             return RedeemResult.Redeemed(RedeemSummary(profileIndex, 1, 0, 0, emptyList(), 0, 0))
         }
+        override suspend fun deviceRedeem(code: String, claimToken: String): DeviceRedeemResult = error("not used")
+        override suspend fun claimDeviceSetup(claimToken: String, profileIndex: Int, skipAddons: Boolean): DeviceClaimResult = error("not used")
         override suspend fun managedPlaylists(profileId: Int): List<ManagedInfo> = emptyList()
         override suspend fun detach(profileId: Int, playlistKey: String): Boolean = false
     }
@@ -63,7 +67,7 @@ class TvStoreAddonsTest {
         val controller = SetupCodeController(
             api = { api }, holder = SetupCodeHolder(clock = { 0L }), accountKind = { AccountKind.REAL },
             activeProfileIndex = { 1 }, profileExists = { true }, localAccountKeys = { emptySet() },
-            pullPlaylists = {}, refreshManaged = {}, requestSignIn = {}, signOutToSignIn = {},
+            pullPlaylists = {}, refreshManaged = {}, requestSignIn = {},
             scope = CoroutineScope(Dispatchers.Unconfined),
         )
         controller.onTyped("TUV-ABCD-EFGH-JKMN")
@@ -83,6 +87,7 @@ class TvStoreAddonsTest {
 
     private val noPreview = object : ProviderPreviewTransport {
         override suspend fun get(url: String, headers: Map<String, String>): RawHttpResponse = error("not used")
+        override suspend fun post(url: String, headers: Map<String, String>, body: String): RawHttpResponse = error("not used")
     }
 
     @Test

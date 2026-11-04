@@ -34,8 +34,13 @@ data class TvSetupState(
     val problem: String? = null,
     /** The provider's contacts when the code had expired (so the viewer can ask for a new one). */
     val problemContacts: List<TvSetupContact> = emptyList(),
-    /** This device has no real account: a setup code cannot be added until it is signed in. */
-    val needsSignIn: Boolean = false,
+    /**
+     * No real account (signed out, or a local guest): the playlists are added to this Apple TV only, and a later
+     * sign-in claims them into the account (B205). No profile to pick, no phone to wait for.
+     */
+    val onDevice: Boolean = false,
+    /** The line under the preview when [onDevice] ("Sign in any time to keep these in your Tuvora account."). */
+    val deviceNote: String? = null,
     /** Which account the playlist will be added to (email), when known. */
     val accountLabel: String? = null,
     val providerName: String? = null,
@@ -56,7 +61,9 @@ data class TvSetupState(
 /** The pure mapping from the shared controller's state to what the Apple TV code screen shows (contract sections 3 and 8). */
 object TvSetupStateBuilder {
 
-    private const val SIGN_IN_NEEDED = "Sign in to Tuvora on this Apple TV to add a provider's setup. Setup codes need an account."
+    /** Only for an account redeem the server refused as signed-out (the session lapsed): with no account a code works on its own. */
+    private const val SIGN_IN_NEEDED = "Your Tuvora session ended. Sign in again on this Apple TV to add this setup."
+    private const val DEVICE_NOTE = "Sign in any time to keep these in your Tuvora account."
 
     internal fun build(
         ui: SetupCodeUiState,
@@ -74,13 +81,12 @@ object TvSetupStateBuilder {
             preview != null -> TvSetupPhase.PREVIEW
             else -> TvSetupPhase.ENTRY
         }
-        val needsSignIn = kind != AccountKind.REAL
+        val onDevice = kind != AccountKind.REAL
         // The sentence under the boxes or on the preview: why a code was refused, else what is wrong with the typing.
         val refusal: SetupCodeOutcome? = ui.redeemRefusal
             ?: ui.previewOutcome?.takeIf { it !is SetupCodeOutcome.Ready }
             ?: ui.typedProblem?.let { SetupCodeOutcome.Problem(it) }
         val problem = when {
-            needsSignIn -> SIGN_IN_NEEDED
             refusal == null -> null
             refusal is SetupCodeOutcome.NeedsSignIn -> SIGN_IN_NEEDED
             else -> refusal.message?.english
@@ -94,15 +100,16 @@ object TvSetupStateBuilder {
             canContinue = TvSetupCodeEntry.canContinue(ui.typed),
             problem = problem,
             problemContacts = contacts,
-            needsSignIn = needsSignIn,
-            accountLabel = if (needsSignIn) null else accountLabel,
+            onDevice = onDevice,
+            deviceNote = if (onDevice) DEVICE_NOTE else null,
+            accountLabel = if (onDevice) null else accountLabel,
             providerName = preview?.providerName,
             packageName = preview?.packageName,
             playlists = preview?.playlists?.map { TvSetupPlaylistLine(it.name, sourceLabel(it.sourceType)) }.orEmpty(),
             addons = if (showAddons) preview?.addons.orEmpty() else emptyList(),
-            profiles = profiles,
+            profiles = if (onDevice) emptyList() else profiles,
             selectedProfile = selected,
-            watchedProfile = profiles.firstOrNull { it.index == activeProfile }?.name,
+            watchedProfile = if (onDevice) null else profiles.firstOrNull { it.index == activeProfile }?.name,
             doneText = ui.completed?.let { doneText(it, profiles, activeProfile) },
             openPlaylistKey = ui.completed?.openPlaylistKey,
         )
@@ -132,6 +139,7 @@ object TvSetupStateBuilder {
     private fun doneText(done: SetupCompletion, profiles: List<TvSetupProfile>, activeProfile: Int): String {
         val provider = done.providerName
         return when (done.outcome) {
+            CompletionKind.ADDED_ON_DEVICE -> "$provider added your playlist to this Apple TV"
             CompletionKind.ALREADY_IN_ACCOUNT -> "Your playlist from $provider is already in your account"
             CompletionKind.NOTHING_MISSING_LOGIN -> "$provider has not filled in your login yet. Ask them to: your playlist is added as soon as they do."
             CompletionKind.NOTHING_INVALID_URL -> "$provider's address for this playlist isn't valid. Ask them to check it."
