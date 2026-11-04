@@ -36,6 +36,11 @@ fun LivePlaybackFreezeReporter.onLiveSnapshot(
      * risk a live link the provider has already invalidated.
      */
     resetVideo: (() -> Boolean)? = null,
+    /**
+     * Called once when the reconnect ladder is exhausted (several reconnects in a row that never
+     * rendered a frame). The surface must show a terminal error with Retry — never a black screen.
+     */
+    onGaveUp: () -> Unit = {},
 ) {
     val nowMs = TraktPlatformClock.nowEpochMs()
     val started = LivePlaybackStartupPolicy.hasStarted(snapshot)
@@ -74,18 +79,26 @@ fun LivePlaybackFreezeReporter.onLiveSnapshot(
         hasVideoTrack = snapshot.hasVideoTrack,
     )
 
+    if (decision is LivePlaybackFreezePolicy.Decision.Recover ||
+        (decision is LivePlaybackFreezePolicy.Decision.Idle && started && snapshot.isPlaying && !snapshot.isEnded)
+    ) {
+        reconnector.onPlaybackConfirmed()
+    }
+
     val kind = when (decision) {
         is LivePlaybackFreezePolicy.Decision.Start -> decision.kind
         is LivePlaybackFreezePolicy.Decision.Continue -> decision.kind
         else -> null
     }
     if (kind != null) {
+        val hadGivenUp = reconnector.hasGivenUp
         reconnector.onFrozen(
             nowMs = nowMs,
             kind = kind,
             resetVideo = resetVideo,
             reconnect = reconnect,
         )
+        if (!hadGivenUp && reconnector.hasGivenUp) onGaveUp()
     }
 }
 

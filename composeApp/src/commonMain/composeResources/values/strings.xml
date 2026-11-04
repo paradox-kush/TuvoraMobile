@@ -456,6 +456,8 @@
     <string name="compose_player_playing">Playing</string>
     <string name="compose_player_fetch_subtitles">Tap to fetch subtitles</string>
     <string name="compose_player_go_back">Go back</string>
+    <string name="compose_player_retry">Retry</string>
+    <string name="player_live_reconnect_failed">The channel stopped streaming and wouldn't reconnect after several tries. Your provider may have closed the connection or hit its connection limit. Try again in a moment.</string>
     <string name="compose_player_reload">Reload</string>
     <string name="compose_player_reset">Reset</string>
     <string name="compose_player_reset_defaults">Reset Defaults</string>

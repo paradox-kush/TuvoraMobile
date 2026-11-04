@@ -175,6 +175,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         val isLiveStream = activeStreamType.equals("live", ignoreCase = true)
         val freezeReporter = remember { LivePlaybackFreezeReporter() }
         val freezeReconnector = remember { LivePlaybackReconnector(freezeReporter) }
+        val liveReconnectFailedMessage = stringResource(Res.string.player_live_reconnect_failed)
         // Reset per source so a reconnect or source switch records a fresh start; the persisted
         // side of the breadcrumb is what says "died while streaming" on the next launch.
         val playbackStartRecorded = remember(playerSurfaceSourceUrl) { mutableStateOf(false) }
@@ -286,6 +287,11 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                                 // Video-only freeze: the stream is still delivering audio, so reset
                                 // the decoder before spending a live link on a re-resolve.
                                 resetVideo = { playerController?.resetVideoPipeline() == true },
+                                // Ladder exhausted: terminal error with Retry, never a black screen.
+                                onGaveUp = {
+                                    liveReconnectFailed = true
+                                    errorMessage = liveReconnectFailedMessage
+                                },
                             )
                         }
                         // A live channel has no end: ENDED means the upstream closed, and the
@@ -681,6 +687,13 @@ private fun BoxScope.RenderPlaybackOverlays(
                 flushWatchProgress()
                 args.onBack()
             },
+            onRetryError = if (liveReconnectFailed) {
+                {
+                    liveReconnectFailed = false
+                    errorMessage = null
+                    playerController?.retry()
+                }
+            } else null,
         )
     }
 }

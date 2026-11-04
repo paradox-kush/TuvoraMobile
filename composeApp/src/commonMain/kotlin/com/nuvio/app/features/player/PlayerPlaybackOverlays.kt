@@ -64,6 +64,7 @@ internal fun BoxScope.PlayerPlaybackOverlays(
     onDismissNextEpisode: () -> Unit,
     errorMessage: String?,
     onDismissError: () -> Unit,
+    onRetryError: (() -> Unit)? = null,
 ) {
     AnimatedVisibility(
         visible = playerControlsLocked && lockedOverlayVisible,
@@ -178,6 +179,7 @@ internal fun BoxScope.PlayerPlaybackOverlays(
         ErrorModal(
             message = errorMessage,
             onDismiss = onDismissError,
+            onRetry = onRetryError,
         )
     }
 }
