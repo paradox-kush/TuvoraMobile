@@ -1287,6 +1287,9 @@ private fun ExoPlayerSurface(
                             return
                         }
                     }
+                    // This subtitle takes the player path (e.g. ASS with libass). A sidecar left over from the
+                    // previous pick would keep painting its cues underneath it, so stop it first.
+                    sidecarController.stopSidecarAddonSubtitle(clearView = true)
                     subtitleSelectionJob = coroutineScope.launch {
                         val currentPosition = exoPlayer.currentPosition
                         val wasPlaying = exoPlayer.isPlaying
