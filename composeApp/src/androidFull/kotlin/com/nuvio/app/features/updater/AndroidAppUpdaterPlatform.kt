@@ -42,7 +42,8 @@ object AndroidAppUpdaterPlatform {
         appContext = context.applicationContext
     }
 
-    fun getSupportedAbis(): List<String> = Build.SUPPORTED_ABIS?.toList().orEmpty()
+    fun getSupportedAbis(): List<String> =
+        UpdateAssetPolicy.usableAbis(Build.SUPPORTED_ABIS?.toList().orEmpty(), android.os.Process.is64Bit())
 
     fun isDebugBuild(): Boolean {
         val context = appContext ?: return false

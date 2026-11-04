@@ -78,7 +78,8 @@ internal object AppUpdaterRepository {
             UpdateChannel.BETA -> json.decodeFromString<List<GitHubReleaseDto>>(responseBody)
         }
         return ReleaseSelector.eligibleReleases(releases, channel).firstNotNullOfOrNull { release ->
-            val asset = chooseBestApkAsset(release.assets, supportedAbis) ?: return@firstNotNullOfOrNull null
+            val asset = UpdateAssetPolicy.rank(release.assets, supportedAbis).firstOrNull()
+                ?: return@firstNotNullOfOrNull null
             val tag = release.tagName?.takeIf { VersionUtils.parse(it) != null }
                 ?: release.name.orEmpty()
             AppUpdate(
@@ -91,22 +92,5 @@ internal object AppUpdaterRepository {
                 assetSizeBytes = asset.size,
             )
         }
-    }
-
-    private fun chooseBestApkAsset(
-        assets: List<GitHubAssetDto>,
-        supportedAbis: List<String>,
-    ): GitHubAssetDto? {
-        val apkAssets = assets.filter { asset ->
-            asset.name.endsWith(".apk", ignoreCase = true) ||
-                asset.contentType == "application/vnd.android.package-archive"
-        }
-        for (abi in supportedAbis) {
-            apkAssets.firstOrNull { it.name.contains(abi, ignoreCase = true) }?.let { return it }
-        }
-        return apkAssets.firstOrNull { asset ->
-            val name = asset.name.lowercase()
-            name.contains("universal") || name.contains("all")
-        } ?: apkAssets.firstOrNull()
     }
 }
