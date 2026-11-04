@@ -4,6 +4,7 @@ package com.nuvio.app.features.player
 
 import android.app.Application
 import android.graphics.Bitmap
+import androidx.compose.ui.graphics.Color
 import androidx.media3.common.text.Cue
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -17,14 +18,16 @@ import kotlin.test.assertTrue
 class SubtitleCuePresenterTest {
     @Test
     fun liveStyleChangesRetainPausedCuesAndClearAtCueEnd() {
-        var style = SubtitleStyleState.DEFAULT
+        // A native baseline: the default look is a visible box, which upstream's rule renders on the overlay.
+        val native = SubtitleStyleState.DEFAULT.copy(backgroundColor = Color.Transparent)
+        var style = native
         val presenter = SubtitleCuePresenter { style }
         val cues = listOf(Cue.Builder().setText("First caption").build())
         assertEquals(cues, presenter.present(cues))
         style = style.copy(appearance = SubtitleAppearance(fontId = "serif"))
         assertTrue(presenter.refresh().isEmpty())
         assertEquals("First caption", presenter.text)
-        style = SubtitleStyleState.DEFAULT
+        style = native
         assertEquals(cues, presenter.refresh())
         assertEquals("", presenter.text)
         style = style.copy(appearance = SubtitleAppearance(shadowEnabled = true))

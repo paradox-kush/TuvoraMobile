@@ -10,7 +10,9 @@ class SubtitleAppearanceTest {
     @Test
     fun oldAndInvalidSettingsKeepExistingAppearance() {
         listOf(null, "", "{", "null").forEach { assertEquals(SubtitleAppearance(), decodeSubtitleAppearance(it)) }
-        assertFalse(SubtitleStyleState.DEFAULT.usesStyledOverlay)
+        // The default look is a visible box (F47), so under upstream's rule it uses the overlay.
+        assertTrue(SubtitleStyleState.DEFAULT.usesStyledOverlay)
+        assertFalse(SubtitleStyleState.DEFAULT.copy(backgroundColor = Color.Transparent).usesStyledOverlay)
         assertEquals(SubtitleAppearance(shadowEnabled = true), decodeSubtitleAppearance("""{"shadowEnabled":true,"future":1}"""))
     }
 

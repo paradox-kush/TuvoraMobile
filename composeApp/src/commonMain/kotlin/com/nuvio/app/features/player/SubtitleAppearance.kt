@@ -32,16 +32,13 @@ internal fun SubtitleAppearance.encode(): String = subtitleAppearanceJson.encode
 /**
  * Whether the Compose styled overlay (not the engine's native subtitle renderer) paints the text.
  *
- * The F47 default look (soft translucent box, owner-approved) is rendered natively on purpose: mpv's
- * background-box and Exo's padded cues already draw it, and it must not push every new user onto the
- * overlay path. Anything the user customises beyond that default (font, shadow, corner radius, or a
- * different box colour/opacity) moves to the overlay, exactly as upstream does for a box.
+ * Same rule as upstream: a custom font, a shadow, or any visible box moves a text subtitle to the
+ * overlay. Owner decision 2026-11-04 (sync 14): follow upstream here rather than keep a fork-only
+ * rule, so this file stays identical to upstream. The fork's default look is a soft translucent box
+ * (F47), so a default user now sees text subtitles on the overlay too; image tracks and ASS stay native.
  */
 internal val SubtitleStyleState.usesStyledOverlay: Boolean
-    get() = appearance.fontId != "default" ||
-        appearance.shadowEnabled ||
-        appearance.backgroundRadius > 0 ||
-        (backgroundColor.alpha > 0f && backgroundColor != SubtitleStyleState.DEFAULT.backgroundColor)
+    get() = appearance.fontId != "default" || backgroundColor.alpha > 0f || appearance.shadowEnabled
 
 object SubtitleRendering {
     fun supportsTextOverlay(codec: String): Boolean = codec.lowercase() in setOf(
