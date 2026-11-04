@@ -1,5 +1,6 @@
 package com.nuvio.app.features.iptv
 
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -86,6 +87,19 @@ class DeviceSetupClaimTest {
         assertNull(account.userAgent)
         assertEquals(ALL_CONTENT_TYPES, account.contentTypes)
         assertEquals(emptyList(), account.backupUrls)
+    }
+
+    @Test
+    fun `a skipped playlist with a null key still decodes from the wire`() {
+        // The server emits playlist_key = null for a service whose login the provider has not filled yet.
+        val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+        val p = json.decodeFromString(
+            DevicePlaylist.serializer(),
+            """{"playlist_key":null,"action":"skipped","reason":"missing_login","name":"Starshare"}""",
+        )
+        assertEquals("skipped", p.action)
+        assertEquals("missing_login", p.reason)
+        assertNull(DevicePlaylistMapper.toAccount(p))
     }
 
     @Test

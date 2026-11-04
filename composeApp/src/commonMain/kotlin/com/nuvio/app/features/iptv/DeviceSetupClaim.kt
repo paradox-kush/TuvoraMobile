@@ -20,7 +20,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class DevicePlaylist(
-    @SerialName("playlist_key") val playlistKey: String,
+    @SerialName("playlist_key") val playlistKey: String? = null,
     val name: String? = null,
     @SerialName("source_type") val sourceType: String = SOURCE_TYPE_XTREAM,
     /** `added`, or `skipped` (the provider has not filled the login yet / the address is invalid). */
