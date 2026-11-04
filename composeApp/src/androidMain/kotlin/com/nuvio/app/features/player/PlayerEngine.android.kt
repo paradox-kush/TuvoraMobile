@@ -2308,7 +2308,9 @@ private class NuvioLibmpvView(
         }
         currentExternalSubtitles.forEachIndexed { index, subtitle ->
             val flag = if (index == 0) "auto" else "cached"
-            mpv.command("sub-add", subtitle.url.toMpvSource(), flag, subtitle.name ?: subtitle.language, subtitle.language)
+            withSubtitleHeaderScope {
+                mpv.command("sub-add", subtitle.url.toMpvSource(), flag, subtitle.name ?: subtitle.language, subtitle.language)
+            }
         }
         mpv.setPropertyBoolean("pause", !playWhenReady)
     }
@@ -2317,8 +2319,29 @@ private class NuvioLibmpvView(
         ctl {
             currentExternalSubtitles.forEachIndexed { index, subtitle ->
                 val flag = if (index == 0) "auto" else "cached"
-                mpv.command("sub-add", subtitle.url.toMpvSource(), flag, subtitle.name ?: subtitle.language, subtitle.language)
+                withSubtitleHeaderScope {
+                    mpv.command("sub-add", subtitle.url.toMpvSource(), flag, subtitle.name ?: subtitle.language, subtitle.language)
+                }
             }
+        }
+    }
+
+    /**
+     * B200: runs a network `sub-add` with the stream's request headers swapped out. mpv's
+     * `http-header-fields` is one global option sent on every HTTP request, so an add-on subtitle host
+     * would otherwise receive the stream's Cookie / Authorization / token. `sub-add` opens the file
+     * synchronously, so the stream headers are restored right after (reconnects still need them).
+     * Runs on the mpv-ctl thread only.
+     */
+    private fun withSubtitleHeaderScope(subtitleHeaders: Map<String, String>? = null, block: () -> Unit) {
+        mpv.setPropertyString(
+            "http-header-fields",
+            serializeHeaderFields(SubtitleCredentialScope.mpvSubtitleRequestHeaders(subtitleHeaders)),
+        )
+        try {
+            block()
+        } finally {
+            mpv.setPropertyString("http-header-fields", serializeHeaderFields(currentRequestHeaders))
         }
     }
 
@@ -2621,7 +2644,7 @@ private class NuvioLibmpvView(
             }
 
             override fun setSubtitleUri(url: String) {
-                ctl { mpv.command("sub-add", url, "select") }
+                ctl { withSubtitleHeaderScope { mpv.command("sub-add", url, "select") } }
             }
 
             override fun clearExternalSubtitle() {
@@ -2734,12 +2757,13 @@ private class NuvioLibmpvView(
         if (!userAgent.isNullOrBlank()) {
             mpv.setPropertyString("user-agent", userAgent)
         }
-        val serialized = headers
-            .filterKeys { !it.equals("User-Agent", ignoreCase = true) }
-            .map { (key, value) -> "${key}: ${value.replace(",", "\\,")}" }
-            .joinToString(",")
-        mpv.setPropertyString("http-header-fields", serialized)
+        mpv.setPropertyString("http-header-fields", serializeHeaderFields(headers))
     }
+
+    private fun serializeHeaderFields(headers: Map<String, String>): String = headers
+        .filterKeys { !it.equals("User-Agent", ignoreCase = true) }
+        .map { (key, value) -> "${key}: ${value.replace(",", "\\,")}" }
+        .joinToString(",")
 
     private fun extractLibmpvTracks(context: Context, type: String): List<LibmpvTrack> {
         val nodes = obsTrackList?.asArray()?.toList().orEmpty()
