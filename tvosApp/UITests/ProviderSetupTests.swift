@@ -177,7 +177,10 @@ final class ProviderSetupTests: XCTestCase {
         }
         XCTAssertEqual(label("setup.code"), code, "the boxes do not show the typed code")
         // down to Continue
-        for _ in 0..<6 where focusedId() != "setup.continue" { press(.down, settle: 0.4) }
+        // Where DOWN lands depends on the column of the last key typed: Delete, Continue, or (past a
+        // disabled-looking gap) the text field. Step down into the action row, then correct sideways/up.
+        for _ in 0..<3 where !["setup.continue", "setup.delete", "setup.field"].contains(focusedId()) { press(.down, settle: 0.4) }
+        if focusedId() == "setup.field" { press(.up, settle: 0.4) }
         for _ in 0..<2 where focusedId() != "setup.continue" { press(.right, settle: 0.4) }
         XCTAssertEqual(focusedId(), "setup.continue")
         press(.select, settle: 3)
