@@ -74,7 +74,7 @@ internal class TvM3uReplay(
                 TvM3uReplayRun.Move.Wait -> delay(TICK_MS)
                 is TvM3uReplayRun.Move.Retitle -> {
                     session.retitle(move.title)
-                    session.setReplayBar(current.barOriginMs, current.barSpanMs)
+                    session.setReplayBar(current.barOriginMs, current.barSpanMs, current.barProgrammeStartMs, current.barProgrammeEndMs)
                     delay(TICK_MS)
                 }
                 // The old session is left for Swift to swap out (PlaybackCoordinator closes it): closing it here
@@ -129,7 +129,7 @@ internal class TvM3uReplay(
             parentMetaType = "tv",
             liveReplay = LiveReplayLaunch(programme.title, programme.startMs, programme.endMs),
         )
-        return TvReplayStep(TvPlayerSession(launch).also { it.setReplayBar(started.barOriginMs, started.barSpanMs) }, null)
+        return TvReplayStep(TvPlayerSession(launch).also { it.setReplayBar(started.barOriginMs, started.barSpanMs, started.barProgrammeStartMs, started.barProgrammeEndMs) }, null)
     }
 
     private fun failed(move: TvM3uReplayRun.Move.Failed): TvReplayStep {

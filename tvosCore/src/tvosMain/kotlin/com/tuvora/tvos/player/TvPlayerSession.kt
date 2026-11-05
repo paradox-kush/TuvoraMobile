@@ -326,13 +326,23 @@ class TvPlayerSession(
     val title: String get() = launch.title
 
     /** A continuing replay entered its next programme: the player shows [title] from here ([TvPlayerState.replayTitle]). */
+    private var replayProgramme: Pair<Long, Long>? = null
+
     /** The seek bar spans one programme of a continuing replay: [originMs] is where it starts in the player's timeline. */
-    fun setReplayBar(originMs: Long, spanMs: Long) {
-        if (!closed) _state.value = _state.value.copy(replayOriginMs = originMs, replaySpanMs = spanMs)
+    fun setReplayBar(originMs: Long, spanMs: Long, programmeStartMs: Long, programmeEndMs: Long) {
+        if (closed) return
+        replayProgramme = programmeStartMs to programmeEndMs
+        _state.value = _state.value.copy(replayOriginMs = originMs, replaySpanMs = spanMs)
+    }
+
+    /** A bar position held to what has aired (a replay of a programme still airing stops short of live). */
+    fun clampBar(barMs: Long): Long {
+        val (start, end) = replayProgramme ?: return barMs
+        return com.tuvora.tvos.screens.TvReplayBar.clampSeek(barMs, start, end, com.nuvio.app.features.trakt.TraktPlatformClock.nowEpochMs())
     }
 
     /** A seek to a position on the bar (see [TvPlayerState.barPositionMs]). */
-    fun seekToBar(barMs: Long) = seekTo(com.tuvora.tvos.screens.TvReplayBar.raw(barMs, _state.value.replayOriginMs))
+    fun seekToBar(barMs: Long) = seekTo(com.tuvora.tvos.screens.TvReplayBar.raw(clampBar(barMs), _state.value.replayOriginMs))
 
     fun retitle(title: String) {
         if (!closed) _state.value = _state.value.copy(replayTitle = title)
@@ -438,6 +448,7 @@ class TvPlayerSession(
 
     fun seekBy(offsetMs: Long) {
         if (isLive) return
+        if (replayProgramme != null) { seekToBar(_state.value.barPositionMs + offsetMs); return }
         if (party.seek(_state.value.positionMs + offsetMs)) return
         bridge?.seekBy(offsetMs)
         scheduleSeekSave()

@@ -408,7 +408,7 @@ struct TvPlayerScreen: View {
             resumeAfterScrub = state.isPlaying
             session.pause()
         }
-        scrubMs = target.int64Value
+        scrubMs = session.clampBar(barMs: target.int64Value)   // a replay of an airing programme stops short of live
         bumpControls()
     }
 

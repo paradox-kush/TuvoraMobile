@@ -40,4 +40,22 @@ class TvReplayBarTest {
         assertEquals(70 * min, TvReplayBar.raw(10 * min, 60 * min))
         assertEquals(0L, TvReplayBar.raw(5 * min, -20 * min), "never before the link start")
     }
+
+    @Test
+    fun `a programme still airing cannot be sought past what has aired`() {
+        val now = 1_800_000_000_000L
+        val start = now - 20 * min
+        val end = start + 60 * min
+        val guard = com.nuvio.app.features.iptv.CatchUpPlayback.LIVE_EDGE_GUARD_MS
+        assertEquals(20 * min - guard, TvReplayBar.maxSeekMs(start, end, now))
+        assertEquals(20 * min - guard, TvReplayBar.clampSeek(45 * min, start, end, now))
+        assertEquals(5 * min, TvReplayBar.clampSeek(5 * min, start, end, now))
+    }
+
+    @Test
+    fun `a finished programme is seekable to its end and a just-started one has nothing to seek`() {
+        val now = 1_800_000_000_000L
+        assertEquals(60 * min, TvReplayBar.clampSeek(90 * min, now - 3 * 60 * min, now - 2 * 60 * min, now))
+        assertEquals(0L, TvReplayBar.clampSeek(10 * min, now - 10_000L, now + 59 * min, now))
+    }
 }

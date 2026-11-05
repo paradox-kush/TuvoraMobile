@@ -15,4 +15,16 @@ object TvReplayBar {
 
     /** The player position a bar position means (what a seek is sent as). */
     fun raw(barMs: Long, originMs: Long): Long = (barMs + originMs).coerceAtLeast(0L)
+
+    /**
+     * The furthest bar position a seek may ask for. A finished programme is wholly recorded; one still
+     * airing (a Start over) only exists up to now minus the shared live-edge guard, so the bar's seekable
+     * end stops short of live ([com.nuvio.app.features.iptv.CatchUpPlayback.maxSeekPositionMs], the phone's rule).
+     */
+    fun maxSeekMs(programmeStartMs: Long, programmeEndMs: Long, nowMs: Long): Long =
+        com.nuvio.app.features.iptv.CatchUpPlayback.maxSeekPositionMs(programmeStartMs, programmeEndMs, nowMs)
+
+    /** A bar position held to what has aired. */
+    fun clampSeek(barMs: Long, programmeStartMs: Long, programmeEndMs: Long, nowMs: Long): Long =
+        barMs.coerceIn(0L, maxSeekMs(programmeStartMs, programmeEndMs, nowMs))
 }
