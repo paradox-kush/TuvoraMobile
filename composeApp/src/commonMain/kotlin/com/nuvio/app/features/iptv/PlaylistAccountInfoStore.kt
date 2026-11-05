@@ -25,8 +25,7 @@ internal object AccountInfoFreshnessPolicy {
  */
 internal class PlaylistAccountInfoStore(
     private val fetch: suspend (XtreamAccount) -> XtreamAccountInfo? = { account ->
-        IptvClient.forAccount(account).accountInfo(account)
-            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()
+        fetchAccountInfo(account) { IptvClient.forAccount(it).accountInfo(it) }
     },
     private val clock: () -> Long = { TraktPlatformClock.nowEpochMs() },
 ) {
@@ -63,7 +62,37 @@ internal class PlaylistAccountInfoStore(
         knownFlow.value = emptyMap()
     }
 
+    /**
+     * One pass of the settings list: ask the panel of each MANAGED playlist that this device may use. A playlist
+     * turned off here is skipped (the list never inspects it), and one refusal can never end the pass for the rest.
+     */
+    suspend fun refreshManaged(
+        accounts: List<XtreamAccount>,
+        managedKeys: Set<String>,
+        availableHere: (XtreamAccount) -> Boolean = { it.availableOnDevice },
+    ) {
+        for (account in accounts) {
+            if (account.id !in managedKeys || !availableHere(account)) continue
+            infoFor(account)
+        }
+    }
+
     companion object {
         val shared = PlaylistAccountInfoStore()
+
+        /**
+         * The default panel ask. A refusal by the device-source guard (a CancellationException subclass) is "no
+         * answer", never an exception that ends the caller's loop; only a REAL cancellation is rethrown.
+         */
+        internal suspend fun fetchAccountInfo(
+            account: XtreamAccount,
+            ask: suspend (XtreamAccount) -> Result<XtreamAccountInfo?>,
+        ): XtreamAccountInfo? {
+            val result = ask(account)
+            val failure = result.exceptionOrNull()
+            if (failure is com.nuvio.app.core.sources.SourceDisabledOnDeviceException) return null
+            if (failure is kotlinx.coroutines.CancellationException) throw failure
+            return result.getOrNull()
+        }
     }
 }

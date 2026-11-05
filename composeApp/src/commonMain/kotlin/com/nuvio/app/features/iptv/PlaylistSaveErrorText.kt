@@ -11,6 +11,7 @@ import nuvio.composeapp.generated.resources.iptv_playlist_error_missing_stalker_
 import nuvio.composeapp.generated.resources.iptv_playlist_error_missing_xtream_fields
 import nuvio.composeapp.generated.resources.iptv_playlist_error_secure_connection
 import nuvio.composeapp.generated.resources.iptv_playlist_error_source_disabled
+import nuvio.composeapp.generated.resources.iptv_playlist_error_source_disabled_account
 import nuvio.composeapp.generated.resources.iptv_playlist_error_unreachable
 import nuvio.composeapp.generated.resources.iptv_playlist_error_wrong_credentials
 import nuvio.composeapp.generated.resources.iptv_playlist_saved_provider_says
@@ -61,6 +62,7 @@ private fun PlaylistSaveError.resource(): StringResource = when (this) {
     PlaylistSaveError.PROVIDER_BLOCKED -> Res.string.compose_iptv_hub_blocked_title
     PlaylistSaveError.SECURE_CONNECTION_FAILED -> Res.string.iptv_playlist_error_secure_connection
     PlaylistSaveError.SOURCE_DISABLED_ON_DEVICE -> Res.string.iptv_playlist_error_source_disabled
+    PlaylistSaveError.SOURCE_DISABLED_FOR_ACCOUNT -> Res.string.iptv_playlist_error_source_disabled_account
     PlaylistSaveError.FILE_UNREADABLE -> Res.string.iptv_playlist_error_file_unreadable
 }
 

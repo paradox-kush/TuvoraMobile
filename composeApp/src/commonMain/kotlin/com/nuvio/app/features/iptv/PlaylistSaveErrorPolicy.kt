@@ -43,6 +43,9 @@ internal enum class PlaylistSaveError(val fallbackText: String) {
      */
     SOURCE_DISABLED_ON_DEVICE("This playlist is turned off on this device — turn it on under Sources on this device"),
 
+    /** The account turned this playlist off (it is off for every device), not this device. */
+    SOURCE_DISABLED_FOR_ACCOUNT("This playlist is turned off on your account — turn it on in your playlist settings, then try again"),
+
     /** A local M3U file that could not be read or parsed. */
     FILE_UNREADABLE("Could not read that playlist file"),
 }
@@ -136,7 +139,9 @@ internal object PlaylistSaveErrorPolicy {
         transport: (Throwable) -> PlaylistTransportFailure? = ::classifyPlaylistTransportFailure,
     ): PlaylistSaveMessage {
         if (error is com.nuvio.app.core.sources.SourceDisabledOnDeviceException)
-            return PlaylistSaveMessage.Known(PlaylistSaveError.SOURCE_DISABLED_ON_DEVICE)
+            return PlaylistSaveMessage.Known(
+                if (error.scope == com.nuvio.app.core.sources.RefusalScope.ACCOUNT) PlaylistSaveError.SOURCE_DISABLED_FOR_ACCOUNT
+                else PlaylistSaveError.SOURCE_DISABLED_ON_DEVICE)
         transportFailureIn(error, transport)?.let { return PlaylistSaveMessage.Known(it.toSaveError()) }
         return when {
             error is XtreamAuthRejectedException -> PlaylistSaveMessage.Known(PlaylistSaveError.WRONG_CREDENTIALS)

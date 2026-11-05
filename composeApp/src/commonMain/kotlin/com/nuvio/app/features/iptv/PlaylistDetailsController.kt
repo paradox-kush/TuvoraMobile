@@ -22,6 +22,8 @@ internal data class PlaylistDetailsLive(
     val load: LoadStatus = LoadStatus.Idle,
     val counts: DetailsCounts = DetailsCounts(),
     val hasPanel: Boolean = true,
+    /** The account check was deliberately not made (a portal playlist turned off here): say "turn it on to check". */
+    val inspectionSkipped: Boolean = false,
 ) {
     /** Still checking: not started yet (the screen opens before load runs) or in flight. */
     val loading: Boolean get() = load is LoadStatus.Loading || load == LoadStatus.Idle && hasPanel
@@ -46,20 +48,22 @@ internal class PlaylistDetailsController(
         loadedFor = account.id
         job?.cancel()
         val hasPanel = !account.sourceType.isM3u()
+        val plan = DetailsInspectionPolicy.plan(account.sourceType, account.availableOnDevice)
         _live.value = PlaylistDetailsLive(
             info = store.cached(account.id),
-            load = if (hasPanel) BoundedLoad.begin(LoadSurface.SETTINGS) else LoadStatus.Empty,
+            load = if (hasPanel && plan != DetailsInspectionPolicy.Plan.SKIP) BoundedLoad.begin(LoadSurface.SETTINGS) else LoadStatus.Empty,
             hasPanel = hasPanel,
+            inspectionSkipped = hasPanel && plan == DetailsInspectionPolicy.Plan.SKIP,
         )
         job = scope.launch {
             val counts = BoundedLoad.run(LoadSurface.SETTINGS, report = mapOf("row" to "details_counts")) {
                 localCatalogCounts(account)
             }.valueOrNull() ?: DetailsCounts()
             _live.update { it.copy(counts = counts) }
-            if (!hasPanel) return@launch
+            if (!hasPanel || plan == DetailsInspectionPolicy.Plan.SKIP) return@launch
             // Bounded: a panel that never answers ends as "Couldn't reach the provider", not "Checking…" forever.
             val outcome = BoundedLoad.run(LoadSurface.SETTINGS, isEmpty = { it == null }, report = mapOf("row" to "details_account")) {
-                store.infoFor(account, force = true, inspect = true)
+                store.infoFor(account, force = plan == DetailsInspectionPolicy.Plan.INSPECT, inspect = plan == DetailsInspectionPolicy.Plan.INSPECT)
             }
             _live.update { it.copy(info = outcome.valueOrNull() ?: it.info, load = outcome.status) }
         }
@@ -120,5 +124,20 @@ internal class ManagedPlaylistActions(
 
     companion object {
         val shared = ManagedPlaylistActions()
+    }
+}
+
+/**
+ * What the details page does about the panel's account answer (B171). A playlist this device may use is asked as
+ * always (6 h cache). One turned off HERE gets a single read-only, forced inspection - except a Stalker portal:
+ * its handshake can log another device out of a one-session portal, so it is only asked while turned on.
+ */
+internal object DetailsInspectionPolicy {
+    enum class Plan { NORMAL, INSPECT, SKIP }
+
+    fun plan(sourceType: String, availableHere: Boolean): Plan = when {
+        availableHere -> Plan.NORMAL
+        sourceType == SOURCE_TYPE_STALKER -> Plan.SKIP
+        else -> Plan.INSPECT
     }
 }

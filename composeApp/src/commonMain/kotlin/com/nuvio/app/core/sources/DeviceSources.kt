@@ -13,7 +13,10 @@ import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import co.touchlab.kermit.Logger
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import com.nuvio.app.core.auth.AuthState
 import kotlinx.serialization.json.JsonElement
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
@@ -55,25 +58,35 @@ object DeviceSources {
     val epoch: Long get() = if (activated) engine().state.value.availabilityEpoch else 0
     fun allows(kind: String, ref: String): Boolean = !activated || (AuthRepository.state.value != com.nuvio.app.core.auth.AuthState.Loading && engine().allows(ProfileRepository.activeProfileId,kind,ref))
     fun allowsAddon(url: String): Boolean = !activated || (AuthRepository.state.value != com.nuvio.app.core.auth.AuthState.Loading && engine().allowsAddonRequest(ProfileRepository.activeProfileId,url))
-    private fun logRefusal(kind: String, mode: String) { log.i { "source refused on this device: kind=$kind mode=$mode" } }
-    private fun refuse(kind: String): Nothing { val mode = engine().state.value.mode; logRefusal(kind, mode); throw SourceDisabledOnDeviceException(kind, mode) }
-    fun guard(kind: String, ref: String) { if (!allows(kind,ref)) refuse(kind) }
+    // Debug level: guards sit on hot paths (every addon request), so a refusal must not flood the log.
+    private fun logRefusal(kind: String, mode: String) { log.d { "source refused on this device: kind=$kind mode=$mode" } }
+    private fun refuse(kind: String, ref: String?): Nothing {
+        val engine = engine()
+        val scope = if (ref == null) RefusalScope.DEVICE else engine.refusalScope(ProfileRepository.activeProfileId, kind, ref)
+        engine.refuse(kind, scope)
+    }
+    /** The wrong profile must never be read: wait (bounded) for sign-in state, else refuse. */
+    private suspend fun authSettled(): Boolean =
+        AuthRepository.state.value != AuthState.Loading ||
+            withTimeoutOrNull(5_000) { AuthRepository.state.first { it != AuthState.Loading } } != null
+    fun guard(kind: String, ref: String) { if (!allows(kind,ref)) refuse(kind, ref) }
     /** [guard] for suspend callers: honours [verifying] / [inspecting] for the current request. */
     suspend fun checkAccess(kind: String, ref: String) {
         val access = currentCoroutineContext()[DeviceSourceAccessElement]?.access ?: DeviceSourceAccess.DISCOVERY
         if (!activated || access == DeviceSourceAccess.INSPECT) return
         if (access == DeviceSourceAccess.DISCOVERY) guard(kind, ref)
-        else if (!engine().permits(access, ProfileRepository.activeProfileId, kind, ref)) refuse(kind)
+        else if (!authSettled() || !engine().permits(access, ProfileRepository.activeProfileId, kind, ref)) refuse(kind, ref)
     }
     suspend fun <T> guarded(kind: String, ref: String, block: suspend () -> T): T {
         if (!activated) return block()
         val access = currentCoroutineContext()[DeviceSourceAccessElement]?.access ?: DeviceSourceAccess.DISCOVERY
+        if (access == DeviceSourceAccess.VERIFY && !authSettled()) refuse(kind, ref)
         return engine().guarded(ProfileRepository.activeProfileId,kind,ref,access,block)
     }
     /** The add/edit form's live check of a playlist: allowed before the device has a choice for it. */
     suspend fun <T> verifying(block: suspend () -> T): T = withContext(DeviceSourceAccessElement(DeviceSourceAccess.VERIFY)) { block() }
     /** A read-only account lookup the user opened (expiry, connections): allowed for a source turned off here. */
     suspend fun <T> inspecting(block: suspend () -> T): T = withContext(DeviceSourceAccessElement(DeviceSourceAccess.INSPECT)) { block() }
-    fun guardAddon(url: String) { if (!allowsAddon(url)) refuse("addon") }
+    fun guardAddon(url: String) { if (!allowsAddon(url)) refuse("addon", null) }
     suspend fun refresh() = engine().refresh(ProfileRepository.activeProfileId)
 }

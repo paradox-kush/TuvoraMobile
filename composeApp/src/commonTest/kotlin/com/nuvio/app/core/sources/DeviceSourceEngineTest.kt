@@ -345,4 +345,13 @@ class DeviceSourceEngineTest {
         assertNull(device.state.value.message)
         assertTrue(device.allows(1,"iptv",source.sourceRef))
     }
+
+    @Test fun refusalNamesWhoTurnedTheSourceOff() = runTest {
+        val accountOff = source.copy(accountEnabled = false)
+        val acc = Memory(json.encodeToString(DevicePreferenceDisk(binding = SavedDeviceBinding("setup","Phone","secret"), cursor = 0, sources = mapOf(1 to listOf(accountOff)))))
+        val device = engine(acc)
+        assertEquals(RefusalScope.ACCOUNT, assertFailsWith<SourceDisabledOnDeviceException> { device.guarded(1,"iptv",source.sourceRef,DeviceSourceAccess.VERIFY) { "x" } }.scope)
+        val here = engine(cached(listOf(DevicePreferenceValue(1,source.sourceId,false,1))))
+        assertEquals(RefusalScope.DEVICE, assertFailsWith<SourceDisabledOnDeviceException> { here.guarded(1,"iptv",source.sourceRef,DeviceSourceAccess.VERIFY) { "x" } }.scope)
+    }
 }
