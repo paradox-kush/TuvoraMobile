@@ -5,12 +5,16 @@ import com.nuvio.app.features.recordings.api.ArmKind
 import com.nuvio.app.features.recordings.api.CaptureMode
 import com.nuvio.app.features.recordings.api.FireResult
 import com.nuvio.app.features.recordings.api.ListingInfo
+import com.nuvio.app.features.recordings.api.LiveCaptureJob
+import com.nuvio.app.features.recordings.api.LiveCaptureOutcome
+import com.nuvio.app.features.recordings.api.LiveFootage
 import com.nuvio.app.features.recordings.api.LowSpacePolicy
 import com.nuvio.app.features.recordings.api.Recording
 import com.nuvio.app.features.recordings.api.RecordingAlarms
 import com.nuvio.app.features.recordings.api.RecordingCapabilities
 import com.nuvio.app.features.recordings.api.RecordingChannel
 import com.nuvio.app.features.recordings.api.RecordingFiles
+import com.nuvio.app.features.recordings.api.RecordingLiveCapturer
 import com.nuvio.app.features.recordings.api.RecordingProblem
 import com.nuvio.app.features.recordings.api.RecordingSaver
 import com.nuvio.app.features.recordings.api.RecordingSchedule
@@ -29,6 +33,7 @@ import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -52,8 +57,11 @@ import kotlinx.serialization.json.Json
  * rethrown after the claim is released as FAILED(STALLED) (system teardown, retryable); only the
  * explicit [cancel] records CANCELLED_BY_USER.
  *
- * LIVE capture is wave 4. TODO(live capture pending live-pause branch): a due LIVE schedule becomes a
- * FAILED row with [RecordingProblem.LIVE_CAPTURE_PENDING] until that lands.
+ * LIVE capture runs through [liveCapturer] (null where the platform cannot: a due LIVE schedule then fails as
+ * [RecordingProblem.LIVE_CAPTURE_PENDING]). A live recording owns a DIRECTORY ([RecordingLiveLayout]); the
+ * capturer fills it, only the user's Delete / Retry / Cancel-before-footage ever removes it, and a retry inside
+ * the slot continues into the same directory. Footage is never thrown away by a failure: giving up, a full disk
+ * or the user pressing Stop with something recorded all end as a DONE recording (cut short where it was).
  */
 class RecordingsRepository(
     private val files: RecordingFiles,
@@ -66,6 +74,8 @@ class RecordingsRepository(
     private val timeSource: TimeSource = TimeSource.Monotonic,
     /** Wall clock for paths that have no caller-supplied time (cancel, delete after a cold start). */
     private val clock: () -> Long = { GMTDate().timestamp },
+    /** Records live programmes. Null where the platform cannot (a due LIVE schedule then fails as LIVE_CAPTURE_PENDING). */
+    private val liveCapturer: RecordingLiveCapturer? = null,
 ) : RecordingsPort {
 
     private val log = Logger.withTag("Recordings")
@@ -121,7 +131,11 @@ class RecordingsRepository(
         for (id in ledger.recoverAfterRestart()) {
             val schedule = doc.scheduleValues.firstOrNull { it.id == id }
             val row = doc.recordingValues.firstOrNull { it.id == recordingIdFor(id) }
-            if (schedule != null) {
+            if (schedule != null && schedule.mode == CaptureMode.LIVE) {
+                // The pieces the dead process recorded stay: retry into the same directory, or keep them if the slot is spent.
+                val dir = files.pathFor(RecordingLiveLayout.dirNameFor(schedule.id))
+                afterLiveFailureLocked(schedule, RecordingProblem.STALLED, offline = false, nowMs = nowMs, token = null) { settleLive(dir) }
+            } else if (schedule != null) {
                 // Whatever the dead process wrote to the .part file is kept: the saver resumes it if the server allows.
                 val partial = row?.let { files.sizeOf(partPath(files.pathFor(it.fileName))) } ?: 0L
                 afterFailureLocked(schedule, RecordingProblem.STALLED, offline = false, nowMs = nowMs, written = partial, rangeSupported = true)
@@ -147,10 +161,14 @@ class RecordingsRepository(
                 edit(
                     schedules = { list -> list.filterNot { it.id == sid } },
                     recordings = { list ->
-                        list.map { if (it.id == row.id) it.copy(status = RecordingStatus.DONE, endedAtMs = row.endedAtMs ?: nowMs, sizeBytes = files.sizeOf(target), problem = null, retrySource = null) else it }
+                        val size = RecordingLiveLayout.dirOf(row.fileName)?.let { files.treeSizeOf(files.pathFor(it)) } ?: files.sizeOf(target)
+                        list.map { if (it.id == row.id) it.copy(status = RecordingStatus.DONE, endedAtMs = row.endedAtMs ?: nowMs, sizeBytes = size, problem = null, retrySource = null) else it }
                     },
                 )
                 alarms.disarm(sid)
+            } else if (schedule != null && schedule.mode == CaptureMode.LIVE) {
+                val dir = files.pathFor(RecordingLiveLayout.dirNameFor(schedule.id))
+                afterLiveFailureLocked(schedule, RecordingProblem.STALLED, offline = false, nowMs = nowMs, token = null) { settleLive(dir) }
             } else if (schedule != null) {
                 val partial = files.sizeOf(partPath(target))
                 afterFailureLocked(schedule, RecordingProblem.STALLED, offline = false, nowMs = nowMs, written = partial, rangeSupported = true)
@@ -232,9 +250,19 @@ class RecordingsRepository(
      * can produce (the window the links were built for has moved on).
      */
     private suspend fun deletePartialsOf(schedule: RecordingSchedule) {
+        if (schedule.mode == CaptureMode.LIVE) {
+            deleteLiveDir(RecordingLiveLayout.dirNameFor(schedule.id), recordingIdFor(schedule.id))
+            return
+        }
         val links = CatchUpSaveLinks.candidates(schedule.channel, schedule.programmeStartMs, schedule.programmeEndMs, clock())
         val names = (links.map { fileNameFor(schedule, it) } + SAVE_EXTENSIONS.map { fileNameFor(schedule, "link.$it") }).distinct()
         for (name in names) deletePartial(files.pathFor(name))
+    }
+
+    /** A live recording's whole directory goes, and the capturer forgets its link budget. */
+    private suspend fun deleteLiveDir(dirName: String, recordingId: String) {
+        files.deleteTree(files.pathFor(dirName))
+        liveCapturer?.forget(recordingId)
     }
 
     // ---- alarms ---------------------------------------------------------------------------
@@ -361,8 +389,18 @@ class RecordingsRepository(
     }
 
     override suspend fun deleteRecording(id: String) {
-        val job = mutex.withLock { running[id.removePrefix("rec:")] }
+        val scheduleId = id.removePrefix("rec:")
+        val job = mutex.withLock { running[scheduleId] }
         job?.cancel(CancellationException("cancelled by user"))
+        if (job != null) {
+            // The fire coroutine stops the capture and publishes its footage: the directory must not be deleted
+            // from under it. Bounded, so a capturer that never winds down cannot hold Delete for ever.
+            var waited = 0L
+            while (waited < DELETE_WAIT_MS && mutex.withLock { running.containsKey(scheduleId) }) {
+                delay(DELETE_POLL_MS)
+                waited += DELETE_POLL_MS
+            }
+        }
         locked(clock()) {
             val row = doc.recordingValues.firstOrNull { it.id == id } ?: return@locked
             deleteFilesOf(row)
@@ -373,6 +411,10 @@ class RecordingsRepository(
     }
 
     private suspend fun deleteFilesOf(row: Recording) {
+        RecordingLiveLayout.dirOf(row.fileName)?.let { dir ->
+            deleteLiveDir(dir, row.id)
+            return
+        }
         val path = files.pathFor(row.fileName)
         files.delete(path)
         if (row.status != RecordingStatus.DONE) deletePartial(path)
@@ -384,6 +426,7 @@ class RecordingsRepository(
             val source = row.retrySource ?: return@locked
             if (row.status != RecordingStatus.FAILED && row.status != RecordingStatus.CANCELLED) return@locked
             if (doc.scheduleValues.any { it.id == source.id }) return@locked
+            RecordingLiveLayout.dirOf(row.fileName)?.let { deleteLiveDir(it, recordingId) }
             deletePartial(files.pathFor(row.fileName))
             removeRecordingRow(recordingId)
             ledger.forget(source.id)
@@ -424,12 +467,22 @@ class RecordingsRepository(
     private sealed interface Begin {
         data class Finished(val result: FireResult) : Begin
         data class Go(val run: Run) : Begin
+        data class GoLive(val run: LiveRun) : Begin
     }
+
+    private class LiveRun(
+        val schedule: RecordingSchedule,
+        val token: String,
+        val job: LiveCaptureJob,
+        val cancelJob: CompletableJob,
+        val recordingId: String,
+    )
 
     override suspend fun fire(scheduleId: String, nowMs: Long): FireResult {
         val begin = locked(nowMs) { beginLocked(scheduleId, nowMs) }
         val run = when (begin) {
             is Begin.Finished -> return begin.result
+            is Begin.GoLive -> return runLive(begin.run, nowMs)
             is Begin.Go -> begin.run
         }
         return runSave(run, nowMs)
@@ -449,10 +502,19 @@ class RecordingsRepository(
                 commit()
                 return Begin.Finished(FireResult.Rearmed(decision.atMs))
             }
-            FireDecision.Missed, FireDecision.Expired -> return Begin.Finished(failTerminal(schedule, token, RecordingProblem.MISSED, nowMs))
-            is FireDecision.StartLive ->
-                // TODO(live capture pending live-pause branch): wave 4 replaces this with a real live capture.
-                return Begin.Finished(failTerminal(schedule, token, RecordingProblem.LIVE_CAPTURE_PENDING, nowMs))
+            FireDecision.Missed ->
+                // The slot is over. Footage an earlier attempt left is still a recording; only nothing at all is "missed".
+                return Begin.Finished(
+                    if (schedule.mode == CaptureMode.LIVE) {
+                        val kept = settleLive(RecordingLiveLayout.dirNameFor(schedule.id).let { files.pathFor(it) })
+                        if (kept != null) finishLiveRow(schedule, token, kept, RecordingProblem.STALLED, nowMs)
+                        else failTerminal(schedule, token, RecordingProblem.MISSED, nowMs)
+                    } else {
+                        failTerminal(schedule, token, RecordingProblem.MISSED, nowMs)
+                    },
+                )
+            FireDecision.Expired -> return Begin.Finished(failTerminal(schedule, token, RecordingProblem.MISSED, nowMs))
+            is FireDecision.StartLive -> return beginLive(schedule, token, decision.stopAtMs, nowMs)
             is FireDecision.StartCatchUpSave -> return beginCatchUp(schedule, token, decision, nowMs)
         }
     }
@@ -493,6 +555,202 @@ class RecordingsRepository(
             spaceCheck = { expected -> checkSpaceDuringCapture(expected) },
         )
         return Begin.Go(Run(schedule, token, request, target, d.fromMs, d.toMs, cancelJob, recordingId))
+    }
+
+
+    // ---- live ---------------------------------------------------------------------------------
+
+    private suspend fun beginLive(schedule: RecordingSchedule, token: String, stopAtMs: Long, nowMs: Long): Begin {
+        val capturer = liveCapturer ?: return Begin.Finished(failTerminal(schedule, token, RecordingProblem.LIVE_CAPTURE_PENDING, nowMs))
+        val dirName = RecordingLiveLayout.dirNameFor(schedule.id)
+        val dir = files.pathFor(dirName)
+        val estimate = RecordingSpacePolicy.estimateBytes(stopAtMs - nowMs)
+        when (val space = RecordingSpacePolicy.check(files.freeBytes(), estimate, lowSpacePolicy(), doc.recordingValues)) {
+            SpaceDecision.Proceed -> Unit
+            is SpaceDecision.DeleteThenProceed -> deleteRecordings(space.ids)
+            is SpaceDecision.Refuse ->
+                return Begin.Finished(afterLiveFailureLocked(schedule, space.problem, false, nowMs, token) { settleLive(dir) })
+        }
+
+        val recordingId = recordingIdFor(schedule.id)
+        val row = liveRowFor(schedule, nowMs).copy(startedAtMs = nowMs, endedAtMs = null, status = RecordingStatus.RECORDING, sizeBytes = files.treeSizeOf(dir))
+        edit(recordings = { list -> list.filterNot { it.id == recordingId } + row })
+        alarms.disarm(schedule.id)
+
+        val cancelJob = Job(currentCoroutineContext()[Job])
+        running[schedule.id] = cancelJob
+        commit() // the RUNNING claim reaches disk before the first byte
+        val job = LiveCaptureJob(recordingId = recordingId, dir = dir, stopAtMs = stopAtMs, channel = schedule.channel)
+        return Begin.GoLive(LiveRun(schedule, token, job, cancelJob, recordingId))
+    }
+
+    private fun liveRowFor(schedule: RecordingSchedule, nowMs: Long): Recording {
+        val id = recordingIdFor(schedule.id)
+        return doc.recordingValues.firstOrNull { it.id == id } ?: Recording(
+            id = id, scheduleId = schedule.id, channelKey = schedule.channel.key, channelName = schedule.channel.name,
+            title = schedule.title, episode = schedule.episode, description = schedule.description,
+            programmeStartMs = schedule.programmeStartMs, programmeEndMs = schedule.programmeEndMs,
+            startedAtMs = nowMs, endedAtMs = nowMs, status = RecordingStatus.RECORDING, mode = CaptureMode.LIVE,
+            fileName = RecordingLiveLayout.fileNameFor(schedule.id), seriesRuleId = schedule.seriesRuleId,
+        )
+    }
+
+    /** What the directory holds, published as one playable playlist; null when nothing was recorded. */
+    private suspend fun settleLive(dir: String): LiveFootage? =
+        liveCapturer?.settle(dir)?.takeIf { it.bytes > 0L }
+
+    private suspend fun runLive(run: LiveRun, nowMs: Long): FireResult {
+        val capturer = liveCapturer ?: return withContext(NonCancellable) {
+            mutex.withLock { running.remove(run.schedule.id); failTerminal(run.schedule, run.token, RecordingProblem.LIVE_CAPTURE_PENDING, nowMs) }
+        }
+        val mark = timeSource.markNow()
+        var lastReported = -1L
+        val progress: (Long, Long) -> Unit = { bytes, _ ->
+            if (lastReported < 0 || bytes - lastReported >= PROGRESS_STEP_BYTES || bytes < lastReported) {
+                lastReported = bytes
+                _progress.update { it + (run.recordingId to bytes) }
+            }
+        }
+        var kept: suspend () -> LiveFootage? = { null }
+        val outcome: LiveCaptureOutcome = try {
+            withContext(run.cancelJob) { capturer.capture(run.job, progress) }
+        } catch (e: CancellationException) {
+            if (currentCoroutineContext().isActive) {
+                // Only our own job was cancelled: the user pressed Stop. What was recorded is the show so far.
+                return withContext(NonCancellable) { mutex.withLock { finishLiveStopped(run) } }
+            }
+            // The caller was cancelled by the system (service destroyed): the capturer has published the footage;
+            // the retry policy decides whether to continue into the same directory or keep it as the recording.
+            withContext(NonCancellable) {
+                mutex.withLock {
+                    running.remove(run.schedule.id)
+                    afterLiveFailureLocked(
+                        run.schedule, RecordingProblem.STALLED, offline = false,
+                        nowMs = nowMs + mark.elapsedNow().inWholeMilliseconds, token = run.token,
+                    ) { settleLive(run.job.dir) }
+                }
+            }
+            throw e
+        } catch (e: Exception) {
+            log.w(e) { "live capture threw" }
+            kept = { settleLive(run.job.dir) }
+            LiveCaptureOutcome.Failed(RecordingProblem.UNKNOWN, offline = false, bytesKept = 0L)
+        } finally {
+            withContext(NonCancellable) {
+                run.cancelJob.complete()
+                _progress.update { it - run.recordingId }
+            }
+        }
+        val now = nowMs + mark.elapsedNow().inWholeMilliseconds
+        return withContext(NonCancellable) {
+            mutex.withLock {
+                running.remove(run.schedule.id)
+                when (outcome) {
+                    is LiveCaptureOutcome.Done ->
+                        finishLiveRow(run.schedule, run.token, LiveFootage(outcome.bytes, outcome.durationMs), null, now)
+                    is LiveCaptureOutcome.Failed -> afterLiveFailureLocked(run.schedule, outcome.problem, outcome.offline, now, run.token) {
+                        if (outcome.bytesKept > 0L) LiveFootage(outcome.bytesKept, outcome.durationKeptMs) else kept()
+                    }
+                }
+            }
+        }
+    }
+
+    /** The user stopped a running live recording: the footage is the recording; with none, it is cancelled. */
+    private suspend fun finishLiveStopped(run: LiveRun): FireResult {
+        val s = run.schedule
+        running.remove(s.id)
+        val footage = settleLive(run.job.dir)
+        if (footage != null) return finishLiveRow(s, run.token, footage, null, clock())
+        ledger.release(run.token, FireOutcome.FAILED, RecordingProblem.CANCELLED_BY_USER)
+        deleteLiveDir(RecordingLiveLayout.dirNameFor(s.id), run.recordingId)
+        alarms.disarm(s.id)
+        val endedAt = clock()
+        edit(
+            schedules = { list -> list.filterNot { it.id == s.id } },
+            recordings = { list ->
+                list.map {
+                    if (it.id == run.recordingId) it.copy(
+                        status = RecordingStatus.CANCELLED, problem = RecordingProblem.CANCELLED_BY_USER, retrySource = s, endedAtMs = endedAt,
+                    ) else it
+                }
+            },
+        )
+        commit()
+        return FireResult.Cancelled
+    }
+
+    /**
+     * A live capture ended early. Retry later inside the slot (continuing into the same directory) while the policy
+     * allows; when it does not, or the disk is full, keep what is on disk as a finished recording. [footage] is
+     * asked only when that decision is made. [token] null = the claim was already released (restart recovery).
+     */
+    private suspend fun afterLiveFailureLocked(
+        schedule: RecordingSchedule,
+        problem: RecordingProblem,
+        offline: Boolean,
+        nowMs: Long,
+        token: String?,
+        footage: suspend () -> LiveFootage?,
+    ): FireResult {
+        val decision = if (problem == RecordingProblem.NO_SPACE) RetryDecision.GiveUp(problem)
+        else RecordingSchedulePolicy.afterFailure(schedule, problem, nowMs, offline)
+        return when (decision) {
+            is RetryDecision.RetryAt -> {
+                token?.let { ledger.release(it, FireOutcome.FAILED, problem) }
+                removeRecordingRow(recordingIdFor(schedule.id))
+                edit(schedules = { list -> list.map { if (it.id == schedule.id) decision.schedule else it } })
+                armAt(decision.schedule, nowMs)
+                commit()
+                FireResult.Retrying(decision.schedule.nextTryMs)
+            }
+            is RetryDecision.GiveUp -> {
+                val kept = footage()
+                if (kept != null && kept.bytes > 0L) {
+                    finishLiveRow(schedule, token, kept, decision.problem, nowMs)
+                } else {
+                    token?.let { ledger.release(it, FireOutcome.FAILED, decision.problem) }
+                    deleteLiveDir(RecordingLiveLayout.dirNameFor(schedule.id), recordingIdFor(schedule.id))
+                    terminalRow(schedule, decision.problem, nowMs, target = null)
+                    commit()
+                    FireResult.Failed(decision.problem)
+                }
+            }
+        }
+    }
+
+    /** The recording is DONE with [footage]; [cutShort] (a problem) says it ended before the show did. */
+    private suspend fun finishLiveRow(
+        schedule: RecordingSchedule,
+        token: String?,
+        footage: LiveFootage,
+        cutShort: RecordingProblem?,
+        nowMs: Long,
+    ): FireResult {
+        token?.let { ledger.release(it, FireOutcome.DONE) }
+        val id = recordingIdFor(schedule.id)
+        val base = liveRowFor(schedule, nowMs)
+        alarms.disarm(schedule.id)
+        edit(
+            schedules = { list -> list.filterNot { it.id == schedule.id } },
+            recordings = { list ->
+                list.filterNot { it.id == id } + base.copy(
+                    status = RecordingStatus.DONE, endedAtMs = nowMs, sizeBytes = footage.bytes,
+                    durationMs = footage.durationMs, problem = cutShort, retrySource = null,
+                )
+            },
+        )
+        liveCapturer?.forget(id)
+        keepLastFor(schedule)
+        commit()
+        return FireResult.Saved
+    }
+
+    /** "Keep last N": the extras go after the new one is safely on disk. */
+    private suspend fun keepLastFor(s: RecordingSchedule) {
+        doc.seriesValues.firstOrNull { it.id == s.seriesRuleId }?.let { rule ->
+            deleteRecordings(SeriesExpansion.keepLastToDelete(rule, doc.recordingValues))
+        }
     }
 
     /** Asked by the saver every ~16 MB. Deletes old recordings if the user chose DELETE_OLDEST. */
@@ -591,10 +849,7 @@ class RecordingsRepository(
                 }
             },
         )
-        // "Keep last N": the extras go after the new one is safely on disk.
-        doc.seriesValues.firstOrNull { it.id == s.seriesRuleId }?.let { rule ->
-            deleteRecordings(SeriesExpansion.keepLastToDelete(rule, doc.recordingValues))
-        }
+        keepLastFor(s)
         commit()
         return FireResult.Saved
     }
@@ -682,6 +937,7 @@ class RecordingsRepository(
     }
 
     private fun fileNameFor(schedule: RecordingSchedule, firstCandidate: String?): String {
+        if (schedule.mode == CaptureMode.LIVE) return RecordingLiveLayout.fileNameFor(schedule.id)
         val ext = if (firstCandidate?.substringBefore('?')?.lowercase()?.endsWith(".mp4") == true) "mp4" else "ts"
         val base = buildString {
             for (c in schedule.title) append(if (c.isLetterOrDigit() || c == ' ' || c == '-') c else '_')
@@ -697,5 +953,7 @@ class RecordingsRepository(
         const val LEDGER_FILE = "recordings-ledger.json"
         const val OVERDUE_REARM_DELAY_MS = 5_000L
         const val PROGRESS_STEP_BYTES = 256L * 1024
+        const val DELETE_WAIT_MS = 5_000L
+        const val DELETE_POLL_MS = 10L
     }
 }
