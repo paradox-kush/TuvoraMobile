@@ -195,6 +195,22 @@ class IptvContentDbEpgWindowTest {
     }
 
     @Test
+    fun `a whole-guide refresh keeps the per-channel catch-up history and its fetch stamp`() = runBlocking {
+        val pid = "epg:history"
+        // Xtream per-channel history (get_simple_data_table), stored under the stream id and stamped (B231).
+        IptvContentDb.refillChannelEpg(
+            pid, "7",
+            listOf(programme("7", 1_000L, 2_000L, "Yesterday", hasArchive = true)),
+            fetchedAtMs = 500L,
+        )
+        // The XMLTV ingest owns only the keys it writes.
+        seedEpg(pid, listOf(programme("bbc.uk", 3_000L, 4_000L, "Xmltv")))
+        assertEquals(listOf("Xmltv"), IptvContentDb.epgWindow(pid, "bbc.uk", 0L, 10_000L).map { it.title }, "xmltv rows landed")
+        assertEquals(listOf("Yesterday"), IptvContentDb.epgWindow(pid, "7", 0L, 10_000L).map { it.title }, "history rows survive the swap")
+        assertEquals(500L, IptvContentDb.epgChannelFetchedAt(pid, "7"), "history stamp survives so no re-download")
+    }
+
+    @Test
     fun `xtream channel flags round-trip through ingest and lineup paths`() = runBlocking {
         val pid = "wp1:flags"
         val flagged = IptvStreamRow(
