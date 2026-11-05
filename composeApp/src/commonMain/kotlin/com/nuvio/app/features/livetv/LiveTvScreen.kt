@@ -726,8 +726,15 @@ fun LiveTvScreen(
     }
     ApplyLiveOrientation(orientationMode)
 
-    val nowNext = remember(programmes[currentContentId], nowMs) {
-        nowNextOf(programmes[currentContentId], nowMs)
+    val replayShown = catchUp
+    val nowNext = remember(programmes[currentContentId], nowMs, replayShown?.startMs, replayShown?.endMs) {
+        if (replayShown != null) {
+            GuideNowNextPolicy.selectForReplay(
+                programmes[currentContentId].orEmpty(), replayShown.startMs, replayShown.endMs, replayShown.programmeTitle,
+            )
+        } else {
+            nowNextOf(programmes[currentContentId], nowMs)
+        }
     }
 
     androidx.compose.foundation.layout.BoxWithConstraints(
