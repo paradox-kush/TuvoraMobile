@@ -2,8 +2,8 @@ import XCTest
 
 /// B193: on a fresh install with no sources Home is "ready" with zero rows. The remote must still work:
 /// the empty state offers a focusable "Set up sources" action (focused on arrival), Left/Menu open the
-/// sidebar, and the action reaches the setup-code screen. Uses the disposable local-guest profile, which
-/// has no add-ons and no playlists (a clean-state launch for the simulator). Remote-driven only (XCUIRemote).
+/// sidebar, and the action reaches the setup-code screen. `-smokeEmptyHome` shows Home as a source-less install does, because the shared simulator profile keeps
+/// content from earlier runs (an uninstall is the only other clean state). Remote-driven only (XCUIRemote).
 final class EmptyHomeFocusTests: XCTestCase {
     private let remote = XCUIRemote.shared
     private var app: XCUIApplication!
@@ -11,7 +11,7 @@ final class EmptyHomeFocusTests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "home"]
+        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "home", "-smokeEmptyHome"]
         app.launch()
     }
 
