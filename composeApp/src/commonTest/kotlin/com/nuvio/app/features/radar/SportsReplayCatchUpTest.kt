@@ -41,6 +41,7 @@ class SportsReplayCatchUpTest {
             programmeTitle = replay.programmeTitle,
             startMs = replay.programmeStartMs,
             endMs = replay.programmeEndMs,
+            nowMs = NOW_MS,
         )
         assertNotNull(session, "the launch replay must begin a catch-up session")
         // The player surface's isCatchUpPlayback is exactly `session != null` on this screen.
@@ -70,6 +71,7 @@ class SportsReplayCatchUpTest {
             programmeTitle = replay.programmeTitle,
             startMs = replay.programmeStartMs,
             endMs = replay.programmeEndMs,
+            nowMs = NOW_MS,
         )
 
         val isCatchUpPlayback = session != null
@@ -101,6 +103,7 @@ class SportsReplayCatchUpTest {
             programmeTitle = replay.programmeTitle,
             startMs = replay.programmeStartMs,
             endMs = replay.programmeEndMs,
+            nowMs = NOW_MS,
         )!!
 
         // What LiveTvScreen's onError does with a transport-shaped failure.
@@ -142,6 +145,7 @@ class SportsReplayCatchUpTest {
             programmeTitle = "",
             startMs = 0L,
             endMs = 0L,
+            nowMs = NOW_MS,
         )
         assertNull(session, "a live launch must not begin a catch-up session")
         assertTrue(

@@ -78,6 +78,7 @@ import com.nuvio.app.features.iptv.CatchUpPlayback
 import com.nuvio.app.features.iptv.M3uReplayContinuation
 import com.nuvio.app.features.iptv.M3uReplayOpen
 import com.nuvio.app.features.iptv.M3uReplayWalk
+import com.nuvio.app.features.iptv.ReplayLadder
 import com.nuvio.app.features.iptv.CatchUpStartupBudget
 import com.nuvio.app.features.iptv.CatchUpStartupPolicy
 import com.nuvio.app.features.iptv.ReplayOpenFence
@@ -300,6 +301,8 @@ fun LiveTvScreen(
             programmeTitle = replay.programmeTitle,
             startMs = replay.programmeStartMs,
             endMs = replay.programmeEndMs,
+            nowMs = TraktPlatformClock.nowEpochMs(),
+            scope = replayEffects,
         )
         if (session == null) {
             // No recording after all (the playlist vanished or can't serve catch-up): the same
@@ -307,6 +310,7 @@ fun LiveTvScreen(
             catchUpNotice = CatchUpNotice.NO_RECORDING
         } else {
             startupBudget = CatchUpStartupBudget()
+            replayRelease = session.release
             catchUp = session
         }
         pendingInitialReplay = false
@@ -452,7 +456,7 @@ fun LiveTvScreen(
             return
         }
         val failure = CatchUpPlayback.failureKind(message)
-        val walked = if (session.continues) m3uWalk.onFailure(session.attempt.token, failure) else dialectWalk.onFailure(session.attempt.token, failure)
+        val walked = session.ladder?.onFailure(session.attempt.token, failure) ?: CatchUpDialectWalk.Step.Stale
         when (val step = walked) {
             is CatchUpDialectWalk.Step.Next -> catchUp = session.copy(attempt = step.attempt)
             CatchUpDialectWalk.Step.Stale -> Unit   // a superseded walk's late answer — ignore
@@ -473,7 +477,7 @@ fun LiveTvScreen(
         if (session.proven) return
         val advance = startupBudget.onTimeout() == CatchUpStartupPolicy.Decision.ADVANCE
         val kind = CatchUpDialectWalk.FailureKind.TRANSPORT
-        val step = if (!advance) null else if (session.continues) m3uWalk.onFailure(session.attempt.token, kind) else dialectWalk.onFailure(session.attempt.token, kind)
+        val step = if (!advance) null else session.ladder?.onFailure(session.attempt.token, kind)
         when (step) {
             is CatchUpDialectWalk.Step.Next -> catchUp = session.copy(attempt = step.attempt)
             CatchUpDialectWalk.Step.Stale -> Unit
@@ -527,6 +531,7 @@ fun LiveTvScreen(
                 return@launch
             }
             val request = LiveTvData.catchUpRequest(channel.contentId, programme.startMs, programme.endMs)
+            if (!openFence.isCurrent(ticket)) return@launch
             val session = beginLaunchReplay(
                 walk = dialectWalk,
                 request = request,
@@ -534,11 +539,15 @@ fun LiveTvScreen(
                 programmeTitle = programme.title,
                 startMs = programme.startMs,
                 endMs = programme.endMs,
+                nowMs = TraktPlatformClock.nowEpochMs(),
+                scope = replayEffects,
+                admit = { openFence.isCurrent(ticket) },
             )
             if (session == null) {
                 catchUpNotice = CatchUpNotice.NO_RECORDING
                 return@launch
             }
+            replayRelease = session.release
             currentContentId = channel.contentId
             currentTitle = channel.name
             currentLogo = channel.logo
@@ -888,7 +897,7 @@ fun LiveTvScreen(
                             when {
                                 // The attempt played: pin the winner and stop walking.
                                 LivePlaybackStartupPolicy.hasStarted(it) -> {
-                                    if (session.continues) m3uWalk.onSuccess(session.attempt.token) else dialectWalk.onSuccess(session.attempt.token)
+                                    session.ladder?.onSuccess(session.attempt.token)
                                     catchUp = session.copy(proven = true)
                                 }
                                 // On Android a live/catch-up URL that never opens reports NO error
@@ -916,7 +925,7 @@ fun LiveTvScreen(
                                     endMs = action.next.endMs,
                                 )
                                 is M3uReplayContinuation.Action.Restart -> {
-                                    val begun = m3uWalk.restartAt(running.attempt.token, action.atMs, TraktPlatformClock.nowEpochMs())
+                                    val begun = running.ladder?.restartAt(running.attempt.token, action.atMs, TraktPlatformClock.nowEpochMs())
                                     if (begun == null) {
                                         catchUpNotice = CatchUpNotice.ENDED
                                         exitCatchUp()
@@ -1479,10 +1488,12 @@ internal data class CatchUpSession(
     val streamStartMs: Long = startMs,
     /** End of the window the link asked the provider for. */
     val windowEndMs: Long = endMs,
-    /** An M3U replay asks for more than its programme and follows the playhead into the next shows. */
+    /** A replay asks for more than its programme and follows the playhead into the next shows (every provider's does). */
     val continues: Boolean = false,
-    /** Releases the replay's ask held by the M3U walk (null for an Xtream replay). */
+    /** Releases the replay's ask held by its walk. */
     val release: Disposable? = null,
+    /** The ladder this replay's attempts are reported to, and that restarts it past its window. */
+    val ladder: ReplayLadder? = null,
 ) {
     /**
      * Where the programme on screen starts in the player's own timeline (negative once a restarted link
@@ -1514,15 +1525,21 @@ internal fun beginLaunchReplay(
     programmeTitle: String,
     startMs: Long,
     endMs: Long,
+    nowMs: Long,
+    scope: com.nuvio.app.features.common.lifecycle.EffectScope? = null,
+    admit: () -> Boolean = { true },
 ): CatchUpSession? {
-    val step = request?.let(walk::begin)
-    if (step !is CatchUpDialectWalk.Step.Next) return null
+    val begun = request?.let { walk.beginReplay(it, nowMs, scope, admit) } ?: return null
     return CatchUpSession(
         contentId = contentId,
         programmeTitle = programmeTitle,
         startMs = startMs,
         endMs = endMs,
-        attempt = step.attempt,
+        attempt = begun.attempt,
+        windowEndMs = begun.windowEndMs,
+        continues = true,
+        release = begun.release,
+        ladder = walk,
     )
 }
 
@@ -1550,6 +1567,7 @@ internal fun beginM3uReplay(
         windowEndMs = begun.windowEndMs,
         continues = true,
         release = begun.release,
+        ladder = walk,
     )
 }
 
