@@ -80,8 +80,19 @@ object TvIptvBrowse {
             parentMetaId = contentId,
             parentMetaType = "tv",
         )
-        return TvPlayerSession(launch) {
+        return liveSession(launch, source.singleUseLink) {
             LiveTvData.resolveSource(contentId, name, logo, forceMint = true)?.let { TvResolvedSource(it.url, it.headers) }
-        }.bindSingleUseLink(source.singleUseLink)
+        }
     }
+
+    /**
+     * The session every IPTV live launch (hub, guide, zap, Library, Search, Sports) plays in. The
+     * re-resolver is NAMED: as a trailing lambda Kotlin bound it to the constructor's last function
+     * parameter (`vodReresolve`), so live reconnects had no fresh link and replayed the spent one.
+     */
+    internal fun liveSession(
+        launch: PlayerLaunch,
+        singleUseLink: Boolean,
+        remint: suspend () -> TvResolvedSource?,
+    ): TvPlayerSession = TvPlayerSession(launch, liveReresolve = remint).bindSingleUseLink(singleUseLink)
 }
