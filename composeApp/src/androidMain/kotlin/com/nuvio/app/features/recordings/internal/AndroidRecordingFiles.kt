@@ -35,8 +35,15 @@ internal class AndroidRecordingFiles(private val stateDir: File, private val rec
         Unit
     }
 
+    /**
+     * A plain file name, or `<directory>/<file>` for a live recording (its pieces live in a directory): every
+     * segment must be a plain name, so nothing can climb out of [recordingsDir].
+     */
     override fun pathFor(fileName: String): String {
-        require(File(fileName).name == fileName && fileName.isNotBlank()) { "not a plain file name" }
+        val segments = fileName.split('/')
+        require(segments.size in 1..MAX_SEGMENTS && segments.all { it.isNotBlank() && it != "." && it != ".." && File(it).name == it }) {
+            "not a plain file name"
+        }
         return File(recordingsDir, fileName).path
     }
 
@@ -50,5 +57,18 @@ internal class AndroidRecordingFiles(private val stateDir: File, private val rec
     override suspend fun delete(path: String) = withContext(Dispatchers.IO) {
         File(path).delete()
         Unit
+    }
+
+    override suspend fun deleteTree(path: String) = withContext(Dispatchers.IO) {
+        File(path).deleteRecursively()
+        Unit
+    }
+
+    override fun treeSizeOf(path: String): Long =
+        File(path).takeIf { it.isDirectory }?.walkTopDown()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L
+
+    private companion object {
+        /** `<live directory>/<file>`; nothing deeper is ever produced. */
+        const val MAX_SEGMENTS = 2
     }
 }

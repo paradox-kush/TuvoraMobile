@@ -96,12 +96,29 @@ object LiveTvData {
      * would replay the dead URL, so the retry demands a fresh create_link instead.
      */
     suspend fun resolveSource(contentId: String, name: String, logo: String?, forceMint: Boolean = false): LiveChannelSource? {
+        val source = resolvePlayable(contentId, forceMint) ?: return null
+        XtreamLiveRecents.record(contentId, name, logo)
+        return source
+    }
+
+    /**
+     * The live source a RECORDING opens: the same registry + DoH path as [resolveSource] and the playlist's own
+     * User-Agent (a background capture must look like the player), but it does not touch "recently watched" - a
+     * recording nobody is watching is not something they watched. [forceMint] = a fresh single-use link.
+     */
+    suspend fun resolveForRecording(contentId: String, forceMint: Boolean): LiveChannelSource? {
+        // An alarm can start the process with no screen: the playlists must be read before the registry is asked.
+        runCatching { XtreamRepository.ensureLoaded() }
+        val source = resolvePlayable(contentId, forceMint) ?: return null
+        return source.copy(headers = withStreamUserAgent(contentId, source.headers))
+    }
+
+    private suspend fun resolvePlayable(contentId: String, forceMint: Boolean): LiveChannelSource? {
         val immediate = XtreamItemRegistry.liveStreamUrlFor(contentId)
             ?: XtreamItemRegistry.liveStreamUrlForAsync(contentId, forceMint)
             ?: return null
         val dnsProvider = XtreamItemRegistry.dnsProviderFor(contentId)
         val playback = resolveLivePlaybackUrl(immediate, dnsProvider)
-        XtreamLiveRecents.record(contentId, name, logo)
         return LiveChannelSource(
             url = playback.url,
             headers = playback.headers,

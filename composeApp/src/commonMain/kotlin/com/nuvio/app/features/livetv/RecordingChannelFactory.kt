@@ -75,5 +75,7 @@ internal object RecordingChannelFactory {
         userAgent: String?,
     ): RecordingChannel = RecordingChannel(
         key = contentId, sourceId = accountId, name = name, logo = logo, liveUrl = liveUrl, headers = headers(userAgent), catchUp = null,
+        // Stalker links are minted per open and spent on the first: a live recording mints one per open.
+        singleUse = true,
     )
 }

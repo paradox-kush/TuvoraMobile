@@ -5,7 +5,11 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.core.content.ContextCompat
+import com.nuvio.app.features.livetv.LiveTvData
+import com.nuvio.app.features.livetv.pause.LiveCaptureEnv
+import com.nuvio.app.features.player.PlayerPlaybackNetworking
 import com.nuvio.app.features.recordings.internal.AndroidRecordingAlarms
+import com.nuvio.app.features.recordings.internal.AndroidRecordingLiveCapturer
 import com.nuvio.app.features.recordings.internal.AndroidRecordingFiles
 import com.nuvio.app.features.recordings.internal.AndroidRecordingSaver
 import com.nuvio.app.features.recordings.internal.RecordingNotifications
@@ -17,10 +21,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/** Android capabilities. One constant per platform, so wave 4 (live capture) flips it in one place. */
+/** Android capabilities. One constant per platform (iOS and Desktop keep their own, false there). */
 private object AndroidRecordingCapabilities {
-    /** TODO(live capture pending live-pause branch): wave 4 sets this true. */
-    const val CAN_RECORD_LIVE = false
+    /** Live capture runs on live-pause's shared capture loop inside the recording foreground service. */
+    const val CAN_RECORD_LIVE = true
     val value = RecordingCapabilities(canRecordLive = CAN_RECORD_LIVE, canSaveCatchUp = true)
 }
 
@@ -45,6 +49,20 @@ object RecordingsAndroid {
             recordingsDir = File(app.filesDir, "recordings"),
         )
         val saver = AndroidRecordingSaver(isOnline = { isOnline(app) })
+        val liveCapturer = AndroidRecordingLiveCapturer(
+            // The same HTTP stack and header policy live pause builds its own capture with (AndroidLivePauseWiring).
+            env = LiveCaptureEnv(
+                callFactoryFor = { singleUse, link ->
+                    PlayerPlaybackNetworking.captureCallFactory(link.url, link.headers, retryConnectionFailures = !singleUse)
+                },
+                headerPolicy = PlayerPlaybackNetworking::captureHeaders,
+            ),
+            // The guide's own live-resolve path (registry, DoH, the playlist's User-Agent); a Stalker link is minted per call.
+            resolver = { channel, mint ->
+                LiveTvData.resolveForRecording(channel.key, forceMint = mint)?.let { RecordingLiveLink(it.url, it.headers) }
+            },
+            isOnline = { isOnline(app) },
+        )
         RecordingsAccess.register(
             RecordingsRepository(
                 files = files,
@@ -52,6 +70,7 @@ object RecordingsAndroid {
                 saver = saver,
                 capabilities = AndroidRecordingCapabilities.value,
                 lowSpacePolicy = { LowSpacePolicy.STOP }, // TODO(wave 3): read the user's setting
+                liveCapturer = liveCapturer,
             ),
         )
     }

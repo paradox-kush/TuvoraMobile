@@ -85,4 +85,14 @@ class RecordingChannelFactoryTest {
     fun `a playlist type without saveable catch-up has no catch-up`() {
         assertNull(RecordingChannelFactory.withoutCatchUp("stalker:acc:live:1", "acc", "Ch", null, "http://h/x", null).catchUp)
     }
+
+    @Test
+    fun `only a playlist type whose links are single-use is flagged single-use`() {
+        assertEquals(true, RecordingChannelFactory.withoutCatchUp("stalker:acc:live:1", "acc", "Ch", null, "", null).singleUse)
+        assertEquals(false, xtream().singleUse)
+        assertEquals(
+            false,
+            RecordingChannelFactory.m3u("m3u:acc:live:1", "acc", "Ch", null, "http://h/x.ts", null, info = null, offsetMs = 0L).singleUse,
+        )
+    }
 }
