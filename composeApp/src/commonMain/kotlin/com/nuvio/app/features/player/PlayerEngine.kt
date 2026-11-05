@@ -88,11 +88,6 @@ interface PlayerEngineController {
     fun liveSeekWindow(): LiveSeekWindow? = null
 }
 
-/** A seekable stretch of a live stream held by the engine; [positionMs] is the playhead in the same clock. */
-data class LiveSeekWindow(val startMs: Long, val endMs: Long, val positionMs: Long) {
-    val behindLiveMs: Long get() = (endMs - positionMs).coerceAtLeast(0L)
-}
-
 internal fun sanitizePlaybackHeaders(headers: Map<String, String>?): Map<String, String> {
     val rawHeaders = headers ?: return emptyMap()
     if (rawHeaders.isEmpty()) return emptyMap()
