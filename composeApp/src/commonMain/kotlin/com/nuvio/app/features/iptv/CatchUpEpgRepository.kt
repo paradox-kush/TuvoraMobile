@@ -48,6 +48,7 @@ internal object CatchUpEpgRepository {
      */
     fun supportsCatchUp(account: XtreamAccount, m3uCatchUp: M3uCatchUpInfo?): Boolean =
         supportsCatchUp(account) ||
+            account.sourceType == SOURCE_TYPE_STALKER ||
             (m3uCatchUp != null &&
                 (account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_M3U_FILE))
 
@@ -60,6 +61,13 @@ internal object CatchUpEpgRepository {
      * before this existed.
      */
     suspend fun ensureHistory(account: XtreamAccount, streamId: Int) {
+        // A Stalker portal has no per-channel history call: its aired programmes (and the ids a replay is
+        // addressed by) come from the ONE bulk guide, so "history is on disk" means that fetch has landed.
+        // The window read that follows waits on it instead of racing it on a first open.
+        if (account.sourceType == SOURCE_TYPE_STALKER) {
+            runCatching { com.nuvio.app.features.iptv.stalker.StalkerClient.ensureGuide(account) }
+            return
+        }
         if (!supportsCatchUp(account)) return
         val channelId = streamId.toString()
         val nowMs = TraktPlatformClock.nowEpochMs()

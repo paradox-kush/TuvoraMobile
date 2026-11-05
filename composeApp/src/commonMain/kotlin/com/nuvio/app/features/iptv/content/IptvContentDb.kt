@@ -39,6 +39,8 @@ internal data class IptvStreamRow(
     val useLoadBalancing: Boolean = false,
     /** An M3U live channel's own catch-up (`catchup-*` attributes); null = none. Stored as three nullable columns. */
     val catchUp: M3uCatchUpInfo? = null,
+    /** A Stalker portal's archive depth in days (0 = not stated); stored in `catchup_days` with no catch-up type. */
+    val archiveDays: Int = 0,
 )
 
 /** A series row (one per distinct series within a playlist). */
@@ -319,7 +321,7 @@ internal object IptvContentDb {
                     st.bindLong(10, if (r.hasArchive) 1L else 0L)
                     st.bindLong(11, if (r.useHttpTmpLink) 1L else 0L)
                     st.bindLong(12, if (r.useLoadBalancing) 1L else 0L)
-                    bindCatchUp(st, 13, r.catchUp)
+                    bindCatchUp(st, 13, r.catchUp, r.archiveDays)
                     st.step()
                 }
             }
@@ -909,6 +911,7 @@ internal object IptvContentDb {
                     useHttpTmpLink = !st.isNull(9) && st.getLong(9) > 0,
                     useLoadBalancing = !st.isNull(10) && st.getLong(10) > 0,
                     catchUp = readCatchUp(st, 11),
+                    archiveDays = readArchiveDays(st, 11),
                 )
             )
             out
@@ -954,6 +957,7 @@ internal object IptvContentDb {
                     useHttpTmpLink = !st.isNull(9) && st.getLong(9) > 0,
                     useLoadBalancing = !st.isNull(10) && st.getLong(10) > 0,
                     catchUp = readCatchUp(st, 11),
+                    archiveDays = readArchiveDays(st, 11),
                 )
             )
             out
@@ -1050,7 +1054,7 @@ internal object IptvContentDb {
             c.prepare("DELETE FROM categories WHERE playlist_id = ? AND generation = ? AND type = ?").use { st ->
                 st.bindText(1, playlistId); st.bindLong(2, gen); st.bindText(3, IptvContentKind.LIVE.slug); st.step()
             }
-            c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
+            c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing, catchup_type, catchup_source, catchup_days) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
                 for (r in channels) {
                     st.reset()
                     st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.sid.toLong())
@@ -1063,6 +1067,7 @@ internal object IptvContentDb {
                     st.bindLong(10, if (r.hasArchive) 1L else 0L)
                     st.bindLong(11, if (r.useHttpTmpLink) 1L else 0L)
                     st.bindLong(12, if (r.useLoadBalancing) 1L else 0L)
+                    bindCatchUp(st, 13, null, r.archiveDays)   // a Stalker row's archive depth rides in catchup_days
                     st.step()
                 }
             }
@@ -1141,6 +1146,7 @@ internal object IptvContentDb {
                 useHttpTmpLink = !st.isNull(9) && st.getLong(9) > 0,
                 useLoadBalancing = !st.isNull(10) && st.getLong(10) > 0,
                 catchUp = readCatchUp(st, 11),
+                    archiveDays = readArchiveDays(st, 11),
             ) else null
         }
     }
@@ -1155,9 +1161,10 @@ internal object IptvContentDb {
         }
     }
 
-    private fun bindCatchUp(st: SQLiteStatement, index: Int, info: M3uCatchUpInfo?) {
+    private fun bindCatchUp(st: SQLiteStatement, index: Int, info: M3uCatchUpInfo?, archiveDays: Int = 0) {
         if (info == null) {
-            st.bindNull(index); st.bindNull(index + 1); st.bindNull(index + 2)
+            st.bindNull(index); st.bindNull(index + 1)
+            if (archiveDays > 0) st.bindLong(index + 2, archiveDays.toLong()) else st.bindNull(index + 2)
         } else {
             st.bindText(index, info.type.name)
             if (info.source != null) st.bindText(index + 1, info.source) else st.bindNull(index + 1)
@@ -1166,6 +1173,10 @@ internal object IptvContentDb {
     }
 
     /** A stored triple back to its settings; an unknown type (a future dialect) or none at all reads as no catch-up. */
+    /** A Stalker channel's archive depth: `catchup_days` with no `catchup_type` (an M3U row has a type, and its days live in [M3uCatchUpInfo]). */
+    private fun readArchiveDays(st: SQLiteStatement, index: Int): Int =
+        if (st.isNull(index) && !st.isNull(index + 2)) st.getLong(index + 2).toInt().coerceAtLeast(0) else 0
+
     private fun readCatchUp(st: SQLiteStatement, index: Int): M3uCatchUpInfo? {
         if (st.isNull(index)) return null
         val type = M3uCatchUpType.entries.firstOrNull { it.name == st.getText(index) } ?: return null

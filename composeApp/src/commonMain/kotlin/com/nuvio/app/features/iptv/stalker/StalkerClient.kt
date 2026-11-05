@@ -256,6 +256,7 @@ object StalkerClient : IptvClient {
         epgChannelId = tvgId,
         categoryId = categoryId,
         hasArchive = hasArchive,
+        catchUpDays = archiveDays,
         streamUrl = ""   // create_link resolves the real single-use URL at play time
     )
 
@@ -317,6 +318,7 @@ object StalkerClient : IptvClient {
             ext = null,
             cmd = item.str("cmd"),
             hasArchive = (item.int("tv_archive") ?: 0) > 0,
+            archiveDays = StalkerArchiveDepth.days(item.int("tv_archive"), item.int("tv_archive_duration")),
             // Stored as plain booleans (false = flag absent OR panel said false — the
             // column cannot tell them apart), so reads treat only TRUE as evidence.
             useHttpTmpLink = item.flag("use_http_tmp_link") ?: false,
@@ -605,6 +607,12 @@ object StalkerClient : IptvClient {
     }
 
     /**
+     * Awaits the bulk guide on disk (single-flight, TTL-gated) - what the guide's window read waits on, because
+     * a Stalker portal's aired programmes and their archive ids exist only in that one fetch.
+     */
+    suspend fun ensureGuide(acc: XtreamAccount) { ensureBulkEpg(acc) }
+
+    /**
      * Ensures a fresh (≤[EPG_TTL_MS]) bulk guide for [acc] is stored in [IptvContentDb], fetching
      * `get_epg_info&period=3` when stale. The response is STREAMED through
      * [StalkerEpgStreamParser] and chunk-inserted — it used to be read into one String plus a full
@@ -676,6 +684,7 @@ object StalkerClient : IptvClient {
                     title = prog.title,
                     desc = prog.description.takeIf { it.isNotBlank() },
                     programmeId = prog.programmeId,
+                    hasArchive = prog.hasArchive == true,
                 )
             )
             count++

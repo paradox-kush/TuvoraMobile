@@ -157,6 +157,8 @@ internal class StalkerEpgStreamParser(
                 endMs = endMs,
                 nowPlaying = false,   // decided against the clock at read time, not ingest time
                 programmeId = obj.str("id")?.trim()?.takeIf { it.isNotEmpty() },
+                // `mark_archive`: the portal says it kept a recording. Positive only, like every other panel mark.
+                hasArchive = true.takeIf { obj.str("mark_archive")?.trim().let { m -> m == "1" || m.equals("true", ignoreCase = true) } },
             )
         )
     }
