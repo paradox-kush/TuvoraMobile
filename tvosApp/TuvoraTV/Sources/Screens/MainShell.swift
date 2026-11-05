@@ -172,7 +172,11 @@ struct MainShell: View {
         }
         .task { await theme.observe() }
         .task { TopShelfPublisher.start() }
-        .onReceive(DeepLinkCenter.shared.$openSetupCode) { open in if open { destination = .settings } }
+        .onReceive(DeepLinkCenter.shared.$openSetupCode) { open in
+            guard open else { return }
+            contentFocus.expectContentFocus()
+            destination = .settings
+        }
         .onReceive(DeepLinkCenter.shared.$openIptvTab) { open in
             guard open else { return }
             DeepLinkCenter.shared.openIptvTab = false

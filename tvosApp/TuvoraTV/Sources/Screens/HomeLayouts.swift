@@ -471,7 +471,8 @@ private struct HomeRowsStates: View {
                     .padding(.leading, dp(48))
                 }
             } else {
-                EmptyHomeState(candidate: rows.sections.isEmpty && !hasContinueWatching && !hasCollections, errorMessage: rows.errorMessage)
+                EmptyHomeState(candidate: rows.sections.isEmpty && !hasContinueWatching && !hasCollections, errorMessage: rows.errorMessage,
+                                failedRows: TvHome.shared.showsPartialFailure(state: rows))
             }
         }
     }

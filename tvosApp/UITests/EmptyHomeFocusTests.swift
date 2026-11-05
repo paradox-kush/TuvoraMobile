@@ -54,7 +54,9 @@ final class EmptyHomeFocusTests: XCTestCase {
     }
 
     /// A viewer WHO HAS content must never see the empty state flash and take focus, and Home loading must not open
-    /// the drawer on its own. Launches without the empty hook; skipped when the shared simulator profile holds no content.
+    /// the drawer on its own. Launches without the empty hook. Whether the simulator profile has content is decided from
+    /// real content elements (never from the empty action, which is the very bug): no content -> skip; content and the
+    /// action ever appearing -> fail.
     func testHomeWithContentNeverShowsEmptyActionOrOpensDrawer() throws {
         app.terminate()
         app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "home"]
@@ -63,7 +65,11 @@ final class EmptyHomeFocusTests: XCTestCase {
         let end = Date().addingTimeInterval(6)   // past the empty-state settle delay
         var sawAction = false
         while Date() < end { if app.buttons["home.empty.action"].exists { sawAction = true }; Thread.sleep(forTimeInterval: 0.3) }
-        if sawAction { throw XCTSkip("the simulator profile holds no content: nothing to prove here") }
+        let hasContent = app.buttons.allElementsBoundByIndex.contains {
+            !$0.identifier.hasPrefix("sidebar.") && $0.identifier != "home.empty.action"
+        }
+        if !hasContent { throw XCTSkip("the simulator profile holds no content: nothing to prove here") }
+        XCTAssertFalse(sawAction, "Home has content, yet the empty-state action appeared")
         XCTAssertFalse(focusedId().hasPrefix("sidebar."), "Home loading opened the drawer; focus \(focusedId())")
     }
 }
