@@ -112,7 +112,12 @@ class TvReplay internal constructor(
 object TvCatchUp {
     private val walk by lazy { CatchUpDialectWalk(LiveTvData.winnerMemory()) }
 
-    fun supportsCatchUp(contentId: String): Boolean = LiveTvData.supportsCatchUp(contentId)
+    /**
+     * Whether the guide may offer replay on this playlist's channels: an Xtream panel, or a URL/file M3U
+     * playlist (which channels actually have catch-up is each channel's own `hasArchive`).
+     */
+    fun supportsCatchUp(contentId: String): Boolean =
+        LiveTvData.supportsCatchUp(contentId) || LiveTvData.isM3uPlaylist(contentId)
 
     /** Pulls the FOCUSED channel's guide table (never a page of rows: the 2 MB → 40 MB lesson). */
     suspend fun ensureHistory(contentId: String) = LiveTvData.ensureHistory(contentId)

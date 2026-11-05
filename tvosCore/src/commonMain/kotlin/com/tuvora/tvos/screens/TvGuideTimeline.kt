@@ -77,7 +77,7 @@ object TvGuideTimeline {
 
     /**
      * NuvioTV guideActionFor: the shared [XtreamCatchUp.actionFor], then a playlist that cannot build a
-     * replay URL (Stalker, M3U) never shows a replay affordance.
+     * replay URL (Stalker) never shows a replay affordance; an M3U playlist's channels do when they carry catch-up.
      */
     fun action(programme: XtreamProgram, hasArchive: Boolean, catchUpDays: Int, nowMs: Long, catchUpSupported: Boolean): ProgrammeAction {
         val action = XtreamCatchUp.actionFor(
