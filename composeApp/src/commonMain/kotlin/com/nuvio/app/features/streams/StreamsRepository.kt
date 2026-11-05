@@ -16,6 +16,7 @@ import com.nuvio.app.features.plugins.PluginRepository
 import com.nuvio.app.features.plugins.pluginContentId
 import com.nuvio.app.features.plugins.PluginsUiState
 import com.nuvio.app.features.servers.ServerStreams
+import com.nuvio.app.features.servers.loadBounded
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -564,7 +565,7 @@ object StreamsRepository {
                     log.d { "Fetching streams from: $url" }
 
                     val displayName = addon.addonName
-                    val group = runCatchingUnlessCancelled {
+                    val group = SourceLaneGuard.run {
                         val payload = fetchAddonResponseText(
                             url = url,
                             forceRefresh = forceRefresh,
@@ -610,14 +611,15 @@ object StreamsRepository {
             }
 
             serverSources.forEach { source ->
-                launch { publishCompletion(StreamLoadCompletion.Addon(source.load())) }
+                launch { publishCompletion(StreamLoadCompletion.Addon(source.loadBounded())) }
             }
 
             pluginProviderGroups.forEach { providerGroup ->
                 val includeScraperNameInSubtitle = false
                 providerGroup.scrapers.forEach { scraper ->
                     nonIptvLoads += launch {
-                        val completion = PluginRepository.executeScraper(
+                        val completion = SourceLaneGuard.run {
+                            PluginRepository.executeScraper(
                             scraper = scraper,
                             tmdbId = pluginContentId(
                                 videoId = videoId,
@@ -627,7 +629,8 @@ object StreamsRepository {
                             mediaType = type,
                             season = season,
                             episode = episode,
-                        ).fold(
+                        ).getOrThrow()
+                        }.fold(
                             onSuccess = { results ->
                                 StreamLoadCompletion.PluginScraper(
                                     addonId = providerGroup.addonId,

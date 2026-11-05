@@ -2,6 +2,7 @@ package com.nuvio.app.features.servers
 
 import com.nuvio.app.features.streams.AddonStreamGroup
 import com.nuvio.app.features.streams.StreamBehaviorHints
+import com.nuvio.app.features.streams.SourceLaneGuard
 import com.nuvio.app.features.streams.StreamItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -30,6 +31,18 @@ internal class ServerStreamSource(
         )
     }
 }
+
+/** [ServerStreamSource.load] under the lane deadline: a hung or interrupted server ends as a Failed group, never an unfinished one (B226). */
+internal suspend fun ServerStreamSource.loadBounded(): AddonStreamGroup =
+    SourceLaneGuard.run { load() }.getOrElse { error ->
+        AddonStreamGroup(
+            addonName = addonName,
+            addonId = addonId,
+            streams = emptyList(),
+            isLoading = false,
+            error = error.message,
+        )
+    }
 
 internal object ServerStreams {
     fun isNativeRequest(videoId: String): Boolean = ServerItemRef.isServerId(videoId)

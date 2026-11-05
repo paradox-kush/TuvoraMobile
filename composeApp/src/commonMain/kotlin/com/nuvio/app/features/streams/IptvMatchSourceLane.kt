@@ -23,7 +23,7 @@ internal object IptvMatchSourceLane {
         othersSettled: Job,
         resolve: suspend () -> List<StreamItem>,
     ): AddonStreamGroup =
-        runCatchingUnlessCancelled { IptvSourceWaitPolicy.await(othersSettled) { resolve() } }.fold(
+        SourceLaneGuard.run { IptvSourceWaitPolicy.await(othersSettled) { resolve() } }.fold(
             onSuccess = { resolved ->
                 val streams = resolved ?: emptyList<StreamItem>().also {
                     log.w { "Xtream match for ${source.addonName} cut after ${IptvSourceWaitPolicy.PLAYLIST_BUDGET_MS} ms (playlist not answering)" }

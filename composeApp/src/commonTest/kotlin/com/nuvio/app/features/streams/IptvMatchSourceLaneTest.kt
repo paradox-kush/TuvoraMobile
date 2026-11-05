@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -81,5 +82,68 @@ class IptvMatchSourceLaneTest {
         }
         assertEquals("refused", group.error, "the failure reaches the group")
         assertFalse(group.isLoading, "failed group is finished")
+    }
+}
+
+/** B226: a lane must always report a group; a provider-side CancellationException is a failure, not the caller leaving. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class SourceLaneIsolationTest {
+    private val src = StreamSourceGroup(sourceId = "xtream-match:p", addonName = "p")
+
+    @Test
+    fun aProviderSideCancellationBecomesAFailedGroupNotASilentlyDeadLane() = runTest {
+        val group = IptvMatchSourceLane.resolveGroup(src, Job().also { it.complete() }) {
+            throw kotlinx.coroutines.CancellationException("Source choices changed")
+        }
+        assertFalse(group.isLoading)
+        assertTrue(group.streams.isEmpty())
+        assertEquals("Source choices changed", group.error, "failure is reported, never swallowed as empty")
+    }
+
+    @Test
+    fun aProviderThatNeverAnswersEndsInAFailedGroupAtTheLaneDeadline() = runTest {
+        var group: AddonStreamGroup? = null
+        val job = launch {
+            group = IptvMatchSourceLane.resolveGroup(src, Job()) { delay(Long.MAX_VALUE); emptyList() }
+        }
+        advanceUntilIdle()
+        job.join()
+        assertEquals(SourceLaneGuard.LANE_DEADLINE_MS, currentTime)
+        assertFalse(group!!.isLoading)
+        assertTrue(!group!!.error.isNullOrBlank())
+    }
+
+    @Test
+    fun guardReturnsFailureForForeignCancellationAndTimeout() = runTest {
+        val foreign = SourceLaneGuard.run { throw kotlinx.coroutines.CancellationException("Server scope changed") }
+        assertTrue(foreign.exceptionOrNull() is SourceLaneInterruptedException)
+        val timedOut = SourceLaneGuard.run(deadlineMs = 1_000) { delay(5_000) }
+        assertTrue(timedOut.exceptionOrNull() is SourceLaneTimeoutException)
+        assertEquals(1, SourceLaneGuard.run { 1 }.getOrNull())
+    }
+
+    @Test
+    fun theCallersOwnCancellationStillPropagates() = runTest {
+        var reached = false
+        val job = launch {
+            SourceLaneGuard.run { delay(10_000) }
+            reached = true
+        }
+        testScheduler.runCurrent()
+        job.cancel()
+        job.join()
+        assertFalse(reached, "cancelling the caller must not turn into a Failed value")
+        assertTrue(job.isCancelled)
+    }
+
+    @Test
+    fun aLaneFailureDoesNotCancelItsSiblings() = runTest {
+        val results = mutableMapOf<String, Boolean>()
+        val parent = launch {
+            launch { SourceLaneGuard.run { throw kotlinx.coroutines.CancellationException("x") }; results["bad"] = true }
+            launch { delay(100); SourceLaneGuard.run { 1 }; results["good"] = true }
+        }
+        parent.join()
+        assertEquals(mapOf("bad" to true, "good" to true), results)
     }
 }
