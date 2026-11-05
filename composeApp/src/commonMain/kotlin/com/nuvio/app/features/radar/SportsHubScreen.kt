@@ -145,6 +145,15 @@ fun SportsHubScreen(
     var browseCategory by remember { mutableStateOf<RadarCategory?>(null) }
     var browsing by remember { mutableStateOf(false) }
     var sheetFixture by remember { mutableStateOf<RadarFixture?>(null) }
+    // The Calendar's "Watch now": open the same channel-matching sheet for that game once its fixture is held.
+    val requestedGameId by com.nuvio.app.core.contracts.SportsMatchRequest.gameId.collectAsStateWithLifecycle()
+    LaunchedEffect(requestedGameId, state.fixturesByLeague, state.fixturesByTeam) {
+        val id = requestedGameId ?: return@LaunchedEffect
+        state.fixtureByKey(id)?.let {
+            sheetFixture = it
+            com.nuvio.app.core.contracts.SportsMatchRequest.consume()
+        }
+    }
     // Discovery drill-in: a league/event page listing everything happening in it.
     var leaguePage by remember { mutableStateOf<RadarLeague?>(null) }
     var fixturesPage by remember { mutableStateOf<SportsFixturesPage?>(null) }

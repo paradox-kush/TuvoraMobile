@@ -8,7 +8,9 @@
 "Add to library" = "Pridėti į biblioteką";
 "Added ↑" = "Pridėta (nuo seniausių)";
 "Added ↓" = "Pridėta (nuo naujausių)";
+"Addons" = "Priedai";
 "Adjust home layout, content visibility, and poster behavior" = "Reguliuoti pradinio ekrano išdėstymą, turinio matomumą ir plakatų elgesį";
+"Advanced" = "Išplėstiniai";
 "All" = "Visi";
 "All history" = "Visa istorija";
 "Always show source list and let me choose." = "Visada rodyti šaltinių sąrašą ir leisti pasirinkti.";
@@ -20,8 +22,6 @@
 "Artwork" = "Apipavidalinimas (Artwork)";
 "Audience Score" = "Žiūrovų įvertinimas";
 "Audio" = "Garsas";
-"Audio & Video" = "Garsas ir vaizdo įrašas";
-"Audio controls and video compatibility." = "Garso valdikliai ir vaizdo suderinamumas.";
 "Auto (Best for Content)" = "Automatiškai (Geriausia turiniui)";
 "Auto Stream Selection" = "Automatinis srauto pasirinkimas";
 "Auto-play Next Episode" = "Automatiškai leisti kitą seriją";
@@ -30,6 +30,7 @@
 "Back" = "Atgal";
 "Balanced" = "Subalansuotas";
 "Basic Info" = "Pagrindinė informacija";
+"Blur unwatched episodes" = "Sulieti nežiūrėtas serijas";
 "Bold" = "Paryškintas";
 "Bottom Offset" = "Apatinis poslinkis";
 "Cancel" = "Atšaukti";
@@ -59,7 +60,6 @@
 "Continue Watching Window" = "„Tęsti žiūrėjimą“ langas";
 "Continue without account" = "Tęsti be paskyros";
 "Control what appears on home and search." = "Valdyti, kas rodoma pradiniame ekrane ir paieškoje.";
-"Core playback behavior." = "Pagrindinė atkūrimo elgsena.";
 "Create" = "Sukurti";
 "Create Profile" = "Sukurti profilį";
 "Create your own Client ID at anime-skip.com/account/settings" = "Susikurkite savo kliento ID adresu anime-skip.com/account/settings";
@@ -79,6 +79,7 @@
 "Details" = "Išsami informacija";
 "Device language" = "Įrenginio kalba";
 "Disable" = "Išjungti";
+"Disabled" = "Išjungta";
 "Disconnect" = "Atsijungti";
 "Disconnect Trakt?" = "Atsijungti nuo „Trakt“?";
 "Discover" = "Atrasti";
@@ -89,6 +90,7 @@
 "Enable Anime Skip" = "Įjungti Anime praleidimą";
 "Enable MDBList Ratings" = "Įjungti MDBList įvertinimus";
 "Enable TMDB Enrichment" = "Įjungti TMDB praturtinimą";
+"Enabled" = "Įjungta";
 "Enter Client ID" = "Įveskite kliento ID";
 "Enter MDBList API key" = "Įveskite MDBList API raktą";
 "Enter at least 2 characters" = "Įveskite bent 2 simbolius";
@@ -101,7 +103,6 @@
 "Filmography" = "Filmografija";
 "Focus an avatar to view its name" = "Fokusuokite avatarą, kad pamatytumėte jo pavadinimą";
 "Font Size" = "Šrifto dydis";
-"General" = "Bendra";
 "Generating QR…" = "Generuojama…";
 "Genre" = "Žanras";
 "Go to details" = "Eiti į informaciją";
@@ -109,6 +110,7 @@
 "Grid View" = "Tinklelio rodinys";
 "Hidden" = "Paslėpta";
 "Hide sidebar by default; show when focused." = "Slėpti šoninę juostą pagal numatytuosius nustatymus; rodyti, kai fokusuojama.";
+"Hide unreleased content" = "Slėpti neišleistą turinį";
 "Hold to manage profile" = "Spustelėkite profilį, kad pradėtumėte";
 "Home" = "Pagrindinis";
 "Home Content" = "Pradinio ekrano turinys";
@@ -132,6 +134,7 @@
 "Login approved. Finishing sign in…" = "Prisijungimas patvirtintas. Užbaigiama…";
 "Logo and backdrop images from TMDB" = "Logotipų ir fonų paveikslėliai iš TMDB";
 "MDBList Ratings" = "MDBList įvertinimai";
+"MOVIES" = "Filmai";
 "Manage Lists" = "Valdyti sąrašus";
 "Manage Profiles" = "Valdyti profilius";
 "Manage available integrations" = "Tvarkykite galimas integracijas";
@@ -170,8 +173,6 @@
 "Playback" = "Atkūrimas";
 "Playback Settings" = "Atkūrimo nustatymai";
 "Playback Speed" = "Atkūrimo greitis";
-"Player & Stream Selection" = "Grotuvas ir srauto pasirinkimas";
-"Player preference, auto-play, and source filtering." = "Grotuvo nustatymai, automatinis paleidimas ir šaltinių filtravimas.";
 "Please wait…" = "Prašome palaukti…";
 "Poster Card" = "Plakato kortelė";
 "Preferred Audio Language" = "Pageidaujama garso kalba";
@@ -186,7 +187,9 @@
 "Profiles" = "Profiliai";
 "QR login expired. Generate a new code." = "QR prisijungimo galiojimas pasibaigė. Sugeneruokite naują kodą.";
 "QR unavailable. Refresh to retry." = "QR paslauga laikinai nepasiekiama";
+"Rating" = "Įvertinimas";
 "Ratings" = "Įvertinimai";
+"Refresh" = "Atnaujinimas (Refresh)";
 "Refresh QR" = "Atnaujinti kodą";
 "Remove" = "Pašalinti";
 "Remove from library" = "Pašalinti iš bibliotekos";
@@ -197,6 +200,7 @@
 "Resume" = "Tęsti";
 "Retry" = "Bandyti dar kartą";
 "Runtime, status, country, and language from TMDB" = "Trukmė, išleidimo data, šalis ir kalba iš TMDB";
+"SHOWS" = "Serialai";
 "Save" = "Išsaugoti";
 "Saving…" = "Išsaugoma…";
 "Scan the QR code or enter the short code in your browser." = "Nukreipkite kamerą į kodą";
@@ -220,8 +224,11 @@
 "Show TMDB score" = "Rodyti TMDB įvertinimą";
 "Show Trakt score" = "Rodyti „Trakt“ įvertinimą";
 "Show audience score" = "Rodyti žiūrovų įvertinimą";
+"Show catalog type" = "Rodyti katalogo tipą";
 "Show critics score" = "Rodyti kritikų įvertinimą (Rotten Tomatoes)";
 "Show titles under posters in rows, grid, and see-all." = "Rodyti pavadinimus po plakatais eilutėse, tinklelyje ir „Rodyti viską“.";
+"Shown" = "Rodoma";
+"Shows" = "Serialai";
 "Sign Out" = "Atsijungti";
 "Signed in" = "Prisijungta kaip";
 "Size" = "Dydis";

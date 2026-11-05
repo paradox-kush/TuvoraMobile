@@ -29,6 +29,6 @@ not a code-review maybe.** Phase 0 (this commit) lands the machinery; seams S1â€
 
 ## The firewall (merge safety)
 The fork side is defined by **upstream absence** (`git cat-file -e origin/cmp-rewrite:<path>`), NOT
-directory naming: `features/{radar,iptv,epg,livetv,dev,announcements}` plus `core/{analytics,diag,memory,rec}` and a
+directory naming: `features/{radar,iptv,epg,livetv,dev,announcements,calendar}` plus `core/{analytics,diag,memory,rec}` and a
 few fork-only files in shared dirs. Re-verify the set at every upstream sync. `ArchBaseline` freezes the
 26 current crossings; each seam burns its entries down. Never add a baseline entry to silence a rule.
