@@ -289,30 +289,50 @@ fun LiveTvScreen(
     // stream the replay immediately replaces. The live resolve stands down until the walk has
     // begun (or refused, in which case the launch falls back to a plain live tune).
     var pendingInitialReplay by remember { mutableStateOf(initialReplay != null) }
+    /**
+     * Opens a replay through [startReplay] - the one path for the guide AND the launch, so the walk is picked by
+     * the channel's playlist type either way. [applyChannel] moves the screen onto the channel once a session exists.
+     */
+    suspend fun openReplay(contentId: String, programmeTitle: String, startMs: Long, endMs: Long, applyChannel: () -> Unit) {
+        replayRetry = null
+        replayStartupFailed = false
+        startupBudget = CatchUpStartupBudget()
+        val ticket = openFence.next()
+        replayRelease?.dispose()
+        replayRelease = null
+        val nowMs = TraktPlatformClock.nowEpochMs()
+        val result = startReplay(
+            isM3uPlaylist = LiveTvData.isM3uPlaylist(contentId),
+            sourceType = LiveTvData.sourceTypeOf(contentId),
+            contentId = contentId,
+            programmeTitle = programmeTitle,
+            startMs = startMs,
+            endMs = endMs,
+            nowMs = nowMs,
+            m3uWalk = m3uWalk,
+            dialectWalk = dialectWalk,
+            m3uRequest = { LiveTvData.m3uReplayRequest(contentId, startMs, endMs, nowMs) },
+            xtreamRequest = { LiveTvData.catchUpRequest(contentId, startMs, endMs) },
+            scope = replayEffects,
+            admit = { openFence.isCurrent(ticket) },
+        )
+        // A newer open, a Back or a zap overtook this one: a late result publishes nothing.
+        if (!openFence.isCurrent(ticket)) return
+        when (result) {
+            is ReplayStart.Failed -> replayRetry = { scope.launch { openReplay(contentId, programmeTitle, startMs, endMs, applyChannel) } }
+            ReplayStart.NoRecording -> catchUpNotice = CatchUpNotice.NO_RECORDING
+            is ReplayStart.Started -> {
+                replayRelease = result.session.release
+                applyChannel()
+                catchUpNotice = null
+                catchUp = result.session
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         val replay = initialReplay ?: return@LaunchedEffect
-        val request = LiveTvData.catchUpRequest(
-            initialContentId, replay.programmeStartMs, replay.programmeEndMs,
-        )
-        val session = beginLaunchReplay(
-            walk = dialectWalk,
-            request = request,
-            contentId = initialContentId,
-            programmeTitle = replay.programmeTitle,
-            startMs = replay.programmeStartMs,
-            endMs = replay.programmeEndMs,
-            nowMs = TraktPlatformClock.nowEpochMs(),
-            scope = replayEffects,
-        )
-        if (session == null) {
-            // No recording after all (the playlist vanished or can't serve catch-up): the same
-            // notice a guide replay shows, over the live channel the viewer at least asked about.
-            catchUpNotice = CatchUpNotice.NO_RECORDING
-        } else {
-            startupBudget = CatchUpStartupBudget()
-            replayRelease = session.release
-            catchUp = session
-        }
+        openReplay(initialContentId, replay.programmeTitle, replay.programmeStartMs, replay.programmeEndMs) {}
         pendingInitialReplay = false
     }
 
@@ -492,67 +512,12 @@ fun LiveTvScreen(
     /** Opens a replay: the walk picks the first URL to try, and the sheet (if any) closes. */
     fun startCatchUp(channel: LiveGuideChannel, programme: XtreamProgram) {
         sheetTarget = null
-        replayRetry = null
-        replayStartupFailed = false
-        startupBudget = CatchUpStartupBudget()
-        val ticket = openFence.next()
-        replayRelease?.dispose()
-        replayRelease = null
         scope.launch {
-            if (LiveTvData.isM3uPlaylist(channel.contentId)) {
-                // M3U: the playlist's own catch-up. Opening reads the channel's line from the content
-                // database under the live-resolve deadline; a stall is a failure with Retry, not a spinner.
-                val nowMs = TraktPlatformClock.nowEpochMs()
-                val open = M3uReplayOpen.run(LiveTvData.sourceTypeOf(channel.contentId)) {
-                    LiveTvData.m3uReplayRequest(channel.contentId, programme.startMs, programme.endMs, nowMs)
-                }
-                // A newer open, a Back or a zap overtook this one: a late result publishes nothing.
-                if (!openFence.isCurrent(ticket)) return@launch
-                when (open) {
-                    is M3uReplayOpen.Failed -> replayRetry = { startCatchUp(channel, programme) }
-                    M3uReplayOpen.Unavailable -> catchUpNotice = CatchUpNotice.NO_RECORDING
-                    is M3uReplayOpen.Ready -> {
-                        val session = beginM3uReplay(
-                            m3uWalk, open.request, channel.contentId, programme.title, programme.startMs, programme.endMs,
-                            scope = replayEffects, admit = { openFence.isCurrent(ticket) },
-                        )
-                        if (session == null) {
-                            catchUpNotice = CatchUpNotice.NO_RECORDING
-                        } else {
-                            replayRelease = session.release
-                            currentContentId = channel.contentId
-                            currentTitle = channel.name
-                            currentLogo = channel.logo
-                            catchUpNotice = null
-                            catchUp = session
-                        }
-                    }
-                }
-                return@launch
+            openReplay(channel.contentId, programme.title, programme.startMs, programme.endMs) {
+                currentContentId = channel.contentId
+                currentTitle = channel.name
+                currentLogo = channel.logo
             }
-            val request = LiveTvData.catchUpRequest(channel.contentId, programme.startMs, programme.endMs)
-            if (!openFence.isCurrent(ticket)) return@launch
-            val session = beginLaunchReplay(
-                walk = dialectWalk,
-                request = request,
-                contentId = channel.contentId,
-                programmeTitle = programme.title,
-                startMs = programme.startMs,
-                endMs = programme.endMs,
-                nowMs = TraktPlatformClock.nowEpochMs(),
-                scope = replayEffects,
-                admit = { openFence.isCurrent(ticket) },
-            )
-            if (session == null) {
-                catchUpNotice = CatchUpNotice.NO_RECORDING
-                return@launch
-            }
-            replayRelease = session.release
-            currentContentId = channel.contentId
-            currentTitle = channel.name
-            currentLogo = channel.logo
-            catchUpNotice = null
-            catchUp = session
         }
     }
 
