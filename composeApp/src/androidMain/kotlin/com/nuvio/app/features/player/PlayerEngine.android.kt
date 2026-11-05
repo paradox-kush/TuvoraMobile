@@ -295,6 +295,7 @@ private fun PlatformPlayerSurfaceInner(
             playWhenReady = playWhenReady,
             initialPositionMs = initialPositionMs,
             initialPositionRequestKey = initialPositionRequestKey,
+            startAtLiveWindowStart = startAtLiveWindowStart,
             resizeMode = resizeMode,
             videoZoom = videoZoom,
             liveBufferPlan = liveBufferPlan,
@@ -390,6 +391,8 @@ private fun ExoPlayerSurface(
     playWhenReady: Boolean,
     initialPositionMs: Long?,
     initialPositionRequestKey: String?,
+    /** A local growing HLS playlist (live pause buffer): prepare paused at the start of its window. */
+    startAtLiveWindowStart: Boolean,
     resizeMode: PlayerResizeMode,
     videoZoom: VideoZoom,
     liveBufferPlan: LiveBufferPlan?,
@@ -407,7 +410,7 @@ private fun ExoPlayerSurface(
     val latestOnSnapshot = rememberUpdatedState(onSnapshot)
     val latestOnError = rememberUpdatedState(onError)
     val latestOnInitialPositionHandled = rememberUpdatedState(onInitialPositionHandled)
-    val latestPlayWhenReady = rememberUpdatedState(playWhenReady)
+    val latestPlayWhenReady = rememberUpdatedState(LocalLiveWindowPolicy.playWhenReady(startAtLiveWindowStart, playWhenReady))
     val coroutineScope = rememberCoroutineScope()
 
     val playerSettings = remember {
@@ -459,13 +462,15 @@ private fun ExoPlayerSurface(
     var fallbackStartPositionMs by remember(playerSourceKey) { mutableStateOf<Long?>(null) }
     val effectiveDecoderPriority = decoderPriorityOverride ?: playerSettings.decoderPriority
 
-    var resolvedMediaItem by remember(playerSourceKey, externalSubtitles) {
+    var resolvedMediaItem by remember(playerSourceKey, externalSubtitles, startAtLiveWindowStart) {
         mutableStateOf(
             playbackMediaItemFromUrl(
                 url = sourceUrl,
                 responseHeaders = sanitizedSourceResponseHeaders,
                 streamType = normalizedStreamType,
             ).buildUpon()
+                // The live pause buffer is a local HLS playlist whatever its file name says.
+                .apply { if (startAtLiveWindowStart) setMimeType(MimeTypes.APPLICATION_M3U8) }
                 .setMediaId(sourceUrl)
                 .apply {
                     val subtitleConfigs = startupSubtitleConfigurations(externalSubtitles)
@@ -782,8 +787,10 @@ private fun ExoPlayerSurface(
         val mediaItem = attachedAddonSubtitleConfig?.let { config ->
             resolvedMediaItem.buildUpon().setSubtitleConfigurations(listOf(config)).build()
         } ?: resolvedMediaItem
-        val requestedStartPositionMs = fallbackStartPositionMs
-            ?: initialPositionMs?.takeIf { it > 0L }
+        val requestedStartPositionMs = LocalLiveWindowPolicy.startPositionMs(
+            startAtLiveWindowStart,
+            fallbackStartPositionMs ?: initialPositionMs?.takeIf { it > 0L },
+        )
         playbackDiagnostics.attempt += 1
         playbackDiagnostics.prepareStartedAtMs = SystemClock.elapsedRealtime()
         Log.i(
@@ -889,6 +896,13 @@ private fun ExoPlayerSurface(
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 syncPlayerViewKeepScreenOn()
+                // The viewer of a pause buffer is not at the live edge: falling behind the window means
+                // "back to its start", not "rejoin live" (and not a mime probe of a local file).
+                if (LocalLiveWindowPolicy.restartsAtWindowStart(startAtLiveWindowStart, error.errorCode)) {
+                    exoPlayer.seekTo(0L)
+                    exoPlayer.prepare()
+                    return
+                }
                 Log.e(
                     PLAYER_DIAGNOSTIC_TAG,
                     "error attempt=${playbackDiagnostics.attempt} " +
