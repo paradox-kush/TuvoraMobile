@@ -18,6 +18,7 @@ import kotlin.test.assertTrue
  */
 class StalkerSeriesAbsentTest {
 
+    private var lastSession: StalkerSession? = null
     private var seriesReply = """{"js":null}"""
     private var vodCategories = """{"js":[{"id":"*","title":"All"}]}"""
     private var profile = """{"js":{"id":"1","status":0}}"""
@@ -44,7 +45,7 @@ class StalkerSeriesAbsentTest {
     @BeforeTest
     fun setUp() {
         // No content DB here: the series probe is network-only, so this runs on the Native runner too.
-        StalkerClient.sessionFactory = { StalkerSession(it, fakePortal, { u, h, c -> c(fakePortal(u, h)) }) }
+        StalkerClient.sessionFactory = { StalkerSession(it, fakePortal, { u, h, c -> c(fakePortal(u, h)) }).also { s -> lastSession = s } }
     }
 
     @AfterTest
@@ -103,6 +104,7 @@ class StalkerSeriesAbsentTest {
         seriesReply = """{"js":[]}"""
         val acc = account()
         StalkerClient.seriesCategories(acc)
+        assertEquals(true, lastSession?.seriesModuleDisabled, "the payload was parsed: series is listed as disabled")
         assertTrue(StalkerClient.seriesAbsent(acc), "module off + empty + no series vod = positive evidence")
         assertFalse(XtreamHubSection.SERIES in tabs(acc))
     }
@@ -114,6 +116,7 @@ class StalkerSeriesAbsentTest {
         seriesReply = """{"js":[]}"""
         val acc = account()
         StalkerClient.seriesCategories(acc)
+        assertEquals(false, lastSession?.seriesModuleDisabled, "parsed: series is understood as available (not merely unknown)")
         assertFalse(StalkerClient.seriesAbsent(acc))
         assertTrue(XtreamHubSection.SERIES in tabs(acc))
     }
@@ -125,6 +128,7 @@ class StalkerSeriesAbsentTest {
         seriesReply = """{"js":[]}"""
         val acc = account()
         StalkerClient.seriesCategories(acc)
+        assertEquals(null, lastSession?.seriesModuleDisabled, "an unrecognised payload stays unknown")
         assertFalse(StalkerClient.seriesAbsent(acc))
     }
 
