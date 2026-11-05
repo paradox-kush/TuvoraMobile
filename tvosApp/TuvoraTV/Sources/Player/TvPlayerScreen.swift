@@ -605,6 +605,8 @@ private struct LiveStatus: View {
     /// While time-shifted the scrub bar owns the clickpad edges, so every further press steps again (a press over
     /// the chrome otherwise belongs to the focus engine and would only move between the buttons).
     @FocusState private var scrubFocused: Bool
+    /// Whether this time shift already took focus for its scrub bar (reset when the shift ends).
+    @State private var scrubFocusGrabbed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: dp(10)) {
@@ -638,10 +640,21 @@ private struct LiveStatus: View {
                 badge
             }
         }
-        .onAppear { if view.showsScrubBar { DispatchQueue.main.async { scrubFocused = true } } }
-        .onChange(of: view.showsScrubBar) { _, shows in
-            if shows { DispatchQueue.main.async { scrubFocused = true } }
+        .onAppear { grabScrubFocusOnce() }
+        .onChange(of: view.showsScrubBar) { _, _ in grabScrubFocusOnce() }
+        .onChange(of: view.kind) { _, kind in
+            if kind != .shifted { scrubFocusGrabbed = false }   // the next shift grabs again
+            else { grabScrubFocusOnce() }
         }
+    }
+
+    /// Takes focus once per time shift: when the shift starts, or when its scrub bar first gets a window to draw.
+    /// The bar's visibility follows the engine's window width, which can flicker while the cache moves; re-grabbing
+    /// on each flicker pulled focus back from Go live or Retry while the viewer was moving to them.
+    private func grabScrubFocusOnce() {
+        guard view.kind == .shifted, view.showsScrubBar, !scrubFocusGrabbed else { return }
+        scrubFocusGrabbed = true
+        DispatchQueue.main.async { scrubFocused = true }
     }
 
     private var badge: some View {
