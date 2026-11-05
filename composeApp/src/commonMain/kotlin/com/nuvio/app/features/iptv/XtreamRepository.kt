@@ -260,7 +260,10 @@ object XtreamRepository : IptvCatalog {
                     verifyAndSave(m3uAccountFromForm(input), INVALID_ADDRESS, onResult)
                 } else {
                     verifyAndSave(panel, INVALID_ADDRESS) { ok ->
+                        // The device guard refused this playlist: re-saving the same login as a plain m3u: playlist
+                        // (a new id) would sidestep the off switch and download it. Show the refusal, add nothing.
                         if (ok) onResult(true)
+                        else if (lastVerifyRefused) onResult(false)
                         else verifyAndSave(m3uAccountFromForm(input), INVALID_ADDRESS, onResult)
                     }
                 }
@@ -362,6 +365,9 @@ object XtreamRepository : IptvCatalog {
         )
     }
 
+    /** Whether the last add-time verify was refused by the device-source guard (read by the get.php fallback). */
+    private var lastVerifyRefused = false
+
     private fun verifyAndSave(account: XtreamAccount?, parseError: PlaylistSaveMessage, onResult: (Boolean) -> Unit) {
         if (account == null) {
             reportFormError(parseError, onResult)
@@ -369,6 +375,7 @@ object XtreamRepository : IptvCatalog {
         }
         val profileAtStart = currentProfileId
         scope.launch {
+            lastVerifyRefused = false
             _uiState.update { it.copy(isValidating = true, error = null) }
             // Xtream verifies creds against player_api.php; M3U verifies by ingesting the playlist.
             com.nuvio.app.core.sources.DeviceSources.verifying { verifyForTest?.invoke(account) ?: IptvClient.forAccount(account).verify(account) }
@@ -402,6 +409,7 @@ object XtreamRepository : IptvCatalog {
                     persistAndReport(onResult)
                 }
                 .onFailure { e ->
+                    lastVerifyRefused = e is com.nuvio.app.core.sources.SourceDisabledOnDeviceException
                     // UX11/UX20: a plain, mapped sentence — "unreachable" is no longer reported as
                     // "Authentication failed", and the platform's raw text never reaches the form.
                     val text = PlaylistSaveErrorPolicy.classify(e, account.sourceType).text()

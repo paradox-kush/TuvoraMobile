@@ -44,11 +44,13 @@ internal class PlaylistDetailsController(
     private var loadedFor: String? = null
 
     fun load(account: XtreamAccount) {
-        if (loadedFor == account.id && job?.isActive != true && _live.value.load !is LoadStatus.Loading) return
-        loadedFor = account.id
+        // Keyed on the PLAN as well as the id: turning the playlist on (or off) re-plans the account check.
+        val plan = DetailsInspectionPolicy.plan(account.sourceType, account.availableOnDevice)
+        val key = "${account.id}|$plan"
+        if (loadedFor == key && job?.isActive != true && _live.value.load !is LoadStatus.Loading) return
+        loadedFor = key
         job?.cancel()
         val hasPanel = !account.sourceType.isM3u()
-        val plan = DetailsInspectionPolicy.plan(account.sourceType, account.availableOnDevice)
         _live.value = PlaylistDetailsLive(
             info = store.cached(account.id),
             load = if (hasPanel && plan != DetailsInspectionPolicy.Plan.SKIP) BoundedLoad.begin(LoadSurface.SETTINGS) else LoadStatus.Empty,

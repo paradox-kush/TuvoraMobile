@@ -161,7 +161,7 @@ internal fun LazyListScope.xtreamPlaylistDetailsContent(
         val managedMap by ManagedInfoRepository.state.collectAsStateWithLifecycle()
         val profileId = com.nuvio.app.features.profiles.ProfileRepository.activeProfileId
         val info = managedMap[profileId]?.get(account.id) ?: ManagedInfoRepository.infoFor(profileId, account.id)
-        LaunchedEffect(account.id) { controller.load(account) }
+        LaunchedEffect(account.id, account.enabled, account.availableOnDevice) { controller.load(account) }
 
         val activeServers by XtreamRepository.activeServers.collectAsStateWithLifecycle()
         val model = ManagedDetailsModel.build(

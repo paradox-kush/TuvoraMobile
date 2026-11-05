@@ -29,8 +29,8 @@ class SourceDisabledOnDeviceException(
     val kind: String, val mode: String, val scope: RefusalScope = RefusalScope.DEVICE,
 ) : CancellationException("Source disabled on this device")
 
-/** Who turned the source off: this device's own choice, or the account (the playlist is off for every device). */
-enum class RefusalScope { DEVICE, ACCOUNT }
+/** Who refused: this device's own choice, the account (off for every device), or sign-in not settled yet (not a choice at all). */
+enum class RefusalScope { DEVICE, ACCOUNT, SIGNING_IN }
 
 /**
  * Why a request reaches a source. [DISCOVERY] (the default) is playback and catalog use: it needs the

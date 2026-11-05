@@ -297,7 +297,11 @@ class DeviceSourceEngineTest {
         val device = DeviceSourceEngine(Memory("broken"), { _, _ -> error("offline") }, { "id" }, { "s" }, { 1_000L }, "android",
             onRefused = { kind, mode -> refusals += kind to mode })
         val failure = assertFailsWith<SourceDisabledOnDeviceException> { device.guarded(1,"iptv",source.sourceRef) { "ran" } }
-        assertTrue(failure is CancellationException, "existing cancellation semantics hold")
+        // Existing cancellation handling keeps working: structured concurrency treats it as cancellation, not a crash.
+        val scoped = async { device.guarded(1,"iptv",source.sourceRef) { "ran" } }
+        runCurrent()
+        assertTrue(scoped.isCancelled || scoped.isCompleted)
+        assertFailsWith<CancellationException> { scoped.await() }
         assertEquals("iptv", failure.kind)
         assertEquals("storage_error", failure.mode)
         assertEquals(listOf("iptv" to "storage_error"), refusals, "exactly one line per refusal, no host or id")
@@ -353,5 +357,22 @@ class DeviceSourceEngineTest {
         assertEquals(RefusalScope.ACCOUNT, assertFailsWith<SourceDisabledOnDeviceException> { device.guarded(1,"iptv",source.sourceRef,DeviceSourceAccess.VERIFY) { "x" } }.scope)
         val here = engine(cached(listOf(DevicePreferenceValue(1,source.sourceId,false,1))))
         assertEquals(RefusalScope.DEVICE, assertFailsWith<SourceDisabledOnDeviceException> { here.guarded(1,"iptv",source.sourceRef,DeviceSourceAccess.VERIFY) { "x" } }.scope)
+    }
+
+    @Test fun signInThatNeverSettlesRefusesAfterTheWaitAndASettledOneProceeds() = runTest {
+        val neverSettles = kotlinx.coroutines.flow.MutableStateFlow<com.nuvio.app.core.auth.AuthState>(com.nuvio.app.core.auth.AuthState.Loading)
+        val waiting = async { awaitAuthSettled(neverSettles) }
+        testScheduler.advanceTimeBy(AUTH_SETTLE_TIMEOUT_MS - 1)
+        runCurrent()
+        assertFalse(waiting.isCompleted, "still waiting just inside the limit")
+        testScheduler.advanceTimeBy(2)
+        runCurrent()
+        assertFalse(waiting.await(), "refused once the wait is over")
+        val settlesLater = kotlinx.coroutines.flow.MutableStateFlow<com.nuvio.app.core.auth.AuthState>(com.nuvio.app.core.auth.AuthState.Loading)
+        val second = async { awaitAuthSettled(settlesLater) }
+        testScheduler.advanceTimeBy(3_000)
+        settlesLater.value = com.nuvio.app.core.auth.AuthState.Unauthenticated
+        runCurrent()
+        assertTrue(second.await(), "proceeds as soon as sign-in settles")
     }
 }

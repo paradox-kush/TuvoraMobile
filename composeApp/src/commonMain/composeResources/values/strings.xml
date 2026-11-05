@@ -2688,6 +2688,7 @@
     <string name="iptv_playlist_error_invalid_address">That server address isn&apos;t valid</string>
     <string name="iptv_playlist_error_source_disabled">This playlist is turned off on this device — turn it on under Sources on this device</string>
     <string name="iptv_playlist_error_source_disabled_account">This playlist is turned off on your account — turn it on in your playlist settings, then try again</string>
+    <string name="iptv_playlist_error_signing_in">Still signing in — try again in a moment</string>
     <string name="iptv_details_turn_on_to_check">Turn this playlist on to check its account</string>
     <string name="iptv_playlist_error_unreachable">Couldn&apos;t reach the server — check the address</string>
     <string name="iptv_playlist_error_wrong_credentials">Wrong username or password</string>

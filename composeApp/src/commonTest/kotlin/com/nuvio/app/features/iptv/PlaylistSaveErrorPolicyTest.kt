@@ -220,4 +220,11 @@ class PlaylistSaveErrorPolicyTest {
         assertEquals(known(PlaylistSaveError.SOURCE_DISABLED_FOR_ACCOUNT), PlaylistSaveErrorPolicy.classify(refusal, SOURCE_TYPE_XTREAM))
         assertTrue("this device" !in PlaylistSaveError.SOURCE_DISABLED_FOR_ACCOUNT.fallbackText)
     }
+
+    @Test
+    fun `a sign-in that has not settled is not reported as turned off`() {
+        val refusal = com.nuvio.app.core.sources.SourceDisabledOnDeviceException("iptv", "loading", com.nuvio.app.core.sources.RefusalScope.SIGNING_IN)
+        assertEquals(known(PlaylistSaveError.SIGNING_IN), PlaylistSaveErrorPolicy.classify(refusal, SOURCE_TYPE_XTREAM))
+        assertTrue("turned off" !in PlaylistSaveError.SIGNING_IN.fallbackText)
+    }
 }
