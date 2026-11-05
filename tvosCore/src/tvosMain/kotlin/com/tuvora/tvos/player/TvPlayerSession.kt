@@ -9,6 +9,7 @@ import com.nuvio.app.features.player.MpvStartPosition
 import com.nuvio.app.features.player.NuvioPlayerBridge
 import com.nuvio.app.features.player.NuvioPlayerBridgeCreator
 import com.nuvio.app.features.player.PlayerLaunch
+import com.nuvio.app.features.player.StartDeadlineClock
 import com.nuvio.app.features.player.VodStartDeadlinePolicy
 import com.nuvio.app.features.player.PlayerPlaybackSnapshot
 import com.nuvio.app.features.player.PlayerSettingsRepository
@@ -297,8 +298,13 @@ class TvPlayerSession(
 
     // Resume offer (ResumeLoadPolicy): when this engine load began, and whether a frame has shown.
     private var loadStartedAtMs = 0L
-    /** B214/B217: start of the viewer's wait; survives engine escalations, restarts on Retry/start-over. -1 = not begun. */
-    private var vodDeadlineStartedAtMs = -1L
+    /**
+     * B214/B217: the viewer's active wait. Survives engine escalations, restarts on Retry/start-over,
+     * and does not count paused time or gaps with no polling (a re-resolve, the app being suspended).
+     */
+    private val vodClock = StartDeadlineClock()
+    /** The start deadline fired: the engine is parked and poll() must not overwrite the error. */
+    private var vodDeadlineFailed = false
     private var playbackStarted = false
     private var resumeTargetMs = launch.initialPositionMs
 
@@ -484,7 +490,8 @@ class TvPlayerSession(
     fun retry() {
         if (closed) return
         vodRetryFailure = null
-        vodDeadlineStartedAtMs = clock.elapsedNow().inWholeMilliseconds
+        if (vodDeadlineFailed) { vodDeadlineFailed = false; wantsToPlay = true }
+        vodClock.reset(clock.elapsedNow().inWholeMilliseconds)
         _state.value = _state.value.copy(errorMessage = null, isLoading = true)
         if (!isLive && vodReresolve != null) {
             val position = if (snapshot.positionMs > 0) snapshot.positionMs else resumeTargetMs
@@ -580,18 +587,23 @@ class TvPlayerSession(
     /** A VOD start that never shows a frame ends in a terminal error with Retry (the screen's own backstop). */
     private fun enforceVodStartDeadline() {
         val now = clock.elapsedNow().inWholeMilliseconds
-        if (vodDeadlineStartedAtMs < 0L) vodDeadlineStartedAtMs = now
+        vodClock.onAttempt("vod", now)
+        val suspended = !wantsToPlay
         val action = VodStartDeadlinePolicy.decide(
-            elapsedMs = now - vodDeadlineStartedAtMs,
+            elapsedMs = vodClock.tick(now, suspended),
             started = playbackStarted,
             isLive = isLive,
             isTorrent = false,
-            suspended = !wantsToPlay,
+            suspended = suspended,
             hasError = _state.value.errorMessage != null,
             canFailover = false,
         )
         if (action == VodStartDeadlinePolicy.Action.Fail) {
             log.w { "vod start deadline hit; failing with Retry" }
+            vodDeadlineFailed = true
+            // Park the engine so a late-completing open cannot play behind the error; retry() restarts it.
+            wantsToPlay = false
+            bridge?.pause()
             _state.value = _state.value.copy(
                 errorMessage = VOD_START_FAILED_MESSAGE, isLoading = false, isPlaying = false,
             )
@@ -603,7 +615,7 @@ class TvPlayerSession(
         resumeTargetMs = 0L
         playbackStarted = false
         loadStartedAtMs = clock.elapsedNow().inWholeMilliseconds
-        vodDeadlineStartedAtMs = loadStartedAtMs
+        vodClock.reset(loadStartedAtMs)
         _state.value = _state.value.copy(startOverAtMs = null, isLoading = true)
         bridge?.restartFromBeginning()
         bridge?.play()
@@ -848,7 +860,7 @@ class TvPlayerSession(
 
     private fun poll() {
         // The old engine still reports its previous failure while a replacement link is minted.
-        if (vodRetry.isResolving || vodRetryFailure != null) return
+        if (vodRetry.isResolving || vodRetryFailure != null || vodDeadlineFailed) return
         val b = bridge ?: return
         val error = b.getErrorMessage().takeIf { it.isNotBlank() }
         snapshot = PlayerPlaybackSnapshot(
