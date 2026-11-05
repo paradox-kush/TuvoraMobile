@@ -56,6 +56,7 @@ object LiveLinkReconnectPolicy {
      * May the surface answer a first-engine failure by opening the SAME url on the other engine (Exo -> libmpv)?
      * Never for a single-use link: the first open spent it, so the second engine would be handed a dead token
      * (and a second request on the provider's session cap). The app mints a fresh link instead.
+     * Also Apple TV's lane escalation (AVPlayer -> libmpv) and Android's auto engine switch.
      */
     fun allowsEngineFailover(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
 
@@ -80,11 +81,4 @@ object LiveLinkReconnectPolicy {
 
     /** Media3 lane: OkHttp `retryOnConnectionFailure` and the load-error retries. */
     fun allowsTransportRetry(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
-
-    /**
-     * Whether a failed engine may hand the SAME URL to the other engine (Android's auto engine
-     * switch, Apple TV's lane escalation). A spent single-use link would only 401 again there; its
-     * recovery is a fresh mint, and once that is exhausted, the error.
-     */
-    fun allowsEngineFailover(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
 }
