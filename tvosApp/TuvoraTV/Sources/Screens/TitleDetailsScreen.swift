@@ -157,20 +157,26 @@ struct TitleDetailsScreen: View {
                 CircleIconButton(icon: saved ? "md_check_circle" : "library_add_plus") {
                     Task { try? await TvTitle.shared.toggleSaved(meta: meta); saved = TvTitle.shared.isSaved(meta: meta) }
                 }
-                CircleIconButton(icon: watched ? "md_check_circle" : "md_bookmark_border", filledWhite: watched) {
-                    Task { try? await TvTitle.shared.toggleWatched(meta: meta); watched = TvTitle.shared.isWatched(meta: meta) }
-                }
-                if TvCalendar.shared.canBell(contentId: calendarId(meta), type: meta.type) {
-                    CircleIconButton(icon: bellOn ? "md_notifications_active" : "md_notifications", filledWhite: bellOn) {
-                        TvCalendar.shared.toggleBell(contentId: calendarId(meta), type: meta.type)
-                    }
-                    .accessibilityLabel(L(bellOn ? "Reminders on" : "Remind me of new episodes"))
-                    .task {
-                        TvCalendar.shared.start()
-                        for await next in TvCalendar.shared.state {
-                            bellOn = TvCalendar.shared.isBellOn(state: next, contentId: calendarId(meta), type: meta.type)
+                // The new-episode reminder lives in the + button's long-press menu (the app's secondary-action
+                // pattern: .contextMenu), not as its own button.
+                .contextMenu {
+                    if TvCalendar.shared.canBell(contentId: calendarId(meta), type: meta.type) {
+                        Button {
+                            TvCalendar.shared.toggleBell(contentId: calendarId(meta), type: meta.type)
+                        } label: {
+                            if bellOn { Label(L("Remind me of new episodes"), systemImage: "checkmark") }
+                            else { Text(L("Remind me of new episodes")) }
                         }
                     }
+                }
+                .task {
+                    TvCalendar.shared.start()
+                    for await next in TvCalendar.shared.state {
+                        bellOn = TvCalendar.shared.isBellOn(state: next, contentId: calendarId(meta), type: meta.type)
+                    }
+                }
+                CircleIconButton(icon: watched ? "md_check_circle" : "md_bookmark_border", filledWhite: watched) {
+                    Task { try? await TvTitle.shared.toggleWatched(meta: meta); watched = TvTitle.shared.isWatched(meta: meta) }
                 }
             }
             .scrollClipDisabled()

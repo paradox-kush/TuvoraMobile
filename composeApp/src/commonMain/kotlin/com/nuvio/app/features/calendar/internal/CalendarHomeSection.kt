@@ -39,6 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import coil3.compose.AsyncImage
 import com.nuvio.app.core.contracts.DetailsCalendarBell
+import com.nuvio.app.core.contracts.DetailsReminderControl
 import com.nuvio.app.core.contracts.HomeCalendarSection
 import com.nuvio.app.core.ui.NuvioPrimaryButton
 import com.nuvio.app.core.ui.NuvioSurfaceCard
@@ -246,41 +247,25 @@ private fun ComingUpRow(items: List<CalendarComingUpItem>, games: List<CalendarC
     }
 }
 
-/** The bell on show / film details. Off → on adds the title to the Calendar and turns its reminders on. */
+/** The map from the app's content type to what the Calendar can follow; null = it cannot. */
+internal fun calendarTitleTypeFor(type: String): CalendarTitleType? = when (type.lowercase()) {
+    "series", "tv", "show", "anime" -> CalendarTitleType.SERIES
+    "movie" -> CalendarTitleType.MOVIE
+    else -> null
+}
+
+/** The reminder switch on show / film details (a row in the + menu). Off → on adds the title to the Calendar. */
 internal class CalendarDetailsBellImpl(private val repository: () -> CalendarRepository) : DetailsCalendarBell {
     @Composable
-    override fun Bell(contentId: String, type: String, name: String?, poster: String?, modifier: Modifier) {
-        val titleType = when (type.lowercase()) {
-            "series", "tv", "show", "anime" -> CalendarTitleType.SERIES
-            "movie" -> CalendarTitleType.MOVIE
-            else -> return
-        }
+    override fun reminder(contentId: String, type: String, name: String?, poster: String?): DetailsReminderControl? {
+        val titleType = calendarTitleTypeFor(type) ?: return null
         val ids = remember(contentId) { CalendarIds.fromContentId(contentId) }
-        if (ids.isEmpty) return
+        if (ids.isEmpty) return null
         val repo = remember { repository() }
         val state by repo.state.collectAsStateWithLifecycle()
         LaunchedEffect(repo) { repo.start() }
         val on = state.settings.bellOn.any { calendarKeyMatches(it, titleType, ids) }
         val scope = rememberCoroutineScope()
-        val tokens = MaterialTheme.nuvio
-        Row(
-            modifier = modifier.clip(tokens.shapes.button)
-                .background(if (on) tokens.colors.accent.copy(alpha = 0.18f) else tokens.colors.surfaceCard)
-                .clickable { scope.launch { repo.setBell(titleType, ids, !on) } }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = if (on) Icons.Rounded.NotificationsActive else Icons.Rounded.Notifications,
-                contentDescription = null,
-                tint = if (on) tokens.colors.accent else tokens.colors.textPrimary,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = stringResource(if (on) Res.string.calendar_bell_on else Res.string.calendar_bell_off),
-                style = MaterialTheme.typography.labelLarge,
-                color = tokens.colors.textPrimary,
-            )
-        }
+        return DetailsReminderControl(on) { scope.launch { repo.setBell(titleType, ids, !on) } }
     }
 }
