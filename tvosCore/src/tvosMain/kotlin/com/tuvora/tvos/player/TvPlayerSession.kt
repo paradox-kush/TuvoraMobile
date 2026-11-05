@@ -9,6 +9,8 @@ import com.nuvio.app.features.player.MpvStartPosition
 import com.nuvio.app.features.player.NuvioPlayerBridge
 import com.nuvio.app.features.player.NuvioPlayerBridgeCreator
 import com.nuvio.app.features.player.PlayerLaunch
+import com.nuvio.app.features.player.StartDeadlineClock
+import com.nuvio.app.features.player.VodStartDeadlinePolicy
 import com.nuvio.app.features.player.PlayerPlaybackSnapshot
 import com.nuvio.app.features.player.PlayerSettingsRepository
 import com.nuvio.app.features.player.externalPlaybackSession
@@ -214,7 +216,8 @@ class TvPlayerSession(
                 headers.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
                 launch.externalSubtitles.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
                 MpvStartPosition.loadOption(position, false))
-            if (paused) bridge?.pause()
+            // mpv keeps its pause flag across a loadfile: say the intent explicitly either way.
+            if (paused) bridge?.pause() else bridge?.play()
         },
         failed = {
             vodRetryFailure = "Could not reopen this source. Try again or choose another source."
@@ -275,7 +278,7 @@ class TvPlayerSession(
         override val partyStarted: Boolean get() = playbackStarted
         override val partyHasError: Boolean get() = _state.value.errorMessage != null
         override val partyWantsToPlay: Boolean get() = wantsToPlay
-        override fun partyPlay() { if (!closed) { wantsToPlay = true; bridge?.play() } }
+        override fun partyPlay() { if (!closed) { if (vodDeadlineFailed) retry() else { wantsToPlay = true; bridge?.play() } } }
         override fun partyPause() { wantsToPlay = false; bridge?.pause() }
         override fun partyAdoptPlaying(playing: Boolean) { wantsToPlay = playing }
         override fun partySeek(positionMs: Long) { if (!isLive) { bridge?.seekTo(positionMs.coerceAtLeast(0L)); scheduleSeekSave() } }
@@ -296,6 +299,13 @@ class TvPlayerSession(
 
     // Resume offer (ResumeLoadPolicy): when this engine load began, and whether a frame has shown.
     private var loadStartedAtMs = 0L
+    /**
+     * B214/B217: the viewer's active wait. Survives engine escalations, restarts on Retry/start-over,
+     * and does not count paused time or gaps with no polling (a re-resolve, the app being suspended).
+     */
+    private val vodClock = StartDeadlineClock()
+    /** The start deadline fired: the engine is parked and poll() must not overwrite the error. */
+    private var vodDeadlineFailed = false
     private var playbackStarted = false
     private var resumeTargetMs = launch.initialPositionMs
 
@@ -417,7 +427,7 @@ class TvPlayerSession(
         if (party.toggle()) { reportAfterToggle(); return }
         if (_state.value.isPlaying) pause() else play()
     }
-    fun play() { if (!closed) { if (party.setPlaying(true)) reportAfterToggle() else { wantsToPlay = true; bridge?.play(); reportAfterToggle() } } }
+    fun play() { if (!closed) { if (vodDeadlineFailed) { retry(); return }; if (party.setPlaying(true)) reportAfterToggle() else { wantsToPlay = true; bridge?.play(); reportAfterToggle() } } }
     fun pause() { if (party.setPlaying(false)) reportAfterToggle() else { wantsToPlay = false; bridge?.pause(); reportAfterToggle() } }
 
 
@@ -481,6 +491,8 @@ class TvPlayerSession(
     fun retry() {
         if (closed) return
         vodRetryFailure = null
+        if (vodDeadlineFailed) { vodDeadlineFailed = false; wantsToPlay = true }
+        vodClock.reset(clock.elapsedNow().inWholeMilliseconds)
         _state.value = _state.value.copy(errorMessage = null, isLoading = true)
         if (!isLive && vodReresolve != null) {
             val position = if (snapshot.positionMs > 0) snapshot.positionMs else resumeTargetMs
@@ -493,7 +505,10 @@ class TvPlayerSession(
             // ladder's first attempt and the next poll cannot mint a second link on top of it.
             monitor.onUserRetry()
             poll()
-        } else bridge?.retry()
+        } else {
+            bridge?.retry()
+            bridge?.let { restorePlayIntent(it) }
+        }
     }
 
     // ---- Skip intro / recap / ending ---------------------------------------------------------
@@ -570,6 +585,33 @@ class TvPlayerSession(
         ) && _state.value.errorMessage == null
         val offerAt = if (offer) resumeTargetMs else null
         if (_state.value.startOverAtMs != offerAt) _state.value = _state.value.copy(startOverAtMs = offerAt)
+        enforceVodStartDeadline()
+    }
+
+    /** A VOD start that never shows a frame ends in a terminal error with Retry (the screen's own backstop). */
+    private fun enforceVodStartDeadline() {
+        val now = clock.elapsedNow().inWholeMilliseconds
+        vodClock.onAttempt("vod", now)
+        val suspended = !wantsToPlay
+        val action = VodStartDeadlinePolicy.decide(
+            elapsedMs = vodClock.tick(now, suspended),
+            started = playbackStarted,
+            isLive = isLive,
+            isTorrent = false,
+            suspended = suspended,
+            hasError = _state.value.errorMessage != null,
+            canFailover = false,
+        )
+        if (action == VodStartDeadlinePolicy.Action.Fail) {
+            log.w { "vod start deadline hit; failing with Retry" }
+            vodDeadlineFailed = true
+            // Park the engine so a late-completing open cannot play behind the error; retry() restarts it.
+            wantsToPlay = false
+            bridge?.pause()
+            _state.value = _state.value.copy(
+                errorMessage = VOD_START_FAILED_MESSAGE, isLoading = false, isPlaying = false,
+            )
+        }
     }
 
     /** NuvioTV "Start from beginning": drop the resume and play from 0:00 on the same engine. */
@@ -577,6 +619,7 @@ class TvPlayerSession(
         resumeTargetMs = 0L
         playbackStarted = false
         loadStartedAtMs = clock.elapsedNow().inWholeMilliseconds
+        vodClock.reset(loadStartedAtMs)
         _state.value = _state.value.copy(startOverAtMs = null, isLoading = true)
         bridge?.restartFromBeginning()
         bridge?.play()
@@ -821,8 +864,8 @@ class TvPlayerSession(
 
     private fun poll() {
         // The old engine still reports its previous failure while a replacement link is minted.
-        if (vodRetry.isResolving || vodRetryFailure != null) return
-        val b = bridge ?: return
+        if (vodRetry.isResolving || vodRetryFailure != null || vodDeadlineFailed) return
+        val b = bridge ?: run { enforceVodStartDeadline(); return }
         val error = b.getErrorMessage().takeIf { it.isNotBlank() }
         snapshot = PlayerPlaybackSnapshot(
             isLoading = b.getIsLoading(),
@@ -1117,6 +1160,8 @@ class TvPlayerSession(
     }
 
     private companion object {
+        const val VOD_START_FAILED_MESSAGE =
+            "This stream didn't start. It may be slow, offline, or its video output failed to start. Check your connection and retry, or pick another source."
         /** Reports outlive the session scope (close cancels it right after the stop is queued). */
         val reportScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         const val TOGGLE_REPORT_DELAY_MS = 700L
