@@ -31,7 +31,7 @@ import kotlin.coroutines.resume
 internal object IosRecordingCapabilities {
     /** TODO(live capture pending live-pause branch): wave 4 decides whether iOS ever records live. */
     const val CAN_RECORD_LIVE = false
-    val value = RecordingCapabilities(canRecordLive = CAN_RECORD_LIVE, canSaveCatchUp = true)
+    val value = RecordingCapabilities(canRecordLive = CAN_RECORD_LIVE, canSaveCatchUp = true, canWakeApp = false)
 }
 
 /** iOS cannot wake the app at a time: the schedule waits and the foreground sweep runs it. */
