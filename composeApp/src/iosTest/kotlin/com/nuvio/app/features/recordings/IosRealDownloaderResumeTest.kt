@@ -98,9 +98,10 @@ class IosRealDownloaderResumeTest {
 
     @Test
     fun a_dropped_stream_keeps_its_bytes_and_the_validator_for_the_next_resume() = runBlocking<Unit> {
-        val s = serve { Reply(200, mapOf("ETag" to "\"v9\"", "Last-Modified" to "Wed, 05 Nov 2026 10:00:00 GMT"), whole.encodeToByteArray(), cutAfter = 4) }
+        val body = ByteArray(2_000) { 'x'.code.toByte() }
+        val s = serve { Reply(200, mapOf("ETag" to "\"v9\"", "Last-Modified" to "Wed, 05 Nov 2026 10:00:00 GMT"), body, cutAfter = 1_000) }
         val failed = assertIs<SaveOutcome.Failed>(save(s.url(), resumeFrom = 0))
-        assertEquals(4L, failed.writtenBytes)
+        assertEquals(1_000L, failed.writtenBytes, "problem=${failed.problem} downloads=${rig.recFilesInDownloads()} requests=${s.requestsSnapshot().size}")
         val meta = rig.read("$part.meta").orEmpty()
         assertTrue(meta.startsWith(s.url()), "the link is pinned: $meta")
         assertTrue(meta.contains("\"v9\""), "the ETag it answered with is kept for If-Range: $meta")

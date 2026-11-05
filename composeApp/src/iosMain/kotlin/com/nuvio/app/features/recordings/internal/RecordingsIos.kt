@@ -17,7 +17,10 @@ import com.nuvio.app.features.recordings.api.SaveRequest
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import platform.Foundation.NSDate
 import platform.Foundation.NSFileManager
@@ -117,8 +120,12 @@ internal object IosRecordingPaths {
 
 /**
  * Moves a partial between the repository's folder and the downloader's, only ever handing the
- * downloader a partial that this very link wrote. The link is pinned beside the partial in
- * `<part>.meta`, the same sidecar name Android uses, so the repository deletes both the same way.
+ * downloader a partial that this very link wrote. The link (and the validators it answered with) is
+ * pinned beside the partial in `<part>.meta`, the same sidecar name and layout Android uses, so the
+ * repository deletes both the same way.
+ *
+ * There is one partial slot per recording. A link's partial stays in it until a bigger one replaces it:
+ * a candidate that fails at once must not cost an earlier candidate its bytes.
  */
 @OptIn(ExperimentalForeignApi::class)
 internal class IosPartialStaging {
@@ -145,25 +152,34 @@ internal class IosPartialStaging {
     private fun sizeOf(path: String): Long =
         (fm.attributesOfItemAtPath(path, null)?.get("NSFileSize") as? NSNumber)?.longLongValue ?: 0L
 
+    /** Deletes the partial and its sidecar. */
+    fun discard(part: String) {
+        remove(part)
+        remove("$part.meta")
+    }
+
     /**
      * Readies [workPart] for a save from [url]. A partial pinned to the same link moves over so the
-     * downloader resumes it; any other partial is deleted so the save starts at zero. Returns whether it resumes.
+     * downloader resumes it. A partial from ANOTHER link is left where it is (an earlier candidate's
+     * bytes survive this one failing) and the save starts at zero; one this link wrote that cannot be
+     * resumed, or one with no known source, is deleted. Returns whether it resumes.
      */
     fun stageForResume(url: String, part: String, workPart: String, resumeFromBytes: Long): Boolean {
         remove(workPart)
-        val resume = fm.fileExistsAtPath(part) && RecordingResumePolicy.canResume(readPin(part), url, resumeFromBytes)
-        if (resume) {
+        if (!fm.fileExistsAtPath(part)) return false
+        val pin = readResumePin(part)
+        if (RecordingResumePolicy.canResume(pin?.url, url, resumeFromBytes)) {
             fm.moveItemAtPath(part, workPart, null)
             return true
         }
-        remove(part)
-        remove("$part.meta")
+        if (pin == null || pin.url == url) discard(part)
         return false
     }
 
     /**
      * After a save stopped for any reason (failure, pause, cancel): whatever the downloader wrote goes
-     * back beside the target with its link, or is dropped if empty. Safe to call twice. Returns the bytes kept.
+     * back beside the target with its link, or is dropped if empty. Another link's bigger partial is
+     * not replaced by a smaller one. Safe to call twice. Returns the bytes kept from [workPart].
      */
     fun parkAfterStop(url: String, part: String, workPart: String, etag: String? = null, lastModified: String? = null): Long {
         if (!fm.fileExistsAtPath(workPart)) return 0L
@@ -172,13 +188,18 @@ internal class IosPartialStaging {
             remove(workPart)
             return 0L
         }
-        remove(part)
+        if (fm.fileExistsAtPath(part)) {
+            val foreign = readPin(part) != url
+            if (foreign && sizeOf(part) > size) {
+                remove(workPart)
+                return 0L
+            }
+            discard(part)
+        }
         fm.moveItemAtPath(workPart, part, null)
         writePin(part, url, etag, lastModified)
         return size
     }
-
-    fun clearPin(part: String) = remove("$part.meta")
 }
 
 internal typealias DownloaderStart = (
@@ -204,6 +225,9 @@ private fun startRealDownloader(
  * repository, so nothing appears in the Downloads list. The downloader keeps its partial file in the
  * downloads folder; it is moved to and from `target.part` (pinned to its link by [IosPartialStaging]) so
  * the repository's view of the partial file stays true and a different link never extends it.
+ *
+ * A resume is guarded by the downloader itself (see [StrictResume]): If-Range with the validator the
+ * partial came with, and a 206 that does not start where the partial ends restarts from zero.
  */
 @OptIn(ExperimentalForeignApi::class)
 internal class IosRecordingSaver(
@@ -212,7 +236,7 @@ internal class IosRecordingSaver(
     private val downloadsDir: String = IosRecordingPaths.defaultDownloadsDir(),
     private val start: DownloaderStart = ::startRealDownloader,
     /** How long a stopped save waits for the downloader to really stop before it gives up and cleans up anyway. */
-    @Suppress("unused") private val stopWaitMs: Long = 3_000L,
+    private val stopWaitMs: Long = STOP_WAIT_MS,
 ) : RecordingSaver {
     private val staging = IosPartialStaging()
 
@@ -220,6 +244,8 @@ internal class IosRecordingSaver(
         val fm = NSFileManager.defaultManager
         val part = req.targetPath + ".part"
         val workName = IosRecordingPaths.workName(req.targetPath.substringAfterLast('/'))
+        // The repository asked for a fresh start: whatever an earlier attempt left is not wanted.
+        if (req.resumeFromBytes <= 0L) staging.discard(part)
         var best: SaveOutcome.Failed? = null
         for (url in req.candidates) {
             val outcome = downloadOne(url, req, workName, part, progress)
@@ -230,7 +256,8 @@ internal class IosRecordingSaver(
                 if (!fm.moveItemAtPath(finished, req.targetPath, null)) {
                     return SaveOutcome.Failed(RecordingProblem.UNKNOWN, offline = false, writtenBytes = 0, rangeSupported = true)
                 }
-                staging.clearPin(part)
+                // An earlier candidate's parked partial is of no use any more.
+                staging.discard(part)
                 return SaveOutcome.Done(files.sizeOf(req.targetPath))
             }
             val failed = outcome as SaveOutcome.Failed
@@ -239,46 +266,76 @@ internal class IosRecordingSaver(
             // Out of space: no other link will help.
             if (failed.problem == RecordingProblem.NO_SPACE) break
         }
-        return best ?: SaveOutcome.Failed(RecordingProblem.NO_CATCH_UP, offline = false, writtenBytes = 0, rangeSupported = false)
+        val last = best ?: SaveOutcome.Failed(RecordingProblem.NO_CATCH_UP, offline = false, writtenBytes = 0, rangeSupported = false)
+        // Report the bytes that are really in the partial now, never a partial a later link replaced or removed.
+        return last.copy(writtenBytes = files.sizeOf(part))
     }
 
     private suspend fun downloadOne(url: String, req: SaveRequest, workName: String, part: String, progress: (Long) -> Unit): SaveOutcome {
         val workPart = downloaderFilePath(workName) + ".part"
+        val finishedPath = downloaderFilePath(workName)
+        val fm = NSFileManager.defaultManager
         // Hand a previous partial back to the downloader only if THIS link wrote it; otherwise start at zero.
         val pinBefore = staging.readResumePin(part)
         val resumed = staging.stageForResume(url, part, workPart, req.resumeFromBytes)
-        // The partial keeps the validators it came with; a fresh response replaces them (the downloader reports those).
+        // A finished file an earlier stop left behind is not this save's.
+        if (fm.fileExistsAtPath(finishedPath)) fm.removeItemAtPath(finishedPath, null)
         var etag = if (resumed) pinBefore?.etag else null
         var lastModified = if (resumed) pinBefore?.lastModified else null
+        var declaredTotal: Long? = null
         val strict = StrictResume(
             validator = if (resumed) pinBefore?.validator else null,
             onValidators = { e, l -> etag = e; lastModified = l },
         )
         val item = throwawayItem(url, req, workName)
         var finished = false
-        try {
-            val outcome = runDownload(item, strict, req, progress)
-            if (outcome is SaveOutcome.Done) {
-                finished = true
-                return outcome
+
+        // Whatever the downloader holds goes back beside the target, with its link and validators.
+        fun settle(): Long {
+            // A download that completed just as it was stopped left its finished file: it is this link's partial.
+            if (fm.fileExistsAtPath(finishedPath)) {
+                if (fm.fileExistsAtPath(workPart)) fm.removeItemAtPath(workPart, null)
+                fm.moveItemAtPath(finishedPath, workPart, null)
             }
-            // Keep the partial (and its link) where the repository looks for it.
-            val written = staging.parkAfterStop(url, part, workPart, etag, lastModified)
-            return (outcome as SaveOutcome.Failed).copy(writtenBytes = written)
+            return staging.parkAfterStop(url, part, workPart, etag, lastModified)
+        }
+
+        try {
+            val outcome = runDownload(item, strict, req, progress) { declaredTotal = it }
+            if (outcome is SaveOutcome.Done) {
+                val size = sizeOfFile(finishedPath)
+                val cut = size <= 0L ||
+                    (declaredTotal?.let { size < it } == true) ||
+                    RecordingCompletenessPolicy.endedTooEarly(size, declaredTotal, req.estimatedBytes)
+                if (!cut) {
+                    finished = true
+                    return SaveOutcome.Done(size)
+                }
+                // The stream ended cleanly but short: the bytes are a partial, not a recording.
+                return SaveOutcome.Failed(RecordingProblem.STALLED, offline = false, writtenBytes = settle(), rangeSupported = true)
+            }
+            return (outcome as SaveOutcome.Failed).copy(writtenBytes = settle())
         } finally {
             // A cancel throws past the code above: the partial still goes home, so the repository can
             // resume it after a teardown or delete it after a user cancel instead of leaking it.
-            if (!finished) staging.parkAfterStop(url, part, workPart, etag, lastModified)
+            if (!finished) settle()
         }
     }
 
-    private suspend fun runDownload(item: DownloadItem, strict: StrictResume, req: SaveRequest, progress: (Long) -> Unit): SaveOutcome = coroutineScope {
+    private suspend fun runDownload(
+        item: DownloadItem,
+        strict: StrictResume,
+        req: SaveRequest,
+        progress: (Long) -> Unit,
+        onTotal: (Long) -> Unit,
+    ): SaveOutcome = coroutineScope {
         val result = CompletableDeferred<SaveOutcome>()
         val ticks = Channel<Long>(Channel.CONFLATED)
+        var succeeded = false
         val handle = start(
             DownloadPlatformRequest(item, strict),
-            { downloaded, _ -> progress(downloaded); ticks.trySend(downloaded) },
-            { _, total -> result.complete(SaveOutcome.Done(total ?: 0L)) },
+            { downloaded, total -> total?.let(onTotal); progress(downloaded); ticks.trySend(downloaded) },
+            { _, _ -> succeeded = true; result.complete(SaveOutcome.Done(0L)) },
             { _ ->
                 // The downloader reports a message, not a class: a failure is NETWORK (retried, bounded by the schedule policy).
                 result.complete(SaveOutcome.Failed(RecordingProblem.NETWORK, offline = false, writtenBytes = 0, rangeSupported = true))
@@ -305,9 +362,19 @@ internal class IosRecordingSaver(
         } finally {
             checker.cancel()
             ticks.close()
-            // Cancelled (or finished): make sure no network task outlives this call.
-            if (!result.isCompleted || result.isCancelled) handle.cancel()
+            if (!succeeded) {
+                // Cancelled, failed or out of space: no network task may outlive this call, and the
+                // downloader may still be moving a file it had already finished, so wait (bounded) for it
+                // to stop before anyone cleans up. A cancelled caller must still do this, hence NonCancellable.
+                handle.cancel()
+                withContext(NonCancellable) { withTimeoutOrNull(stopWaitMs) { handle.awaitStopped() } }
+            }
         }
+    }
+
+    private fun sizeOfFile(path: String): Long {
+        val attrs = NSFileManager.defaultManager.attributesOfItemAtPath(path, null)
+        return (attrs?.get("NSFileSize") as? NSNumber)?.longLongValue ?: 0L
     }
 
     private fun downloaderFilePath(name: String): String = "$downloadsDir/$name"
@@ -321,5 +388,6 @@ internal class IosRecordingSaver(
 
     private companion object {
         const val SPACE_CHECK_BYTES = 16L * 1024 * 1024
+        const val STOP_WAIT_MS = 3_000L
     }
 }

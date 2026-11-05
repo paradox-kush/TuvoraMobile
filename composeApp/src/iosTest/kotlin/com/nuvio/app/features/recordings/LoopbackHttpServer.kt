@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -67,6 +68,8 @@ internal class LoopbackHttpServer(private val handler: (headers: Map<String, Str
                         val n = reply.cutAfter ?: reply.body.size
                         if (n > 0) output.writeFully(reply.body, 0, n)
                         output.flush()
+                        // A dropped stream: let the client read what was sent before the connection goes away.
+                        if (reply.cutAfter != null) delay(300)
                     } catch (e: Exception) {
                         // A client that hung up is the test's business, not the server's.
                     } finally {
