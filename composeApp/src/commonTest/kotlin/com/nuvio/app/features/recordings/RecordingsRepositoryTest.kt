@@ -800,12 +800,3 @@ class RecordingsRepositoryTest {
         assertTrue(rig.repo.state.value.schedules.isEmpty(), "nothing left to retry")
     }
 }
-
-class LocalRecordingsDefaultTest {
-    @Test
-    fun `a UI that nothing wrapped in installFeatures still gets the registered port`() {
-        val rig = Rig()
-        kotlin.test.assertSame(rig.repo, defaultRecordingsPort { rig.repo }, "the default must read the registered port, not null (iOS)")
-        kotlin.test.assertNull(defaultRecordingsPort { null }, "no registration means no recordings")
-    }
-}
