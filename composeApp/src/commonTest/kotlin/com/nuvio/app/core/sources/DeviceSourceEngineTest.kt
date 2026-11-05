@@ -297,14 +297,15 @@ class DeviceSourceEngineTest {
         val device = DeviceSourceEngine(Memory("broken"), { _, _ -> error("offline") }, { "id" }, { "s" }, { 1_000L }, "android",
             onRefused = { kind, mode -> refusals += kind to mode })
         val failure = assertFailsWith<SourceDisabledOnDeviceException> { device.guarded(1,"iptv",source.sourceRef) { "ran" } }
+        assertEquals("iptv", failure.kind)
+        assertEquals("storage_error", failure.mode)
+        assertEquals(listOf("iptv" to "storage_error"), refusals, "exactly one line per refusal, no host or id")
+        // Only now a second, separate refusal: it must be a cancellation to structured concurrency, not a failure.
         // Existing cancellation handling keeps working: structured concurrency treats it as cancellation, not a crash.
         val scoped = async { device.guarded(1,"iptv",source.sourceRef) { "ran" } }
         runCurrent()
         assertTrue(scoped.isCancelled || scoped.isCompleted)
         assertFailsWith<CancellationException> { scoped.await() }
-        assertEquals("iptv", failure.kind)
-        assertEquals("storage_error", failure.mode)
-        assertEquals(listOf("iptv" to "storage_error"), refusals, "exactly one line per refusal, no host or id")
     }
 
     @Test fun addTimeVerifyRunsForAnUnsavedPlaylistWhileTheEngineIsNotReady() = runTest {
