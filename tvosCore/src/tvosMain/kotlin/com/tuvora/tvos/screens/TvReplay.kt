@@ -2,10 +2,13 @@ package com.tuvora.tvos.screens
 
 import com.nuvio.app.core.contracts.LivePlaybackAccess
 import com.nuvio.app.features.iptv.BoundedLoad
+import com.nuvio.app.features.iptv.CatchUpDialectWalk
+import com.nuvio.app.features.iptv.LoadOutcome
 import com.nuvio.app.features.iptv.LoadSurface
 import com.nuvio.app.features.iptv.M3uReplayContinuation
 import com.nuvio.app.features.iptv.M3uReplayOpen
 import com.nuvio.app.features.iptv.M3uReplayWalk
+import com.nuvio.app.features.iptv.ReplayLadder
 import com.nuvio.app.features.iptv.ReplayOpenFence
 import com.nuvio.app.features.iptv.XtreamProgram
 import com.nuvio.app.features.livetv.LiveGuideChannel
@@ -16,31 +19,33 @@ import com.nuvio.app.features.profiles.ProfileRepository
 import com.nuvio.app.features.trakt.TraktPlatformClock
 import com.tuvora.tvos.player.TvPlayerSession
 import kotlinx.coroutines.delay
-import kotlin.time.TimeSource
 
 /**
- * An M3U playlist's replay on Apple TV: the phone's LiveTvScreen flow (open under the live-resolve
- * deadline, walk the playlist's own links, follow the playhead into the next programmes, rejoin live)
- * driven through [TvM3uReplayRun]. This class only performs the run's moves; the decisions are the run's.
+ * A programme replay on Apple TV, M3U or Xtream: the phone's LiveTvScreen flow (open under the live-resolve
+ * deadline, walk the provider's link ladder, follow the playhead into the next programmes, rejoin live)
+ * driven through the one [TvReplayRun]. This class only performs the run's moves; the decisions are the run's.
+ *
+ * It never closes a session it hands over: a [TvReplayRun.Move.Reopen] returns the successor and Swift's
+ * PlaybackCoordinator closes the predecessor on the swap. Closing it here made the swap read "the viewer
+ * left" and drop the successor, so the Xtream dialect walk never moved (B229).
  *
  * Lifecycle: the walk's ask for this replay is released when supervision ends, however it ends (the
  * viewer left, a notice, rejoining live), so nothing is held after the player is gone.
  */
-internal class TvM3uReplay(
-    private val walk: M3uReplayWalk,
+internal class TvReplay(
+    private val ladder: ReplayLadder,
     private val fence: ReplayOpenFence,
     private val ticket: Long,
     private val channel: LiveGuideChannel,
     private val programme: XtreamProgram,
 ) : TvReplaySupervisor {
-    private var run: TvM3uReplayRun? = null
+    private var run: TvReplayRun? = null
     private var finished = false
-    private var openedAt = TimeSource.Monotonic.markNow()
     private var nextRow: M3uReplayContinuation.Row? = null
     private var nextRowFor = Long.MIN_VALUE
 
-    /** Opens the replay: bounded read of the channel's line, the first link, and its player session. */
-    suspend fun begin(): TvReplayStep {
+    /** An M3U playlist: bounded read of the channel's line, then the first link and its player session. */
+    suspend fun beginM3u(walk: M3uReplayWalk): TvReplayStep {
         val open = M3uReplayOpen.run(LiveTvData.sourceTypeOf(channel.contentId)) {
             LiveTvData.m3uReplayRequest(channel.contentId, programme.startMs, programme.endMs, TraktPlatformClock.nowEpochMs())
         }
@@ -52,8 +57,29 @@ internal class TvM3uReplay(
             is M3uReplayOpen.Ready -> open.request
         }
         val begun = walk.begin(request, scope = null, admit = { fence.isCurrent(ticket) })
-            ?: return if (fence.isCurrent(ticket)) noRecording() else stale()
-        val started = TvM3uReplayRun(walk, channel.name, programme.title, programme.startMs, programme.endMs, begun)
+        return start(begun)
+    }
+
+    /** An Xtream panel: bounded build of the request, then the walk asks for the continuation window. */
+    suspend fun beginXtream(walk: CatchUpDialectWalk): TvReplayStep {
+        val outcome = BoundedLoad.run<CatchUpDialectWalk.Request?>(
+            surface = LoadSurface.LIVE_RESOLVE,
+            isEmpty = { it == null },
+            report = mapOf("source_type" to LiveTvData.sourceTypeOf(channel.contentId), "kind" to "catchup"),
+        ) { LiveTvData.catchUpRequest(channel.contentId, programme.startMs, programme.endMs) }
+        if (!fence.isCurrent(ticket)) return stale()
+        val request = when (outcome) {
+            is LoadOutcome.Failed -> return TvReplayStep(null, TvReplayPolicy.REPLAY_FAILED_TEXT, canRetry = true)
+            is LoadOutcome.Empty -> return noRecording()
+            is LoadOutcome.Loaded -> outcome.value ?: return noRecording()
+        }
+        val begun = walk.beginReplay(request, TraktPlatformClock.nowEpochMs(), scope = null, admit = { fence.isCurrent(ticket) })
+        return start(begun)
+    }
+
+    private suspend fun start(begun: M3uReplayWalk.Begun?): TvReplayStep {
+        begun ?: return if (fence.isCurrent(ticket)) noRecording() else stale()
+        val started = TvReplayRun(ladder, channel.name, programme.title, programme.startMs, programme.endMs, begun)
         run = started
         return open(started, started.url)
     }
@@ -67,29 +93,28 @@ internal class TvM3uReplay(
             val s = session.state.value
             val move = current.observe(
                 isPlaying = s.isPlaying, positionMs = s.positionMs, isEnded = s.isEnded, errorMessage = s.errorMessage,
-                elapsedMs = openedAt.elapsedNow().inWholeMilliseconds,
                 next = nextRow, nowMs = TraktPlatformClock.nowEpochMs(),
             )
             when (move) {
-                TvM3uReplayRun.Move.Wait -> delay(TICK_MS)
-                is TvM3uReplayRun.Move.Retitle -> {
+                TvReplayRun.Move.Wait -> delay(TICK_MS)
+                is TvReplayRun.Move.Retitle -> {
                     session.retitle(move.title)
                     session.setReplayBar(current.barOriginMs, current.barSpanMs, current.barProgrammeStartMs, current.barProgrammeEndMs)
                     delay(TICK_MS)
                 }
                 // The old session is left for Swift to swap out (PlaybackCoordinator closes it): closing it here
                 // would make the swap read "the viewer left" and drop the new one.
-                is TvM3uReplayRun.Move.Reopen -> return open(current, move.attempt.url)
-                TvM3uReplayRun.Move.GoLive -> return ended(null)
-                TvM3uReplayRun.Move.Ended -> return ended(TvReplayPolicy.REPLAY_ENDED_TEXT)
-                is TvM3uReplayRun.Move.Failed -> return failed(move)
-                TvM3uReplayRun.Move.Abandon -> { release(); return null }
+                is TvReplayRun.Move.Reopen -> return open(current, move.attempt.url)
+                TvReplayRun.Move.GoLive -> return ended(null)
+                TvReplayRun.Move.Ended -> return ended(TvReplayPolicy.REPLAY_ENDED_TEXT)
+                is TvReplayRun.Move.Failed -> return failed(move)
+                TvReplayRun.Move.Abandon -> { release(); return null }
             }
         }
     }
 
     /** The guide row after the programme on screen, looked up once per programme (a local database read). */
-    private suspend fun ensureNextRow(current: TvM3uReplayRun) {
+    private suspend fun ensureNextRow(current: TvReplayRun) {
         val endMs = current.programmeEndMs
         if (nextRowFor == endMs) return
         nextRowFor = endMs
@@ -97,7 +122,7 @@ internal class TvM3uReplay(
     }
 
     /** Resolves [url] like a live link (bounded) and wraps it in a replay session. */
-    private suspend fun open(started: TvM3uReplayRun, url: String): TvReplayStep {
+    private suspend fun open(started: TvReplayRun, url: String): TvReplayStep {
         val source = BoundedLoad.run(
             surface = LoadSurface.LIVE_RESOLVE,
             report = mapOf("source_type" to LiveTvData.sourceTypeOf(channel.contentId), "kind" to "catchup_source"),
@@ -106,12 +131,11 @@ internal class TvM3uReplay(
         if (source == null) {
             // This link's host did not resolve in time: the next link on the ladder, else a failure with Retry.
             return when (val move = started.sourceFailed()) {
-                is TvM3uReplayRun.Move.Reopen -> open(started, move.attempt.url)
-                is TvM3uReplayRun.Move.Failed -> failed(move)
+                is TvReplayRun.Move.Reopen -> open(started, move.attempt.url)
+                is TvReplayRun.Move.Failed -> failed(move)
                 else -> { release(); stale() }
             }
         }
-        openedAt = TimeSource.Monotonic.markNow()
         val title = started.initialTitle()
         val launch = PlayerLaunch(
             profileId = ProfileRepository.activeProfileId,
@@ -132,7 +156,7 @@ internal class TvM3uReplay(
         return TvReplayStep(TvPlayerSession(launch).also { it.setReplayBar(started.barOriginMs, started.barSpanMs, started.barProgrammeStartMs, started.barProgrammeEndMs) }, null)
     }
 
-    private fun failed(move: TvM3uReplayRun.Move.Failed): TvReplayStep {
+    private fun failed(move: TvReplayRun.Move.Failed): TvReplayStep {
         release()
         return TvReplayStep(null, move.notice, canRetry = move.retry)
     }

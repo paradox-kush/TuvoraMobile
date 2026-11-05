@@ -42,6 +42,9 @@ val tvosExcludedCommon = listOf(
     "com/nuvio/app/core/rec/RecShelfTracking.kt", "com/nuvio/app/features/auth/AccountSessionPrompts.kt",
     "com/nuvio/app/features/library/TrackingMembershipRemovalConfirmation.kt",
     "com/nuvio/app/features/livetv/LiveTvOrientation.kt",
+    // The phone screen's replay-start decision, built on LiveTvScreen's CatchUpSession (a Compose screen type).
+    // Apple TV decides the same thing in TvCatchUp.startReplay / TvReplay.
+    "com/nuvio/app/features/livetv/ReplayStart.kt",
     // Phone/desktop long-press channel menu (sheet + toast); Apple TV has its own SwiftUI context menu.
     "com/nuvio/app/features/iptv/IptvLiveChannelMenu.kt",
     // Phone/desktop shell hook for setup links and the empty-screen button; it opens the Add Playlist page
