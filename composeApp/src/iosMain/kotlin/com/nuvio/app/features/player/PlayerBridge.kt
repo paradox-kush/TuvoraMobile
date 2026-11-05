@@ -162,6 +162,22 @@ internal fun NuvioPlayerBridge.setMpvProperties(properties: List<Pair<String, St
 }
 
 /**
+ * Optional capability of an mpv-backed [NuvioPlayerBridge]: the `stream-lavf-o` value the NEXT
+ * `loadfile` opens with ([LiveLinkReconnectPolicy]). The bridge stores it and sets it on the mpv
+ * queue right before its `loadfile`, so it holds even when called before the core exists, and its
+ * own reloads (retry, foreground rejoin) reuse it. A separate interface, checked with `as?`, for the
+ * same reason as [NuvioPlayerPropertyBridge]: Swift is hand-mirrored, and a bridge that has not
+ * adopted it (the Apple TV AVPlayer lane) keeps compiling and keeps its own network behaviour.
+ */
+interface NuvioPlayerLinkReconnectBridge {
+    fun setStreamLavfOptions(options: String)
+}
+
+/** True when the bridge took the setting. */
+internal fun NuvioPlayerBridge.applyStreamLavfOptions(options: String): Boolean =
+    (this as? NuvioPlayerLinkReconnectBridge)?.let { it.setStreamLavfOptions(options); true } ?: false
+
+/**
  * Registry for the player bridge factory.
  * Swift calls [registerFactory] during app startup before Compose is initialized.
  */

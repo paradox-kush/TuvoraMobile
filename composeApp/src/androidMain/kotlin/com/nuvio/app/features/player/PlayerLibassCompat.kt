@@ -32,7 +32,8 @@ internal fun ExoPlayer.Builder.buildWithAssSupportCompat(
     context: Context,
     dataSourceFactory: DataSource.Factory = DefaultDataSource.Factory(context),
     extractorsFactory: ExtractorsFactory = DefaultExtractorsFactory(),
-    renderersFactory: RenderersFactory = DefaultRenderersFactory(context)
+    renderersFactory: RenderersFactory = DefaultRenderersFactory(context),
+    allowLoadRetry: Boolean = true,
 ): ExoPlayer {
     val assHandler = AssHandler()
     val assSubtitleParserFactory = CompatAssSubtitleParserFactory(assHandler)
@@ -44,7 +45,7 @@ internal fun ExoPlayer.Builder.buildWithAssSupportCompat(
     val mediaSourceFactory = DefaultMediaSourceFactory(
         dataSourceFactory,
         assExtractorsFactory
-    )
+    ).withLinkRetry(allowLoadRetry)
     mediaSourceFactory.setSubtitleParserFactory(assSubtitleParserFactory)
 
     // Wrap the renderers factory with AssRenderersFactory to add a

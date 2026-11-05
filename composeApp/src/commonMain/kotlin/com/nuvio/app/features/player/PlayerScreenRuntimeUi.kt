@@ -184,6 +184,14 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
         // can wedge the same way, with no error for any existing report path to see.
         val isLiveStream = activeStreamType.equals("live", ignoreCase = true)
         val freezeReporter = remember { LivePlaybackFreezeReporter() }
+        val singleUseLink = remember(activeVideoId, isLiveStream) {
+            LiveLinkReconnectPolicy.modeFor(
+                isStalkerSource = activeVideoId?.let {
+                    com.nuvio.app.core.contracts.StreamSourceAccess.current().isStalkerSource(it)
+                } == true,
+                isLive = isLiveStream,
+            ) == LiveLinkReconnectPolicy.Mode.SINGLE_USE
+        }
         val freezeReconnector = remember { LivePlaybackReconnector(freezeReporter) }
         val liveReconnectFailedMessage = stringResource(Res.string.player_live_reconnect_failed)
         // Reset per source so a reconnect or source switch records a fresh start; the persisted
@@ -233,6 +241,9 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                     sourceResponseHeaders = activeSourceResponseHeaders,
                     externalSubtitles = externalSubtitles,
                     streamType = activeStreamType,
+                    // A live Stalker create_link is spent after its first open: the engine must not
+                    // re-open it after a drop; the credential refresh mints a fresh one.
+                    singleUseLink = singleUseLink,
                     playbackSurface = LIVE_FREEZE_SURFACE_PLAYER,
                     modifier = videoModifier,
                     playWhenReady = shouldPlay,

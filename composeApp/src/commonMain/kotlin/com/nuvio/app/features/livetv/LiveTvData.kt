@@ -28,6 +28,11 @@ import kotlinx.coroutines.flow.StateFlow
 data class LiveChannelSource(
     val url: String,
     val headers: Map<String, String> = emptyMap(),
+    /**
+     * The URL is spent after its first open (a Stalker `create_link`): the engine must not re-open it
+     * after a drop; recovery mints a fresh one. See [com.nuvio.app.features.player.LiveLinkReconnectPolicy].
+     */
+    val singleUseLink: Boolean = false,
 )
 
 /** A single channel row in the guide. */
@@ -88,7 +93,11 @@ object LiveTvData {
         val dnsProvider = XtreamItemRegistry.dnsProviderFor(contentId)
         val playback = resolveLivePlaybackUrl(immediate, dnsProvider)
         XtreamLiveRecents.record(contentId, name, logo)
-        return LiveChannelSource(url = playback.url, headers = playback.headers)
+        return LiveChannelSource(
+            url = playback.url,
+            headers = playback.headers,
+            singleUseLink = sourceTypeOf(contentId) == com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER,
+        )
     }
 
     /**

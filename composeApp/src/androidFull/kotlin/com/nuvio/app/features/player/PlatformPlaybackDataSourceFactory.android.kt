@@ -14,6 +14,8 @@ internal object PlatformPlaybackDataSourceFactory {
         useYoutubeChunkedPlayback: Boolean,
         useLongReadTimeout: Boolean = false,
         externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle> = emptyList(),
+        /** False for a single-use link (LiveLinkReconnectPolicy): OkHttp must not re-send the stream request. */
+        retryConnectionFailures: Boolean = true,
     ): DataSource.Factory {
         val networkFactory: DataSource.Factory = if (useYoutubeChunkedPlayback) {
             YoutubeChunkedDataSourceFactory(defaultRequestHeaders = defaultRequestHeaders)
@@ -21,6 +23,7 @@ internal object PlatformPlaybackDataSourceFactory {
             PlayerPlaybackNetworking.createHttpDataSourceFactory(
                 defaultRequestHeaders,
                 useLongReadTimeout,
+                retryConnectionFailures = retryConnectionFailures,
             )
         }
         // Clean client with no stream default headers — subtitle fetches get only policy-scoped ones.

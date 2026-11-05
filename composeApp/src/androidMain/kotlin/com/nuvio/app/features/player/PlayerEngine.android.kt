@@ -145,6 +145,7 @@ actual fun PlatformPlayerSurface(
     externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
     streamType: String?,
     isCatchUpPlayback: Boolean,
+    singleUseLink: Boolean,
     playbackSurface: String?,
     useYoutubeChunkedPlayback: Boolean,
     modifier: Modifier,
@@ -178,6 +179,7 @@ actual fun PlatformPlayerSurface(
         externalSubtitles = engineSubtitles,
         streamType = streamType,
         isCatchUpPlayback = isCatchUpPlayback,
+        singleUseLink = singleUseLink,
         playbackSurface = playbackSurface,
         useYoutubeChunkedPlayback = useYoutubeChunkedPlayback,
         modifier = modifier,
@@ -205,6 +207,7 @@ private fun PlatformPlayerSurfaceInner(
     externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
     streamType: String?,
     isCatchUpPlayback: Boolean,
+    singleUseLink: Boolean,
     playbackSurface: String?,
     useYoutubeChunkedPlayback: Boolean,
     modifier: Modifier,
@@ -250,6 +253,8 @@ private fun PlatformPlayerSurfaceInner(
     // ponytail: if a codec class regresses on ExoPlayer, narrow the force back BY CODEC, not by "live".
     // Upstream "switch player": a per-session override from the player's action row wins over the setting.
     val requestedEngine = playbackEngine ?: playerSettings.androidPlaybackEngine
+    // A spent-after-first-open link (Stalker create_link) gets no in-engine re-open on either engine.
+    val linkReconnectMode = LiveLinkReconnectPolicy.modeFor(singleUseLink)
     // F13: the user's live buffer length (null = engine default; VOD and catch-up never get one).
     val liveBufferPlan = LiveBufferPolicy.planFor(
         seconds = playerSettings.liveBufferSeconds,
@@ -290,6 +295,7 @@ private fun PlatformPlayerSurfaceInner(
             resizeMode = resizeMode,
             videoZoom = videoZoom,
             liveBufferPlan = liveBufferPlan,
+            allowTransportRetry = LiveLinkReconnectPolicy.allowsTransportRetry(linkReconnectMode),
             useNativeController = useNativeController,
             onInitialPositionHandled = onInitialPositionHandled,
             onControllerReady = onControllerReady,
@@ -334,6 +340,7 @@ private fun PlatformPlayerSurfaceInner(
                 resizeMode = resizeMode,
                 videoZoom = videoZoom,
                 liveBufferPlan = liveBufferPlan,
+                streamLavfOptions = LiveLinkReconnectPolicy.mpvStreamLavfOptions(linkReconnectMode),
                 // Routed through the policy: on the live path it downgrades a leaking gpu-next to
                 // gpu (the fence-fd leak fix — see LiveVideoOutputPolicy); off the live path it
                 // passes the user's renderer through unchanged.
@@ -383,6 +390,8 @@ private fun ExoPlayerSurface(
     resizeMode: PlayerResizeMode,
     videoZoom: VideoZoom,
     liveBufferPlan: LiveBufferPlan?,
+    /** False for a single-use link: no OkHttp connection retry and no Media3 load retry ([LiveLinkReconnectPolicy]). */
+    allowTransportRetry: Boolean,
     useNativeController: Boolean,
     onInitialPositionHandled: (key: String, handled: Boolean) -> Unit,
     onControllerReady: (PlayerEngineController) -> Unit,
@@ -497,6 +506,7 @@ private fun ExoPlayerSurface(
         playerSettings.vodCacheEnabled,
         playerSettings.vodCacheSizeMode,
         playerSettings.vodCacheSizeMb,
+        allowTransportRetry,
     ) {
         val upstream = PlatformPlaybackDataSourceFactory.create(
             context = context,
@@ -506,6 +516,7 @@ private fun ExoPlayerSurface(
             useYoutubeChunkedPlayback = useYoutubeChunkedPlayback,
             useLongReadTimeout = isLoopbackPlaybackSource(sourceUrl),
             externalSubtitles = externalSubtitles,
+            retryConnectionFailures = allowTransportRetry,
         )
         val mimeType = playbackMediaItemFromUrl(
             url = sourceUrl,
@@ -537,7 +548,7 @@ private fun ExoPlayerSurface(
         if (!sourceAudioUrl.isNullOrBlank()) {
             // Keep libass parsing for addon ASS subtitles, like sources the player builds itself.
             val mediaSourceFactory = getAssMediaSourceFactoryCompat()
-                ?: DefaultMediaSourceFactory(dataSourceFactory, extractorsFactory)
+                ?: DefaultMediaSourceFactory(dataSourceFactory, extractorsFactory).withLinkRetry(allowTransportRetry)
             val videoSource = mediaSourceFactory.createMediaSource(videoMediaItem)
             val audioSource = mediaSourceFactory.createMediaSource(playbackMediaItemFromUrl(sourceAudioUrl))
             val mergedSource = MergingMediaSource(videoSource, audioSource)
@@ -704,7 +715,8 @@ private fun ExoPlayerSurface(
                 context = context,
                 dataSourceFactory = dataSourceFactory,
                 extractorsFactory = extractorsFactory,
-                renderersFactory = renderersFactory
+                renderersFactory = renderersFactory,
+                allowLoadRetry = allowTransportRetry,
             ).also { builtPlayer ->
                 // Apply video effects only when ASS track was detected as selected.
                 // On first init videoEffectsNeeded is false. When onTracksChanged
@@ -725,7 +737,7 @@ private fun ExoPlayerSurface(
             val mediaSourceFactory = DefaultMediaSourceFactory(
                 dataSourceFactory,
                 extractorsFactory,
-            )
+            ).withLinkRetry(allowTransportRetry)
 
             playerBuilder
                 .setRenderersFactory(renderersFactory)
@@ -1465,6 +1477,8 @@ private fun LibmpvPlayerSurface(
     resizeMode: PlayerResizeMode,
     videoZoom: VideoZoom,
     liveBufferPlan: LiveBufferPlan?,
+    /** mpv `stream-lavf-o` for this source, from [LiveLinkReconnectPolicy]; set before each `loadfile`. */
+    streamLavfOptions: String,
     /** Already resolved by [LiveVideoOutputPolicy]: gpu on the live path, else the user's renderer. */
     videoOutput: String,
     hardwareDecodingEnabled: Boolean,
@@ -1690,7 +1704,7 @@ private fun LibmpvPlayerSurface(
         }
     }
 
-    LaunchedEffect(playerViewRef, sourceUrl, sourceAudioUrl, sanitizedSourceHeaders, externalSubtitles) {
+    LaunchedEffect(playerViewRef, sourceUrl, sourceAudioUrl, sanitizedSourceHeaders, externalSubtitles, streamLavfOptions) {
         val view = playerViewRef ?: return@LaunchedEffect
         playbackDiagnostics.attempt += 1
         playbackDiagnostics.prepareStartedAtMs = SystemClock.elapsedRealtime()
@@ -1712,6 +1726,7 @@ private fun LibmpvPlayerSurface(
             externalSubtitles = externalSubtitles,
             playWhenReady = latestPlayWhenReady.value,
             startOption = startOption,
+            streamLavfOptions = streamLavfOptions,
         )
         // Handled only when the load carried the position; otherwise the runtime's post-load
         // seek stays the fallback (e.g. a progress-fraction resume with no position yet).
@@ -1821,6 +1836,7 @@ private class NuvioLibmpvView(
     private var currentSourceAudioUrl: String? = null
     private var currentRequestHeaders: Map<String, String> = emptyMap()
     private var currentExternalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle> = emptyList()
+    private var currentStreamLavfOptions: String = LiveLinkReconnectPolicy.ENGINE_RECONNECT_LAVF_OPTIONS
 
     // Set from the composable. Live streams must rejoin the live edge when the surface returns:
     // a live stream paused in the background goes stale (the server keeps sending real time and
@@ -2254,10 +2270,9 @@ private class NuvioLibmpvView(
         // file and wrong for a live channel: an IPTV panel closing the socket mid-stream reads
         // as a clean EOF. Letting ffmpeg re-open the URL heals a transient drop before the
         // app-level reconnect (LivePlaybackFreezeTracking) has to rebuild playback.
-        mpv.setOptionString(
-            "stream-lavf-o",
-            "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5"
-        )
+        // The init default only: loadCurrentSource sets the value for every file, so a single-use
+        // link (Stalker create_link) opens with reconnect=0 — see LiveLinkReconnectPolicy.
+        mpv.setOptionString("stream-lavf-o", LiveLinkReconnectPolicy.ENGINE_RECONNECT_LAVF_OPTIONS)
         mpv.setOptionString("tls-verify", "yes")
         mpv.setOptionString("tls-ca-file", "${context.filesDir.path}/cacert.pem")
         val demuxerBytes = demuxerBytesFor(MemoryPortAccess.current().baseTier())
@@ -2312,12 +2327,15 @@ private class NuvioLibmpvView(
         externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
         playWhenReady: Boolean,
         startOption: String? = null,
+        streamLavfOptions: String = LiveLinkReconnectPolicy.ENGINE_RECONNECT_LAVF_OPTIONS,
     ) {
         val sameSource =
             currentSourceUrl == sourceUrl &&
                 currentSourceAudioUrl == sourceAudioUrl &&
                 currentRequestHeaders == requestHeaders &&
-                currentExternalSubtitles == externalSubtitles
+                currentExternalSubtitles == externalSubtitles &&
+                currentStreamLavfOptions == streamLavfOptions
+        currentStreamLavfOptions = streamLavfOptions
         currentSourceUrl = sourceUrl
         currentSourceAudioUrl = sourceAudioUrl
         currentRequestHeaders = requestHeaders
@@ -2342,6 +2360,10 @@ private class NuvioLibmpvView(
         mpv.setPropertyBoolean("pause", !playWhenReady)
         // Upstream (original-audio-language fix): let mpv re-pick the audio track per source.
         mpv.setPropertyString("aid", "auto")
+        // Per source, before loadfile: the next open reads it (mpv manual, options/<name>: "many
+        // options require reloading the file for changes to take effect"). Set as a global, not a
+        // loadfile per-file option, so retry()/restartFromBeginning()/live rejoin reuse it unchanged.
+        mpv.setPropertyString("stream-lavf-o", currentStreamLavfOptions)
         if (startOption != null) {
             mpv.command("loadfile", sourceUrl.toMpvSource(), "replace", "-1", startOption)
         } else {
@@ -3995,3 +4017,8 @@ private fun Format.exoBitDepth(): Int? {
         else -> null
     }
 }
+
+/** A single-use link gets no Media3 load retry ([SingleUseLoadErrorHandlingPolicy]); others keep the default. */
+@androidx.annotation.OptIn(UnstableApi::class)
+internal fun DefaultMediaSourceFactory.withLinkRetry(allowLoadRetry: Boolean): DefaultMediaSourceFactory =
+    if (allowLoadRetry) this else setLoadErrorHandlingPolicy(SingleUseLoadErrorHandlingPolicy)

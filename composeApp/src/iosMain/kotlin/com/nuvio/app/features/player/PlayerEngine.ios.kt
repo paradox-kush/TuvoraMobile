@@ -52,6 +52,7 @@ actual fun PlatformPlayerSurface(
     externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
     streamType: String?,
     isCatchUpPlayback: Boolean,
+    singleUseLink: Boolean,
     // Accepted for signature parity; iOS renders through the Swift MPVPlayerBridge, which has no
     // Android SurfaceTexture stage and therefore none of the per-frame fence leak this drives.
     @Suppress("UNUSED_PARAMETER") playbackSurface: String?,
@@ -87,6 +88,7 @@ actual fun PlatformPlayerSurface(
         externalSubtitles = engineSubtitles,
         streamType = streamType,
         isCatchUpPlayback = isCatchUpPlayback,
+        singleUseLink = singleUseLink,
         playbackSurface = playbackSurface,
         useYoutubeChunkedPlayback = useYoutubeChunkedPlayback,
         modifier = modifier,
@@ -114,6 +116,7 @@ private fun PlatformPlayerSurfaceInner(
     externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
     streamType: String?,
     isCatchUpPlayback: Boolean,
+    singleUseLink: Boolean,
     // Accepted for signature parity; iOS renders through the Swift MPVPlayerBridge, which has no
     // Android SurfaceTexture stage and therefore none of the per-frame fence leak this drives.
     @Suppress("UNUSED_PARAMETER") playbackSurface: String?,
@@ -391,7 +394,7 @@ private fun PlatformPlayerSurfaceInner(
     }
 
     // Load file and set initial state
-    LaunchedEffect(bridge, sourceUrl, sourceAudioUrl, sourceHeaders, externalSubtitles) {
+    LaunchedEffect(bridge, sourceUrl, sourceAudioUrl, sourceHeaders, externalSubtitles, singleUseLink) {
         bridge.applyIosVideoOutputSettings(latestPlayerSettings.value)
         // A replay must NOT reload-to-live-edge on foreground: it would skip the viewer to the
         // end of the recording they were part-way through.
@@ -405,6 +408,11 @@ private fun PlatformPlayerSurfaceInner(
         )?.let { plan -> bridge.setMpvProperties(LiveBufferPolicy.mpvProperties(plan)) }
         // The resume rides the load (mpv `start=`), not a post-load seek mpv can reject (B59b).
         val startOption = MpvStartPosition.loadOption(latestInitialPositionMs.value, isLive)
+        // A spent-after-first-open link (Stalker create_link) opens with reconnect=0; every other
+        // source re-states the reconnect default, so nothing leaks from the previous load.
+        bridge.applyStreamLavfOptions(
+            LiveLinkReconnectPolicy.mpvStreamLavfOptions(LiveLinkReconnectPolicy.modeFor(singleUseLink)),
+        )
         bridge.loadFileWithAudio(
             videoUrl = sourceUrl,
             audioUrl = sourceAudioUrl,
