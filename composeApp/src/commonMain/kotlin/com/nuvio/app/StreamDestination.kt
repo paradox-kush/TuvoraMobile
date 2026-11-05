@@ -3,6 +3,11 @@ package com.nuvio.app
 import com.nuvio.app.features.player.resolveAvailableExternalPlayerId
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.DisposableEffect
@@ -103,10 +108,16 @@ internal fun StreamDestination(
     var resolvingYouTubeStream by rememberSaveable(route.launchId) { mutableStateOf(false) }
     var preparingServerStream by remember(route.launchId) { mutableStateOf(false) }
     var pendingP2pStreamOpen by remember { mutableStateOf<PendingP2pStreamOpen?>(null) }
+    // B165: ids whose streams exist only inside the series meta (IPTV / media-server series).
+    val streamsLiveOnlyInMeta = launch.parentMetaId != null && (
+        com.nuvio.app.core.contracts.StreamSourceAccess.current().isHandledId(launch.videoId) ||
+            com.nuvio.app.features.servers.ServerItemRef.parse(launch.parentMetaId) != null
+        )
     val shouldResolveEpisodeVideoId =
         launch.parentMetaId != null &&
-            launch.seasonNumber != null &&
-            launch.episodeNumber != null
+            ((launch.seasonNumber != null && launch.episodeNumber != null) || streamsLiveOnlyInMeta)
+    var metaLoadFailed by remember(route.launchId) { mutableStateOf(false) }
+    var metaRetryNonce by remember(route.launchId) { mutableStateOf(0) }
     var effectiveVideoId by rememberSaveable(
         launch.videoId,
         launch.parentMetaId,
@@ -131,6 +142,7 @@ internal fun StreamDestination(
         launch.type,
         launch.seasonNumber,
         launch.episodeNumber,
+        metaRetryNonce,
     ) {
         effectiveVideoId = launch.videoId
         if (!shouldResolveEpisodeVideoId) {
@@ -141,12 +153,29 @@ internal fun StreamDestination(
         hasResolvedVideoId = false
         val metaType = launch.parentMetaType ?: launch.type
         val metaId = launch.parentMetaId ?: return@LaunchedEffect
-        val resolvedVideoId = runCatching {
-            MetaDetailsRepository.fetch(metaType, metaId)
-        }.getOrNull()
+        // The fetch also caches the meta so the embedded-stream lookup finds it (B165).
+        val meta = try {
+            MetaDetailsRepository.ensureMetaForStreams(metaType, metaId)
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            null
+        }
+        // A title that cannot be loaded is a failure, not "no streams", when only the meta lists them.
+        if (com.nuvio.app.features.details.EmbeddedStreamLookup.failureBlocksStreams(
+                metaLoaded = meta != null,
+                streamsLiveOnlyInMeta = streamsLiveOnlyInMeta,
+            )
+        ) {
+            metaLoadFailed = true
+            return@LaunchedEffect
+        }
+        metaLoadFailed = false
+        val resolvedVideoId = meta
             ?.videos
             ?.firstOrNull { video ->
-                video.season == launch.seasonNumber &&
+                launch.seasonNumber != null &&
+                    video.season == launch.seasonNumber &&
                     video.episode == launch.episodeNumber
             }
             ?.id
@@ -602,6 +631,30 @@ internal fun StreamDestination(
     }
 
     if (!hasResolvedVideoId) {
+        if (metaLoadFailed) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                com.nuvio.app.core.ui.NuvioSurfaceCard(modifier = Modifier.padding(24.dp)) {
+                    Text(
+                        text = stringResource(Res.string.streams_empty_load_failed_title),
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(Res.string.streams_empty_series_meta_failed_message),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    com.nuvio.app.core.ui.NuvioPrimaryButton(
+                        text = stringResource(Res.string.action_retry),
+                        onClick = { metaLoadFailed = false; metaRetryNonce += 1 },
+                    )
+                }
+            }
+            return
+        }
         if (showLoadingScreen) {
             StreamLoadingScreen(
                 launch = launch,

@@ -88,4 +88,84 @@ class PlaylistAccountInfoStoreTest {
         assertFalse(AccountInfoFreshnessPolicy.isFresh(0, AccountInfoFreshnessPolicy.FAILURE_TTL_MS, succeeded = false))
         assertTrue(AccountInfoFreshnessPolicy.isFresh(0, AccountInfoFreshnessPolicy.FAILURE_TTL_MS, succeeded = true))
     }
+
+    // --- B171: the details page's one lookup is an inspection; a cancellation is never a cached failure ---
+
+    @Test
+    fun `an inspection fetch runs as read-only inspection and the list's fetch does not`() = runBlocking {
+        val seen = mutableListOf<com.nuvio.app.core.sources.DeviceSourceAccess?>()
+        val s = PlaylistAccountInfoStore(
+            fetch = { seen += kotlin.coroutines.coroutineContext[com.nuvio.app.core.sources.DeviceSourceAccessElement]?.access; info },
+            clock = { now },
+        )
+        s.infoFor(xtream)
+        s.infoFor(xtream, force = true, inspect = true)
+        assertEquals(listOf(null, com.nuvio.app.core.sources.DeviceSourceAccess.INSPECT), seen)
+    }
+
+    @Test
+    fun `a forced inspection bypasses the six hour freshness window`() = runBlocking {
+        store.infoFor(xtream)
+        store.infoFor(xtream, force = true, inspect = true)
+        assertEquals(2, calls)
+    }
+
+    @Test
+    fun `a cancelled fetch propagates and is not remembered as a failed check`() = runBlocking {
+        val s = PlaylistAccountInfoStore(fetch = { throw kotlinx.coroutines.CancellationException("scope gone") }, clock = { now })
+        val thrown = runCatching { s.infoFor(xtream) }.exceptionOrNull()
+        assertTrue(thrown is kotlinx.coroutines.CancellationException)
+        assertNull(s.cached("k1"))
+        answer = info
+        assertEquals(info, store.infoFor(xtream), "no 45 s failure entry was left behind")
+    }
+
+    // --- review fixes: the DEFAULT ask, and the list loop -------------------------------------------
+
+    private val refusal = com.nuvio.app.core.sources.SourceDisabledOnDeviceException("iptv", "ready")
+
+    @Test
+    fun `the default ask turns a device refusal into no answer instead of throwing`() = runBlocking {
+        assertNull(PlaylistAccountInfoStore.fetchAccountInfo(xtream) { Result.failure(refusal) })
+        assertEquals(info, PlaylistAccountInfoStore.fetchAccountInfo(xtream) { Result.success(info) })
+    }
+
+    @Test
+    fun `the default ask still rethrows a real cancellation`() = runBlocking {
+        val thrown = runCatching {
+            PlaylistAccountInfoStore.fetchAccountInfo(xtream) { Result.failure(kotlinx.coroutines.CancellationException("scope gone")) }
+        }.exceptionOrNull()
+        assertTrue(thrown is kotlinx.coroutines.CancellationException && thrown !is com.nuvio.app.core.sources.SourceDisabledOnDeviceException)
+    }
+
+    @Test
+    fun `a refusal for one playlist does not end the list pass for the rest`() = runBlocking {
+        val off = xtream.copy(id = "off")
+        val on = xtream.copy(id = "on")
+        val asked = mutableListOf<String>()
+        val s = PlaylistAccountInfoStore(
+            fetch = { acc -> asked += acc.id; PlaylistAccountInfoStore.fetchAccountInfo(acc) { a -> if (a.id == "off") Result.failure(refusal) else Result.success(info) } },
+            clock = { now },
+        )
+        s.refreshManaged(listOf(off, on), setOf("off", "on"), availableHere = { true })
+        assertEquals(listOf("off", "on"), asked)
+        assertEquals(info, s.cached("on"))
+    }
+
+    @Test
+    fun `the list pass never asks a playlist turned off on this device`() = runBlocking {
+        val asked = mutableListOf<String>()
+        val s = PlaylistAccountInfoStore(fetch = { acc -> asked += acc.id; info }, clock = { now })
+        s.refreshManaged(listOf(xtream.copy(id = "off"), xtream.copy(id = "on"), xtream.copy(id = "unmanaged")), setOf("off", "on"), availableHere = { it.id != "off" })
+        assertEquals(listOf("on"), asked)
+    }
+
+    @Test
+    fun `details inspection plan keeps the cache for turned-on playlists and never touches an off portal`() {
+        val p = DetailsInspectionPolicy
+        assertEquals(DetailsInspectionPolicy.Plan.NORMAL, p.plan(SOURCE_TYPE_XTREAM, availableHere = true))
+        assertEquals(DetailsInspectionPolicy.Plan.INSPECT, p.plan(SOURCE_TYPE_XTREAM, availableHere = false))
+        assertEquals(DetailsInspectionPolicy.Plan.SKIP, p.plan(SOURCE_TYPE_STALKER, availableHere = false))
+        assertEquals(DetailsInspectionPolicy.Plan.NORMAL, p.plan(SOURCE_TYPE_STALKER, availableHere = true))
+    }
 }

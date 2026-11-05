@@ -7,7 +7,9 @@
 "Add to library" = "लाइब्रेरी में जोड़ें";
 "Added ↑" = "जोड़ा गया ↑";
 "Added ↓" = "जोड़ा गया ↓";
+"Addons" = "ऐडऑन";
 "Adjust home layout, content visibility, and poster behavior" = "होम लेआउट, कंटेंट दृश्यता और पोस्टर व्यवहार समायोजित करें";
+"Advanced" = "एडवांस्ड";
 "All" = "सभी";
 "All history" = "सारा इतिहास";
 "Always show source list and let me choose." = "हमेशा सोर्स सूची दिखाएँ और मुझे चुनने दें।";
@@ -17,8 +19,6 @@
 "Artwork" = "आर्टवर्क";
 "Audience Score" = "ऑडियंस स्कोर";
 "Audio" = "ऑडियो";
-"Audio & Video" = "ऑडियो और वीडियो";
-"Audio controls and video compatibility." = "ऑडियो नियंत्रण और वीडियो संगतता।";
 "Auto (Best for Content)" = "ऑटो (सामग्री के लिए सर्वश्रेष्ठ)";
 "Auto Stream Selection" = "ऑटो स्ट्रीम चयन";
 "Auto-play Next Episode" = "अगला एपिसोड ऑटो-प्ले";
@@ -27,6 +27,7 @@
 "Back" = "वापस";
 "Balanced" = "बैलेंस्ड";
 "Basic Info" = "बेसिक जानकारी";
+"Blur unwatched episodes" = "अनदेखे एपिसोड ब्लर करें";
 "Bold" = "बोल्ड";
 "Bottom Offset" = "बॉटम ऑफसेट";
 "Cancel" = "रद्द करें";
@@ -54,7 +55,6 @@
 "Continue Watching Window" = "कंटिन्यू वॉचिंग विंडो";
 "Continue without account" = "अकाउंट के बिना जारी रखें";
 "Control what appears on home and search." = "होम और सर्च में क्या दिखाई देगा इसे नियंत्रित करें।";
-"Core playback behavior." = "मुख्य प्लेबैक व्यवहार।";
 "Create" = "बनाएँ";
 "Create Profile" = "प्रोफाइल बनाएँ";
 "Create your own Client ID at anime-skip.com/account/settings" = "anime-skip.com/account/settings पर अपना Client ID बनाएँ";
@@ -74,6 +74,7 @@
 "Details" = "डिटेल्स";
 "Device language" = "डिवाइस भाषा";
 "Disable" = "अक्षम करें";
+"Disabled" = "अक्षम";
 "Disconnect" = "डिस्कनेक्ट";
 "Disconnect Trakt?" = "Trakt डिस्कनेक्ट करें?";
 "Discover" = "डिस्कवर";
@@ -84,6 +85,7 @@
 "Enable Anime Skip" = "Anime Skip सक्षम करें";
 "Enable MDBList Ratings" = "MDBList रेटिंग्स सक्षम करें";
 "Enable TMDB Enrichment" = "TMDB एनरिचमेंट सक्षम करें";
+"Enabled" = "सक्षम";
 "Enter Client ID" = "Client ID दर्ज करें";
 "Enter MDBList API key" = "MDBList API Key दर्ज करें";
 "Enter at least 2 characters" = "कम से कम 2 अक्षर दर्ज करें";
@@ -96,7 +98,6 @@
 "Filmography" = "फिल्मोग्राफी";
 "Focus an avatar to view its name" = "उसका नाम देखने के लिए अवतार पर फोकस करें";
 "Font Size" = "फ़ॉन्ट आकार";
-"General" = "सामान्य";
 "Generating QR…" = "QR बनाया जा रहा है…";
 "Genre" = "जॉनर";
 "Go to details" = "विवरण देखें";
@@ -104,6 +105,7 @@
 "Grid View" = "ग्रिड व्यू";
 "Hidden" = "छुपाया गया";
 "Hide sidebar by default; show when focused." = "डिफ़ॉल्ट रूप से साइडबार छुपाएँ; फोकस होने पर दिखाएँ।";
+"Hide unreleased content" = "अनरिलीज़ कंटेंट छुपाएँ";
 "Hold to manage profile" = "प्रोफाइल मैनेज करने के लिए होल्ड करें";
 "Home" = "होम";
 "Home Content" = "होम कंटेंट";
@@ -127,6 +129,7 @@
 "Login approved. Finishing sign in…" = "लॉगिन स्वीकृत। साइन इन पूरा किया जा रहा है…";
 "Logo and backdrop images from TMDB" = "TMDB से लोगो और बैकड्रॉप इमेज";
 "MDBList Ratings" = "MDBList रेटिंग्स";
+"MOVIES" = "मूवीज़";
 "Manage Lists" = "लिस्ट मैनेज करें";
 "Manage Profiles" = "प्रोफाइल मैनेज करें";
 "Manage available integrations" = "उपलब्ध एकीकरण प्रबंधित करें";
@@ -143,10 +146,12 @@
 "Move Up" = "ऊपर ले जाएँ";
 "Movie" = "फ़िल्म";
 "Movies" = "मूवीज़";
+"NEW" = "नया";
 "Name" = "नाम";
 "Network" = "नेटवर्क";
 "Networks" = "नेटवर्क";
 "Networks with logos from TMDB" = "TMDB से लोगो सहित नेटवर्क";
+"New" = "नया";
 "Next Episode" = "अगला एपिसोड";
 "Next Up" = "अगला";
 "No %@ in this list" = "इस लिस्ट में कोई %1$@ नहीं";
@@ -167,8 +172,6 @@
 "Playback" = "प्लेबैक";
 "Playback Settings" = "प्लेबैक सेटिंग्स";
 "Playback Speed" = "प्लेबैक गति";
-"Player & Stream Selection" = "प्लेयर और स्ट्रीम चयन";
-"Player preference, auto-play, and source filtering." = "प्लेयर पसंद, ऑटो-प्ले और सोर्स फ़िल्टरिंग।";
 "Please wait…" = "कृपया प्रतीक्षा करें…";
 "Poster Card" = "पोस्टर कार्ड";
 "Preferred Audio Language" = "पसंदीदा ऑडियो भाषा";
@@ -183,7 +186,9 @@
 "Profiles" = "प्रोफाइल";
 "QR login expired. Generate a new code." = "QR लॉगिन समाप्त हो गया। नया कोड जनरेट करें।";
 "QR unavailable. Refresh to retry." = "QR उपलब्ध नहीं। फिर से कोशिश करने के लिए रीफ्रेश करें।";
+"Rating" = "रेटिंग";
 "Ratings" = "रेटिंग्स";
+"Refresh" = "रिफ्रेश";
 "Refresh QR" = "QR रीफ्रेश करें";
 "Remove" = "हटाएँ";
 "Remove from library" = "लाइब्रेरी से हटाएँ";
@@ -194,6 +199,7 @@
 "Resume" = "जारी रखें";
 "Retry" = "फिर से कोशिश करें";
 "Runtime, status, country, and language from TMDB" = "TMDB से रनटाइम, रिलीज़ डेट, देश और भाषा";
+"SHOWS" = "शो";
 "Save" = "सेव";
 "Saving…" = "सेव हो रहा है…";
 "Scan the QR code or enter the short code in your browser." = "QR स्कैन करें, ब्राउज़र में अनुमति दें, फिर यहाँ लौटें।";
@@ -218,8 +224,11 @@
 "Show TMDB score" = "TMDB स्कोर दिखाएँ";
 "Show Trakt score" = "Trakt स्कोर दिखाएँ";
 "Show audience score" = "ऑडियंस स्कोर दिखाएँ";
+"Show catalog type" = "कैटलॉग प्रकार दिखाएँ";
 "Show critics score" = "क्रिटिक्स स्कोर दिखाएँ";
 "Show titles under posters in rows, grid, and see-all." = "रो, ग्रिड और see-all में पोस्टर के नीचे टाइटल दिखाएँ।";
+"Shown" = "दिखाया गया";
+"Shows" = "शो";
 "Sign Out" = "साइन आउट";
 "Signed in" = "साइन इन";
 "Size" = "आकार";
@@ -243,6 +252,8 @@
 "TMDB metadata language for title, logo, and enabled fields" = "टाइटल, लोगो और सक्षम फ़ील्ड के लिए TMDB मेटाडेटा भाषा";
 "TMDB movie collections in release order" = "रिलीज़ क्रम में TMDB मूवी कलेक्शन";
 "TMDB recommendation backdrops on detail and post-play screens" = "डिटेल पेज पर TMDB रिकमेंडेशन बैकड्रॉप";
+"TODAY" = "आज";
+"TOMORROW" = "कल";
 "TV" = "टीवी";
 "Text Color" = "टेक्स्ट रंग";
 "This will disconnect your Trakt account from Tuvora." = "यह आपके Trakt अकाउंट को Tuvora से डिस्कनेक्ट कर देगा।";

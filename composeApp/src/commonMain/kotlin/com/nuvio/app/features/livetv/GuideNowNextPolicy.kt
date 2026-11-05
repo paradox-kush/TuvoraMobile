@@ -13,4 +13,15 @@ internal object GuideNowNextPolicy {
             next = sorted.firstOrNull { it.startMs > nowMs },
         )
     }
+
+    /**
+     * The now-bar during a replay names the programme being replayed and the one after it, never the
+     * show airing now. A replay with no matching guide row (a Sports replay) still names itself.
+     */
+    fun selectForReplay(programmes: List<XtreamProgram>, startMs: Long, endMs: Long, title: String): GuideNowNext {
+        val sorted = programmes.filter { it.endMs > it.startMs }.sortedBy { it.startMs }
+        val now = sorted.firstOrNull { it.startMs == startMs }
+            ?: XtreamProgram(title, "", startMs, endMs, false)
+        return GuideNowNext(now = now, next = sorted.firstOrNull { it.startMs >= now.endMs })
+    }
 }

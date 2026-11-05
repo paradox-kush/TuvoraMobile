@@ -106,12 +106,12 @@ object TvPlaylistDetailsPolicy {
      * call, so while the panel is still being asked ([loading]) nothing is said, and when it could not be asked
      * the line is [ExpiryDisplay.CheckFailed]'s "Couldn't check expiry" (the shared model decides which).
      */
-    fun expiryLine(expiry: ExpiryDisplay, loading: Boolean = false): String? = when (expiry) {
+    fun expiryLine(expiry: ExpiryDisplay, loading: Boolean = false, inspectionSkipped: Boolean = false): String? = when (expiry) {
         is ExpiryDisplay.DaysLeft -> if (expiry.days == 1) "1 day left" else "${expiry.days} days left"
         ExpiryDisplay.Expired -> "Expired"
         ExpiryDisplay.NeverExpires -> "Never expires"
         is ExpiryDisplay.Text -> expiry.text
-        ExpiryDisplay.NotReported -> if (loading) null else "Expiry not reported by this provider"
+        ExpiryDisplay.NotReported -> if (loading) null else if (inspectionSkipped) "Turn this playlist on to check its account" else "Expiry not reported by this provider"
         ExpiryDisplay.CheckFailed -> "Couldn't check expiry"
     }
 
@@ -140,9 +140,10 @@ object TvPlaylistDetailsPolicy {
         managedBy?.let { if (serviceUpdatedDate != null) "$it \u00B7 updated $serviceUpdatedDate" else it }
 
     /** What the status line under the facts says. [statusText] is the panel's own word ("Active", "Active · Trial"). */
-    fun statusLine(statusText: String?, loading: Boolean, hasPanel: Boolean): String? = when {
+    fun statusLine(statusText: String?, loading: Boolean, hasPanel: Boolean, inspectionSkipped: Boolean = false): String? = when {
         !hasPanel -> "This playlist is a plain list, so there is no account to check."
         statusText != null -> statusText
+        inspectionSkipped -> "Turn this playlist on to check its account"
         loading -> "Checking the account…"
         else -> "Couldn't reach the provider for account details."
     }

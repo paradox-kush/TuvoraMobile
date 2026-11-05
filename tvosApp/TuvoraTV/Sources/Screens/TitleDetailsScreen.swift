@@ -14,6 +14,8 @@ struct TitleDetailsScreen: View {
     @State private var saved = false
     @State private var smokePressed = false
     @State private var watched = false
+    /// Calendar bell (shared Calendar via TvCalendar): new-episode reminders for this title.
+    @State private var bellOn = false
     @State private var presentation: MetaScreenSettingsUiState?
     @State private var progressRevision = 0
     /// A title or person opened from the lower sections. MetaDetailsRepository holds one title at a time,
@@ -158,6 +160,18 @@ struct TitleDetailsScreen: View {
                 CircleIconButton(icon: watched ? "md_check_circle" : "md_bookmark_border", filledWhite: watched) {
                     Task { try? await TvTitle.shared.toggleWatched(meta: meta); watched = TvTitle.shared.isWatched(meta: meta) }
                 }
+                if TvCalendar.shared.canBell(contentId: calendarId(meta), type: meta.type) {
+                    CircleIconButton(icon: bellOn ? "md_notifications_active" : "md_notifications", filledWhite: bellOn) {
+                        TvCalendar.shared.toggleBell(contentId: calendarId(meta), type: meta.type)
+                    }
+                    .accessibilityLabel(L(bellOn ? "Reminders on" : "Remind me of new episodes"))
+                    .task {
+                        TvCalendar.shared.start()
+                        for await next in TvCalendar.shared.state {
+                            bellOn = TvCalendar.shared.isBellOn(state: next, contentId: calendarId(meta), type: meta.type)
+                        }
+                    }
+                }
             }
             .scrollClipDisabled()
             .focusSection()
@@ -170,6 +184,12 @@ struct TitleDetailsScreen: View {
         }
     }
     @Namespace private var namespace
+
+    /// The id the Calendar follows a title by: its IMDb id when it has one, else the app's content id.
+    private func calendarId(_ meta: MetaDetails) -> String {
+        if let imdb = meta.imdbId, imdb.hasPrefix("tt") { return imdb }
+        return meta.id
+    }
 
     private func metaRow(_ meta: MetaDetails) -> some View {
         HStack(spacing: dp(8)) {

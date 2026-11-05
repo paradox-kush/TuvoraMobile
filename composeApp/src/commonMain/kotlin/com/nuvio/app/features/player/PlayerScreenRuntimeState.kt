@@ -174,6 +174,10 @@ internal class PlayerScreenRuntime(
     var liveReconnectFailed by mutableStateOf(false)
     /** Bumped by the viewer's Retry on that error; the live freeze ladder starts over on it (never on its own reconnects). */
     var liveUserRetryGeneration by mutableStateOf(0)
+    /** A VOD start hit [VodStartDeadlinePolicy.FAIL_AFTER_MS] with no first frame: the error modal offers Retry. */
+    var vodStartFailed by mutableStateOf(false)
+    /** Bumped by Retry on that error; restarts the start deadline clock. */
+    var vodStartRetryGeneration by mutableStateOf(0)
     /**
      * Resolves a user-facing string for a message the runtime raises itself (toasts). Production uses the
      * Compose resource environment; tests replace it, since the Android host JVM has no resource system.

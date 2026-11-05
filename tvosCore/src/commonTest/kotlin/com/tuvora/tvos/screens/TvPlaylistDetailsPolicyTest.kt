@@ -280,4 +280,11 @@ class TvPlaylistDetailsPolicyTest {
         assertEquals("Reloads each time you open it in the IPTV tab.", hint(ManualRefreshUiState(load = LoadStatus.Loaded, result = ManualRefreshResult.RELOAD_ON_OPEN)), "stalker")
         assertEquals("No copy of the file here.", hint(ManualRefreshUiState(load = LoadStatus.Loaded, result = ManualRefreshResult.NEEDS_LOCAL_FILE)), "file with no copy")
     }
+
+    @Test fun aSkippedInspectionSaysTurnItOnInsteadOfNotReported() {
+        assertEquals("Turn this playlist on to check its account",
+            TvPlaylistDetailsPolicy.expiryLine(ExpiryDisplay.NotReported, inspectionSkipped = true))
+        assertEquals("Turn this playlist on to check its account", TvPlaylistDetailsPolicy.statusLine(null, false, true, inspectionSkipped = true))
+        assertEquals("Expiry not reported by this provider", TvPlaylistDetailsPolicy.expiryLine(ExpiryDisplay.NotReported))
+    }
 }

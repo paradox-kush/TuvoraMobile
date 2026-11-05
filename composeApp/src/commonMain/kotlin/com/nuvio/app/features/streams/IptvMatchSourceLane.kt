@@ -23,7 +23,10 @@ internal object IptvMatchSourceLane {
         othersSettled: Job,
         resolve: suspend () -> List<StreamItem>,
     ): AddonStreamGroup =
-        runCatchingUnlessCancelled { IptvSourceWaitPolicy.await(othersSettled) { resolve() } }.fold(
+        // IptvSourceWaitPolicy ends the wait once nothing else is loading (B63), so a panel may outwait
+        // add-ons and plugins. The safety deadline is for the case where "the others" never settle
+        // (a plugin lane parked by a paused search): the chip must still end.
+        SourceLaneGuard.run(deadlineMs = SourceLaneGuard.IPTV_SAFETY_DEADLINE_MS) { IptvSourceWaitPolicy.await(othersSettled) { resolve() } }.fold(
             onSuccess = { resolved ->
                 val streams = resolved ?: emptyList<StreamItem>().also {
                     log.w { "Xtream match for ${source.addonName} cut after ${IptvSourceWaitPolicy.PLAYLIST_BUDGET_MS} ms (playlist not answering)" }
@@ -39,6 +42,17 @@ internal object IptvMatchSourceLane {
                 )
             },
             onFailure = { err ->
+                if (err is SourceLaneTimeoutException) {
+                    // Safety deadline: same outcome as a budget cut ("still loading"), not a fetch failure.
+                    log.w { "Xtream match for ${source.addonName} cut at the safety deadline" }
+                    return@fold AddonStreamGroup(
+                        addonName = source.addonName,
+                        addonId = source.sourceId,
+                        streams = emptyList(),
+                        isLoading = false,
+                        iptvPending = true,
+                    )
+                }
                 if (err is IptvCatalogPendingException) {
                     log.i { "Xtream match for ${source.addonName}: catalog still loading" }
                     return@fold AddonStreamGroup(
@@ -55,7 +69,7 @@ internal object IptvMatchSourceLane {
                     addonId = source.sourceId,
                     streams = emptyList(),
                     isLoading = false,
-                    error = err.message,
+                    error = err.laneFailureMessage(),
                 )
             },
         )

@@ -48,4 +48,24 @@ class GuideNowNextPolicyTest {
         assertEquals(second, result.now)
         assertEquals(third, result.next)
     }
+
+    // A replay's now-bar names the programme being replayed, not the one airing now (iPhone pass 11-05).
+    @Test fun replayShowsTheReplayedProgrammeAndItsSuccessor() {
+        val result = GuideNowNextPolicy.selectForReplay(listOf(first, second, third), 0, 100, "First")
+        assertEquals(first, result.now)
+        assertEquals(second, result.next)
+    }
+    @Test fun replayIgnoresTheLiveClock() {
+        // nowMs is not an input at all: the live programme (third) must not appear.
+        val result = GuideNowNextPolicy.selectForReplay(listOf(first, second, third), 100, 200, "Second")
+        assertEquals(second, result.now)
+        assertEquals(third, result.next)
+    }
+    @Test fun replayOutsideTheGuideStillNamesItsProgramme() {
+        val result = GuideNowNextPolicy.selectForReplay(listOf(third), 0, 100, "Sports replay")
+        assertEquals("Sports replay", result.now?.title)
+        assertEquals(0L, result.now?.startMs)
+        assertEquals(100L, result.now?.endMs)
+        assertEquals(third, result.next)
+    }
 }

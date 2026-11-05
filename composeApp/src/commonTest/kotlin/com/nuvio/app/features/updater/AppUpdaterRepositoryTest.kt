@@ -6,6 +6,12 @@ import kotlin.test.assertNull
 
 class AppUpdaterRepositoryTest {
     @Test
+    fun updaterAsksTheCurrentRepoNameNotTheRedirectedOne() {
+        // B175: the old name answers 301 and both hops count against GitHub's 60 requests/hour/IP.
+        assertEquals("paradox-kush/TuvoraMobile", UPDATER_RELEASES_REPO)
+    }
+
+    @Test
     fun channelsUseTheSameReleaseEndpointsAsTv() {
         assertEquals("releases/latest", AppUpdaterRepository.releasePath(UpdateChannel.STABLE))
         assertEquals("releases?per_page=100", AppUpdaterRepository.releasePath(UpdateChannel.BETA))

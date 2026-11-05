@@ -40,6 +40,18 @@ internal object CatchUpEpgRepository {
         account.sourceType == SOURCE_TYPE_XTREAM
 
     /**
+     * Whether a replay can be built for ONE channel of [account]: an Xtream playlist (any channel; the
+     * panel's `tv_archive` flag decides the rest), or a URL/file M3U playlist on a channel whose own
+     * `catchup-*` attributes ([m3uCatchUp]) say how to ask. A Stalker archive is built server-side from a
+     * programme id our EPG drops, so it is not offered. The history fetch above stays Xtream-only
+     * ([supportsCatchUp] with one argument): M3U history comes from the XMLTV guide.
+     */
+    fun supportsCatchUp(account: XtreamAccount, m3uCatchUp: M3uCatchUpInfo?): Boolean =
+        supportsCatchUp(account) ||
+            (m3uCatchUp != null &&
+                (account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_M3U_FILE))
+
+    /**
      * Ensures this channel's guide table is on disk and fresh enough, then returns.
      *
      * Cheap and idempotent: a channel fetched inside [CatchUpEpgPolicy.FETCH_GATE_MS] returns
