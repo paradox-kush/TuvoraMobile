@@ -29,6 +29,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
@@ -141,7 +142,12 @@ fun SearchScreen(
     val networkStatusUiState by NetworkStatusRepository.uiState.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     var lastRequestedQuery by rememberSaveable { mutableStateOf<String?>(null) }
-    var iptvScopes by remember { mutableStateOf(IptvSearchScopePolicy.ALL) }
+    var iptvScopes by rememberSaveable(
+        stateSaver = listSaver(
+            save = { IptvSearchScopePolicy.encode(it) },
+            restore = { IptvSearchScopePolicy.decode(it) },
+        ),
+    ) { mutableStateOf(IptvSearchScopePolicy.ALL) }
     var observedOfflineState by remember { mutableStateOf(false) }
     val discoverInFocus by remember(query, listState) {
         derivedStateOf {
@@ -404,7 +410,7 @@ fun SearchScreen(
                                 )
                             }
                         }
-                        if (visibleSections.isEmpty()) {
+                        if (visibleSections.isEmpty() && !uiState.isLoading) {
                             item(key = "search_iptv_scope_empty") {
                                 Text(
                                     text = stringResource(Res.string.compose_search_iptv_scope_empty),

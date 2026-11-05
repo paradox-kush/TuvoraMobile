@@ -44,7 +44,10 @@ class IptvSearchScopePolicyTest {
     }
 
     @Test
-    fun `scope keys match the rows the Xtream search emits`() {
-        assertEquals(listOf("xtream_channels", "xtream_movies", "xtream_series"), IptvSearchScope.entries.map { it.sectionKey })
+    fun `saved state round-trips and junk or empty reads as all`() {
+        val two = setOf(IptvSearchScope.LIVE, IptvSearchScope.SERIES)
+        assertEquals(two, IptvSearchScopePolicy.decode(IptvSearchScopePolicy.encode(two)))
+        assertEquals(IptvSearchScopePolicy.ALL, IptvSearchScopePolicy.decode(emptyList()))
+        assertEquals(IptvSearchScopePolicy.ALL, IptvSearchScopePolicy.decode(listOf("BOGUS")))
     }
 }

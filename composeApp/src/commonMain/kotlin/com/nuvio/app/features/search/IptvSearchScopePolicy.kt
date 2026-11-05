@@ -18,6 +18,14 @@ internal object IptvSearchScopePolicy {
 
     private val byKey = IptvSearchScope.entries.associateBy { it.sectionKey }
 
+    /** Saved-state form: scope names. */
+    fun encode(selected: Set<IptvSearchScope>): List<String> = selected.map { it.name }
+
+    /** Unknown or empty saved state reads as all, never a throw or a blank screen. */
+    fun decode(saved: List<String>): Set<IptvSearchScope> =
+        saved.mapNotNull { name -> IptvSearchScope.entries.firstOrNull { it.name == name } }.toSet()
+            .ifEmpty { ALL }
+
     fun scopeOf(sectionKey: String): IptvSearchScope? = byKey[sectionKey]
 
     /** True when [rows] carry at least one IPTV row — the only time the chips are worth showing. */
