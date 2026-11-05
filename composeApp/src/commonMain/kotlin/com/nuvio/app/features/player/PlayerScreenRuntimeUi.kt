@@ -768,7 +768,8 @@ private fun BoxScope.RenderPlaybackOverlays(
                     errorMessage = null
                     shouldPlay = true
                     vodStartRetryGeneration++
-                    playerController?.retry()
+                    // No engine yet (the open never produced a controller): remount the surface so Retry reopens it.
+                    (playerController?.retry() ?: run { startOverGeneration += 1 })
                 }
             } else if (liveReconnectFailed) {
                 {
@@ -780,7 +781,8 @@ private fun BoxScope.RenderPlaybackOverlays(
                     credentialRefreshAttempts = 0
                     credentialRefreshBaselinePositionMs = 0L
                     liveUserRetryGeneration++
-                    playerController?.retry()
+                    // No engine yet (the open never produced a controller): remount the surface so Retry reopens it.
+                    (playerController?.retry() ?: run { startOverGeneration += 1 })
                 }
             } else null,
         )

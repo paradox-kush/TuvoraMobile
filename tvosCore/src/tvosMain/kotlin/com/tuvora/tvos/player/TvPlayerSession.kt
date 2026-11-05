@@ -216,7 +216,8 @@ class TvPlayerSession(
                 headers.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
                 launch.externalSubtitles.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
                 MpvStartPosition.loadOption(position, false))
-            if (paused) bridge?.pause()
+            // mpv keeps its pause flag across a loadfile: say the intent explicitly either way.
+            if (paused) bridge?.pause() else bridge?.play()
         },
         failed = {
             vodRetryFailure = "Could not reopen this source. Try again or choose another source."
@@ -277,7 +278,7 @@ class TvPlayerSession(
         override val partyStarted: Boolean get() = playbackStarted
         override val partyHasError: Boolean get() = _state.value.errorMessage != null
         override val partyWantsToPlay: Boolean get() = wantsToPlay
-        override fun partyPlay() { if (!closed) { wantsToPlay = true; bridge?.play() } }
+        override fun partyPlay() { if (!closed) { if (vodDeadlineFailed) retry() else { wantsToPlay = true; bridge?.play() } } }
         override fun partyPause() { wantsToPlay = false; bridge?.pause() }
         override fun partyAdoptPlaying(playing: Boolean) { wantsToPlay = playing }
         override fun partySeek(positionMs: Long) { if (!isLive) { bridge?.seekTo(positionMs.coerceAtLeast(0L)); scheduleSeekSave() } }
@@ -426,7 +427,7 @@ class TvPlayerSession(
         if (party.toggle()) { reportAfterToggle(); return }
         if (_state.value.isPlaying) pause() else play()
     }
-    fun play() { if (!closed) { if (party.setPlaying(true)) reportAfterToggle() else { wantsToPlay = true; bridge?.play(); reportAfterToggle() } } }
+    fun play() { if (!closed) { if (vodDeadlineFailed) { retry(); return }; if (party.setPlaying(true)) reportAfterToggle() else { wantsToPlay = true; bridge?.play(); reportAfterToggle() } } }
     fun pause() { if (party.setPlaying(false)) reportAfterToggle() else { wantsToPlay = false; bridge?.pause(); reportAfterToggle() } }
 
 
@@ -504,7 +505,10 @@ class TvPlayerSession(
             // ladder's first attempt and the next poll cannot mint a second link on top of it.
             monitor.onUserRetry()
             poll()
-        } else bridge?.retry()
+        } else {
+            bridge?.retry()
+            bridge?.let { restorePlayIntent(it) }
+        }
     }
 
     // ---- Skip intro / recap / ending ---------------------------------------------------------
@@ -861,7 +865,7 @@ class TvPlayerSession(
     private fun poll() {
         // The old engine still reports its previous failure while a replacement link is minted.
         if (vodRetry.isResolving || vodRetryFailure != null || vodDeadlineFailed) return
-        val b = bridge ?: return
+        val b = bridge ?: run { enforceVodStartDeadline(); return }
         val error = b.getErrorMessage().takeIf { it.isNotBlank() }
         snapshot = PlayerPlaybackSnapshot(
             isLoading = b.getIsLoading(),
