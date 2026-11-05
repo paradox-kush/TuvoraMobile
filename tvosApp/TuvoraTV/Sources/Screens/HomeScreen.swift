@@ -134,7 +134,7 @@ struct HomeScreen: View {
                 }
                 if let rows {
                     // When nothing at all is shown, the empty state below carries the one Retry (never two cards).
-                    if TvHome.shared.showsPartialFailure(state: rows) && !(entries.isEmpty && continueWatching.isEmpty && rows.sections.isEmpty) {
+                    if TvHome.shared.showsPartialFailure(state: rows) && !(entries.isEmpty && !(cwEnabled && !continueWatching.isEmpty) && rows.sections.isEmpty) {
                         NuvioStateMessage(title: "Some rows didn’t load",
                                           message: "Tuvora tries again each time you come back to Home.",
                                           retry: { TvHome.shared.retryFailed() })
@@ -151,7 +151,7 @@ struct HomeScreen: View {
                                           onFocus: { pendingHero = HeroContent(collection: collection, folder: $0) }) { openFolder = $0 }
                         }
                     }
-                    EmptyHomeState(candidate: entries.isEmpty && continueWatching.isEmpty && rows.sections.isEmpty && !rows.isLoading,
+                    EmptyHomeState(candidate: entries.isEmpty && !(cwEnabled && !continueWatching.isEmpty) && rows.sections.isEmpty && !rows.isLoading,
                                    errorMessage: rows.errorMessage, failedRows: TvHome.shared.showsPartialFailure(state: rows))
                 }
             }
