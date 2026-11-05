@@ -66,21 +66,23 @@ object DeviceSources {
         engine.refuse(kind, scope)
     }
     /** The wrong profile must never be read: wait (bounded) for sign-in state, else refuse. */
-    private suspend fun authSettled(): Boolean =
-        AuthRepository.state.value != AuthState.Loading ||
-            withTimeoutOrNull(5_000) { AuthRepository.state.first { it != AuthState.Loading } } != null
+    private suspend fun authSettled(): Boolean = awaitAuthSettled(AuthRepository.state)
+    private fun refuseSigningIn(kind: String): Nothing = engine().refuse(kind, RefusalScope.SIGNING_IN)
     fun guard(kind: String, ref: String) { if (!allows(kind,ref)) refuse(kind, ref) }
     /** [guard] for suspend callers: honours [verifying] / [inspecting] for the current request. */
     suspend fun checkAccess(kind: String, ref: String) {
         val access = currentCoroutineContext()[DeviceSourceAccessElement]?.access ?: DeviceSourceAccess.DISCOVERY
         if (!activated || access == DeviceSourceAccess.INSPECT) return
         if (access == DeviceSourceAccess.DISCOVERY) guard(kind, ref)
-        else if (!authSettled() || !engine().permits(access, ProfileRepository.activeProfileId, kind, ref)) refuse(kind, ref)
+        else {
+            if (!authSettled()) refuseSigningIn(kind)
+            if (!engine().permits(access, ProfileRepository.activeProfileId, kind, ref)) refuse(kind, ref)
+        }
     }
     suspend fun <T> guarded(kind: String, ref: String, block: suspend () -> T): T {
         if (!activated) return block()
         val access = currentCoroutineContext()[DeviceSourceAccessElement]?.access ?: DeviceSourceAccess.DISCOVERY
-        if (access == DeviceSourceAccess.VERIFY && !authSettled()) refuse(kind, ref)
+        if (access == DeviceSourceAccess.VERIFY && !authSettled()) refuseSigningIn(kind)
         return engine().guarded(ProfileRepository.activeProfileId,kind,ref,access,block)
     }
     /** The add/edit form's live check of a playlist: allowed before the device has a choice for it. */
@@ -90,3 +92,10 @@ object DeviceSources {
     fun guardAddon(url: String) { if (!allowsAddon(url)) refuse("addon", null) }
     suspend fun refresh() = engine().refresh(ProfileRepository.activeProfileId)
 }
+
+/** How long a verify waits for sign-in to settle before it says "still signing in". */
+internal const val AUTH_SETTLE_TIMEOUT_MS = 5_000L
+
+/** True once [state] is no longer [AuthState.Loading], waiting at most [timeoutMs]. */
+internal suspend fun awaitAuthSettled(state: kotlinx.coroutines.flow.StateFlow<AuthState>, timeoutMs: Long = AUTH_SETTLE_TIMEOUT_MS): Boolean =
+    state.value != AuthState.Loading || withTimeoutOrNull(timeoutMs) { state.first { it != AuthState.Loading } } != null
