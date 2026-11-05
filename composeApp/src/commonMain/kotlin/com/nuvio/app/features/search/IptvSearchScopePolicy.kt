@@ -28,6 +28,38 @@ internal object IptvSearchScopePolicy {
 
     fun scopeOf(sectionKey: String): IptvSearchScope? = byKey[sectionKey]
 
+    /** What the results area of Search is showing; mirrors the `when` in SearchScreen (same order). */
+    enum class Body { SKELETON, ERROR, NO_RESULTS, RESULTS }
+
+    fun bodyOf(loadingOrPending: Boolean, noRows: Boolean, errorWithNoRows: Boolean): Body = when {
+        loadingOrPending && noRows -> Body.SKELETON
+        errorWithNoRows -> Body.ERROR
+        !loadingOrPending && noRows -> Body.NO_RESULTS
+        else -> Body.RESULTS
+    }
+
+    /**
+     * The chips are part of the results area only (rows, or the "No Results" state): never over skeletons or an
+     * error. There they stay up whenever the IPTV lane is relevant to this query: IPTV rows are on screen, or the
+     * lane already answered for the shown search (even with zero hits, or with every row filtered out) so the
+     * viewer never loses the filters they just set. A lane that FAILED is not an answer.
+     */
+    fun chipsVisible(body: Body, hasIptvRows: Boolean, iptvAnswered: Boolean): Boolean =
+        (body == Body.RESULTS || body == Body.NO_RESULTS) && (hasIptvRows || iptvAnswered)
+
+    /**
+     * True when the selection hides the IPTV rows that DID come back, after loading finished: [allRows] are the
+     * unfiltered rows. When the search found no IPTV hits at all the filter is not to blame, so there is no note.
+     */
+    fun <T> showEmptyNote(
+        selected: Set<IptvSearchScope>,
+        allRows: List<T>,
+        iptvAnswered: Boolean,
+        isLoading: Boolean,
+        keyOf: (T) -> String,
+    ): Boolean = iptvAnswered && !isLoading && selected.size != ALL.size &&
+        hasIptvRows(allRows, keyOf) && filter(allRows, selected, keyOf).none { scopeOf(keyOf(it)) != null }
+
     /** True when [rows] carry at least one IPTV row — the only time the chips are worth showing. */
     fun <T> hasIptvRows(rows: List<T>, keyOf: (T) -> String): Boolean = rows.any { scopeOf(keyOf(it)) != null }
 

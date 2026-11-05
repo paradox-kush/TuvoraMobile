@@ -50,4 +50,44 @@ class IptvSearchScopePolicyTest {
         assertEquals(IptvSearchScopePolicy.ALL, IptvSearchScopePolicy.decode(emptyList()))
         assertEquals(IptvSearchScopePolicy.ALL, IptvSearchScopePolicy.decode(listOf("BOGUS")))
     }
+
+    @Test
+    fun `chips stay up when the IPTV lane answered even with zero rows`() {
+        val results = IptvSearchScopePolicy.Body.RESULTS
+        val noResults = IptvSearchScopePolicy.Body.NO_RESULTS
+        assertTrue(IptvSearchScopePolicy.chipsVisible(results, hasIptvRows = true, iptvAnswered = false))
+        assertTrue(IptvSearchScopePolicy.chipsVisible(noResults, hasIptvRows = false, iptvAnswered = true), "zero hits keeps the filters")
+        assertTrue(IptvSearchScopePolicy.chipsVisible(results, hasIptvRows = false, iptvAnswered = true))
+        assertFalse(IptvSearchScopePolicy.chipsVisible(noResults, hasIptvRows = false, iptvAnswered = false), "no IPTV at all")
+    }
+
+    @Test
+    fun `chips never show over skeletons or an error`() {
+        assertFalse(IptvSearchScopePolicy.chipsVisible(IptvSearchScopePolicy.Body.SKELETON, true, true))
+        assertFalse(IptvSearchScopePolicy.chipsVisible(IptvSearchScopePolicy.Body.ERROR, true, true))
+    }
+
+    @Test
+    fun `body mirrors the screen order`() {
+        val b = IptvSearchScopePolicy.Body
+        assertEquals(b.SKELETON, IptvSearchScopePolicy.bodyOf(loadingOrPending = true, noRows = true, errorWithNoRows = false))
+        assertEquals(b.SKELETON, IptvSearchScopePolicy.bodyOf(true, true, true))
+        assertEquals(b.ERROR, IptvSearchScopePolicy.bodyOf(false, true, true))
+        assertEquals(b.NO_RESULTS, IptvSearchScopePolicy.bodyOf(false, true, false))
+        assertEquals(b.RESULTS, IptvSearchScopePolicy.bodyOf(true, false, false))
+        assertEquals(b.RESULTS, IptvSearchScopePolicy.bodyOf(false, false, false))
+    }
+
+    @Test
+    fun `empty note shows only when the selection hides IPTV rows that came back`() {
+        val live = setOf(IptvSearchScope.LIVE)
+        val noChannels = rows.filter { it != "xtream_channels" }
+        assertTrue(IptvSearchScopePolicy.showEmptyNote(live, noChannels, true, false) { it })
+        assertFalse(IptvSearchScopePolicy.showEmptyNote(live, noChannels, true, true) { it }, "still loading")
+        assertFalse(IptvSearchScopePolicy.showEmptyNote(live, noChannels, false, false) { it }, "lane did not answer")
+        assertFalse(IptvSearchScopePolicy.showEmptyNote(IptvSearchScopePolicy.ALL, noChannels, true, false) { it }, "nothing hidden")
+        assertFalse(IptvSearchScopePolicy.showEmptyNote(live, rows, true, false) { it }, "an IPTV row survives")
+        assertFalse(IptvSearchScopePolicy.showEmptyNote(live, emptyList<String>(), true, false) { it }, "no IPTV hits: not the filter's fault")
+        assertFalse(IptvSearchScopePolicy.showEmptyNote(live, listOf("addon_movies"), true, false) { it }, "add-on rows only")
+    }
 }
