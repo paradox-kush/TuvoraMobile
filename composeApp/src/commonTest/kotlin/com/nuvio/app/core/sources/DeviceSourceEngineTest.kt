@@ -289,4 +289,69 @@ class DeviceSourceEngineTest {
         assertFalse(device.allowsAddonRequest(1,"https://addon.example/stream/movie/id.json?token=B"))
         assertTrue(device.allowsAddonRequest(1,path.sourceRef + "/catalog/movie/top.json"))
     }
+
+    // --- B224 / B171: typed refusal, verify + inspect access, storage re-read ---------------------------
+
+    @Test fun refusalIsATypedCancellationCarryingKindAndModeOnly() = runTest {
+        val refusals = mutableListOf<Pair<String, String>>()
+        val device = DeviceSourceEngine(Memory("broken"), { _, _ -> error("offline") }, { "id" }, { "s" }, { 1_000L }, "android",
+            onRefused = { kind, mode -> refusals += kind to mode })
+        val failure = assertFailsWith<SourceDisabledOnDeviceException> { device.guarded(1,"iptv",source.sourceRef) { "ran" } }
+        assertTrue(failure is CancellationException, "existing cancellation semantics hold")
+        assertEquals("iptv", failure.kind)
+        assertEquals("storage_error", failure.mode)
+        assertEquals(listOf("iptv" to "storage_error"), refusals, "exactly one line per refusal, no host or id")
+    }
+
+    @Test fun addTimeVerifyRunsForAnUnsavedPlaylistWhileTheEngineIsNotReady() = runTest {
+        for (memory in listOf(Memory("broken"), Memory())) { // storage_error, and loading (no binding yet)
+            val device = engine(memory)
+            assertFalse(device.state.value.ready)
+            assertFailsWith<SourceDisabledOnDeviceException>("discovery stays closed") {
+                device.guarded(1,"iptv","brand-new-playlist") { "ran" }
+            }
+            assertEquals("ran", device.guarded(1,"iptv","brand-new-playlist", DeviceSourceAccess.VERIFY) { "ran" })
+            assertFalse(device.allows(1,"iptv","brand-new-playlist"), "verifying never makes the source usable")
+        }
+    }
+
+    @Test fun verifyStillRefusesASourceThisDeviceKnowsToBeOff() = runTest {
+        val device = engine(cached(listOf(DevicePreferenceValue(1,source.sourceId,false,1))))
+        assertFailsWith<SourceDisabledOnDeviceException> { device.guarded(1,"iptv",source.sourceRef,DeviceSourceAccess.VERIFY) { "ran" } }
+    }
+
+    @Test fun inspectionReadsADisabledSourceButDiscoveryStaysClosedAndNothingChanges() = runTest {
+        val off = DevicePreferenceValue(1,source.sourceId,false,1)
+        val device = engine(cached(listOf(off)))
+        val before = device.state.value
+        assertEquals("ran", device.guarded(1,"iptv",source.sourceRef,DeviceSourceAccess.INSPECT) { "ran" })
+        assertFailsWith<SourceDisabledOnDeviceException> { device.guarded(1,"iptv",source.sourceRef) { "ran" } }
+        assertFalse(device.allows(1,"iptv",source.sourceRef))
+        assertFalse(device.choice(1,source.sourceId))
+        assertEquals(before.disk, device.state.value.disk, "inspection cannot enable or alter anything")
+        assertEquals(before.availabilityEpoch, device.state.value.availabilityEpoch)
+    }
+
+    @Test fun storageThatFailedAtStartupIsReadAgainOnRefreshInsteadOfStayingBrokenUntilRelaunch() = runTest {
+        val memory = Memory("broken")
+        val device = engine(memory)
+        assertEquals("storage_error", device.state.value.mode)
+        device.refresh(1,false,false)
+        assertEquals("storage_error", device.state.value.mode, "still unreadable: stays closed")
+        assertFalse(device.allows(1,"iptv",source.sourceRef))
+        memory.value = cached().value // the keychain became readable (first unlock)
+        device.refresh(1,false,false)
+        assertEquals("ready", device.state.value.mode)
+        assertNull(device.state.value.message)
+        assertTrue(device.allows(1,"iptv",source.sourceRef))
+    }
+
+    @Test fun refusalNamesWhoTurnedTheSourceOff() = runTest {
+        val accountOff = source.copy(accountEnabled = false)
+        val acc = Memory(json.encodeToString(DevicePreferenceDisk(binding = SavedDeviceBinding("setup","Phone","secret"), cursor = 0, sources = mapOf(1 to listOf(accountOff)))))
+        val device = engine(acc)
+        assertEquals(RefusalScope.ACCOUNT, assertFailsWith<SourceDisabledOnDeviceException> { device.guarded(1,"iptv",source.sourceRef,DeviceSourceAccess.VERIFY) { "x" } }.scope)
+        val here = engine(cached(listOf(DevicePreferenceValue(1,source.sourceId,false,1))))
+        assertEquals(RefusalScope.DEVICE, assertFailsWith<SourceDisabledOnDeviceException> { here.guarded(1,"iptv",source.sourceRef,DeviceSourceAccess.VERIFY) { "x" } }.scope)
+    }
 }

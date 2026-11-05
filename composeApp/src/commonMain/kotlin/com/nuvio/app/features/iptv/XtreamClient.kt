@@ -70,7 +70,8 @@ object XtreamClient : IptvClient {
      * backup server, Step 0.3), parsed loosely. Any failure still reads as null, as it always has.
      */
     private suspend fun userInfo(acc: XtreamAccount): JsonObject? =
-        runCatching { json.parseToJsonElement(loginText(acc)).jsonObject["user_info"] as? JsonObject }.getOrNull()
+        runCatching { json.parseToJsonElement(loginText(acc)).jsonObject["user_info"] as? JsonObject }
+            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()
 
     /** The raw no-action player_api body, from whichever server answers (Step 0.3). */
     private suspend fun loginText(acc: XtreamAccount): String = panelText(acc) { a -> playerApi(a) }
