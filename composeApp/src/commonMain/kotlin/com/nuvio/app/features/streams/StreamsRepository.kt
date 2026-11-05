@@ -152,7 +152,7 @@ object StreamsRepository {
                 debridSettings.canResolvePlayableLinks, debridSettings.activeResolverProviderId,
             ) else state
 
-        val embeddedStreams = MetaDetailsRepository.findEmbeddedStreams(videoId)
+        val embeddedStreams = MetaDetailsRepository.findEmbeddedStreams(videoId, parentMetaId)
         if (embeddedStreams.isNotEmpty()) {
             log.d { "Using ${embeddedStreams.size} embedded streams for type=$type id=$videoId" }
             val group = AddonStreamGroup(
@@ -733,7 +733,7 @@ object StreamsRepository {
     }
 
     fun selectFilter(addonId: String?) {
-        _uiState.update { it.copy(selectedFilter = addonId) }
+        _uiState.update { it.withSelectedFilter(addonId) }
     }
 
     fun consumeAutoPlay() {

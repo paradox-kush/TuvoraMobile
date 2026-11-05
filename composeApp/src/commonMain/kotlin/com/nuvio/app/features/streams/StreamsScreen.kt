@@ -165,7 +165,6 @@ fun StreamsScreen(
     val noDirectStreamLinkText = stringResource(Res.string.streams_no_direct_link)
     var streamActionsTarget by remember(videoId) { mutableStateOf<StreamItem?>(null) }
     val downloadScope = rememberCoroutineScope()
-    var preferredFilterApplied by remember(videoId) { mutableStateOf(false) }
     val episodeProgress = watchProgressUiState.progressForVideo(
         videoId = videoId,
         parentMetaId = parentMetaId,
@@ -197,12 +196,12 @@ fun StreamsScreen(
         )
     }
 
-    LaunchedEffect(uiState.groups, storedProgress?.providerAddonId, preferredFilterApplied) {
-        if (preferredFilterApplied) return@LaunchedEffect
-        val preferredAddonId = storedProgress?.providerAddonId ?: return@LaunchedEffect
-        if (uiState.groups.any { it.addonId == preferredAddonId }) {
+    // UX154: once per stream-list load. The "applied" fact lives in the repository state (it survives the
+    // round trip through the player); a composition-local flag reset on return and overrode the user's chip.
+    LaunchedEffect(uiState.groups, uiState.filterTouched, storedProgress?.providerAddonId) {
+        val preferredAddonId = storedProgress?.providerAddonId
+        if (PreferredFilterPolicy.shouldApply(uiState.filterTouched, preferredAddonId, uiState.groups)) {
             StreamsRepository.selectFilter(preferredAddonId)
-            preferredFilterApplied = true
         }
     }
 

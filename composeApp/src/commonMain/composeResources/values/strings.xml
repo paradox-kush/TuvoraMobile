@@ -1687,6 +1687,7 @@
     <string name="streams_empty_load_failed_message">The installed stream addons failed to return a valid stream response.</string>
     <string name="streams_empty_iptv_loading_title">Your playlist is still loading</string>
     <string name="streams_empty_iptv_loading_message">It hasn't finished loading its catalog on this device yet, so this title couldn't be checked. Tap refresh in a minute.</string>
+    <string name="streams_empty_series_meta_failed_message">Could not load this series from its source, so its episodes cannot be listed. Check your connection and try again.</string>
     <string name="streams_empty_load_failed_title">Could not load streams</string>
     <string name="playback_unavailable">Playback unavailable</string>
     <string name="playback_unavailable_message">Playback isn’t available for this title with your current setup.</string>
