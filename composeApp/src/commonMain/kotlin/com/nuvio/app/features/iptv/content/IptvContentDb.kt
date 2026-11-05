@@ -619,17 +619,23 @@ internal object IptvContentDb {
             // at do. An empty fetch that keeps the prior guide keeps the prior map with it.
             if (mapping != null && (swap || !keepPriorIfEmpty)) writeMapping(c, playlistId, mapping)
             if (swap || !keepPriorIfEmpty) {
-                // A wholesale refresh supersedes the per-channel fetch stamps too. On an explicit
-                // clear (empty + !keepPrior) this empties the guide; on a swap it makes room for it.
-                for (table in listOf("epg_programmes", "epg_channel_fetch")) {
-                    c.prepare("DELETE FROM $table WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
+                // B231: a channel with a fetch stamp owns its rows (Xtream per-channel catch-up history,
+                // written by refillChannelEpg). A swap replaces everything else but keeps those rows and
+                // their stamps, so the past cells don't blank until a re-focus re-downloads them. An
+                // explicit clear (empty + !keepPrior) still empties the whole guide, stamps included.
+                val keepOwned = swap
+                val owned = "SELECT channel_id FROM epg_channel_fetch WHERE playlist_id = ?"
+                c.prepare("DELETE FROM epg_programmes WHERE playlist_id = ?" + if (keepOwned) " AND channel_id NOT IN ($owned)" else "").use { st ->
+                    st.bindText(1, playlistId); if (keepOwned) st.bindText(2, playlistId); st.step()
                 }
+                if (!keepOwned) c.prepare("DELETE FROM epg_channel_fetch WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
             }
             if (swap) {
                 c.prepare(
                     "INSERT INTO epg_programmes(playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive, programme_id) " +
-                        "SELECT playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive, programme_id FROM $EPG_SHADOW WHERE playlist_id = ?",
-                ).use { st -> st.bindText(1, playlistId); st.step() }
+                        "SELECT playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive, programme_id FROM $EPG_SHADOW " +
+                        "WHERE playlist_id = ? AND channel_id NOT IN (SELECT channel_id FROM epg_channel_fetch WHERE playlist_id = ?)",
+                ).use { st -> st.bindText(1, playlistId); st.bindText(2, playlistId); st.step() }
             }
             // Always clear this playlist's shadow rows (swapped in, or discarded).
             c.prepare("DELETE FROM $EPG_SHADOW WHERE playlist_id = ?").use { st -> st.bindText(1, playlistId); st.step() }
