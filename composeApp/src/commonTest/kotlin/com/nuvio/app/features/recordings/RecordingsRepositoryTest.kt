@@ -219,7 +219,7 @@ class RecordingsRepositoryTest {
     @Test
     fun `a channel without catch-up is NO_CATCH_UP`() = runTest {
         val rig = Rig()
-        rig.files.texts["recordings.json"] = stateText(dueCatchUp().copy(channel = channel()))
+        rig.files.texts["recordings.json"] = stateText(dueCatchUp().copy(channel = channel(catchUp = com.nuvio.app.features.recordings.api.RecordingCatchUp.Xtream("http://p.example:8080", "", "", 42, 3, null))))
         assertEquals(FireResult.Failed(RecordingProblem.NO_CATCH_UP), rig.repo.fire("s1", NOW))
     }
 

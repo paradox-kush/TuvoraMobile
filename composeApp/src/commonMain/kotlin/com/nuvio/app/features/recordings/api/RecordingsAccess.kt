@@ -1,6 +1,5 @@
 package com.nuvio.app.features.recordings.api
 
-import androidx.compose.runtime.staticCompositionLocalOf
 import kotlinx.atomicfu.atomic
 
 /**
@@ -16,5 +15,3 @@ object RecordingsAccess {
 
     fun current(): RecordingsPort? = port.value
 }
-
-val LocalRecordings = staticCompositionLocalOf<RecordingsPort?> { null }
