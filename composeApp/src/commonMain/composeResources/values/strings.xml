@@ -489,6 +489,7 @@
     <string name="compose_player_youre_watching">You&apos;re watching</string>
     <string name="compose_profile_add_profile">Add Profile</string>
     <string name="compose_search_clear">Clear search</string>
+    <string name="compose_search_iptv_scope_empty">No IPTV matches for the selected types.</string>
     <string name="compose_search_discover_title">Discover</string>
     <string name="compose_search_empty_failed_message">Installed addons failed to return valid search results.</string>
     <string name="compose_search_empty_failed_title">Search failed</string>

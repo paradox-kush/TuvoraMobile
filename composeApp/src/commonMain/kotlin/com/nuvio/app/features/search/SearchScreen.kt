@@ -44,7 +44,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.core.network.NetworkCondition
 import com.nuvio.app.core.network.NetworkStatusRepository
+import com.nuvio.app.core.ui.Chip
 import com.nuvio.app.core.ui.NuvioInputField
+import nuvio.composeapp.generated.resources.compose_iptv_hub_section_live
+import nuvio.composeapp.generated.resources.compose_search_iptv_scope_empty
+import nuvio.composeapp.generated.resources.media_movies
+import nuvio.composeapp.generated.resources.media_series
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.NuvioScreen
 import com.nuvio.app.core.ui.NuvioNetworkOfflineCard
@@ -136,6 +141,7 @@ fun SearchScreen(
     val networkStatusUiState by NetworkStatusRepository.uiState.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     var lastRequestedQuery by rememberSaveable { mutableStateOf<String?>(null) }
+    var iptvScopes by remember { mutableStateOf(IptvSearchScopePolicy.ALL) }
     var observedOfflineState by remember { mutableStateOf(false) }
     val discoverInFocus by remember(query, listState) {
         derivedStateOf {
@@ -386,8 +392,30 @@ fun SearchScreen(
                     }
 
                     else -> {
+                        // F85: Live / Movies / Series chips narrow the IPTV rows already fetched (no new request).
+                        val showScopeChips = IptvSearchScopePolicy.hasIptvRows(uiState.sections) { it.key }
+                        val visibleSections = IptvSearchScopePolicy.filter(uiState.sections, iptvScopes) { it.key }
+                        if (showScopeChips) {
+                            item(key = "search_iptv_scope_chips") {
+                                IptvSearchScopeChips(
+                                    selected = iptvScopes,
+                                    onToggle = { iptvScopes = IptvSearchScopePolicy.toggle(iptvScopes, it) },
+                                    modifier = Modifier.padding(horizontal = homeSectionPadding, vertical = 4.dp),
+                                )
+                            }
+                        }
+                        if (visibleSections.isEmpty()) {
+                            item(key = "search_iptv_scope_empty") {
+                                Text(
+                                    text = stringResource(Res.string.compose_search_iptv_scope_empty),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = homeSectionPadding, vertical = 12.dp),
+                                )
+                            }
+                        }
                         items(
-                            items = uiState.sections.withDuplicateSafeLazyKeys { section -> section.key },
+                            items = visibleSections.withDuplicateSafeLazyKeys { section -> section.key },
                             key = { section -> section.lazyKey },
                         ) { keyedSection ->
                             val section = keyedSection.value
@@ -542,6 +570,30 @@ private fun SearchRecentRow(
                 imageVector = Icons.Rounded.Close,
                 contentDescription = stringResource(Res.string.compose_search_remove_recent_search),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** F85: Live / Movies / Series multi-select over the IPTV rows of a search. */
+@Composable
+private fun IptvSearchScopeChips(
+    selected: Set<IptvSearchScope>,
+    onToggle: (IptvSearchScope) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        IptvSearchScope.entries.forEach { scope ->
+            Chip(
+                label = stringResource(
+                    when (scope) {
+                        IptvSearchScope.LIVE -> Res.string.compose_iptv_hub_section_live
+                        IptvSearchScope.MOVIES -> Res.string.media_movies
+                        IptvSearchScope.SERIES -> Res.string.media_series
+                    },
+                ),
+                selected = scope in selected,
+                onClick = { onToggle(scope) },
             )
         }
     }
