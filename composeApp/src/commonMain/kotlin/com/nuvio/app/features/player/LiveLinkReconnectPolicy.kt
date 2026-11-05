@@ -36,8 +36,9 @@ object LiveLinkReconnectPolicy {
         "reconnect=0,reconnect_streamed=0,reconnect_on_network_error=0"
 
     /**
-     * A live Stalker channel is single-use. A replay is not marked here: it is opened from the archive
-     * URL the catch-up walk built, never from `create_link`.
+     * A live Stalker channel is single-use. A replay is not marked here (this overload keeps the walked
+     * Xtream/M3U replay reusable); a Stalker archive replay is minted by `create_link` and flagged through
+     * [modeFor] (singleUseLink = true).
      */
     fun modeFor(isStalkerSource: Boolean, isLive: Boolean, isCatchUp: Boolean = false): Mode =
         if (isStalkerSource && isLive && !isCatchUp) Mode.SINGLE_USE else Mode.ENGINE_RECONNECT
@@ -50,6 +51,19 @@ object LiveLinkReconnectPolicy {
         Mode.ENGINE_RECONNECT -> ENGINE_RECONNECT_LAVF_OPTIONS
         Mode.SINGLE_USE -> SINGLE_USE_LAVF_OPTIONS
     }
+
+    /**
+     * May the surface answer a first-engine failure by opening the SAME url on the other engine (Exo -> libmpv)?
+     * Never for a single-use link: the first open spent it, so the second engine would be handed a dead token
+     * (and a second request on the provider's session cap). The app mints a fresh link instead.
+     */
+    fun allowsEngineFailover(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
+
+    /**
+     * May the link go through the on-disk media cache (a caching data source can re-request ranges of the URL)?
+     * Never for a single-use link: it is read once, front to back, by the engine alone.
+     */
+    fun allowsMediaCache(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
 
     /** Media3 lane: OkHttp `retryOnConnectionFailure` and the load-error retries. */
     fun allowsTransportRetry(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT

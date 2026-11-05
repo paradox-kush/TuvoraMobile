@@ -4,11 +4,15 @@ import com.nuvio.app.features.iptv.CatchUpDialectWalk
 import com.nuvio.app.features.iptv.M3uCatchUpInfo
 import com.nuvio.app.features.iptv.M3uCatchUpType
 import com.nuvio.app.features.iptv.M3uReplayWalk
+import com.nuvio.app.features.iptv.stalker.StalkerArchiveAnswer
+import com.nuvio.app.features.iptv.stalker.StalkerArchiveLink.LinkError
+import com.nuvio.app.features.iptv.stalker.StalkerReplayFailure
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Both entries into a replay (guide cell, Sports launch) pick the walk by the channel's playlist type. */
@@ -36,6 +40,100 @@ class ReplayStartTest {
         accountId = "acct", baseUrl = "https://example.com", username = "user", password = "pass",
         streamId = 777, startMs = start, endMs = end,
     )
+
+    private suspend fun runStalker(link: suspend () -> StalkerArchiveAnswer?) = startReplay(
+        isM3uPlaylist = false, sourceType = "stalker",
+        contentId = "c:1", programmeTitle = "Match", startMs = start, endMs = end, nowMs = now,
+        m3uWalk = M3uReplayWalk(MMemory()), dialectWalk = CatchUpDialectWalk(XMemory()),
+        m3uRequest = { error("a Stalker replay never builds a playlist request") },
+        xtreamRequest = { error("a Stalker replay never builds an Xtream request") },
+        isStalker = true, stalkerLink = link,
+    )
+
+    @Test
+    fun `a stalker replay is one single use session with no walk`() = runTest {
+        val result = runStalker { StalkerArchiveAnswer("http://portal/archive.ts", LinkError.NONE) }
+        val session = assertIs<ReplayStart.Started>(result).session
+        assertEquals("http://portal/archive.ts", session.attempt.url)
+        assertTrue(session.singleUse, "no in-engine re-open of a spent link")
+        assertNull(session.ladder, "nothing to walk or restart")
+        assertFalse(session.continues)
+    }
+
+    @Test
+    fun `each stalker refusal is told apart and no programme id is no recording`() = runTest {
+        suspend fun failure(e: LinkError) = (runStalker { StalkerArchiveAnswer(null, e) } as ReplayStart.Refused).failure
+        assertEquals(StalkerReplayFailure.SESSION_LIMIT, failure(LinkError.SESSION_LIMIT))
+        assertEquals(StalkerReplayFailure.NOTHING_TO_PLAY, failure(LinkError.NOTHING_TO_PLAY))
+        assertEquals(StalkerReplayFailure.LINK_FAULT, failure(LinkError.LINK_FAULT))
+        assertEquals(ReplayStart.NoRecording, runStalker { null })
+    }
+
+    @Test
+    fun `a stalker request that throws is no answer with retry and not no recording`() = runTest {
+        assertEquals(ReplayStart.Refused(StalkerReplayFailure.NO_ANSWER), runStalker { error("boom") })
+    }
+
+    @Test
+    fun `a second press while a mint is in flight mints nothing`() = runTest {
+        val gate = ReplayMintGate()
+        var mints = 0
+        lateinit var second: ReplayStart
+        val first = startReplay(
+            isM3uPlaylist = false, sourceType = "stalker",
+            contentId = "c:1", programmeTitle = "Match", startMs = start, endMs = end, nowMs = now,
+            m3uWalk = M3uReplayWalk(MMemory()), dialectWalk = CatchUpDialectWalk(XMemory()),
+            m3uRequest = { error("unused") }, xtreamRequest = { error("unused") },
+            isStalker = true, mintGate = gate,
+            stalkerLink = {
+                mints++
+                // The viewer presses again while this mint is still open.
+                second = startReplay(
+                    isM3uPlaylist = false, sourceType = "stalker",
+                    contentId = "c:1", programmeTitle = "Match", startMs = start, endMs = end, nowMs = now,
+                    m3uWalk = M3uReplayWalk(MMemory()), dialectWalk = CatchUpDialectWalk(XMemory()),
+                    m3uRequest = { error("unused") }, xtreamRequest = { error("unused") },
+                    isStalker = true, mintGate = gate,
+                    stalkerLink = { mints++; StalkerArchiveAnswer("http://portal/second.ts", LinkError.NONE) },
+                )
+                StalkerArchiveAnswer("http://portal/first.ts", LinkError.NONE)
+            },
+        )
+        assertEquals(ReplayStart.InFlight, second)
+        assertEquals(1, mints, "exactly one single-use link was minted")
+        assertEquals("http://portal/first.ts", assertIs<ReplayStart.Started>(first).session.attempt.url)
+        // The gate is released afterwards: a later Retry mints again.
+        assertIs<ReplayStart.Started>(runStalkerGated(gate) { StalkerArchiveAnswer("http://portal/third.ts", LinkError.NONE) })
+    }
+
+    @Test
+    fun `the gate is released when a mint throws`() = runTest {
+        val gate = ReplayMintGate()
+        assertEquals(ReplayStart.Refused(StalkerReplayFailure.NO_ANSWER), runStalkerGated(gate) { error("boom") })
+        assertIs<ReplayStart.Started>(runStalkerGated(gate) { StalkerArchiveAnswer("http://portal/a.ts", LinkError.NONE) })
+    }
+
+    private suspend fun runStalkerGated(gate: ReplayMintGate, link: suspend () -> StalkerArchiveAnswer?) = startReplay(
+        isM3uPlaylist = false, sourceType = "stalker",
+        contentId = "c:1", programmeTitle = "Match", startMs = start, endMs = end, nowMs = now,
+        m3uWalk = M3uReplayWalk(MMemory()), dialectWalk = CatchUpDialectWalk(XMemory()),
+        m3uRequest = { error("unused") }, xtreamRequest = { error("unused") },
+        isStalker = true, stalkerLink = link, mintGate = gate,
+    )
+
+    @Test
+    fun `retry mints a fresh link each time`() = runTest {
+        var mints = 0
+        val link: suspend () -> StalkerArchiveAnswer? = {
+            mints++
+            StalkerArchiveAnswer("http://portal/a" + mints + ".ts", LinkError.NONE)
+        }
+        val first = assertIs<ReplayStart.Started>(runStalker(link)).session
+        val second = assertIs<ReplayStart.Started>(runStalker(link)).session
+        assertEquals(2, mints)
+        assertTrue(first.attempt.url != second.attempt.url, "never the spent URL")
+        assertTrue(first.attempt.token != second.attempt.token)
+    }
 
     private suspend fun run(
         isM3u: Boolean,

@@ -156,6 +156,7 @@ internal class StalkerEpgStreamParser(
                 startMs = startMs,
                 endMs = endMs,
                 nowPlaying = false,   // decided against the clock at read time, not ingest time
+                programmeId = obj.str("id")?.trim()?.takeIf { it.isNotEmpty() },
             )
         )
     }

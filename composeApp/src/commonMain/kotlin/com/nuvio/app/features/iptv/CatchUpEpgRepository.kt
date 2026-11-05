@@ -181,5 +181,6 @@ internal object CatchUpEpgRepository {
         // The column cannot hold "the panel said nothing", so an unmarked row reads as silence
         // rather than a denial — which is what the channel-level rules already assume.
         hasArchive = true.takeIf { hasArchive },
+        programmeId = programmeId,
     )
 }

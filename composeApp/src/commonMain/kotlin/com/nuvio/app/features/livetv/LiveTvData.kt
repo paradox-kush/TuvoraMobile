@@ -358,10 +358,26 @@ object LiveTvData {
      * Panels 302-redirect catch-up to token-bearing edge hosts, so the resolution has to behave
      * exactly like the live one rather than handing the raw URL to the engine.
      */
-    suspend fun catchUpSource(contentId: String, url: String): LiveChannelSource {
+    suspend fun catchUpSource(contentId: String, url: String, singleUse: Boolean = false): LiveChannelSource {
         val dnsProvider = XtreamItemRegistry.dnsProviderFor(contentId)
         val playback = resolveLivePlaybackUrl(url, dnsProvider)
-        return LiveChannelSource(url = playback.url, headers = playback.headers)
+        return LiveChannelSource(url = playback.url, headers = playback.headers, singleUseLink = singleUse)
+    }
+
+    /** Whether [contentId] belongs to a Stalker portal (its replays are minted per programme, never walked). */
+    fun isStalkerPortal(contentId: String): Boolean = sourceTypeOf(contentId) == com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER
+
+    /**
+     * One fresh archive create_link for the programme starting at [startMs] on [contentId]'s channel: the portal's
+     * own EPG programme id is read from the stored guide, then minted. Null = no programme id (nothing to ask the
+     * portal for). Every call mints a NEW single-use link: this is also what Retry runs.
+     */
+    suspend fun stalkerArchiveLink(contentId: String, startMs: Long): com.nuvio.app.features.iptv.stalker.StalkerArchiveAnswer? {
+        val (account, streamId) = accountFor(contentId) ?: return null
+        val programmeId = CatchUpEpgRepository.window(account, streamId, startMs, startMs + 1L)
+            .firstOrNull { it.startMs == startMs }?.programmeId
+            ?: return null
+        return com.nuvio.app.features.iptv.stalker.StalkerClient.createArchiveLink(account, programmeId)
     }
 
     /** The learned-winner memory the walks are constructed with (Xtream dialects and M3U link forms share it). */

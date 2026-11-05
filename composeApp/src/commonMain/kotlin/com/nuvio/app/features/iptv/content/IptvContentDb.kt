@@ -120,6 +120,8 @@ internal data class EpgProgrammeRow(
     val title: String,
     val desc: String?,
     val hasArchive: Boolean = false,
+    /** The portal's own programme id (Stalker); null elsewhere and on rows stored before it was kept. */
+    val programmeId: String? = null,
 )
 
 /**
@@ -214,6 +216,12 @@ internal object IptvContentDb {
         // v4 added the per-programme catch-up flag to an epg_programmes table that already existed.
         // Introspect and add only if absent; a real failure propagates (see SqliteSchema).
         it.ensureColumn("epg_programmes", "has_archive", "has_archive INTEGER NOT NULL DEFAULT 0")
+        // Stalker's own programme id, which an archive create_link names. NULLABLE and added in place (additive only,
+        // no version bump): rows stored before read null, and the guide shows them without a replay route until the
+        // next guide refresh rewrites them. The shadow table is created before this runs on a fresh install and
+        // altered here on an existing one.
+        it.ensureColumn("epg_programmes", "programme_id", "programme_id TEXT")
+        it.ensureColumn(EPG_SHADOW, "programme_id", "programme_id TEXT")
         // B64: which item-id scheme built the catalog. A missing column/row reads as 1 (pre-B64), so an
         // M3U catalog re-ingests once under the login-free ids; no version bump (that drops every catalog).
         it.ensureColumn("ingest_meta", "id_scheme", "id_scheme INTEGER NOT NULL DEFAULT 1")
@@ -447,7 +455,7 @@ internal object IptvContentDb {
         val c = connection()
         c.execSQL("BEGIN IMMEDIATE")
         try {
-            c.prepare("INSERT INTO $EPG_SHADOW(playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive) VALUES(?,?,?,?,?,?,?)").use { st ->
+            c.prepare("INSERT INTO $EPG_SHADOW(playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive, programme_id) VALUES(?,?,?,?,?,?,?,?)").use { st ->
                 for (r in programmes) {
                     st.reset()
                     st.bindText(1, playlistId); st.bindText(2, r.channelId)
@@ -455,6 +463,7 @@ internal object IptvContentDb {
                     st.bindText(5, r.title)
                     if (r.desc != null) st.bindText(6, r.desc) else st.bindNull(6)
                     st.bindLong(7, if (r.hasArchive) 1L else 0L)
+                    if (r.programmeId != null) st.bindText(8, r.programmeId) else st.bindNull(8)
                     st.step()
                 }
             }
@@ -552,7 +561,7 @@ internal object IptvContentDb {
         limit: Int = 200,
     ): List<EpgProgrammeRow> = mutex.withLock {
         connection().prepare(
-            "SELECT channel_id, start_ms, end_ms, title, SUBSTR(desc, 1, 600), has_archive FROM epg_programmes " +
+            "SELECT channel_id, start_ms, end_ms, title, SUBSTR(desc, 1, 600), has_archive, programme_id FROM epg_programmes " +
                 "WHERE playlist_id = ? AND channel_id = ? AND start_ms < ? AND end_ms > ? ORDER BY start_ms LIMIT ?"
         ).use { st ->
             st.bindText(1, playlistId); st.bindText(2, channelId)
@@ -566,6 +575,7 @@ internal object IptvContentDb {
                     title = st.getText(3),
                     desc = if (st.isNull(4)) null else st.getText(4),
                     hasArchive = st.getLong(5) > 0,
+                    programmeId = if (st.isNull(6)) null else st.getText(6),
                 )
             )
             out
@@ -615,8 +625,8 @@ internal object IptvContentDb {
             }
             if (swap) {
                 c.prepare(
-                    "INSERT INTO epg_programmes(playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive) " +
-                        "SELECT playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive FROM $EPG_SHADOW WHERE playlist_id = ?",
+                    "INSERT INTO epg_programmes(playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive, programme_id) " +
+                        "SELECT playlist_id, channel_id, start_ms, end_ms, title, desc, has_archive, programme_id FROM $EPG_SHADOW WHERE playlist_id = ?",
                 ).use { st -> st.bindText(1, playlistId); st.step() }
             }
             // Always clear this playlist's shadow rows (swapped in, or discarded).

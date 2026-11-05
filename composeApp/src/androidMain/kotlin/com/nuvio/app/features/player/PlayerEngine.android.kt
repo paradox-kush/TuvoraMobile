@@ -296,6 +296,7 @@ private fun PlatformPlayerSurfaceInner(
             videoZoom = videoZoom,
             liveBufferPlan = liveBufferPlan,
             allowTransportRetry = LiveLinkReconnectPolicy.allowsTransportRetry(linkReconnectMode),
+            allowMediaCache = LiveLinkReconnectPolicy.allowsMediaCache(linkReconnectMode),
             useNativeController = useNativeController,
             onInitialPositionHandled = onInitialPositionHandled,
             onControllerReady = onControllerReady,
@@ -306,8 +307,10 @@ private fun PlatformPlayerSurfaceInner(
                 // hid it from the screen's expired-link recovery (which only runs for a non-null
                 // message), so an IPTV token/stream-id failure could never self-heal on Android.
                 // Pass those straight through; keep the engine failover for real playback failures.
+                // A single-use link is spent by the first open: libmpv would be handed the dead URL, so it fails here.
                 if (message != null && !linkAuthFailure &&
-                    requestedEngine == AndroidPlaybackEngine.Auto
+                    requestedEngine == AndroidPlaybackEngine.Auto &&
+                    LiveLinkReconnectPolicy.allowsEngineFailover(linkReconnectMode)
                 ) {
                     Log.w(TAG, "ExoPlayer failed; falling back to libmpv: $message")
                     initialPositionRequestKey?.let { key ->
@@ -392,6 +395,8 @@ private fun ExoPlayerSurface(
     liveBufferPlan: LiveBufferPlan?,
     /** False for a single-use link: no OkHttp connection retry and no Media3 load retry ([LiveLinkReconnectPolicy]). */
     allowTransportRetry: Boolean,
+    /** False for a single-use link: it bypasses the on-disk media cache ([LiveLinkReconnectPolicy.allowsMediaCache]). */
+    allowMediaCache: Boolean,
     useNativeController: Boolean,
     onInitialPositionHandled: (key: String, handled: Boolean) -> Unit,
     onControllerReady: (PlayerEngineController) -> Unit,
@@ -507,6 +512,7 @@ private fun ExoPlayerSurface(
         playerSettings.vodCacheSizeMode,
         playerSettings.vodCacheSizeMb,
         allowTransportRetry,
+        allowMediaCache,
     ) {
         val upstream = PlatformPlaybackDataSourceFactory.create(
             context = context,
@@ -526,7 +532,7 @@ private fun ExoPlayerSurface(
         val adaptive = mimeType == MimeTypes.APPLICATION_M3U8 ||
             mimeType == MimeTypes.APPLICATION_MPD ||
             mimeType == MimeTypes.APPLICATION_SS
-        val media = if (!playerSettings.vodCacheEnabled || useYoutubeChunkedPlayback || adaptive) {
+        val media = if (!playerSettings.vodCacheEnabled || !allowMediaCache || useYoutubeChunkedPlayback || adaptive) {
             upstream
         } else {
             VodCache.wrap(

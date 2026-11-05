@@ -675,6 +675,7 @@ object StalkerClient : IptvClient {
                     endMs = prog.endMs,
                     title = prog.title,
                     desc = prog.description.takeIf { it.isNotBlank() },
+                    programmeId = prog.programmeId,
                 )
             )
             count++
@@ -997,14 +998,7 @@ object StalkerClient : IptvClient {
         cmd: String,
         extraParams: Map<String, String> = emptyMap()
     ): String? {
-        val params = buildMap {
-            put("type", type)
-            put("action", "create_link")
-            put("cmd", cmd)
-            put("forced_storage", "undefined")
-            put("disable_ad", "0")
-            putAll(extraParams)
-        }
+        val params = StalkerArchiveLink.createLinkParams(type, cmd, extraParams)
         // Playback: the ACTIVE portal only — a create_link failure never walks to a backup (Step 0.3).
         val js = try { playbackSession(acc).request(params) as? JsonObject }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
@@ -1021,6 +1015,23 @@ object StalkerClient : IptvClient {
         return StalkerProtocol.extractStreamUrl(js.str("cmd")).also {
             if (it == null) playbackLog.w { "create_link failed: no playable command" }
         }
+    }
+
+    /**
+     * The playback link of one archived programme, minted from the portal's own EPG [programmeId]
+     * (`type=tv_archive`). Answers what came back - a link, or which refusal (the session cap, "nothing to
+     * play", a link fault) - so the viewer is told the real reason. A transport failure THROWS: the caller runs
+     * this under [com.nuvio.app.features.iptv.BoundedLoad], where a throw or a hang ends as "no answer", never
+     * as "no recording". Like every create_link the result is single-use: never probe it, never re-open it,
+     * and Retry mints a new one. The ACTIVE portal only - a create_link failure never walks to a backup.
+     */
+    suspend fun createArchiveLink(acc: XtreamAccount, programmeId: String): StalkerArchiveAnswer {
+        val js = playbackSession(acc).request(StalkerArchiveLink.params(programmeId)) as? JsonObject
+        val url = StalkerProtocol.extractStreamUrl(js?.str("cmd"))
+        if (url != null) return StalkerArchiveAnswer(url, StalkerArchiveLink.LinkError.NONE)
+        playbackLog.w { "create_link (archive) failed: no playable command" }
+        // The raw answer is only read for the error field; it is never logged (it can echo play tokens).
+        return StalkerArchiveAnswer(null, StalkerArchiveLink.linkErrorOf(js?.toString()))
     }
 
     // --- cmd lookup (browse-time cmd needed for create_link) ------------------
