@@ -91,6 +91,9 @@ object XtreamHubRepository {
             categoryJobs.remove(accountId).orEmpty().toList()
         }
         jobs.forEach { it.cancel() }
+        // F9: a refreshed catalogue re-asks whether the portal has series — the hidden tab must be able to come back.
+        com.nuvio.app.features.iptv.stalker.StalkerClient.forgetSeriesVerdict(accountId)
+        _uiState.update { it.copy(seriesUnavailableIds = it.seriesUnavailableIds - accountId) }
         if (_uiState.value.selectedAccountId == accountId) {
             _uiState.update { it.copy(catalogueGeneration = it.catalogueGeneration + 1L) }
         }
@@ -566,6 +569,7 @@ object XtreamHubRepository {
                     (outcome as? LoadOutcome.Failed)?.error,
                     // The server that actually failed last (Step 0.3b) — with backups that is not always the main one.
                     host = IptvPanelGuard.panelOriginUrlOf(account, PlaylistServerFailover.lastFailedServerUrl(account) ?: account.baseUrl),
+                    forSeriesSection = section == XtreamHubSection.SERIES,
                 )
                 _uiState.update { it.copy(categoriesLoad = outcome.status, loadError = failure) }
             } else if (isCurrent(accountId, section)) {
@@ -763,7 +767,12 @@ object XtreamHubRepository {
                 val kind = section.matchKind
                 if (XtreamMatchIndex.builtAt(accountId, kind) != null) {
                     val rows = XtreamMatchIndex.itemsFor(accountId, kind, categoryId, offset, PAGE_SIZE + 1)
-                    val page = rows.take(PAGE_SIZE)
+                    // B179: hasMore is judged on the RAW window; divider rows are dropped from what is shown
+                    // (the next window starts at the shown count, so a few rows overlap and merge by id).
+                    val page = rows.take(PAGE_SIZE).let { raw ->
+                        if (section != XtreamHubSection.LIVE) raw
+                        else ChannelSeparatorPolicy.withoutSeparators(raw, { it.name }, { it.epgId }, { it.hasArchive })
+                    }
                     // Panels that ship no icons in the bulk list (or rows indexed before artwork
                     // was known) get filled lazily: ask get_vod_info per null row, in list order,
                     // while the user is on this window. Results land in the DB + patch in via
@@ -827,7 +836,7 @@ object XtreamHubRepository {
                 if (section == XtreamHubSection.LIVE) {
                     val rows = com.nuvio.app.features.iptv.stalker.StalkerClient
                         .liveChannelsPage(account, categoryId, offset, PAGE_SIZE + 1)
-                    val page = rows.take(PAGE_SIZE)
+                    val page = ChannelSeparatorPolicy.withoutSeparators(rows.take(PAGE_SIZE), { it.name }, { it.epgChannelId }, { it.hasArchive })
                     XtreamItemRegistry.registerAll(page.map { XtreamItemRegistry.resolvedChannel(accountId, it) })
                     val entityIds = page.map {
                         com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(accountId, it.name, it.epgChannelId)
@@ -852,7 +861,7 @@ object XtreamHubRepository {
                 M3UClient.ensureIngested(account)
                 return when (section) {
                     XtreamHubSection.LIVE -> M3UClient.liveChannelsPage(account, categoryId, offset, PAGE_SIZE + 1).let { rows ->
-                        val page = rows.take(PAGE_SIZE)
+                        val page = ChannelSeparatorPolicy.withoutSeparators(rows.take(PAGE_SIZE), { it.name }, { it.epgChannelId }, { it.hasArchive })
                         XtreamItemRegistry.registerAll(page.map { XtreamItemRegistry.resolvedChannel(accountId, it) })
                         val entityIds = page.map {
                             com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(accountId, it.name, it.epgChannelId)

@@ -37,13 +37,6 @@ internal data class IptvStreamRow(
     val useLoadBalancing: Boolean = false,
 )
 
-/**
- * B179: provider divider rows ("BG: #### Bulgaria Channels") never become channels. Dropped where a
- * lineup is WRITTEN, so the hub's paged reads, the guide, search and the Sports matcher all see one list.
- */
-private fun List<IptvStreamRow>.withoutSeparators(): List<IptvStreamRow> =
-    com.nuvio.app.features.iptv.ChannelSeparatorPolicy.withoutSeparators(this, { it.name }, { it.tvgId }, { it.hasArchive })
-
 /** A series row (one per distinct series within a playlist). */
 internal data class IptvSeriesRow(
     val sid: Int,
@@ -286,15 +279,14 @@ internal object IptvContentDb {
         episodes: List<IptvEpisodeRow>,
         categories: List<Triple<String, String, String>>, // (type, id, name)
     ) = mutex.withLock {
-        val kept = channels.withoutSeparators()
         val c = connection()
         c.execSQL("BEGIN IMMEDIATE")
         try {
             // Inside an ingest the chunk belongs to the generation being built; outside one (the
             // Stalker write-through, which never calls beginIngest) it joins the served generation.
             val gen = pendingGeneration[playlistId] ?: activeGeneration(c, playlistId)
-            if (kept.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
-                for (r in kept) {
+            if (channels.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
+                for (r in channels) {
                     st.reset()
                     st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.sid.toLong())
                     if (r.categoryId != null) st.bindText(4, r.categoryId) else st.bindNull(4)
@@ -1016,7 +1008,8 @@ internal object IptvContentDb {
         channels: List<IptvStreamRow>,
         categories: List<Pair<String, String>>, // (id, name), type = live
     ) = mutex.withLock {
-        val kept = channels.withoutSeparators()
+        // B179: every row is stored (a saved id must keep resolving); the count is what the lists will SHOW.
+        val shownCount = channels.count { !com.nuvio.app.features.iptv.ChannelSeparatorPolicy.isSeparator(it.name, it.tvgId, it.hasArchive) }
         val c = connection()
         c.execSQL("BEGIN IMMEDIATE")
         try {
@@ -1028,7 +1021,7 @@ internal object IptvContentDb {
                 st.bindText(1, playlistId); st.bindLong(2, gen); st.bindText(3, IptvContentKind.LIVE.slug); st.step()
             }
             c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
-                for (r in kept) {
+                for (r in channels) {
                     st.reset()
                     st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.sid.toLong())
                     if (r.categoryId != null) st.bindText(4, r.categoryId) else st.bindNull(4)
@@ -1054,7 +1047,7 @@ internal object IptvContentDb {
             // Freshness marker LAST, inside the same transaction: present+fresh = lineup usable.
             // active_generation is written back explicitly — INSERT OR REPLACE would otherwise reset it.
             c.prepare("INSERT OR REPLACE INTO ingest_meta(playlist_id, built_at, live_count, vod_count, series_count, epg_url, active_generation) VALUES(?,?,?,0,0,NULL,?)").use { st ->
-                st.bindText(1, playlistId); st.bindLong(2, now()); st.bindLong(3, kept.size.toLong()); st.bindLong(4, gen)
+                st.bindText(1, playlistId); st.bindLong(2, now()); st.bindLong(3, shownCount.toLong()); st.bindLong(4, gen)
                 st.step()
             }
             c.execSQL("COMMIT")

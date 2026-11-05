@@ -99,8 +99,6 @@ import nuvio.composeapp.generated.resources.compose_iptv_hub_blocked_message
 import nuvio.composeapp.generated.resources.compose_iptv_hub_blocked_title
 import nuvio.composeapp.generated.resources.compose_iptv_hub_error_message
 import nuvio.composeapp.generated.resources.compose_iptv_hub_error_title
-import nuvio.composeapp.generated.resources.compose_iptv_hub_no_live_title
-import nuvio.composeapp.generated.resources.compose_iptv_hub_no_movies_title
 import nuvio.composeapp.generated.resources.compose_iptv_hub_no_section_message
 import nuvio.composeapp.generated.resources.compose_iptv_hub_no_series_title
 import nuvio.composeapp.generated.resources.compose_iptv_hub_refused_title
@@ -185,7 +183,8 @@ fun XtreamHubScreen(
     val account = state.accounts.firstOrNull { it.id == state.selectedAccountId }
     val enabledSections = XtreamHubSections.visible(
         typeEnabled = { account?.typeEnabled(it.contentKey) != false },
-        seriesAbsent = account?.id in state.seriesUnavailableIds,
+        // The chip only goes once the viewer has left Series (the "no series" card is what Series shows).
+        seriesAbsent = account?.id in state.seriesUnavailableIds && state.section != XtreamHubSection.SERIES,
     )
     val visibleCategories = if (account == null) state.categories else {
         // A custom group (F02) is the viewer's own row, not a provider category, so selections never hide it.
@@ -370,12 +369,8 @@ fun XtreamHubScreen(
                         IptvLoadFailurePolicy.Kind.BLOCKED_BY_PROVIDER -> stringResource(Res.string.compose_iptv_hub_blocked_title)
                         IptvLoadFailurePolicy.Kind.REFUSED -> stringResource(Res.string.compose_iptv_hub_refused_title)
                         IptvLoadFailurePolicy.Kind.UNREACHABLE -> stringResource(Res.string.compose_iptv_hub_error_title)
-                        // UX164: a provider with no such section is a fact, not a failure.
-                        IptvLoadFailurePolicy.Kind.SECTION_UNAVAILABLE -> when (state.section) {
-                            XtreamHubSection.SERIES -> stringResource(Res.string.compose_iptv_hub_no_series_title)
-                            XtreamHubSection.MOVIES -> stringResource(Res.string.compose_iptv_hub_no_movies_title)
-                            XtreamHubSection.LIVE -> stringResource(Res.string.compose_iptv_hub_no_live_title)
-                        }
+                        // UX164: a provider with no Series section is a fact, not a failure.
+                        IptvLoadFailurePolicy.Kind.SECTION_UNAVAILABLE -> stringResource(Res.string.compose_iptv_hub_no_series_title)
                     }
                     val generic = stringResource(Res.string.compose_iptv_hub_error_message)
                     val blocked = stringResource(Res.string.compose_iptv_hub_blocked_message, failure.status ?: 0)

@@ -123,7 +123,7 @@ struct IptvHubScreen: View {
         HStack(spacing: dp(8)) {
             // UX147: a portal that positively has no series loses the Series chip (unknown keeps it).
             ForEach([(XtreamHubSection.live, "Live TV"), (.movies, "Movies"), (.series, "Series")]
-                .filter { !($0.0 == .series && hub.seriesUnavailable) }, id: \.1) { section, title in
+                .filter { !($0.0 == .series && hub.seriesUnavailable && hub.section != .series) }, id: \.1) { section, title in
                 HubChip(title: title, selected: hub.section == section) { TvIptvBrowse.shared.open(section: section) }
                     .accessibilityIdentifier("hubchip.\(title)")
             }

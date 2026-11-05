@@ -2592,8 +2592,6 @@
     <string name="compose_iptv_hub_blocked_title">This provider is blocking us</string>
     <string name="compose_iptv_hub_blocked_message">The portal is up — its firewall answered HTTP %1$d instead of letting us in. This usually clears by itself; a different network gets past it sooner.</string>
     <string name="compose_iptv_hub_no_series_title">This provider has no series</string>
-    <string name="compose_iptv_hub_no_movies_title">This provider has no movies</string>
-    <string name="compose_iptv_hub_no_live_title">This provider has no live channels</string>
     <string name="compose_iptv_hub_no_section_message">Its portal says there is nothing in this section, so there is nothing to retry.</string>
     <string name="compose_iptv_hub_refused_title">The portal wouldn't serve this playlist</string>
     <string name="compose_iptv_hub_no_provider_message">Add an IPTV playlist to browse Live TV, Movies and Series.</string>
