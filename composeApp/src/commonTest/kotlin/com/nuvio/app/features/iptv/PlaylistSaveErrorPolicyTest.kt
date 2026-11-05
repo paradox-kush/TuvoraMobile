@@ -5,6 +5,7 @@ import com.nuvio.app.features.iptv.stalker.StalkerDeviceConflictException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * UX11 / UX20 / UX21 / B23 — what the Add/Edit Playlist form says when a save fails. One sentence per
@@ -193,5 +194,37 @@ class PlaylistSaveErrorPolicyTest {
         )
         assertEquals(true, outcome.save)
         assertEquals(known(PlaylistSaveError.UNREACHABLE), outcome.failure)
+    }
+
+    // --- B224: the device-source guard's refusal is not a network failure ---------------------------
+
+    @Test
+    fun `a device-source refusal is its own message and never unreachable`() {
+        val refusal = com.nuvio.app.core.sources.SourceDisabledOnDeviceException("iptv", "loading")
+        for (type in listOf(SOURCE_TYPE_XTREAM, SOURCE_TYPE_M3U_URL, SOURCE_TYPE_STALKER)) {
+            assertEquals(known(PlaylistSaveError.SOURCE_DISABLED_ON_DEVICE), PlaylistSaveErrorPolicy.classify(refusal, type))
+        }
+        val text = PlaylistSaveError.SOURCE_DISABLED_ON_DEVICE.fallbackText
+        assertTrue("reach" !in text && text.contains("this device"), text)
+    }
+
+    @Test
+    fun `a plain cancellation is still not blamed on the device guard`() {
+        val plain = kotlinx.coroutines.CancellationException("scope cancelled")
+        assertEquals(known(PlaylistSaveError.UNREACHABLE), PlaylistSaveErrorPolicy.classify(plain, SOURCE_TYPE_XTREAM))
+    }
+
+    @Test
+    fun `an account-wide refusal says so instead of blaming this device`() {
+        val refusal = com.nuvio.app.core.sources.SourceDisabledOnDeviceException("iptv", "ready", com.nuvio.app.core.sources.RefusalScope.ACCOUNT)
+        assertEquals(known(PlaylistSaveError.SOURCE_DISABLED_FOR_ACCOUNT), PlaylistSaveErrorPolicy.classify(refusal, SOURCE_TYPE_XTREAM))
+        assertTrue("this device" !in PlaylistSaveError.SOURCE_DISABLED_FOR_ACCOUNT.fallbackText)
+    }
+
+    @Test
+    fun `a sign-in that has not settled is not reported as turned off`() {
+        val refusal = com.nuvio.app.core.sources.SourceDisabledOnDeviceException("iptv", "loading", com.nuvio.app.core.sources.RefusalScope.SIGNING_IN)
+        assertEquals(known(PlaylistSaveError.SIGNING_IN), PlaylistSaveErrorPolicy.classify(refusal, SOURCE_TYPE_XTREAM))
+        assertTrue("turned off" !in PlaylistSaveError.SIGNING_IN.fallbackText)
     }
 }

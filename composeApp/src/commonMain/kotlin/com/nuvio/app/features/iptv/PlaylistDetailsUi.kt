@@ -70,6 +70,7 @@ import nuvio.composeapp.generated.resources.provider_details_detached_toast
 import nuvio.composeapp.generated.resources.provider_details_edit
 import nuvio.composeapp.generated.resources.provider_details_edit_hint
 import nuvio.composeapp.generated.resources.provider_details_edit_hint_managed
+import nuvio.composeapp.generated.resources.iptv_details_turn_on_to_check
 import nuvio.composeapp.generated.resources.provider_details_enabled
 import nuvio.composeapp.generated.resources.provider_details_enabled_hint
 import nuvio.composeapp.generated.resources.provider_details_expired
@@ -160,7 +161,7 @@ internal fun LazyListScope.xtreamPlaylistDetailsContent(
         val managedMap by ManagedInfoRepository.state.collectAsStateWithLifecycle()
         val profileId = com.nuvio.app.features.profiles.ProfileRepository.activeProfileId
         val info = managedMap[profileId]?.get(account.id) ?: ManagedInfoRepository.infoFor(profileId, account.id)
-        LaunchedEffect(account.id) { controller.load(account) }
+        LaunchedEffect(account.id, account.enabled, account.availableOnDevice) { controller.load(account) }
 
         val activeServers by XtreamRepository.activeServers.collectAsStateWithLifecycle()
         val model = ManagedDetailsModel.build(
@@ -172,7 +173,7 @@ internal fun LazyListScope.xtreamPlaylistDetailsContent(
             addressLine = (ServerFailoverPolicy.backupLabel(activeServers[account.id] ?: 0)
                 ?: PlaylistAddress.hostOnly(account.baseUrl)),
             // Asked and not answered: say so, instead of letting "no answer" read as "the provider has no expiry".
-            panelCheckFailed = live.hasPanel && !live.loading && live.info == null,
+            panelCheckFailed = live.hasPanel && !live.loading && !live.inspectionSkipped && live.info == null,
         )
 
         var tab by rememberSaveable(account.id) { mutableStateOf(DetailsTab.OVERVIEW.name) }
@@ -364,7 +365,7 @@ private fun expiryText(expiry: ExpiryDisplay, live: PlaylistDetailsLive): String
     ExpiryDisplay.NeverExpires -> stringResource(Res.string.provider_details_never_expires)
     is ExpiryDisplay.Text -> expiry.text
     // While the panel has not answered there is nothing to say yet; once it has (or it has no panel), say so.
-    ExpiryDisplay.NotReported -> if (live.loading) null else stringResource(Res.string.provider_details_expiry_not_reported)
+    ExpiryDisplay.NotReported -> if (live.loading) null else if (live.inspectionSkipped) stringResource(Res.string.iptv_details_turn_on_to_check) else stringResource(Res.string.provider_details_expiry_not_reported)
     ExpiryDisplay.CheckFailed -> stringResource(Res.string.provider_details_expiry_check_failed)
 }
 
@@ -443,6 +444,7 @@ private fun OverviewTab(isTablet: Boolean, model: ManagedDetailsModel, live: Pla
         val status = when {
             !live.hasPanel -> stringResource(Res.string.provider_details_status_none)
             model.statusText != null -> model.statusText
+            live.inspectionSkipped -> stringResource(Res.string.iptv_details_turn_on_to_check)
             live.loading -> stringResource(Res.string.provider_details_status_loading)
             else -> stringResource(Res.string.provider_details_status_unreachable)
         }

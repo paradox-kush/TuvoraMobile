@@ -69,9 +69,9 @@ object XtreamSearchIndex {
             if (account.searchIncludesType(CONTENT_TYPE_SERIES)) series += seriesFor(account, q, overlay, PER_TYPE_CAP)
         }
         return listOfNotNull(
-            section("xtream_channels", "IPTV Channels", "tv", channels),
-            section("xtream_movies", "IPTV Movies", "movie", movies),
-            section("xtream_series", "IPTV Series", "series", series),
+            section(SECTION_KEY_CHANNELS, "IPTV Channels", "tv", channels),
+            section(SECTION_KEY_MOVIES, "IPTV Movies", "movie", movies),
+            section(SECTION_KEY_SERIES, "IPTV Series", "series", series),
         )
     }
 
@@ -245,6 +245,11 @@ object XtreamSearchIndex {
         IptvSourceCategoryPolicy.scanLimit(account, type, PER_TYPE_CAP)
 
     internal const val PER_TYPE_CAP = 30
+
+    /** Keys of the three search rows. features/search/IptvSearchScope mirrors them (it may not import iptv); a test pins the pair. */
+    internal const val SECTION_KEY_CHANNELS = "xtream_channels"
+    internal const val SECTION_KEY_MOVIES = "xtream_movies"
+    internal const val SECTION_KEY_SERIES = "xtream_series"
 
     private fun section(key: String, title: String, type: String, items: List<MetaPreview>): HomeCatalogSection? {
         if (items.isEmpty()) return null

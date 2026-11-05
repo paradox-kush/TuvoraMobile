@@ -30,6 +30,15 @@ class LiveLinkReconnectPolicyTest {
     }
 
     @Test
+    fun `a single-use link is never handed to the other engine`() {
+        assertFalse(
+            LiveLinkReconnectPolicy.allowsEngineFailover(LiveLinkReconnectPolicy.modeFor(singleUseLink = true)),
+            "the other engine would open the same spent create_link and 401",
+        )
+        assertTrue(LiveLinkReconnectPolicy.allowsEngineFailover(LiveLinkReconnectPolicy.modeFor(singleUseLink = false)))
+    }
+
+    @Test
     fun `reusable live links keep the in-engine reconnect`() {
         // Xtream and M3U live, and any non-IPTV live stream.
         val mode = LiveLinkReconnectPolicy.modeFor(isStalkerSource = false, isLive = true)

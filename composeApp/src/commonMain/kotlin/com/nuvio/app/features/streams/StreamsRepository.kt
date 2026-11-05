@@ -16,6 +16,7 @@ import com.nuvio.app.features.plugins.PluginRepository
 import com.nuvio.app.features.plugins.pluginContentId
 import com.nuvio.app.features.plugins.PluginsUiState
 import com.nuvio.app.features.servers.ServerStreams
+import com.nuvio.app.features.servers.loadBounded
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -151,7 +152,7 @@ object StreamsRepository {
                 debridSettings.canResolvePlayableLinks, debridSettings.activeResolverProviderId,
             ) else state
 
-        val embeddedStreams = MetaDetailsRepository.findEmbeddedStreams(videoId)
+        val embeddedStreams = MetaDetailsRepository.findEmbeddedStreams(videoId, parentMetaId)
         if (embeddedStreams.isNotEmpty()) {
             log.d { "Using ${embeddedStreams.size} embedded streams for type=$type id=$videoId" }
             val group = AddonStreamGroup(
@@ -204,9 +205,9 @@ object StreamsRepository {
                 _uiState.value = StreamsUiState(requestToken = requestToken, isAnyLoading = true)
                 activeJob?.cancel()
                 activeJob = scope.launch {
-                    val rebuilt = runCatchingUnlessCancelled {
+                    val rebuilt = registerDirectIptv {
                         MetaDetailsRepository.ensureXtreamStreamRegistered(videoId, forceFresh = isStalkerSource)
-                    }.getOrDefault(false)
+                    }
                     ensureActive()
                     val retriedStreams = if (rebuilt) streamProvider.directStreamItems(videoId) else emptyList()
                     val retried = retriedStreams.firstOrNull()
@@ -564,7 +565,7 @@ object StreamsRepository {
                     log.d { "Fetching streams from: $url" }
 
                     val displayName = addon.addonName
-                    val group = runCatchingUnlessCancelled {
+                    val group = resolveAddonGroup(displayName, addon.addonId) {
                         val payload = fetchAddonResponseText(
                             url = url,
                             forceRefresh = forceRefresh,
@@ -575,27 +576,7 @@ object StreamsRepository {
                             addonId = addon.addonId,
                             addonLogo = addon.manifest.logoUrl,
                         )
-                    }.fold(
-                        onSuccess = { streams ->
-                            log.d { "Got ${streams.size} streams from ${displayName}" }
-                            AddonStreamGroup(
-                                addonName = displayName,
-                                addonId = addon.addonId,
-                                streams = streams,
-                                isLoading = false,
-                            )
-                        },
-                        onFailure = { err ->
-                            log.w(err) { "Failed to fetch streams from ${displayName}" }
-                            AddonStreamGroup(
-                                addonName = displayName,
-                                addonId = addon.addonId,
-                                streams = emptyList(),
-                                isLoading = false,
-                                error = err.message,
-                            )
-                        },
-                    )
+                    }
                     publishCompletion(StreamLoadCompletion.Addon(group))
                 }
             }
@@ -610,14 +591,15 @@ object StreamsRepository {
             }
 
             serverSources.forEach { source ->
-                launch { publishCompletion(StreamLoadCompletion.Addon(source.load())) }
+                launch { publishCompletion(StreamLoadCompletion.Addon(source.loadBounded())) }
             }
 
             pluginProviderGroups.forEach { providerGroup ->
                 val includeScraperNameInSubtitle = false
                 providerGroup.scrapers.forEach { scraper ->
                     nonIptvLoads += launch {
-                        val completion = PluginRepository.executeScraper(
+                        val completion = SourceLaneGuard.run(deadlineMs = null) {
+                            PluginRepository.executeScraper(
                             scraper = scraper,
                             tmdbId = pluginContentId(
                                 videoId = videoId,
@@ -627,7 +609,8 @@ object StreamsRepository {
                             mediaType = type,
                             season = season,
                             episode = episode,
-                        ).fold(
+                        ).getOrThrow()
+                        }.fold(
                             onSuccess = { results ->
                                 StreamLoadCompletion.PluginScraper(
                                     addonId = providerGroup.addonId,
@@ -646,7 +629,7 @@ object StreamsRepository {
                                 StreamLoadCompletion.PluginScraper(
                                     addonId = providerGroup.addonId,
                                     streams = emptyList(),
-                                    error = error.message ?: getString(Res.string.streams_failed_to_load_scraper, scraper.name),
+                                    error = error.laneFailureMessage() ?: getString(Res.string.streams_failed_to_load_scraper, scraper.name),
                                 )
                             },
                         )
@@ -750,7 +733,7 @@ object StreamsRepository {
     }
 
     fun selectFilter(addonId: String?) {
-        _uiState.update { it.copy(selectedFilter = addonId) }
+        _uiState.update { it.withSelectedFilter(addonId) }
     }
 
     fun consumeAutoPlay() {

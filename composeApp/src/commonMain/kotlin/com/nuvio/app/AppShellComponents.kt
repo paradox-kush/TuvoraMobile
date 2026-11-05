@@ -102,6 +102,8 @@ internal data class AppTabActions(
     val onCloudFilePlay: ((CloudLibraryItem, CloudLibraryFile) -> Unit)? = null,
     val onConnectCloudClick: (() -> Unit)? = null,
     val onDownloadsClick: () -> Unit = {},
+    // Fork: the Calendar page (features/calendar), opened from Library's top bar and the Home calendar section.
+    val onCalendarClick: () -> Unit = {},
     val onContinueWatchingClick: ((ContinueWatchingItem) -> Unit)? = null,
     val onContinueWatchingLongPress: ((ContinueWatchingItem) -> Unit)? = null,
     val onSwitchProfile: (() -> Unit)? = null,
@@ -156,6 +158,7 @@ internal fun AppTabHost(
                         onPlaySportsChannel = actions.onPlayLiveChannel,
                         onPlaySportsReplay = actions.onPlaySportsReplay,
                         onAddIptvPlaylist = actions.onIptvAddProvider,
+                        onOpenCalendar = actions.onCalendarClick,
                     )
                 }
             }
@@ -184,6 +187,7 @@ internal fun AppTabHost(
                     onPreviewClick = actions.onPosterClick,
                     onPreviewLongClick = actions.onPosterLongClick,
                     onDownloadsClick = actions.onDownloadsClick,
+                    onCalendarClick = actions.onCalendarClick,
                     disintegrationRequest = state.libraryDisintegrationRequest,
                 )
             }

@@ -494,6 +494,8 @@ internal fun PlayerScreenRuntime.startOverFromBeginning() {
     // Restart on the player that exists: rebuilding it would first wait for the old player to tear
     // down, and with a slow provider that one is stuck in the read being escaped (emulator,
     // 2026-09-27: the new mpv waited on its predecessor for good). Remount only without a player.
+    // The start-deadline clock restarts either way (the effect is keyed on this counter too).
+    vodStartRetryGeneration += 1
     val controller = playerController
     if (controller != null) controller.restartFromBeginning() else startOverGeneration += 1
 }
@@ -533,8 +535,12 @@ internal fun PlayerScreenRuntime.switchPlaybackEngine() {
  */
 internal fun PlayerScreenRuntime.maybeFailoverPlaybackEngine(
     resolvedAutoEngine: AndroidPlaybackEngine?,
+    singleUseLink: Boolean = false,
 ): Boolean {
     if (!playerSettingsUiState.autoSwitchPlaybackEngineOnError) return false
+    // A spent single-use link (live Stalker create_link) would only 401 on the other engine too: its
+    // recovery is the credential refresh's fresh mint, and once that is exhausted, the error.
+    if (!LiveLinkReconnectPolicy.allowsEngineFailover(LiveLinkReconnectPolicy.modeFor(singleUseLink))) return false
     if (engineFailoverDisarmed) return false
     if (engineFailoverTriggered) return false
 
@@ -549,11 +555,12 @@ internal fun PlayerScreenRuntime.maybeFailoverPlaybackEngine(
     }
 
     engineFailoverTriggered = true
+    // Same rule as a manual switch (B59-H1): before the first frame the snapshot still reads 0 while
+    // the engine seeks to the resume point, so keep the requested target instead of failing over to 0:00.
+    val swapStart = sourceSwapStart()
     flushWatchProgress()
-    if (initialSeekApplied) {
-        activeInitialPositionMs = playbackSnapshot.positionMs.coerceAtLeast(0L)
-        activeInitialProgressFraction = null
-    }
+    activeInitialPositionMs = swapStart.positionMs
+    activeInitialProgressFraction = swapStart.progressFraction
     // Capture the current track selection so it can be restored on the new engine.
     rememberCurrentTrackPreferenceForEngineSwitch(target)
     playbackEngineOverride = target

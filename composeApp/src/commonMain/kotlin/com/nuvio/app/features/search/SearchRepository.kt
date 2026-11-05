@@ -234,19 +234,33 @@ object SearchRepository {
                 resultChannel.close()
             }
             val results = arrayOfNulls<IndexedSearchResult>(loaders.size)
+            // UX180: the IPTV lane reports through the same channel, so the single consumer below
+            // publishes its rows the moment they are ready instead of waiting for the slowest add-on.
+            val iptvWatcher = if (iptvLane != null) {
+                launch {
+                    resultChannel.trySend(
+                        IndexedSearchResult(index = IPTV_RESULT_INDEX, iptvRows = awaitCurrentIptvRows()),
+                    )
+                }
+            } else {
+                null
+            }
+            var iptvRowsReady: List<HomeCatalogSection>? = null
 
             try {
                 for (result in resultChannel) {
-                    results[result.index] = result
-                    val sections = results.orderedSections()
-                    if (sections.isNotEmpty()) {
-                        _uiState.value = SearchUiState(
-                            isLoading = true,
-                            sections = sections,
-                        )
+                    if (result.index == IPTV_RESULT_INDEX) {
+                        iptvRowsReady = result.iptvRows
+                    } else {
+                        results[result.index] = result
                     }
+                    // A cancelled run must not overwrite the newer search's state.
+                    if (generation != searchGeneration) continue
+                    SearchInterimPolicy.interim(results.orderedSections(), iptvRowsReady)
+                        ?.let { _uiState.value = it }
                 }
             } finally {
+                iptvWatcher?.cancel()
                 closeChannelJob.cancel()
                 resultChannel.close()
             }
@@ -779,7 +793,12 @@ private data class IndexedSearchResult(
     val index: Int,
     val section: HomeCatalogSection? = null,
     val error: Throwable? = null,
+    /** Only on the [IPTV_RESULT_INDEX] event: the IPTV lane's rows. */
+    val iptvRows: List<HomeCatalogSection>? = null,
 )
+
+/** Marks the IPTV lane's own event in the add-on result channel. */
+private const val IPTV_RESULT_INDEX = -1
 
 private fun Array<IndexedSearchResult?>.orderedSections(): List<HomeCatalogSection> =
     mapNotNull { result -> result?.section }

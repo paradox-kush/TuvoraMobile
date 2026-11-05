@@ -644,7 +644,7 @@ private struct CategoryDialog: View {
 
 /// MatchChannelsOverlay (SportsHubScreen.kt:638-845): the viewer's channels showing this match, in
 /// evidence tiers; OK plays the channel.
-private struct MatchChannelsSheet: View {
+struct MatchChannelsSheet: View {
     let fixture: RadarFixture
     let live: Bool
     let onPlay: (TvPlayerSession) -> Void
