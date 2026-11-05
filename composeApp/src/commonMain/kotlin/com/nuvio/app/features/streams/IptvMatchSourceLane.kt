@@ -39,6 +39,18 @@ internal object IptvMatchSourceLane {
                 )
             },
             onFailure = { err ->
+                if (err is SourceLaneTimeoutException) {
+                    // The lane deadline ended a playlist that was still answering: same outcome as a
+                    // budget cut ("still loading"), not a fetch failure.
+                    log.w { "Xtream match for ${source.addonName} cut at the lane deadline" }
+                    return@fold AddonStreamGroup(
+                        addonName = source.addonName,
+                        addonId = source.sourceId,
+                        streams = emptyList(),
+                        isLoading = false,
+                        iptvPending = true,
+                    )
+                }
                 if (err is IptvCatalogPendingException) {
                     log.i { "Xtream match for ${source.addonName}: catalog still loading" }
                     return@fold AddonStreamGroup(
@@ -55,7 +67,7 @@ internal object IptvMatchSourceLane {
                     addonId = source.sourceId,
                     streams = emptyList(),
                     isLoading = false,
-                    error = err.message,
+                    error = err.laneFailureMessage(),
                 )
             },
         )

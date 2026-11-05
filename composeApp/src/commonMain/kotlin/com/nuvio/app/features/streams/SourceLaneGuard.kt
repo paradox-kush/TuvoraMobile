@@ -1,12 +1,14 @@
 package com.nuvio.app.features.streams
 
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
+import nuvio.composeapp.generated.resources.Res
+import nuvio.composeapp.generated.resources.streams_source_timed_out
+import org.jetbrains.compose.resources.getString
 
-/** A provider lane ran past [SourceLaneGuard.LANE_DEADLINE_MS] and was ended with a Failed outcome. */
+/** A provider lane ran past its deadline and was ended with a Failed outcome. */
 internal class SourceLaneTimeoutException(val deadlineMs: Long) :
     Exception("Source did not answer within ${deadlineMs / 1000}s")
 
@@ -20,26 +22,40 @@ internal class SourceLaneInterruptedException(cause: Throwable) :
  * aggregators count completions (`repeat(totalTasks) { receive() }`) and settle the whole list
  * only when every lane has reported.
  *
- * Before this guard a lane could end without reporting: a provider that threw a
- * [CancellationException] that was not the caller leaving (`fetchAddonResponseText`'s "Source
- * choices changed", a stale-generation "Server scope changed", an inner `withTimeout`) was
- * re-thrown by `runCatchingUnlessCancelled`, which ended only that child quietly — the completion
- * was never sent, the collector waited forever and the whole list stayed on its spinner (B226,
- * B153/B154 family). And a provider that never answered held the list open with no deadline.
+ * What it fixes: `runCatchingUnlessCancelled` re-throws every [CancellationException]. Add-on,
+ * IPTV-match and plugin lanes use it, and their providers throw cancellations that are not the
+ * caller leaving (`fetchAddonResponseText`'s "Source choices changed", an inner `withTimeout`).
+ * Re-thrown, the child ended quietly, the completion was never sent and the collector waited
+ * forever (B226 family). The media-server lane ([com.nuvio.app.features.servers.ServerStreamSource.load])
+ * already turned a foreign cancellation into a Failed group, so for servers this adds only the deadline.
  *
  * Rule: only the CALLER's cancellation propagates; everything else becomes a failure value.
+ * A [deadlineMs] of null bounds nothing and only converts foreign cancellation — used by plugin
+ * scrapers, whose runtime owns a 60 s budget that starts after its TMDB lookup, its 10-slot queue
+ * and the search-pause wait, none of which a lane deadline may cut.
  */
 internal object SourceLaneGuard {
     /** Matches the 60 s whole-call HTTP limit; legitimately slow media-server lookups (15-20 s) fit inside it. */
     const val LANE_DEADLINE_MS = 60_000L
 
-    suspend fun <T> run(deadlineMs: Long = LANE_DEADLINE_MS, block: suspend () -> T): Result<T> {
+    private class Held<T>(val value: T)
+
+    suspend fun <T> run(deadlineMs: Long? = LANE_DEADLINE_MS, block: suspend () -> T): Result<T> {
         val caller = currentCoroutineContext()
         return try {
-            Result.success(withTimeout(deadlineMs) { block() })
-        } catch (error: TimeoutCancellationException) {
-            caller.ensureActive()
-            Result.failure(SourceLaneTimeoutException(deadlineMs))
+            if (deadlineMs == null) {
+                Result.success(block())
+            } else {
+                // withTimeoutOrNull swallows only OUR timeout; an inner TimeoutCancellationException
+                // propagates and is reported as the provider's own interruption, not as this deadline.
+                val held = withTimeoutOrNull(deadlineMs) { Held(block()) }
+                if (held == null) {
+                    caller.ensureActive()
+                    Result.failure(SourceLaneTimeoutException(deadlineMs))
+                } else {
+                    Result.success(held.value)
+                }
+            }
         } catch (error: CancellationException) {
             caller.ensureActive() // the caller left: propagate
             Result.failure(SourceLaneInterruptedException(error))
@@ -48,3 +64,7 @@ internal object SourceLaneGuard {
         }
     }
 }
+
+/** User-facing text for a lane failure: the localized timeout line for a deadline, else the provider's message. */
+internal suspend fun Throwable.laneFailureMessage(): String? =
+    if (this is SourceLaneTimeoutException) getString(Res.string.streams_source_timed_out) else message

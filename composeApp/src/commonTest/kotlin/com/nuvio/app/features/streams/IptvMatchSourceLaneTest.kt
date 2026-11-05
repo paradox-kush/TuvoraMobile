@@ -1,6 +1,7 @@
 package com.nuvio.app.features.streams
 
 import com.nuvio.app.core.contracts.StreamSourceGroup
+import com.nuvio.app.features.servers.loadBounded
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -101,49 +102,90 @@ class SourceLaneIsolationTest {
     }
 
     @Test
-    fun aProviderThatNeverAnswersEndsInAFailedGroupAtTheLaneDeadline() = runTest {
+    fun aPlaylistStillAnsweringAtTheLaneDeadlineIsStillLoadingNotFailed() = runTest {
         var group: AddonStreamGroup? = null
         val job = launch {
+            // others never settle, so the 8 s budget cut never applies; only the lane deadline can end it
             group = IptvMatchSourceLane.resolveGroup(src, Job()) { delay(Long.MAX_VALUE); emptyList() }
         }
         advanceUntilIdle()
         job.join()
         assertEquals(SourceLaneGuard.LANE_DEADLINE_MS, currentTime)
         assertFalse(group!!.isLoading)
-        assertTrue(!group!!.error.isNullOrBlank())
+        assertTrue(group!!.iptvPending, "same outcome as a budget cut: shown as still loading")
+        assertNull(group!!.error)
     }
 
     @Test
-    fun guardReturnsFailureForForeignCancellationAndTimeout() = runTest {
-        val foreign = SourceLaneGuard.run { throw kotlinx.coroutines.CancellationException("Server scope changed") }
-        assertTrue(foreign.exceptionOrNull() is SourceLaneInterruptedException)
-        val timedOut = SourceLaneGuard.run(deadlineMs = 1_000) { delay(5_000) }
-        assertTrue(timedOut.exceptionOrNull() is SourceLaneTimeoutException)
+    fun guardReportsForeignCancellationAndItsOwnDeadlineDistinctly() = runTest {
+        assertTrue(SourceLaneGuard.run { throw kotlinx.coroutines.CancellationException("Server scope changed") }
+            .exceptionOrNull() is SourceLaneInterruptedException)
+        assertTrue(SourceLaneGuard.run(deadlineMs = 1_000) { delay(5_000) }.exceptionOrNull() is SourceLaneTimeoutException)
         assertEquals(1, SourceLaneGuard.run { 1 }.getOrNull())
     }
 
     @Test
-    fun theCallersOwnCancellationStillPropagates() = runTest {
-        var reached = false
+    fun aProvidersOwnInnerTimeoutIsNotMislabelledAsTheLaneDeadline() = runTest {
+        val failure = SourceLaneGuard.run(deadlineMs = 60_000) {
+            kotlinx.coroutines.withTimeout(10) { delay(1_000) }
+        }.exceptionOrNull()
+        assertTrue(failure is SourceLaneInterruptedException, "was $failure")
+        assertEquals(10, currentTime)
+    }
+
+    @Test
+    fun noDeadlineLaneIsNeverCutButStillConvertsForeignCancellation() = runTest {
+        // plugin scrapers: the runtime owns the budget (queue + pause + 60 s), so a long run is not cut
+        assertEquals("ok", SourceLaneGuard.run(deadlineMs = null) { delay(500_000); "ok" }.getOrNull())
+        assertTrue(SourceLaneGuard.run(deadlineMs = null) { throw kotlinx.coroutines.CancellationException("x") }
+            .exceptionOrNull() is SourceLaneInterruptedException)
+    }
+
+    @Test
+    fun theCallersOwnCancellationPropagatesAndStopsTheProvider() = runTest {
+        var reportedValue = false
+        var providerStopped = false
         val job = launch {
-            SourceLaneGuard.run { delay(10_000) }
-            reached = true
+            SourceLaneGuard.run {
+                try { delay(10_000) } finally { providerStopped = true }
+            }
+            reportedValue = true
         }
         testScheduler.runCurrent()
         job.cancel()
         job.join()
-        assertFalse(reached, "cancelling the caller must not turn into a Failed value")
-        assertTrue(job.isCancelled)
+        assertFalse(reportedValue, "cancelling the caller must not turn into a Failed value")
+        assertTrue(providerStopped)
     }
 
+    /** The aggregator's shape: one completion per lane or the collector never returns. */
     @Test
-    fun aLaneFailureDoesNotCancelItsSiblings() = runTest {
-        val results = mutableMapOf<String, Boolean>()
-        val parent = launch {
-            launch { SourceLaneGuard.run { throw kotlinx.coroutines.CancellationException("x") }; results["bad"] = true }
-            launch { delay(100); SourceLaneGuard.run { 1 }; results["good"] = true }
+    fun theListSettlesWhenAddonPluginServerAndIptvLanesEachThrowAProviderSideCancellation() = runTest {
+        val foreign = { kotlinx.coroutines.CancellationException("provider side") }
+        val completions = kotlinx.coroutines.channels.Channel<AddonStreamGroup>(kotlinx.coroutines.channels.Channel.BUFFERED)
+        val pluginResults = mutableListOf<Result<List<Int>>>()
+        val server = com.nuvio.app.features.servers.ServerStreamSource("server:s", "s", false) { throw foreign() }
+        val settled = launch {
+            launch { // add-on lane, exactly as StreamsRepository runs it
+                val group = SourceLaneGuard.run<List<StreamItem>> { throw foreign() }.fold(
+                    onSuccess = { AddonStreamGroup("a", "addon:a", it, isLoading = false) },
+                    onFailure = { AddonStreamGroup("a", "addon:a", emptyList(), isLoading = false, error = it.message) },
+                )
+                completions.send(group)
+            }
+            launch { // plugin lane
+                pluginResults += SourceLaneGuard.run(deadlineMs = null) { throw foreign() }
+                completions.send(AddonStreamGroup("p", "plugin:p", emptyList(), isLoading = false))
+            }
+            launch { completions.send(server.loadBounded()) }
+            launch { completions.send(IptvMatchSourceLane.resolveGroup(src, Job().also { it.complete() }) { throw foreign() }) }
         }
-        parent.join()
-        assertEquals(mapOf("bad" to true, "good" to true), results)
+        val received = mutableListOf<AddonStreamGroup>()
+        repeat(4) { received += completions.receive() }
+        settled.join()
+        assertEquals(4, received.size)
+        assertTrue(received.none { it.isLoading })
+        assertTrue(pluginResults.single().isFailure)
+        assertTrue(received.filter { it.addonId != "plugin:p" }.all { !it.error.isNullOrBlank() }, "failures are reported, not shown as empty")
     }
 }

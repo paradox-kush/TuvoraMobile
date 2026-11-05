@@ -593,7 +593,7 @@ object StreamsRepository {
                                 addonId = addon.addonId,
                                 streams = emptyList(),
                                 isLoading = false,
-                                error = err.message,
+                                error = err.laneFailureMessage(),
                             )
                         },
                     )
@@ -618,7 +618,7 @@ object StreamsRepository {
                 val includeScraperNameInSubtitle = false
                 providerGroup.scrapers.forEach { scraper ->
                     nonIptvLoads += launch {
-                        val completion = SourceLaneGuard.run {
+                        val completion = SourceLaneGuard.run(deadlineMs = null) {
                             PluginRepository.executeScraper(
                             scraper = scraper,
                             tmdbId = pluginContentId(
