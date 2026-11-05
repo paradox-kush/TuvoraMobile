@@ -108,7 +108,16 @@ data class TvPlayerState(
      * Continue at hh:mm?" Swift shows it for a few seconds; [TvPlayerSession.acceptServerResume] takes it.
      */
     val serverResumeOfferMs: Long? = null,
-)
+    /** A continuing M3U replay's title once the playhead moved into the next programme (null = [TvPlayerSession.title]). */
+    val replayTitle: String? = null,
+    /** A continuing replay's seek bar: the programme's start in the player's timeline, and its length ([TvReplayBar]). */
+    val replayOriginMs: Long = 0L,
+    val replaySpanMs: Long? = null,
+) {
+    /** What the seek bar shows: the programme for a replay, else the player's own position. */
+    val barPositionMs: Long get() = replaySpanMs?.let { com.tuvora.tvos.screens.TvReplayBar.position(positionMs, replayOriginMs, it) } ?: positionMs
+    val barDurationMs: Long get() = replaySpanMs ?: durationMs
+}
 
 /**
  * Engine controls the shared NuvioPlayerBridge doesn't carry. Apple TV's libmpv bridge implements this;
@@ -315,6 +324,29 @@ class TvPlayerSession(
     val state: StateFlow<TvPlayerState> = _state.asStateFlow()
 
     val title: String get() = launch.title
+
+    /** A continuing replay entered its next programme: the player shows [title] from here ([TvPlayerState.replayTitle]). */
+    private var replayProgramme: Pair<Long, Long>? = null
+
+    /** The seek bar spans one programme of a continuing replay: [originMs] is where it starts in the player's timeline. */
+    fun setReplayBar(originMs: Long, spanMs: Long, programmeStartMs: Long, programmeEndMs: Long) {
+        if (closed) return
+        replayProgramme = programmeStartMs to programmeEndMs
+        _state.value = _state.value.copy(replayOriginMs = originMs, replaySpanMs = spanMs)
+    }
+
+    /** A bar position held to what has aired (a replay of a programme still airing stops short of live). */
+    fun clampBar(barMs: Long): Long {
+        val (start, end) = replayProgramme ?: return barMs
+        return com.tuvora.tvos.screens.TvReplayBar.clampSeek(barMs, start, end, com.nuvio.app.features.trakt.TraktPlatformClock.nowEpochMs())
+    }
+
+    /** A seek to a position on the bar (see [TvPlayerState.barPositionMs]). */
+    fun seekToBar(barMs: Long) = seekTo(com.tuvora.tvos.screens.TvReplayBar.raw(clampBar(barMs), _state.value.replayOriginMs))
+
+    fun retitle(title: String) {
+        if (!closed) _state.value = _state.value.copy(replayTitle = title)
+    }
     val subtitle: String? get() = launch.episodeTitle ?: launch.streamTitle.takeIf { it != launch.title }
 
     /** The current engine's view controller. Changes when the session escalates; see [TvPlayerState.engineGeneration]. */
@@ -416,6 +448,7 @@ class TvPlayerSession(
 
     fun seekBy(offsetMs: Long) {
         if (isLive) return
+        if (replayProgramme != null) { seekToBar(_state.value.barPositionMs + offsetMs); return }
         if (party.seek(_state.value.positionMs + offsetMs)) return
         bridge?.seekBy(offsetMs)
         scheduleSeekSave()

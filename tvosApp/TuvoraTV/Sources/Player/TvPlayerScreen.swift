@@ -72,7 +72,7 @@ struct TvPlayerScreen: View {
 
     /// UI-test marker: the session this screen drives and whether *that* session is playing.
     private var nowMarker: some View {
-        Text("\(session.title)|\(session.state.value.isPlaying ? "playing" : "waiting")")
+        Text("\(session.state.value.replayTitle ?? session.title)|\(session.state.value.isPlaying ? "playing" : "waiting")")
             .font(.system(size: 1))
             .opacity(0.01)
             .allowsHitTesting(false)
@@ -189,7 +189,7 @@ struct TvPlayerScreen: View {
             // thumb, or a swipe across the control buttons, paused playback into a scrub).
             RemoteTouchCatcher(
                 isActive: { TvPlayerRemotePolicy.shared.scrubAllowed(ctx: remoteContext, seekBarFocused: seekBarFocused) },
-                onBegan: { scrubOriginMs = scrubMs ?? state?.positionMs ?? 0 },
+                onBegan: { scrubOriginMs = scrubMs ?? state?.barPositionMs ?? 0 },
                 onMoved: { dx, dy in scrub(dx: dx, dy: dy) },
                 onEnded: { _, _ in }
             )
@@ -378,7 +378,7 @@ struct TvPlayerScreen: View {
 
     private func commitScrub() {
         guard let target = scrubMs else { return }
-        session.seekTo(positionMs: target)
+        session.seekToBar(barMs: target)
         scrubMs = nil
         session.play()
         bumpControls()
@@ -402,13 +402,13 @@ struct TvPlayerScreen: View {
     private func scrub(dx: CGFloat, dy: CGFloat) {
         guard let state,
               let target = TvPlayerRemotePolicy.shared.scrubTarget(
-                originMs: scrubOriginMs, dx: Double(dx), dy: Double(dy), durationMs: state.durationMs, scrubbing: scrubMs != nil
+                originMs: scrubOriginMs, dx: Double(dx), dy: Double(dy), durationMs: state.barDurationMs, scrubbing: scrubMs != nil
               ) else { return }
         if scrubMs == nil {
             resumeAfterScrub = state.isPlaying
             session.pause()
         }
-        scrubMs = target.int64Value
+        scrubMs = session.clampBar(barMs: target.int64Value)   // a replay of an airing programme stops short of live
         bumpControls()
     }
 
@@ -549,7 +549,7 @@ private struct PlayerChrome: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: dp(10)) {
-            Text(session.title).font(NuvioType.headlineMedium).foregroundStyle(.white).lineLimit(1)
+            Text(state.replayTitle ?? session.title).font(NuvioType.headlineMedium).foregroundStyle(.white).lineLimit(1)
             if let subtitle = session.subtitle {
                 Text(ui: subtitle).font(NuvioType.titleMedium).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
             }
@@ -560,7 +560,7 @@ private struct PlayerChrome: View {
                 }
                 .foregroundStyle(colors.primary)
             } else {
-                SeekBar(positionMs: scrubMs ?? state.positionMs, bufferedMs: state.bufferedMs, durationMs: state.durationMs,
+                SeekBar(positionMs: scrubMs ?? state.barPositionMs, bufferedMs: state.bufferedMs, durationMs: state.barDurationMs,
                         scrubbing: scrubMs != nil, onSeek: { session.seekBy(offsetMs: $0); onActivity() },
                         onFocusChange: onSeekBarFocus)
             }
