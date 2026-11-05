@@ -811,7 +811,7 @@ object XtreamHubRepository {
                 if (XtreamMatchIndex.builtAt(accountId, kind) != null) {
                     val rows = XtreamMatchIndex.itemsFor(accountId, kind, categoryId, offset, PAGE_SIZE + 1)
                     // B179: hasMore is judged on the RAW window; divider rows are dropped from what is shown
-                    // (the next window starts at the shown count, so a few rows overlap and merge by id).
+                    // (the next window starts at the RAW rows consumed, see RawWindow, so hidden rows never shift it).
                     val page = rows.take(PAGE_SIZE).let { raw ->
                         if (section != XtreamHubSection.LIVE) raw
                         else ChannelSeparatorPolicy.withoutSeparators(raw, { it.name }, { it.epgId }, { it.hasArchive })
