@@ -68,6 +68,10 @@ struct MainShell: View {
     /// reaches it when nothing in the content lies further left, so "LEFT at the edge opens the drawer"
     /// needs no timing guess (the old 150 ms heuristic misfired wherever focus reporting lagged).
     @FocusState private var edgeFocused: Bool
+    /// Focus recovery (see ContentFocusActivity.contentChanged): an invisible entry point in the content
+    /// takes focus for an instant and steps aside, so the focus engine re-picks a real item nearby.
+    @FocusState private var recoveryFocused: Bool
+    @State private var recoveryActive = false
     @ObservedObject private var contentFocus = ContentFocusActivity.shared
 
     private func openRail() {
@@ -93,12 +97,22 @@ struct MainShell: View {
                 .overlay(Color.black.opacity(expanded ? 0.55 : 0).allowsHitTesting(false).ignoresSafeArea())
                 .animation(NuvioTokens.Motion.medium, value: expanded)
                 .onExitCommand { openRail() }
+                .overlay(alignment: .topLeading) {
+                    if recoveryActive {
+                        Color.white.opacity(0.001).frame(width: 4, height: 4)
+                            .padding(.top, dp(120)).padding(.leading, dp(40))
+                            .focusable()
+                            .focused($recoveryFocused)
+                            .onChange(of: recoveryFocused) { _, now in if now { recoveryActive = false } }
+                    }
+                }
                 .task(id: contentFocus.recoveryTick) {
                     try? await Task.sleep(nanoseconds: 600_000_000)   // let the refresh settle
                     guard !Task.isCancelled, !railEngaged, !ContentFocusActivity.windowHasFocus else { return }
-                    // Empty content has no focus target. Keep navigation available by handing
-                    // focus to a real sidebar control instead of a transient invisible target.
-                    openRail()
+                    contentFocus.expectContentFocus()   // keep the edge catcher out of the re-pick
+                    recoveryActive = true
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    recoveryFocused = true
                 }
                 // Native views (search keyboard, system lists) don't report focus: any press inside the
                 // content also proves the content holds focus.
@@ -159,6 +173,12 @@ struct MainShell: View {
         .task { await theme.observe() }
         .task { TopShelfPublisher.start() }
         .onReceive(DeepLinkCenter.shared.$openSetupCode) { open in if open { destination = .settings } }
+        .onReceive(DeepLinkCenter.shared.$openIptvTab) { open in
+            guard open else { return }
+            DeepLinkCenter.shared.openIptvTab = false
+            contentFocus.expectContentFocus()
+            destination = .iptv
+        }
         .onReceive(DeepLinkCenter.shared.$partyCode) { code in if code != nil { destination = .settings } }
         // Watch party news (joins, leaves, the party ending, what someone did to playback) as the shell's toast.
         .task { for await text in TvParty.shared.messages { playback.notify(text) } }

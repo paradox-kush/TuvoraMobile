@@ -67,6 +67,8 @@ final class DeepLinkCenter: ObservableObject {
     @Published var pending: DeepLink?
     /// The IPTV hub's empty state asked for the setup-code screen: the shell switches to Settings, which opens it.
     @Published var openSetupCode = false
+    /// The empty Home's "Open IPTV" action (a playlist exists, it just lives in the IPTV tab): the shell switches tabs.
+    @Published var openIptvTab = false
     /// A watch-party link (tuvora://party/<code>): the shell opens Settings › Watch party with the code typed in.
     @Published var partyCode: String?
 }

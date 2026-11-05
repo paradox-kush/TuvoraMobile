@@ -46,6 +46,7 @@ struct HomeScreen: View {
 
     /// Simulator hook `-smokeEmptyHome` (DEBUG): shows Home as a fresh install with no sources does, whatever the
     /// simulator profile already holds (EmptyHomeFocusTests, B193). Never compiled into a release build.
+    private static let emptyRows = HomeUiState(isLoading: false, heroItems: [], sections: [], errorMessage: nil, failedRowCount: 0)
     private static var smokeEmptyHome: Bool {
         #if DEBUG
         return AppArguments.list.contains("-smokeEmptyHome")
@@ -58,7 +59,7 @@ struct HomeScreen: View {
         layoutBody
         .task {
             TvHome.shared.start()
-            for await next in TvHome.shared.rows { rows = next; ContentFocusActivity.contentChanged(); if hero == nil, !Self.smokeEmptyHome, let first = next.heroItems.first ?? next.sections.first?.items.first { hero = HeroContent(preview: first) } }
+            for await next in TvHome.shared.rows { rows = Self.smokeEmptyHome ? Self.emptyRows : next; ContentFocusActivity.contentChanged(); if hero == nil, !Self.smokeEmptyHome, let first = next.heroItems.first ?? next.sections.first?.items.first { hero = HeroContent(preview: first) } }
         }
         // Media-server rows: re-pulled when Home appears (never a timer); the contributor's own TTL makes a quick return free.
         .task { TvMediaServers.shared.refreshHomeRows() }
@@ -155,15 +156,8 @@ struct HomeScreen: View {
                                           onFocus: { pendingHero = HeroContent(collection: collection, folder: $0) }) { openFolder = $0 }
                         }
                     }
-                    if entries.isEmpty && (!rows.isLoading || Self.smokeEmptyHome) && continueWatching.isEmpty {
-                        let hint = TvHome.shared.emptyHomeHint()
-                        NuvioStateMessage(title: StoreCopy.emptyHomeTitle(hint),
-                                          message: rows.errorMessage ?? StoreCopy.emptyHomeMessage(hint),
-                                          actionTitle: "Set up sources", actionId: "home.empty.setupSources") {
-                            DeepLinkCenter.shared.openSetupCode = true
-                        }
-                            .frame(height: dp(200))
-                    }
+                    EmptyHomeState(candidate: entries.isEmpty && continueWatching.isEmpty && rows.sections.isEmpty && !rows.isLoading,
+                                   errorMessage: rows.errorMessage)
                 }
             }
             .padding(.bottom, dp(48))
