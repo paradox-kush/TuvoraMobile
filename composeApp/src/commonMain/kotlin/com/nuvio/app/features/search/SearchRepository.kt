@@ -254,6 +254,8 @@ object SearchRepository {
                     } else {
                         results[result.index] = result
                     }
+                    // A cancelled run must not overwrite the newer search's state.
+                    if (generation != searchGeneration) continue
                     SearchInterimPolicy.interim(results.orderedSections(), iptvRowsReady)
                         ?.let { _uiState.value = it }
                 }

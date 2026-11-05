@@ -139,10 +139,16 @@ class AppUpdaterControllerTest {
         assertEquals(1, requests)
         assertEquals("limited", controller.uiState.value.errorMessage, "the limit message reaches the viewer")
 
+        controller.dismissDialog()
         controller.checkForUpdates(force = false, showNoUpdateFeedback = false)
+        assertFalse(controller.uiState.value.showDialog, "an automatic check stays silent")
         controller.checkForUpdates(force = true, showNoUpdateFeedback = false)
         assertEquals(1, requests, "automatic and manual re-checks make no request while limited")
         assertTrue(controller.uiState.value.showDialog, "a manual check still explains why nothing happened")
+        assertTrue(
+            controller.uiState.value.errorMessage?.let { it.isNotBlank() && it != "limited" } == true,
+            "the blocked manual check shows the retry-in message, not a stale error",
+        )
 
         now += 1_800L
         controller.checkForUpdates(force = true, showNoUpdateFeedback = false)
@@ -152,12 +158,16 @@ class AppUpdaterControllerTest {
     @Test
     fun automaticCheckWhileLimitedStaysSilent() {
         val now = 10_000L
+        var requests = 0
         val controller = AppUpdaterController(scope, preferences, { _ ->
+            requests += 1
             Result.failure(UpdaterRateLimitedException(now + 600L, "limited"))
         }, nowEpochSeconds = { now })
         controller.checkForUpdates(force = false, showNoUpdateFeedback = false)
         controller.checkForUpdates(force = false, showNoUpdateFeedback = false)
+        controller.checkForUpdates(force = false, showNoUpdateFeedback = false)
 
+        assertEquals(1, requests, "only the first automatic check reaches GitHub")
         assertFalse(controller.uiState.value.showDialog)
         assertNull(controller.uiState.value.errorMessage)
     }

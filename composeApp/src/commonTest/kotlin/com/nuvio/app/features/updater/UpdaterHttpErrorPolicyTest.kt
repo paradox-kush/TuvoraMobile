@@ -85,4 +85,22 @@ class UpdaterHttpErrorPolicyTest {
         assertFalse(UpdaterHttpErrorPolicy.mayCheck(now + 10, now))
         assertTrue(UpdaterHttpErrorPolicy.mayCheck(now + 10, now + 10), "the reset instant lifts the block")
     }
+
+    @Test
+    fun `a far-future reset is capped at one hour`() {
+        val outcome = classify(403, mapOf("x-ratelimit-remaining" to "0", "x-ratelimit-reset" to "${now + 86_400L * 3}"))
+        assertEquals(Outcome.RateLimited(now + UpdaterHttpErrorPolicy.MAX_BACKOFF_SECONDS), outcome)
+        assertEquals(
+            Outcome.RateLimited(now + UpdaterHttpErrorPolicy.MAX_BACKOFF_SECONDS),
+            classify(429, mapOf("retry-after" to "999999999")),
+        )
+    }
+
+    @Test
+    fun `a stored block beyond the cap is stale and does not block`() {
+        val beyond = now + UpdaterHttpErrorPolicy.MAX_BACKOFF_SECONDS + 1
+        assertTrue(UpdaterHttpErrorPolicy.isStale(beyond, now))
+        assertTrue(UpdaterHttpErrorPolicy.mayCheck(beyond, now))
+        assertFalse(UpdaterHttpErrorPolicy.mayCheck(now + UpdaterHttpErrorPolicy.MAX_BACKOFF_SECONDS, now))
+    }
 }
