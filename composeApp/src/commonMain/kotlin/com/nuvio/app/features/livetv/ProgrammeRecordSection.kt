@@ -33,6 +33,7 @@ import nuvio.composeapp.generated.resources.recordings_action_allow_exact
 import nuvio.composeapp.generated.resources.recordings_action_cancel
 import nuvio.composeapp.generated.resources.recordings_action_record
 import nuvio.composeapp.generated.resources.recordings_action_record_series
+import nuvio.composeapp.generated.resources.recordings_series_guide_failed
 import nuvio.composeapp.generated.resources.recordings_action_view
 import nuvio.composeapp.generated.resources.recordings_already_saved
 import nuvio.composeapp.generated.resources.recordings_confirm_already
@@ -89,6 +90,7 @@ internal fun ProgrammeRecordSection(
                     return@Column
                 }
                 if (work == RecordWork.Failed) Note(stringResource(Res.string.recordings_prepare_failed))
+                if (work == RecordWork.GuideUnreadable) Note(stringResource(Res.string.recordings_series_guide_failed))
                 val offer = ProgrammeRecordPolicy.offer(p.channel, programme.startMs, programme.endMs, nowMs, port.capabilities, state)
                 when (offer) {
                     is RecordOffer.Record -> {

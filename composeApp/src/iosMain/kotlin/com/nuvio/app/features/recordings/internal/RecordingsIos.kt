@@ -13,8 +13,10 @@ import com.nuvio.app.features.recordings.api.RecordingSaver
 import com.nuvio.app.features.recordings.api.SaveOutcome
 import com.nuvio.app.features.recordings.api.SaveRequest
 import kotlinx.cinterop.ExperimentalForeignApi
-import kotlinx.coroutines.CancellableContinuation
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import platform.Foundation.NSDate
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSHomeDirectory
@@ -25,7 +27,6 @@ import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.stringWithContentsOfFile
 import platform.Foundation.timeIntervalSince1970
 import platform.Foundation.writeToFile
-import kotlin.coroutines.resume
 
 /** iPhone/iPad capabilities. One constant, so wave 4 (live capture) flips it in one place. */
 internal object IosRecordingCapabilities {
@@ -45,6 +46,8 @@ internal class IosRecordingAlarms : RecordingAlarms {
 internal class IosRecordingFiles(
     private val stateDir: String = "${NSHomeDirectory().trimEnd('/')}/Library/Application Support/recordings-state",
     private val recordingsDir: String = "${NSHomeDirectory().trimEnd('/')}/Documents/nuvio_recordings",
+    /** Where upstream's downloader keeps the file it is working on for us (`rec-<name>` and `rec-<name>.part`). */
+    private val downloadsDir: String = IosRecordingPaths.defaultDownloadsDir(),
 ) : RecordingFiles {
     private val fm get() = NSFileManager.defaultManager
 
@@ -89,24 +92,105 @@ internal class IosRecordingFiles(
     }
 
     override suspend fun delete(path: String) {
+        remove(path)
+        if (path.endsWith(".part")) {
+            // A partial has a sidecar naming its link, and a twin in the downloader's folder while a save runs.
+            remove("$path.meta")
+            val work = IosRecordingPaths.workName(path.substringAfterLast('/').removeSuffix(".part"))
+            remove("$downloadsDir/$work.part")
+            remove("$downloadsDir/$work")
+        }
+    }
+
+    private fun remove(path: String) {
         if (fm.fileExistsAtPath(path)) fm.removeItemAtPath(path, null)
     }
 }
 
+/** Names shared by the saver and the file store, so neither guesses the other's layout. */
+internal object IosRecordingPaths {
+    fun defaultDownloadsDir(): String = "${NSHomeDirectory().trimEnd('/')}/Documents/nuvio_downloads"
+    fun workName(targetFileName: String): String = "rec-$targetFileName"
+}
+
 /**
- * Saves through upstream's downloader, so the platform's own behaviour (and its limits) apply: a
- * force-quit cancels the save, and the UI says so. The downloader wants a [DownloadItem]; a throwaway
- * one is built here and never given to the downloads repository, so nothing appears in the
- * Downloads list. The downloader keeps its partial file in the downloads folder; it is moved to and
- * from `target.part` so the repository's view of the partial file stays true.
+ * Moves a partial between the repository's folder and the downloader's, only ever handing the
+ * downloader a partial that this very link wrote. The link is pinned beside the partial in
+ * `<part>.meta`, the same sidecar name Android uses, so the repository deletes both the same way.
+ */
+@OptIn(ExperimentalForeignApi::class)
+internal class IosPartialStaging {
+    private val fm get() = NSFileManager.defaultManager
+
+    fun readPin(part: String): String? {
+        val path = "$part.meta"
+        if (!fm.fileExistsAtPath(path)) return null
+        return NSString.stringWithContentsOfFile(path, NSUTF8StringEncoding, null)?.lines()?.firstOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    fun writePin(part: String, url: String) {
+        NSString.create(string = url).writeToFile("$part.meta", atomically = true, encoding = NSUTF8StringEncoding, error = null)
+    }
+
+    private fun remove(path: String) {
+        if (fm.fileExistsAtPath(path)) fm.removeItemAtPath(path, null)
+    }
+
+    private fun sizeOf(path: String): Long =
+        (fm.attributesOfItemAtPath(path, null)?.get("NSFileSize") as? NSNumber)?.longLongValue ?: 0L
+
+    /**
+     * Readies [workPart] for a save from [url]. A partial pinned to the same link moves over so the
+     * downloader resumes it; any other partial is deleted so the save starts at zero. Returns whether it resumes.
+     */
+    fun stageForResume(url: String, part: String, workPart: String, resumeFromBytes: Long): Boolean {
+        remove(workPart)
+        val resume = fm.fileExistsAtPath(part) && RecordingResumePolicy.canResume(readPin(part), url, resumeFromBytes)
+        if (resume) {
+            fm.moveItemAtPath(part, workPart, null)
+            return true
+        }
+        remove(part)
+        remove("$part.meta")
+        return false
+    }
+
+    /**
+     * After a save stopped for any reason (failure, pause, cancel): whatever the downloader wrote goes
+     * back beside the target with its link, or is dropped if empty. Safe to call twice. Returns the bytes kept.
+     */
+    fun parkAfterStop(url: String, part: String, workPart: String): Long {
+        if (!fm.fileExistsAtPath(workPart)) return 0L
+        val size = sizeOf(workPart)
+        if (size <= 0L) {
+            remove(workPart)
+            return 0L
+        }
+        remove(part)
+        fm.moveItemAtPath(workPart, part, null)
+        writePin(part, url)
+        return size
+    }
+
+    fun clearPin(part: String) = remove("$part.meta")
+}
+
+/**
+ * Saves through upstream's downloader, so the platform's own behaviour (and its limits) apply: this is
+ * not a background URLSession, so the save only runs while Tuvora is open, and the UI says so. The
+ * downloader wants a [DownloadItem]; a throwaway one is built here and never given to the downloads
+ * repository, so nothing appears in the Downloads list. The downloader keeps its partial file in the
+ * downloads folder; it is moved to and from `target.part` (pinned to its link by [IosPartialStaging]) so
+ * the repository's view of the partial file stays true and a different link never extends it.
  */
 @OptIn(ExperimentalForeignApi::class)
 internal class IosRecordingSaver(private val files: RecordingFiles) : RecordingSaver {
+    private val staging = IosPartialStaging()
 
     override suspend fun save(req: SaveRequest, progress: (Long) -> Unit): SaveOutcome {
         val fm = NSFileManager.defaultManager
         val part = req.targetPath + ".part"
-        val workName = "rec-" + req.targetPath.substringAfterLast('/')
+        val workName = IosRecordingPaths.workName(req.targetPath.substringAfterLast('/'))
         var best: SaveOutcome.Failed? = null
         for (url in req.candidates) {
             val outcome = downloadOne(url, req, workName, part, progress)
@@ -117,52 +201,79 @@ internal class IosRecordingSaver(private val files: RecordingFiles) : RecordingS
                 if (!fm.moveItemAtPath(finished, req.targetPath, null)) {
                     return SaveOutcome.Failed(RecordingProblem.UNKNOWN, offline = false, writtenBytes = 0, rangeSupported = true)
                 }
+                staging.clearPin(part)
                 return SaveOutcome.Done(files.sizeOf(req.targetPath))
             }
             val failed = outcome as SaveOutcome.Failed
             if (best == null || failed.writtenBytes >= best.writtenBytes) best = failed
             if (failed.offline) break
+            // Out of space: no other link will help.
+            if (failed.problem == RecordingProblem.NO_SPACE) break
         }
         return best ?: SaveOutcome.Failed(RecordingProblem.NO_CATCH_UP, offline = false, writtenBytes = 0, rangeSupported = false)
     }
 
     private suspend fun downloadOne(url: String, req: SaveRequest, workName: String, part: String, progress: (Long) -> Unit): SaveOutcome {
-        val fm = NSFileManager.defaultManager
         val workPart = downloaderFilePath(workName) + ".part"
-        // Hand a previous partial back to the downloader, which resumes it with a Range request.
-        if (fm.fileExistsAtPath(part)) {
-            if (fm.fileExistsAtPath(workPart)) fm.removeItemAtPath(workPart, null)
-            fm.moveItemAtPath(part, workPart, null)
-        }
+        // Hand a previous partial back to the downloader only if THIS link wrote it; otherwise start at zero.
+        staging.stageForResume(url, part, workPart, req.resumeFromBytes)
         val item = throwawayItem(url, req, workName)
-        val outcome = suspendCancellableCoroutine<SaveOutcome> { cont ->
-            val handle = DownloadsPlatformDownloader.start(
-                request = DownloadPlatformRequest(item),
-                onProgress = { downloaded, _ -> progress(downloaded) },
-                onSuccess = { _, total -> cont.resumeOnce(SaveOutcome.Done(total ?: 0L)) },
-                onFailure = { _ ->
-                    // The downloader reports a message, not a class: classify by whether the device is online is not
-                    // available here, so a failure is NETWORK (retried, bounded by the schedule policy).
-                    cont.resumeOnce(SaveOutcome.Failed(RecordingProblem.NETWORK, offline = false, writtenBytes = 0, rangeSupported = true))
-                },
-                onPaused = { cont.resumeOnce(SaveOutcome.Failed(RecordingProblem.STALLED, offline = false, writtenBytes = 0, rangeSupported = true)) },
-            )
-            cont.invokeOnCancellation { handle.cancel() }
+        var finished = false
+        try {
+            val outcome = runDownload(item, req, progress)
+            if (outcome is SaveOutcome.Done) {
+                finished = true
+                return outcome
+            }
+            // Keep the partial (and its link) where the repository looks for it.
+            val written = staging.parkAfterStop(url, part, workPart)
+            return (outcome as SaveOutcome.Failed).copy(writtenBytes = written)
+        } finally {
+            // A cancel throws past the code above: the partial still goes home, so the repository can
+            // resume it after a teardown or delete it after a user cancel instead of leaking it.
+            if (!finished) staging.parkAfterStop(url, part, workPart)
         }
-        if (outcome is SaveOutcome.Failed) {
-            // Keep the partial where the repository looks for it.
-            val written = files.sizeOf(workPart)
-            if (written > 0 && fm.fileExistsAtPath(workPart)) fm.moveItemAtPath(workPart, part, null)
-            return outcome.copy(writtenBytes = written)
-        }
-        return outcome
     }
 
-    private fun CancellableContinuation<SaveOutcome>.resumeOnce(value: SaveOutcome) {
-        if (isActive) resume(value)
+    private suspend fun runDownload(item: DownloadItem, req: SaveRequest, progress: (Long) -> Unit): SaveOutcome = coroutineScope {
+        val result = CompletableDeferred<SaveOutcome>()
+        val ticks = Channel<Long>(Channel.CONFLATED)
+        val handle = DownloadsPlatformDownloader.start(
+            request = DownloadPlatformRequest(item),
+            onProgress = { downloaded, _ -> progress(downloaded); ticks.trySend(downloaded) },
+            onSuccess = { _, total -> result.complete(SaveOutcome.Done(total ?: 0L)) },
+            onFailure = { _ ->
+                // The downloader reports a message, not a class: a failure is NETWORK (retried, bounded by the schedule policy).
+                result.complete(SaveOutcome.Failed(RecordingProblem.NETWORK, offline = false, writtenBytes = 0, rangeSupported = true))
+            },
+            onPaused = { result.complete(SaveOutcome.Failed(RecordingProblem.STALLED, offline = false, writtenBytes = 0, rangeSupported = true)) },
+        )
+        val spaceCheck = req.spaceCheck
+        val checker = launch {
+            var last = -1L
+            for (downloaded in ticks) {
+                if (last < 0) last = downloaded
+                if (spaceCheck != null && downloaded - last >= SPACE_CHECK_BYTES) {
+                    last = downloaded
+                    val problem = spaceCheck(SPACE_CHECK_BYTES)
+                    if (problem != null) {
+                        handle.cancel()
+                        result.complete(SaveOutcome.Failed(problem, offline = false, writtenBytes = 0, rangeSupported = true))
+                    }
+                }
+            }
+        }
+        try {
+            result.await()
+        } finally {
+            checker.cancel()
+            ticks.close()
+            // Cancelled (or finished): make sure no network task outlives this call.
+            if (!result.isCompleted || result.isCancelled) handle.cancel()
+        }
     }
 
-    private fun downloaderFilePath(name: String): String = "${NSHomeDirectory().trimEnd('/')}/Documents/nuvio_downloads/$name"
+    private fun downloaderFilePath(name: String): String = "${IosRecordingPaths.defaultDownloadsDir()}/$name"
 
     private fun throwawayItem(url: String, req: SaveRequest, workName: String) = DownloadItem(
         id = "recording:$workName", contentType = "recording", parentMetaId = "recording", parentMetaType = "recording",
@@ -170,5 +281,8 @@ internal class IosRecordingSaver(private val files: RecordingFiles) : RecordingS
         sourceUrl = url, sourceHeaders = req.headers, fileName = workName, status = DownloadStatus.Downloading,
         createdAtEpochMs = 0, updatedAtEpochMs = 0,
     )
-}
 
+    private companion object {
+        const val SPACE_CHECK_BYTES = 16L * 1024 * 1024
+    }
+}

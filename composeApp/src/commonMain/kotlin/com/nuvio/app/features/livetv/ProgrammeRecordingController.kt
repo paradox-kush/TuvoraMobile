@@ -28,6 +28,9 @@ internal sealed interface RecordWork {
     data object Working : RecordWork
     data class Confirmed(val confirmation: ScheduleConfirmation) : RecordWork
     data object Failed : RecordWork
+
+    /** The stored guide could not be read, so a series would have been scheduled short. Nothing was scheduled. */
+    data object GuideUnreadable : RecordWork
 }
 
 /**
@@ -89,9 +92,16 @@ internal class ProgrammeRecordingController(
             _work.value = try {
                 val now = clock()
                 val days = channel.catchUp?.days ?: 0
-                val stored = runCatching {
+                val stored = when (val read = readStoredGuide {
                     LiveTvData.historyProgrammes(channel.key, now - days * DAY_MS, now + SERIES_LOOKAHEAD_MS)
-                }.getOrDefault(emptyList())
+                }) {
+                    is StoredGuideRead.Ok -> read.programmes
+                    // Never "nothing here": saving the rule with fewer airings than the guide has would look like success.
+                    StoredGuideRead.Failed -> {
+                        _work.value = RecordWork.GuideUnreadable
+                        return@launch
+                    }
+                }
                 val created = port.addSeriesRule(
                     channel = channel, title = programme.title, keepLast = 0,
                     listings = (stored + shown + programme).toListings(), nowMs = now,
@@ -146,8 +156,9 @@ internal class ProgrammeRecordingController(
             try {
                 val now = clock()
                 for (rule in port.state.value.series) {
-                    val stored = runCatching { LiveTvData.historyProgrammes(rule.channel.key, now, now + SERIES_LOOKAHEAD_MS) }
-                        .getOrDefault(emptyList())
+                    // A rule whose guide cannot be read this visit is skipped; the next visit asks again.
+                    val stored = (readStoredGuide { LiveTvData.historyProgrammes(rule.channel.key, now, now + SERIES_LOOKAHEAD_MS) }
+                        as? StoredGuideRead.Ok)?.programmes ?: continue
                     if (stored.isNotEmpty()) port.expandSeries(rule.id, stored.toListings(), now)
                 }
             } catch (e: CancellationException) {

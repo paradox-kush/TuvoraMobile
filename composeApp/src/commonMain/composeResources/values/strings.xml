@@ -2767,13 +2767,14 @@
     <string name="recordings_action_done">Done</string>
     <string name="recordings_working">Setting it up…</string>
     <string name="recordings_prepare_failed">Couldn’t read this channel’s details. Try again in a moment.</string>
+    <string name="recordings_series_guide_failed">Couldn’t read this channel’s guide, so no episodes were scheduled. Try again in a moment.</string>
     <string name="recordings_unavailable_needs_catch_up">Can’t record this one: the channel doesn’t keep a catch-up archive.</string>
     <string name="recordings_unavailable_over">Can’t record this one: it’s over and the provider no longer has it.</string>
     <string name="recordings_unavailable_bad_times">Can’t record this one: the guide has no start and end time for it.</string>
     <string name="recordings_already_saved">Already recorded. You’ll find it in Recordings.</string>
     <string name="recordings_confirm_set">Recording set.</string>
     <string name="recordings_confirm_late">Recording set, but your phone may start it a little late. If Android can’t start it in the background, it saves the next time you open Tuvora. Allow exact alarms and it will be on time.</string>
-    <string name="recordings_confirm_next_open">Saves the next time you open Tuvora after the show ends. Force-quitting Tuvora cancels a save in progress.</string>
+    <string name="recordings_confirm_next_open">Saves the next time you open Tuvora after the show ends. Keep Tuvora open until the save finishes.</string>
     <string name="recordings_confirm_already">Already scheduled.</string>
     <string name="recordings_confirm_cannot">Can’t record this programme.</string>
     <string name="recordings_confirm_series_nothing">Series saved. No upcoming episodes are in the guide yet; new ones are added when you open Live TV.</string>
