@@ -54,7 +54,7 @@ struct EmptyHomeState: View {
             if candidate && settled {
                 // The smoke hook must not depend on the simulator profile's playlists.
                 let hint = EmptyHomeSmoke.enabled ? TvEmptyHomeHint.addPlaylist : TvHome.shared.emptyHomeHint()
-                let action = EmptyHomeAction.choose(hint: hint, hasError: errorMessage != nil || failedRows)
+                let action = EmptyHomeAction.choose(hint: hint, hasError: !EmptyHomeSmoke.enabled && (errorMessage != nil || failedRows))
                 NuvioStateMessage(title: StoreCopy.emptyHomeTitle(hint),
                                   message: errorMessage ?? StoreCopy.emptyHomeMessage(hint),
                                   actionTitle: action.title, actionId: "home.empty.action") {
