@@ -9,7 +9,6 @@ import com.nuvio.app.features.iptv.CatchUpWinnerStore
 import com.nuvio.app.features.iptv.IptvClient
 import com.nuvio.app.features.iptv.IptvPanelGuard
 import com.nuvio.app.features.iptv.CatchUpNextProgramme
-import com.nuvio.app.features.iptv.M3uCatchUpInfo
 import com.nuvio.app.features.iptv.M3uReplayContinuation
 import com.nuvio.app.features.iptv.M3uReplayWalk
 import com.nuvio.app.features.iptv.XtreamCatchUp
@@ -307,18 +306,15 @@ object LiveTvData {
     /** Stored programmes overlapping a guide window — the only source of PAST rows. */
     suspend fun historyProgrammes(contentId: String, fromMs: Long, toMs: Long): List<XtreamProgram> {
         val (account, streamId) = accountFor(contentId) ?: return emptyList()
-        // An M3U catch-up channel's past is its XMLTV guide (kept up to catchup-days); an M3U channel without
-        // catch-up has no history and keeps the now-and-next ladder it always had.
-        if (account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_M3U_FILE) {
-            if (m3uCatchUpOf(account, streamId) == null) return emptyList()
-            return runCatching { XmltvClient.storedWindow(account, streamId, fromMs, toMs) }.getOrDefault(emptyList())
+        // An M3U channel's past is its own XMLTV guide on disk (6 h for every channel, the whole archive for a
+        // catch-up one); without catch-up the past shows but has nothing to replay. See [GuideHistorySource].
+        val isM3u = account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_M3U_FILE
+        return when (GuideHistorySource.forChannel(isM3u, hasCatchUp = false)) {
+            GuideHistorySource.Source.STORED_XMLTV ->
+                runCatching { XmltvClient.storedWindow(account, streamId, fromMs, toMs) }.getOrDefault(emptyList())
+            GuideHistorySource.Source.CATCHUP_TABLE -> CatchUpEpgRepository.window(account, streamId, fromMs, toMs)
         }
-        return CatchUpEpgRepository.window(account, streamId, fromMs, toMs)
     }
-
-    /** The channel's own catch-up from the content database; null for a channel without (or a missing row). */
-    private suspend fun m3uCatchUpOf(account: XtreamAccount, streamId: Int): M3uCatchUpInfo? =
-        runCatching { IptvContentDb.channelRow(account.id, streamId)?.catchUp }.getOrNull()
 
     /** The whole synopsis for the programme sheet — truncated everywhere else. */
     suspend fun programmeDescription(contentId: String, startMs: Long): String? {
