@@ -19,6 +19,16 @@ class XtreamHubSectionsTest {
     }
 
     @Test
+    fun `the series chip stays while Series is the current section and goes once the viewer leaves`() {
+        assertEquals(all, XtreamHubSections.visible({ true }, seriesAbsent = true, current = XtreamHubSection.SERIES))
+        assertEquals(
+            listOf(XtreamHubSection.LIVE, XtreamHubSection.MOVIES),
+            XtreamHubSections.visible({ true }, seriesAbsent = true, current = XtreamHubSection.MOVIES),
+        )
+        assertEquals(all, XtreamHubSections.visible({ true }, seriesAbsent = false, current = XtreamHubSection.MOVIES))
+    }
+
+    @Test
     fun `playlist content toggles still apply`() {
         assertEquals(listOf(XtreamHubSection.LIVE), XtreamHubSections.visible({ it == XtreamHubSection.LIVE }, seriesAbsent = false))
     }

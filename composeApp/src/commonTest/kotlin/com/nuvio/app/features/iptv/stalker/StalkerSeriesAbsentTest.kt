@@ -20,13 +20,16 @@ class StalkerSeriesAbsentTest {
 
     private var seriesReply = """{"js":null}"""
     private var vodCategories = """{"js":[{"id":"*","title":"All"}]}"""
+    private var profile = """{"js":{"id":"1","status":0}}"""
+    private var modules = """{"js":{}}"""
 
     private val fakePortal: suspend (String, Map<String, String>) -> String = { url, _ ->
         val action = Regex("action=([^&]+)").find(url)?.groupValues?.get(1)
         val type = Regex("type=([^&]+)").find(url)?.groupValues?.get(1)
         when {
             action == "handshake" -> """{"js":{"token":"T"}}"""
-            action == "get_profile" -> """{"js":{"id":"1","status":0}}"""
+            action == "get_profile" -> profile
+            action == "get_modules" -> modules
             type == "series" && action == "get_categories" -> seriesReply
             type == "vod" && action == "get_categories" -> vodCategories
             else -> """{"js":[]}"""
@@ -40,8 +43,7 @@ class StalkerSeriesAbsentTest {
 
     @BeforeTest
     fun setUp() {
-        com.nuvio.app.features.iptv.content.IptvContentDbDriver.openForTests =
-            { androidx.sqlite.driver.bundled.BundledSQLiteDriver().open(":memory:") }
+        // No content DB here: the series probe is network-only, so this runs on the Native runner too.
         StalkerClient.sessionFactory = { StalkerSession(it, fakePortal, { u, h, c -> c(fakePortal(u, h)) }) }
     }
 
@@ -88,6 +90,42 @@ class StalkerSeriesAbsentTest {
         StalkerClient.seriesCategories(acc)
         assertFalse(StalkerClient.seriesAbsent(acc), "empty alone is not positive evidence")
         assertTrue(XtreamHubSection.SERIES in tabs(acc))
+    }
+
+    // A module-gated portal (auth_access=false) is asked for get_modules during the session bootstrap; its
+    // answer is the capability signal, so these run the payload THROUGH the session.
+    private val moduleGated = """{"js":{"id":"1","status":0,"auth_access":false}}"""
+
+    @Test
+    fun `get_modules reporting series disabled plus an empty answer hides the tab`() = runBlocking {
+        profile = moduleGated
+        modules = """{"js":{"all_modules":["tv","vod","series"],"disabled_modules":["series"]}}"""
+        seriesReply = """{"js":[]}"""
+        val acc = account()
+        StalkerClient.seriesCategories(acc)
+        assertTrue(StalkerClient.seriesAbsent(acc), "module off + empty + no series vod = positive evidence")
+        assertFalse(XtreamHubSection.SERIES in tabs(acc))
+    }
+
+    @Test
+    fun `get_modules listing series as available keeps the tab even when the list is empty`() = runBlocking {
+        profile = moduleGated
+        modules = """{"js":{"all_modules":["tv","vod","series"],"disabled_modules":[]}}"""
+        seriesReply = """{"js":[]}"""
+        val acc = account()
+        StalkerClient.seriesCategories(acc)
+        assertFalse(StalkerClient.seriesAbsent(acc))
+        assertTrue(XtreamHubSection.SERIES in tabs(acc))
+    }
+
+    @Test
+    fun `a get_modules payload we do not recognise is unknown and keeps the tab`() = runBlocking {
+        profile = moduleGated
+        modules = """{"js":"nope"}"""
+        seriesReply = """{"js":[]}"""
+        val acc = account()
+        StalkerClient.seriesCategories(acc)
+        assertFalse(StalkerClient.seriesAbsent(acc))
     }
 
     @Test

@@ -39,10 +39,14 @@ enum class XtreamHubSection { LIVE, MOVIES, SERIES }
 object XtreamHubSections {
     /**
      * [typeEnabled] is the playlist-manager content toggle per section; [seriesAbsent] is the portal's
-     * own positive "no series" evidence (UX147). Unknown evidence is false, so the tab stays.
+     * own positive "no series" evidence (UX147). Unknown evidence is false, so the tab stays. The chip
+     * only goes once the viewer has LEFT Series ([current]): removing the selected chip would leave the
+     * "no series" card without its tab (and TV focus on a detached node).
      */
-    fun visible(typeEnabled: (XtreamHubSection) -> Boolean, seriesAbsent: Boolean): List<XtreamHubSection> =
-        XtreamHubSection.entries.filter { typeEnabled(it) && !(it == XtreamHubSection.SERIES && seriesAbsent) }
+    fun visible(typeEnabled: (XtreamHubSection) -> Boolean, seriesAbsent: Boolean, current: XtreamHubSection? = null): List<XtreamHubSection> =
+        XtreamHubSection.entries.filter {
+            typeEnabled(it) && !(it == XtreamHubSection.SERIES && seriesAbsent && current != XtreamHubSection.SERIES)
+        }
 
     fun withSeriesAbsent(ids: Set<String>, accountId: String, absent: Boolean): Set<String> =
         if (absent) ids + accountId else ids - accountId
@@ -69,6 +73,8 @@ data class XtreamHubCategory(
     val load: LoadStatus = LoadStatus.Idle,
     /** More rows exist past [items] (item 5): the row's end-trigger calls loadMore. */
     val hasMore: Boolean = false,
+    /** Raw provider rows the windows have covered so far (the paging offset). 0 = unknown: fall back to [items].size. */
+    val rawOffset: Int = 0,
 ) {
     val loading: Boolean get() = load is LoadStatus.Loading
     val failed: Boolean get() = load is LoadStatus.Failed

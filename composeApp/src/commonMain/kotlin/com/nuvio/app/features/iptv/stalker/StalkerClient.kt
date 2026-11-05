@@ -223,7 +223,7 @@ object StalkerClient : IptvClient {
         setSeriesAbsent(
             acc,
             vod.isSuccess && StalkerCapabilities.seriesAbsent(
-                modulesSeriesDisabled = runCatching { sessionFor(acc).seriesModuleDisabled }.getOrNull(),
+                modulesSeriesDisabled = runCatchingCancellable { sessionFor(acc).seriesModuleDisabled }.getOrNull(),
                 xcEmptySection = emptySection,
                 xcAnsweredEmpty = failure == null,
                 xcFailedOtherwise = false,
@@ -246,6 +246,7 @@ object StalkerClient : IptvClient {
 
     private fun setSeriesAbsent(acc: XtreamAccount, absent: Boolean) = synchronized(verdictLock) {
         if (absent) seriesAbsentIds += acc.id else seriesAbsentIds -= acc.id
+        Unit
     }
 
     private suspend fun knownDialect(acc: XtreamAccount): StalkerSeriesDialect.Dialect? =

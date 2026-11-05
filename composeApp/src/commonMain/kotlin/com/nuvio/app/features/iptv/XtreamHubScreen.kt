@@ -183,8 +183,8 @@ fun XtreamHubScreen(
     val account = state.accounts.firstOrNull { it.id == state.selectedAccountId }
     val enabledSections = XtreamHubSections.visible(
         typeEnabled = { account?.typeEnabled(it.contentKey) != false },
-        // The chip only goes once the viewer has left Series (the "no series" card is what Series shows).
-        seriesAbsent = account?.id in state.seriesUnavailableIds && state.section != XtreamHubSection.SERIES,
+        seriesAbsent = account?.id in state.seriesUnavailableIds,
+        current = state.section,
     )
     val visibleCategories = if (account == null) state.categories else {
         // A custom group (F02) is the viewer's own row, not a provider category, so selections never hide it.
