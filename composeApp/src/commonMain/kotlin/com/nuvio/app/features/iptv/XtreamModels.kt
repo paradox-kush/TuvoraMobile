@@ -330,7 +330,9 @@ data class XtreamChannel(
     val hasArchive: Boolean,
     /** Panel-declared catch-up window in days; 0 = unknown (three real panels: 3 vs 7, so never assume). */
     val catchUpDays: Int = 0,
-    val streamUrl: String
+    val streamUrl: String,
+    /** An M3U channel's own catch-up (its `catchup-*` attributes); null for Xtream/Stalker and for M3U channels without. */
+    val m3uCatchUp: M3uCatchUpInfo? = null,
 )
 
 data class XtreamMovie(

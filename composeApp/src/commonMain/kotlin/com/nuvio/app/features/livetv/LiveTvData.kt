@@ -133,7 +133,6 @@ object LiveTvData {
         val channels = visibleGuideChannels(account, allChannels, currentStreamId = parsed.id)
 
         val currentCategory = channels.firstOrNull { it.streamId.toString() == parsed.id }?.categoryId
-        val supportsCatchUp = CatchUpEpgRepository.supportsCatchUp(account)
         val mapped = channels.map { ch ->
             LiveGuideChannel(
                 contentId = XtreamItemRegistry.liveId(account.id, ch.streamId),
@@ -142,7 +141,7 @@ object LiveTvData {
                 logo = ch.logo,
                 streamId = ch.streamId,
                 categoryId = ch.categoryId,
-                hasArchive = supportsCatchUp && ch.hasArchive,
+                hasArchive = CatchUpEpgRepository.supportsCatchUp(account, ch.m3uCatchUp) && ch.hasArchive,
                 catchUpDays = ch.catchUpDays,
                 entityId = com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(account.id, ch.name, ch.epgChannelId),
             )

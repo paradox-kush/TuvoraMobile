@@ -41,7 +41,10 @@ internal object M3uIngestMapping {
         val catId = M3UClient.categoryId(entry.group)
         return when (entry.kind) {
             M3UKind.LIVE -> M3uIngestRow.Channel(
-                IptvStreamRow(M3uIdentity.itemSid(entry.url, login), entry.name, entry.logo, entry.tvgId, catId, entry.url, entry.ext),
+                IptvStreamRow(
+                    M3uIdentity.itemSid(entry.url, login), entry.name, entry.logo, entry.tvgId, catId, entry.url, entry.ext,
+                    catchUp = entry.catchUp,
+                ),
                 catId,
             )
             M3UKind.MOVIE -> {
