@@ -217,9 +217,9 @@ class AndroidLivePauseCaptureTest {
 
     @Test
     fun `a stream with no pieces for the stall window fails as stalled`() = runBlocking {
-        // Program tables forever, never a picture: no piece can ever be cut.
-        val tables = Ts.concat(*Array(60) { Ts.concat(Ts.pat(), Ts.pmt()) })
-        serve { response(tables).throttleBody(188L * 2, 100, TimeUnit.MILLISECONDS) }
+        // Bytes keep arriving but never form a transport stream (no sync byte): no piece can ever be cut.
+        val noise = ByteArray(188 * 120) { 0x11 }
+        serve { response(noise).throttleBody(188L * 2, 100, TimeUnit.MILLISECONDS) }
         val run = capture().begin(request(url("/live/7.ts")))
         withTimeout(10_000) { while (hitCount("/live/7.ts") == 0) delay(10) }   // the capture is connected and reading
         delay(250)
