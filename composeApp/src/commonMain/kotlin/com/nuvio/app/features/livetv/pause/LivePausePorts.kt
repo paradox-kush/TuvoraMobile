@@ -31,6 +31,11 @@ data class LiveCaptureRequest(
     val keepMs: Long,
     val bitrateBps: Long?,
     val lowMemoryTier: Boolean,
+    /**
+     * THE attempt counter of this channel's capture, shared with every earlier capture of it (Retry included), so
+     * a viewer pressing Retry cannot make the provider hand out a fresh single-use link per press.
+     */
+    val reconnect: LiveCaptureReconnect = LiveCaptureReconnect(singleUseLink),
 )
 
 sealed interface LiveCaptureEvent {
@@ -47,6 +52,13 @@ sealed interface LiveCaptureEvent {
 /** One running capture. [dispose] cancels it and deletes its directory; safe to call twice. */
 interface LiveCaptureHandle {
     val events: Flow<LiveCaptureEvent>
+
+    /**
+     * Stops recording but KEEPS what is on disk, finished as an ended playlist, so a player still watching it can
+     * play to the end. [dispose] still deletes it later. Default: ports that cannot keep anything dispose.
+     */
+    fun stop() = dispose()
+
     fun dispose()
 }
 

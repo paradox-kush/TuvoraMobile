@@ -52,6 +52,7 @@ class LivePauseController(
     private var channel: LivePauseChannel? = null
     private var link: LiveLink? = null
     private var singleUse = false
+    private var reconnect = LiveCaptureReconnect(singleUseLink = false)
     private var bitrateBps: Long? = null
     private var engine: LivePauseEnginePort? = null
     private var caps = LivePauseCapabilities(diskBuffer = false, engineBackBuffer = false)
@@ -64,6 +65,7 @@ class LivePauseController(
     private var bufferFull = false
     private var generation = 0
     private var startJob: Job? = null
+    private var captureHandle: LiveCaptureHandle? = null
     private var effects = newEffects()
     private var rePauseArmed = false
     private var disposed = false
@@ -86,8 +88,11 @@ class LivePauseController(
         bitrateBps: Long? = null,
     ) {
         if (disposed) return
+        val retrying = rePauseArmed && this.contentId == contentId
         if (this.contentId != contentId) rePauseArmed = false
         endSession()
+        // One attempt counter per channel run: a Retry continues it, anything else starts over.
+        if (!retrying) reconnect = LiveCaptureReconnect(singleUseLink)
         this.contentId = contentId
         this.channel = channel
         this.link = link
@@ -153,7 +158,7 @@ class LivePauseController(
         when (val running = _state.value) {
             is LivePauseState.Shifted -> if (running.paused) onPlay() else onPause()
             is LivePauseState.Preparing -> if (wantPaused) onPlay() else onPause()
-            is LivePauseState.Failed -> Unit   // Retry / Live are the actions there
+            is LivePauseState.Failed -> onPlay()   // Play on a failed pause goes live (the surface may be released)
             LivePauseState.Off -> if (isPlaying) onPause() else onPlay()
         }
     }
@@ -212,8 +217,12 @@ class LivePauseController(
         if (disposed) return
         val running = _state.value
         wantPaused = false
-        if (running is LivePauseState.Off || running is LivePauseState.Failed) {
-            if (running is LivePauseState.Off) engine?.play()
+        if (running is LivePauseState.Failed) {
+            retune()   // a failed pause can leave nothing on screen: Play means "back to the picture"
+            return
+        }
+        if (running is LivePauseState.Off) {
+            engine?.play()
             return
         }
         if (running is LivePauseState.Preparing) return   // plays the moment the buffer is ready (attachEngine)
@@ -253,6 +262,7 @@ class LivePauseController(
             }
             else -> return
         }
+        if (target == running.positionMs) return   // a held key at the edge asks for the same seek again and again
         engine?.seekTo(target)
         _state.value = running.copy(
             positionMs = target,
@@ -279,6 +289,7 @@ class LivePauseController(
         if (disposed) return
         if (_state.value !is LivePauseState.Failed) return
         rePauseArmed = true
+        reconnect.onRetry()
         retune()
     }
 
@@ -313,6 +324,7 @@ class LivePauseController(
             keepMs = config.keepMs,
             bitrateBps = bitrateBps,
             lowMemoryTier = config.lowMemoryTier,
+            reconnect = reconnect,
         )
         startJob = scope.launch {
             val outcome = BoundedLoad.run(
@@ -322,6 +334,7 @@ class LivePauseController(
                 // The provider connection is released first (a max_connections=1 account), then the capture opens.
                 delay(config.captureStartDelayMs)
                 val handle = port.start(request)
+                captureHandle = handle
                 fx.onRevert(handle::dispose)
                 scope.launch {
                     handle.events.collect { event -> onCaptureEvent(mine, event, ready) }
@@ -379,9 +392,19 @@ class LivePauseController(
     }
 
     private fun fail(reason: LivePauseFailure) {
-        // The buffer is gone with its capture. What the player already holds may keep playing; Retry / Live decide.
-        effects.dispose()
-        effects = newEffects()
+        // Whatever else this session's capture says is stale: a Ready queued behind this Failed must not resurrect
+        // a Local surface on a dead capture.
+        generation++
+        val handle = captureHandle
+        if (handle != null && _surface.value is LivePauseSurface.Local) {
+            // The viewer is watching this buffer: stop recording but keep the files playable until Live / Retry /
+            // leaving ends the session (endSession disposes the capture and deletes them).
+            handle.stop()
+        } else {
+            effects.dispose()
+            effects = newEffects()
+            captureHandle = null
+        }
         _state.value = LivePauseState.Failed(reason)
     }
 
@@ -407,6 +430,7 @@ class LivePauseController(
         generation++
         startJob?.cancel()
         startJob = null
+        captureHandle = null
         effects.dispose()
         effects = newEffects()
         mechanism = LivePauseMechanism.UNAVAILABLE

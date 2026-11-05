@@ -185,7 +185,12 @@ class LivePauseControllerTest {
         if (!emitBeforeReady) { h.emit(LiveCaptureEvent.Ready("file:///x/index.m3u8", 2_000)); runCurrent() }
         h.emit(LiveCaptureEvent.Failed(reason)); runCurrent()
         assertEquals(LivePauseState.Failed(reason), r.controller.state.value, "reason $reason")
-        assertTrue(h.disposed >= 1, "a failed capture is disposed (deletes its directory)")
+        if (emitBeforeReady) {
+            assertTrue(h.disposed >= 1, "a capture that failed before a buffer existed is disposed (deletes its directory)")
+        } else {
+            assertTrue(h.stopped >= 1, "a capture that failed under a viewer is stopped")
+            assertEquals(0, h.disposed, "but the buffer being watched is kept until Live")
+        }
     }
 
     @Test
@@ -439,7 +444,7 @@ class LivePauseControllerTest {
     }
 
     @Test
-    fun `the play pause button changes the wish while preparing and does nothing once failed`() = runTest {
+    fun `the play pause button changes the wish while preparing and goes live once failed`() = runTest {
         val r = rig(); r.openLive()
         r.controller.togglePlayPause(isPlaying = true)   // pause
         assertIs<LivePauseState.Preparing>(r.controller.state.value)
@@ -447,7 +452,8 @@ class LivePauseControllerTest {
         advanceTimeBy(1_500); runCurrent()
         r.capture!!.handles.single().emit(LiveCaptureEvent.Failed(LivePauseFailure.STALLED)); runCurrent()
         r.controller.togglePlayPause(isPlaying = false)
-        assertEquals(LivePauseState.Failed(LivePauseFailure.STALLED), r.controller.state.value)
+        assertEquals(1, r.host.retunes, "Play on a failed pause goes live instead of doing nothing")
+        assertEquals(LivePauseState.Off, r.controller.state.value)
     }
 
     @Test
@@ -468,5 +474,97 @@ class LivePauseControllerTest {
         assertEquals("pause", r.engine.calls.last(), "provider catch-up: no buffer, no capture")
         assertEquals(0, r.capture!!.requests.size)
         assertIs<LivePauseState.Shifted>(r.controller.state.value)
+    }
+
+    // --- Opus final-review fixes -----------------------------------------------------------------
+
+    @Test
+    fun `a capture that fails right behind its first piece never shows a buffer`() = runTest {
+        val r = rig(); r.openLive()
+        r.controller.onPause()
+        advanceTimeBy(1_500); runCurrent()
+        val h = r.capture!!.handles.single()
+        h.emit(LiveCaptureEvent.Ready("file:///x/index.m3u8", 2_000))
+        h.emit(LiveCaptureEvent.Failed(LivePauseFailure.STALLED))   // both land before the start job resumes
+        runCurrent()
+        assertEquals(LivePauseState.Failed(LivePauseFailure.STALLED), r.controller.state.value)
+        assertEquals(LivePauseSurface.Released, r.controller.surface.value, "no Local surface on a dead capture")
+    }
+
+    @Test
+    fun `play on a failed pause goes live`() = runTest {
+        val r = rig(); r.openLive()
+        r.controller.onPause()
+        advanceTimeBy(1_500); runCurrent()
+        r.capture!!.handles.single().emit(LiveCaptureEvent.Failed(LivePauseFailure.NO_SPACE)); runCurrent()
+        r.controller.onPlay()
+        assertEquals(1, r.host.retunes)
+        assertEquals(LivePauseState.Off, r.controller.state.value)
+        assertEquals(LivePauseSurface.Live, r.controller.surface.value)
+    }
+
+    @Test
+    fun `a stall while shifted keeps the buffer being watched until live`() = runTest {
+        val r = rig(); shifted(r)
+        val h = r.capture!!.handles.single()
+        h.emit(LiveCaptureEvent.Failed(LivePauseFailure.STALLED)); runCurrent()
+        assertEquals(LivePauseState.Failed(LivePauseFailure.STALLED), r.controller.state.value)
+        assertIs<LivePauseSurface.Local>(r.controller.surface.value, "the player keeps its source")
+        assertEquals(1, h.stopped)
+        assertEquals(0, h.disposed, "the files under the player are not deleted")
+        r.controller.goLive()
+        assertTrue(h.disposed >= 1, "Live finally deletes them")
+    }
+
+    @Test
+    fun `dispose mid start deletes the capture that is already open`() = runTest {
+        val r = rig(); r.openLive()
+        r.controller.onPause()
+        advanceTimeBy(1_500); runCurrent()   // the capture is open, no piece yet
+        r.controller.dispose()
+        runCurrent()
+        assertTrue(r.capture!!.handles.single().disposed >= 1)
+    }
+
+    @Test
+    fun `retry and the capture share one bounded attempt counter`() = runTest {
+        val r = rig(); r.openLive(singleUse = true)
+        r.controller.onPause()
+        advanceTimeBy(1_500); runCurrent()
+        val first = r.capture!!.requests.single().reconnect
+        repeat(3) { first.onDrop() }   // the capture spent its reconnects, each minting a single-use link
+        r.capture.handles.single().emit(LiveCaptureEvent.Failed(LivePauseFailure.STALLED)); runCurrent()
+        r.controller.retry()
+        r.openLive(singleUse = true)   // the screen re-resolved the same channel
+        r.controller.onSnapshot(1_000, isPlaying = true)
+        advanceTimeBy(1_500); runCurrent()
+        val second = r.capture.requests.last().reconnect
+        assertTrue(first === second, "Retry continues the same counter")
+        assertIs<LiveCaptureReconnect.Decision.Retry>(second.onDrop(), "one more reconnect is allowed")
+        assertEquals(LiveCaptureReconnect.Decision.GiveUp, second.onDrop(), "and then it is over")
+    }
+
+    @Test
+    fun `another channel starts with a fresh attempt counter`() = runTest {
+        val r = rig(); r.openLive(singleUse = true)
+        r.controller.onPause()
+        advanceTimeBy(1_500); runCurrent()
+        val first = r.capture!!.requests.single().reconnect
+        r.openLive(singleUse = true, id = "c2")
+        r.controller.onPause()
+        advanceTimeBy(1_500); runCurrent()
+        assertTrue(first !== r.capture.requests.last().reconnect)
+    }
+
+    @Test
+    fun `a held scrub key does not repeat the same seek`() = runTest {
+        val r = rig(); shifted(r)
+        r.capture!!.handles.single().emit(LiveCaptureEvent.Buffered(60_000, false)); runCurrent()
+        r.controller.seekInWindow(0)
+        r.controller.seekInWindow(0)
+        r.controller.seekInWindow(-1_000)
+        r.controller.seekInWindow(30_000)
+        r.controller.seekInWindow(30_000)
+        assertEquals(listOf("seek:30000"), r.engine.calls)
     }
 }

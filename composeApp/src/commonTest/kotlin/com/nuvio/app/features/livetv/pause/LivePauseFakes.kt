@@ -33,7 +33,9 @@ class FakeLiveHost : LivePauseHost {
 class FakeCaptureHandle : LiveCaptureHandle {
     val channel = Channel<LiveCaptureEvent>(Channel.UNLIMITED)
     var disposed = 0
+    var stopped = 0
     override val events: Flow<LiveCaptureEvent> = channel.receiveAsFlow()
+    override fun stop() { stopped++ }
     override fun dispose() {
         disposed++
         channel.close()
