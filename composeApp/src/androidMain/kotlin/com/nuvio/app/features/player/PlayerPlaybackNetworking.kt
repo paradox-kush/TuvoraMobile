@@ -136,6 +136,16 @@ internal object PlayerPlaybackNetworking {
         }
     }
 
+    /**
+     * The playback stack for the live pause capture (same DNS, TLS policy, timeouts and Sentry breadcrumbs as the
+     * player). [retryConnectionFailures] false for a single-use link: a silent OkHttp re-send would re-open a spent URL.
+     */
+    fun captureCallFactory(retryConnectionFailures: Boolean): Call.Factory =
+        playbackCallFactory { if (!retryConnectionFailures) retryOnConnectionFailure(false) }
+
+    /** The request headers the player would send for [headers]: sanitised, with the default User-Agent when none is set. */
+    fun captureHeaders(headers: Map<String, String>): Map<String, String> = withDefaultUserAgent(headers)
+
     fun createDataSourceFactory(
         context: Context,
         defaultHeaders: Map<String, String> = emptyMap(),
