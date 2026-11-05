@@ -154,6 +154,7 @@ internal class AndroidLivePauseCapture(
             while (true) {
                 try {
                     if (mint) {
+                        if (!reconnect.tryMint()) return fail(LivePauseFailure.PROVIDER_REFUSED)   // the run's links are spent
                         link = request.minter.mint()
                         mint = false
                     }

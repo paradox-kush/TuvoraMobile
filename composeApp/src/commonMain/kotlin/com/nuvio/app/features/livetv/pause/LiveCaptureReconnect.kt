@@ -35,6 +35,7 @@ class LiveCaptureReconnect(
     /** A piece or segment landed: the provider is serving, so the counter starts over. */
     fun onProgress() {
         attempts = 0
+        mintsLeft = MAX_MINTS
     }
 
     /**
@@ -45,8 +46,27 @@ class LiveCaptureReconnect(
         attempts = minOf(attempts, maxAttemptsWithoutProgress - 1)
     }
 
-    private companion object {
-        const val BASE_DELAY_MS = 2_000L
-        const val MAX_DELAY_MS = 8_000L
+    /** Fresh single-use links this channel run may still ask the provider for (first opens AND reconnects). */
+    var mintsLeft: Int = MAX_MINTS
+        private set
+
+    /**
+     * Spends one fresh link. Every mint of a single-use link goes through here, so neither reconnects nor Retry
+     * presses can make the provider hand out links without end. Reusable links cost nothing.
+     */
+    fun tryMint(): Boolean {
+        if (!singleUseLink) return true
+        if (mintsLeft <= 0) return false
+        mintsLeft--
+        return true
+    }
+
+    /** Whether a Retry can still open anything: false once a single-use run spent its links. */
+    val canRetry: Boolean get() = !singleUseLink || mintsLeft > 0
+
+    companion object {
+        const val MAX_MINTS = 4
+        private const val BASE_DELAY_MS = 2_000L
+        private const val MAX_DELAY_MS = 8_000L
     }
 }

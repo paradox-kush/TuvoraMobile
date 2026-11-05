@@ -142,7 +142,8 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropert
     /// NuvioPlayerLiveCacheBridge (Kotlin, hand-mirrored): live pause / rewind. The cache plan is written on the
     /// mpv queue (never Main) and starts the `demuxer-cache-state` observation; the window is read from the shadow.
     func applyLiveCacheProperties(names: [String], values: [String]) {
-        ensurePlayerViewController().applyLiveCacheProperties(names, values)
+        // Never create a player view controller here: after teardown this would leave an orphan VC.
+        playerVC?.applyLiveCacheProperties(names, values)
     }
     func getSeekableRanges() -> String { playerVC?.propertyShadow.seekableRangesText ?? "" }
     func syncVideoSurfaceLayout(width: Double, height: Double) {

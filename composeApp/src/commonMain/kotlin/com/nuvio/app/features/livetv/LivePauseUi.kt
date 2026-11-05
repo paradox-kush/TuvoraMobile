@@ -101,7 +101,9 @@ internal fun LivePauseStatus(
                     color = Color.White,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s16)) {
-                    PauseAction(stringResource(Res.string.compose_livetv_pause_retry), colors.accent, onRetry)
+                    if ((state as? LivePauseState.Failed)?.retryable != false) {
+                        PauseAction(stringResource(Res.string.compose_livetv_pause_retry), colors.accent, onRetry)
+                    }
                     PauseAction(stringResource(Res.string.compose_livetv_pause_go_live), Color.White, onGoLive)
                 }
             }

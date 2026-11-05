@@ -118,11 +118,12 @@ final class LivePauseRemoteTests: XCTestCase {
         press(.left, settle: 1.5)
         let afterFirst = offsetSeconds() ?? -1
         let focusAfterFirst = focusedId
+        XCTAssertGreaterThanOrEqual(afterFirst, afterResume + 8, "the first LEFT step did not land (\(afterResume) -> \(afterFirst))")
         attach("4a-after-first-left")
         press(.left, settle: 2.5)
         XCTAssertTrue(chip.waitForExistence(timeout: 5), "the chip vanished after stepping back")
         let afterSteps = offsetSeconds() ?? 0
-        XCTAssertGreaterThan(afterSteps, afterResume + 8, "two LEFT steps did not rewind further (\(afterResume) -> first \(afterFirst) with focus on \(focusAfterFirst) -> \(afterSteps), focus now \(focusedId))")
+        XCTAssertGreaterThanOrEqual(afterSteps, afterResume + 18, "two LEFT steps (10 s each) did not both land (\(afterResume) -> first \(afterFirst) with focus on \(focusAfterFirst) -> \(afterSteps), focus now \(focusedId))")
         attach("4-stepped-back")
 
         // The scrub bar and the chip are focusable and visibly highlighted when focused.

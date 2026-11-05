@@ -69,6 +69,10 @@ class LivePauseController(
     private var effects = newEffects()
     private var rePauseArmed = false
     private var disposed = false
+    // A scrub target the engine has not applied yet (mpv seeks asynchronously): it outranks snapshots until the
+    // engine lands near it or [SEEK_HOLD_MS] passes, so a stale playhead can neither undo a step nor fake "caught up".
+    private var pendingSeek: Long? = null
+    private var pendingSeekAtMs = 0L
 
     /** True when the pause button drives this controller (otherwise the caller keeps the plain pause). */
     val handlesPlayPause: Boolean get() = !disposed && activeMechanism() != LivePauseMechanism.UNAVAILABLE
@@ -138,6 +142,20 @@ class LivePauseController(
             }
             LivePauseMechanism.ENGINE_BACK_BUFFER -> {
                 val window = engine?.liveWindow() ?: return
+                val pending = pendingSeek
+                if (pending != null) {
+                    val landed = kotlin.math.abs(window.positionMs - pending) <= SEEK_LAND_TOLERANCE_MS
+                    val expired = clock.monotonicMs() - pendingSeekAtMs > SEEK_HOLD_MS
+                    if (landed || expired) {
+                        pendingSeek = null
+                    } else {
+                        _state.value = engineShifted(window).copy(
+                            positionMs = pending,
+                            behindLiveMs = (window.endMs - pending).coerceAtLeast(0L),
+                        )
+                        return
+                    }
+                }
                 if (!wantPaused && isPlaying && window.behindLiveMs <= config.edgeSlackMs) {
                     finishSession()   // caught up with the live edge on its own
                     return
@@ -264,6 +282,8 @@ class LivePauseController(
         }
         if (target == running.positionMs) return   // a held key at the edge asks for the same seek again and again
         engine?.seekTo(target)
+        pendingSeek = target
+        pendingSeekAtMs = clock.monotonicMs()
         _state.value = running.copy(
             positionMs = target,
             behindLiveMs = (running.windowEndMs - target).coerceAtLeast(0L),
@@ -287,9 +307,19 @@ class LivePauseController(
     /** From Failed: go live and pause again once the picture is back. */
     fun retry() {
         if (disposed) return
-        if (_state.value !is LivePauseState.Failed) return
-        rePauseArmed = true
+        val failed = _state.value as? LivePauseState.Failed ?: return
+        if (!failed.retryable) {
+            retune()   // nothing left to open a capture with: Retry is not offered, a stray press just goes live
+            return
+        }
         reconnect.onRetry()
+        if (mechanism == LivePauseMechanism.DISK_BUFFER && _surface.value is LivePauseSurface.Released) {
+            // Nothing is on screen and the live source is already released: restart the capture directly (its
+            // first open is the one mint). A retune first would mint a link only to drop it again.
+            startDisk()
+            return
+        }
+        rePauseArmed = true
         retune()
     }
 
@@ -405,7 +435,7 @@ class LivePauseController(
             effects = newEffects()
             captureHandle = null
         }
-        _state.value = LivePauseState.Failed(reason)
+        _state.value = LivePauseState.Failed(reason, retryable = reconnect.canRetry)
     }
 
     // --- ending a session ------------------------------------------------------------------------
@@ -437,6 +467,7 @@ class LivePauseController(
         wantPaused = false
         bufferedMs = 0L
         bufferFull = false
+        pendingSeek = null
     }
 
     // --- mpv cache budget ------------------------------------------------------------------------
@@ -482,6 +513,14 @@ class LivePauseController(
     )
 
     private fun newEffects() = EffectScope(onRevertFailure)
+
+    companion object {
+        /** How long a scrub target outranks the engine's snapshots (mpv applies seeks asynchronously). */
+        const val SEEK_HOLD_MS = 3_000L
+
+        /** How close the engine's playhead must come to a scrub target for the seek to count as applied. */
+        const val SEEK_LAND_TOLERANCE_MS = 1_500L
+    }
 
     /** A capture failure carried through the start work, so [BoundedLoad] reports it as a failed (not empty) load. */
     private class CaptureFailure(val reason: LivePauseFailure) : RuntimeException("live pause capture failed: $reason")

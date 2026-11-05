@@ -20,7 +20,7 @@ sealed interface LivePauseState {
     ) : LivePauseState
 
     /** Shown with Retry and Live. */
-    data class Failed(val reason: LivePauseFailure) : LivePauseState
+    data class Failed(val reason: LivePauseFailure, val retryable: Boolean = true) : LivePauseState
 }
 
 enum class LivePauseFailure { NO_SPACE, PROVIDER_REFUSED, STALLED, SEQUENCE_RESET, UNSUPPORTED_STREAM, TIMED_OUT }

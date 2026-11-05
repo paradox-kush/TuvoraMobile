@@ -230,10 +230,8 @@ class LivePauseControllerTest {
     }
 
     @Test
-    fun `retry goes live then pauses again once playing`() = runTest {
-        val r = rig(); r.openLive()
-        r.controller.onPause()
-        advanceTimeBy(1_500); runCurrent()
+    fun `retry while watching the buffer goes live then pauses again once playing`() = runTest {
+        val r = rig(); shifted(r)
         r.capture!!.handles.single().emit(LiveCaptureEvent.Failed(LivePauseFailure.NO_SPACE)); runCurrent()
         r.controller.retry()
         assertEquals(1, r.host.retunes)
@@ -566,5 +564,85 @@ class LivePauseControllerTest {
         r.controller.seekInWindow(30_000)
         r.controller.seekInWindow(30_000)
         assertEquals(listOf("seek:30000"), r.engine.calls)
+    }
+
+    // --- review round 2 (Opus): link budget per Retry, pending seek vs stale snapshots ----------------
+
+    @Test
+    fun `retry with the live source released restarts the capture without a retune`() = runTest {
+        val r = rig(); r.openLive(singleUse = true)
+        r.controller.onPause()
+        advanceTimeBy(1_500); runCurrent()
+        r.capture!!.handles.single().emit(LiveCaptureEvent.Failed(LivePauseFailure.STALLED)); runCurrent()
+        assertEquals(LivePauseSurface.Released, r.controller.surface.value)
+        r.controller.retry()
+        advanceTimeBy(1_500); runCurrent()
+        assertEquals(0, r.host.retunes, "a retune would mint a link just to throw it away")
+        assertEquals(2, r.capture.requests.size, "Retry restarts the capture once")
+        assertIs<LivePauseState.Preparing>(r.controller.state.value)
+    }
+
+    @Test
+    fun `retry is not offered once the single use link budget is spent`() = runTest {
+        val r = rig(); r.openLive(singleUse = true)
+        r.controller.onPause()
+        advanceTimeBy(1_500); runCurrent()
+        val counter = r.capture!!.requests.single().reconnect
+        while (counter.tryMint()) Unit   // every open and reconnect of this channel run spent a fresh link
+        r.capture.handles.single().emit(LiveCaptureEvent.Failed(LivePauseFailure.STALLED)); runCurrent()
+        assertFalse(assertIs<LivePauseState.Failed>(r.controller.state.value).retryable)
+        r.controller.retry()
+        assertEquals(1, r.capture.requests.size, "no new capture")
+        assertEquals(1, r.host.retunes, "Retry falls back to going live")
+    }
+
+    @Test
+    fun `the mint budget is shared by first opens and reconnects and refilled by progress`() {
+        val c = LiveCaptureReconnect(singleUseLink = true)
+        var mints = 0
+        while (c.tryMint()) mints++
+        assertEquals(LiveCaptureReconnect.MAX_MINTS, mints)
+        assertFalse(c.canRetry)
+        c.onProgress()
+        assertTrue(c.tryMint(), "a landed piece proves the provider serves: the budget refills")
+        assertTrue(LiveCaptureReconnect(singleUseLink = false).canRetry, "reusable links never run out")
+    }
+
+    @Test
+    fun `a stale engine snapshot does not overwrite a pending seek`() = runTest {
+        val r = rig(config = mpvConfig); r.openLive(caps = mpv)
+        r.engine.window = LiveSeekWindow(100_000, 160_000, 150_000)
+        r.controller.onPause()
+        r.controller.seekInWindow(140_000)
+        r.controller.onSnapshot(150_000, isPlaying = false)   // mpv has not applied the seek yet
+        val s = assertIs<LivePauseState.Shifted>(r.controller.state.value)
+        assertEquals(140_000, s.positionMs, "the target holds until the engine lands")
+        r.controller.seekInWindow(s.positionMs - 10_000)   // a second LEFT steps from the target
+        assertEquals("seek:130000", r.engine.calls.last())
+        r.engine.window = LiveSeekWindow(100_000, 161_000, 130_400)
+        r.controller.onSnapshot(130_400, isPlaying = false)
+        assertEquals(130_400, assertIs<LivePauseState.Shifted>(r.controller.state.value).positionMs, "landed")
+    }
+
+    @Test
+    fun `a stale snapshot near the edge does not end the session while a seek is pending`() = runTest {
+        val r = rig(config = mpvConfig); r.openLive(caps = mpv)
+        r.engine.window = LiveSeekWindow(100_000, 160_000, 159_000)
+        r.controller.onPause()
+        r.controller.onPlay()
+        r.controller.seekInWindow(150_000)
+        r.controller.onSnapshot(159_500, isPlaying = true)   // the old playhead, at the edge
+        assertIs<LivePauseState.Shifted>(r.controller.state.value, "not caught up: the viewer just went back 10 s")
+    }
+
+    @Test
+    fun `a seek the engine never applies stops holding after the deadline`() = runTest {
+        val r = rig(config = mpvConfig); r.openLive(caps = mpv)
+        r.engine.window = LiveSeekWindow(100_000, 160_000, 150_000)
+        r.controller.onPause()
+        r.controller.seekInWindow(140_000)
+        r.clock.mono += LivePauseController.SEEK_HOLD_MS + 1
+        r.controller.onSnapshot(150_000, isPlaying = false)
+        assertEquals(150_000, assertIs<LivePauseState.Shifted>(r.controller.state.value).positionMs)
     }
 }
