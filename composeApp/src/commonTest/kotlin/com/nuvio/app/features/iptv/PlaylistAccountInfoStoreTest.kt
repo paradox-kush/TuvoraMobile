@@ -88,4 +88,35 @@ class PlaylistAccountInfoStoreTest {
         assertFalse(AccountInfoFreshnessPolicy.isFresh(0, AccountInfoFreshnessPolicy.FAILURE_TTL_MS, succeeded = false))
         assertTrue(AccountInfoFreshnessPolicy.isFresh(0, AccountInfoFreshnessPolicy.FAILURE_TTL_MS, succeeded = true))
     }
+
+    // --- B171: the details page's one lookup is an inspection; a cancellation is never a cached failure ---
+
+    @Test
+    fun `an inspection fetch runs as read-only inspection and the list's fetch does not`() = runBlocking {
+        val seen = mutableListOf<com.nuvio.app.core.sources.DeviceSourceAccess?>()
+        val s = PlaylistAccountInfoStore(
+            fetch = { seen += kotlin.coroutines.coroutineContext[com.nuvio.app.core.sources.DeviceSourceAccessElement]?.access; info },
+            clock = { now },
+        )
+        s.infoFor(xtream)
+        s.infoFor(xtream, force = true, inspect = true)
+        assertEquals(listOf(null, com.nuvio.app.core.sources.DeviceSourceAccess.INSPECT), seen)
+    }
+
+    @Test
+    fun `a forced inspection bypasses the six hour freshness window`() = runBlocking {
+        store.infoFor(xtream)
+        store.infoFor(xtream, force = true, inspect = true)
+        assertEquals(2, calls)
+    }
+
+    @Test
+    fun `a cancelled fetch propagates and is not remembered as a failed check`() = runBlocking {
+        val s = PlaylistAccountInfoStore(fetch = { throw kotlinx.coroutines.CancellationException("scope gone") }, clock = { now })
+        val thrown = runCatching { s.infoFor(xtream) }.exceptionOrNull()
+        assertTrue(thrown is kotlinx.coroutines.CancellationException)
+        assertNull(s.cached("k1"))
+        answer = info
+        assertEquals(info, store.infoFor(xtream), "no 45 s failure entry was left behind")
+    }
 }

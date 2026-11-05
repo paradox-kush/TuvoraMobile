@@ -25,7 +25,8 @@ internal object AccountInfoFreshnessPolicy {
  */
 internal class PlaylistAccountInfoStore(
     private val fetch: suspend (XtreamAccount) -> XtreamAccountInfo? = { account ->
-        IptvClient.forAccount(account).accountInfo(account).getOrNull()
+        IptvClient.forAccount(account).accountInfo(account)
+            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()
     },
     private val clock: () -> Long = { TraktPlatformClock.nowEpochMs() },
 ) {
@@ -40,12 +41,17 @@ internal class PlaylistAccountInfoStore(
 
     fun cached(key: String): XtreamAccountInfo? = entries.value[key]?.info
 
-    /** The panel's answer for [account], from the cache while it is fresh. Null when unreachable or there is no panel. */
-    suspend fun infoFor(account: XtreamAccount, force: Boolean = false): XtreamAccountInfo? {
+    /**
+     * The panel's answer for [account], from the cache while it is fresh. Null when unreachable or there is no panel.
+     * A failed answer is cached for [AccountInfoFreshnessPolicy.FAILURE_TTL_MS] only; a cancelled one is not cached at all.
+     */
+    suspend fun infoFor(account: XtreamAccount, force: Boolean = false, inspect: Boolean = false): XtreamAccountInfo? {
         if (account.sourceType.isM3u()) return null
         val cached = entries.value[account.id]
         if (!force && cached != null && AccountInfoFreshnessPolicy.isFresh(cached.atMs, clock(), cached.ok)) return cached.info
-        val info = fetch(account)
+        // [inspect]: the user opened this playlist's details, so the one read-only lookup is allowed even for a
+        // playlist turned off on this device (B171). The list's background lookups never pass it.
+        val info = if (inspect) com.nuvio.app.core.sources.DeviceSources.inspecting { fetch(account) } else fetch(account)
         // A failure is remembered for seconds (not hours) and never erases what the panel last said.
         entries.update { it + (account.id to Entry(info ?: cached?.info, clock(), ok = info != null)) }
         if (info != null) knownFlow.update { it + (account.id to info) }

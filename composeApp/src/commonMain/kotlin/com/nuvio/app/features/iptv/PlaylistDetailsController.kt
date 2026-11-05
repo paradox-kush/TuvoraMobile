@@ -59,7 +59,7 @@ internal class PlaylistDetailsController(
             if (!hasPanel) return@launch
             // Bounded: a panel that never answers ends as "Couldn't reach the provider", not "Checking…" forever.
             val outcome = BoundedLoad.run(LoadSurface.SETTINGS, isEmpty = { it == null }, report = mapOf("row" to "details_account")) {
-                store.infoFor(account)
+                store.infoFor(account, force = true, inspect = true)
             }
             _live.update { it.copy(info = outcome.valueOrNull() ?: it.info, load = outcome.status) }
         }

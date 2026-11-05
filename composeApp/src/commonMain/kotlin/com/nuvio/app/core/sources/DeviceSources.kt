@@ -11,12 +11,15 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
-import kotlinx.coroutines.CancellationException
+import co.touchlab.kermit.Logger
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 object DeviceSources {
+    private val log = Logger.withTag("DeviceSources")
     private var activated = false
     val isActive: Boolean get() = activated
     val showSettings = kotlinx.coroutines.flow.MutableStateFlow(false)
@@ -42,6 +45,7 @@ object DeviceSources {
                 now = { Clock.System.now().toEpochMilliseconds() }, platform = if (com.nuvio.app.core.sync.MOBILE_SYNC_PLATFORM == "tvos") "tv" else if (com.nuvio.app.isIos) "ios" else "android", localOnly = auth.isLocalOnly,
                 automaticSetupName = com.nuvio.app.core.sync.syncDeviceName().take(120),
                 existingInstallation = com.nuvio.app.core.sync.SyncClientIdentity.sourceSetupUpgradeEligible,
+                onRefused = ::logRefusal,
             )
             key = next
         }
@@ -51,11 +55,25 @@ object DeviceSources {
     val epoch: Long get() = if (activated) engine().state.value.availabilityEpoch else 0
     fun allows(kind: String, ref: String): Boolean = !activated || (AuthRepository.state.value != com.nuvio.app.core.auth.AuthState.Loading && engine().allows(ProfileRepository.activeProfileId,kind,ref))
     fun allowsAddon(url: String): Boolean = !activated || (AuthRepository.state.value != com.nuvio.app.core.auth.AuthState.Loading && engine().allowsAddonRequest(ProfileRepository.activeProfileId,url))
-    fun guard(kind: String, ref: String) { if (!allows(kind,ref)) throw CancellationException("Source disabled on this device") }
+    private fun logRefusal(kind: String, mode: String) { log.i { "source refused on this device: kind=$kind mode=$mode" } }
+    private fun refuse(kind: String): Nothing { val mode = engine().state.value.mode; logRefusal(kind, mode); throw SourceDisabledOnDeviceException(kind, mode) }
+    fun guard(kind: String, ref: String) { if (!allows(kind,ref)) refuse(kind) }
+    /** [guard] for suspend callers: honours [verifying] / [inspecting] for the current request. */
+    suspend fun checkAccess(kind: String, ref: String) {
+        val access = currentCoroutineContext()[DeviceSourceAccessElement]?.access ?: DeviceSourceAccess.DISCOVERY
+        if (!activated || access == DeviceSourceAccess.INSPECT) return
+        if (access == DeviceSourceAccess.DISCOVERY) guard(kind, ref)
+        else if (!engine().permits(access, ProfileRepository.activeProfileId, kind, ref)) refuse(kind)
+    }
     suspend fun <T> guarded(kind: String, ref: String, block: suspend () -> T): T {
         if (!activated) return block()
-        return engine().guarded(ProfileRepository.activeProfileId,kind,ref,block)
+        val access = currentCoroutineContext()[DeviceSourceAccessElement]?.access ?: DeviceSourceAccess.DISCOVERY
+        return engine().guarded(ProfileRepository.activeProfileId,kind,ref,access,block)
     }
-    fun guardAddon(url: String) { if (!allowsAddon(url)) throw CancellationException("Source disabled on this device") }
+    /** The add/edit form's live check of a playlist: allowed before the device has a choice for it. */
+    suspend fun <T> verifying(block: suspend () -> T): T = withContext(DeviceSourceAccessElement(DeviceSourceAccess.VERIFY)) { block() }
+    /** A read-only account lookup the user opened (expiry, connections): allowed for a source turned off here. */
+    suspend fun <T> inspecting(block: suspend () -> T): T = withContext(DeviceSourceAccessElement(DeviceSourceAccess.INSPECT)) { block() }
+    fun guardAddon(url: String) { if (!allowsAddon(url)) refuse("addon") }
     suspend fun refresh() = engine().refresh(ProfileRepository.activeProfileId)
 }

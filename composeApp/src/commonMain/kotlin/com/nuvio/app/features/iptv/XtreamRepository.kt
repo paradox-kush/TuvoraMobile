@@ -371,7 +371,7 @@ object XtreamRepository : IptvCatalog {
         scope.launch {
             _uiState.update { it.copy(isValidating = true, error = null) }
             // Xtream verifies creds against player_api.php; M3U verifies by ingesting the playlist.
-            (verifyForTest?.invoke(account) ?: IptvClient.forAccount(account).verify(account))
+            com.nuvio.app.core.sources.DeviceSources.verifying { verifyForTest?.invoke(account) ?: IptvClient.forAccount(account).verify(account) }
                 .onSuccess {
                     // Profile switched while verifying — saving now would write this playlist
                     // into the wrong profile's list. Drop it; re-add on the right profile.
@@ -506,7 +506,7 @@ object XtreamRepository : IptvCatalog {
             // changed, so it is not checked at all. See sameConnectionAs.
             val verified =
                 if (!PlaylistEditVerifyPolicy.needsVerify(old, account)) Result.success(Unit)
-                else verifyForTest?.invoke(account) ?: IptvClient.forAccount(account).verify(account)
+                else com.nuvio.app.core.sources.DeviceSources.verifying { verifyForTest?.invoke(account) ?: IptvClient.forAccount(account).verify(account) }
             // Decision 2026-09-27: a failed check saves anyway and warns (never discards the edit).
             val outcome = PlaylistEditVerifyPolicy.outcome(verified, account.sourceType)
             // UX11: the row warning carries the mapped sentence, never the raw exception text.
