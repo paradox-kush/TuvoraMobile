@@ -1,5 +1,7 @@
 package com.nuvio.app.features.recordings.api
 
+import com.nuvio.app.core.sync.AppForegroundMonitor
+import com.nuvio.app.core.sync.foregroundEvents
 import com.nuvio.app.features.recordings.internal.IosRecordingAlarms
 import com.nuvio.app.features.recordings.internal.IosRecordingCapabilities
 import com.nuvio.app.features.recordings.internal.IosRecordingFiles
@@ -31,16 +33,22 @@ object RecordingsIos {
                 lowSpacePolicy = { LowSpacePolicy.STOP }, // TODO(wave 3): read the user's setting
             ),
         )
-        recordingsSweepOnForeground()
+        // Lifecycle-bound, no timer: one sweep per return to the foreground (the monitor also reports the current state on subscribe).
+        // The monitor reads UIApplication state, so it is collected on Main; the sweep itself runs off it.
+        CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
+            AppForegroundMonitor.events().foregroundEvents().collect { scope.launch { sweepNow() } }
+        }
     }
 }
 
-/** Call when the app becomes active: loads state on first use, recovers a dead run, runs overdue schedules. */
-fun recordingsSweepOnForeground() {
+private suspend fun sweepNow() {
     val port = RecordingsAccess.current() ?: return
-    CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
-        val now = (NSDate().timeIntervalSince1970 * 1000).toLong()
-        port.start(now)
-        port.sweepOverdue(now)
-    }
+    val now = (NSDate().timeIntervalSince1970 * 1000).toLong()
+    port.start(now)
+    port.sweepOverdue(now)
+}
+
+/** Runs the foreground sweep now (loads state on first use, recovers a dead run, runs overdue schedules). Idempotent. */
+fun recordingsSweepOnForeground() {
+    CoroutineScope(SupervisorJob() + Dispatchers.Default).launch { sweepNow() }
 }

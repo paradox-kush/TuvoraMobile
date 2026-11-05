@@ -1,5 +1,6 @@
 package com.nuvio.app.features.recordings.api
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -31,10 +32,14 @@ private object AndroidRecordingCapabilities {
 object RecordingsAndroid {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    @Volatile
+    private var appContext: Context? = null
+
     @Synchronized
     fun install(context: Context) {
-        if (RecordingsAccess.current() != null) return
         val app = context.applicationContext
+        appContext = app
+        if (RecordingsAccess.current() != null) return
         val files = AndroidRecordingFiles(
             stateDir = File(app.filesDir, "recordings-state"),
             recordingsDir = File(app.filesDir, "recordings"),
@@ -72,6 +77,35 @@ object RecordingsAndroid {
             }
         }
     }
+
+    /**
+     * True the first time it is asked on this install (and only then), so the screen offers "Allow exact alarms"
+     * once and never nags. Called only when an alarm actually came back inexact.
+     */
+    fun takeExactAlarmPromptTurn(): Boolean {
+        val prefs = appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE) ?: return false
+        if (prefs.getBoolean(KEY_EXACT_PROMPT_TAKEN, false)) return false
+        prefs.edit().putBoolean(KEY_EXACT_PROMPT_TAKEN, true).apply()
+        return true
+    }
+
+    /** Opens Settings > Alarms & reminders for this app. False when this device has no such screen (or below Android 12). */
+    fun openExactAlarmSettings(): Boolean {
+        val context = appContext ?: return false
+        val intent = AndroidRecordingAlarms.exactAlarmSettingsIntent(context) ?: return false
+        if (intent.resolveActivity(context.packageManager) == null) return false
+        return try {
+            context.startActivity(intent)
+            true
+        } catch (e: ActivityNotFoundException) {
+            false
+        } catch (e: SecurityException) {
+            false
+        }
+    }
+
+    private const val PREFS = "recordings_prefs"
+    private const val KEY_EXACT_PROMPT_TAKEN = "exact_alarm_prompt_taken"
 
     private fun isOnline(context: Context): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true

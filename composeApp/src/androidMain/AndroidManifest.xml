@@ -9,6 +9,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
+    <!-- Package visibility (API 30+): lets resolveActivity() see the system screen that allows exact alarms. -->
+    <queries>
+        <intent>
+            <action android:name="android.settings.REQUEST_SCHEDULE_EXACT_ALARM" />
+        </intent>
+    </queries>
+
     <application>
         <service
             android:name="com.nuvio.app.features.downloads.DownloadsTransferJobService"
