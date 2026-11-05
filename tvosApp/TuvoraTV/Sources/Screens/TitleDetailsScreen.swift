@@ -154,7 +154,7 @@ struct TitleDetailsScreen: View {
             HStack(spacing: dp(12)) {
                 PlayPill(title: playLabel(meta)) { openSources(meta: meta, video: isSeries ? resumeEpisode(meta) : nil) }
                     .prefersDefaultFocus(true, in: namespace)
-                CircleIconButton(icon: saved ? "md_check_circle" : "library_add_plus") {
+                CircleIconButton(icon: saved ? "md_check_circle" : "library_add_plus", identifier: "title.save") {
                     Task { try? await TvTitle.shared.toggleSaved(meta: meta); saved = TvTitle.shared.isSaved(meta: meta) }
                 }
                 // The new-episode reminder lives in the + button's long-press menu (the app's secondary-action
@@ -361,6 +361,7 @@ struct PlayPill: View {
 struct CircleIconButton: View {
     let icon: String
     var filledWhite = false   // NuvioTV: watched-selected circle is white
+    var identifier: String? = nil
     let action: () -> Void
     @Environment(\.nuvio) private var colors
     @FocusState private var focused: Bool
@@ -376,6 +377,7 @@ struct CircleIconButton: View {
         .buttonStyle(PlainNoChromeButtonStyle())
         .focused($focused)
         .reportsFocus(focused)
+        .accessibilityIdentifier(identifier ?? "")
     }
 }
 
