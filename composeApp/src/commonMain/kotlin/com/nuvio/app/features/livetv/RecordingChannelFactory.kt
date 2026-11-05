@@ -14,10 +14,17 @@ internal object RecordingChannelFactory {
     const val DEFAULT_ARCHIVE_DAYS = 3
 
     /** The stream's own request headers: the playlist's User-Agent override rides along (see StreamUserAgentPolicy). */
-    fun headers(userAgent: String?): Map<String, String> = TODO("wave 3")
+    fun headers(userAgent: String?): Map<String, String> =
+        userAgent?.trim()?.takeIf { it.isNotEmpty() }?.let { mapOf("User-Agent" to it) } ?: emptyMap()
 
     /** The `catchup-type` word that `M3uCatchUp.catchUpType` reads back to the same type. */
-    fun m3uTypeName(type: M3uCatchUpType): String = TODO("wave 3")
+    fun m3uTypeName(type: M3uCatchUpType): String = when (type) {
+        M3uCatchUpType.APPEND -> "append"
+        M3uCatchUpType.DEFAULT -> "default"
+        M3uCatchUpType.SHIFT -> "shift"
+        M3uCatchUpType.FLUSSONIC -> "flussonic"
+        M3uCatchUpType.XTREAM -> "xtream"
+    }
 
     fun xtream(
         contentId: String,
@@ -33,7 +40,14 @@ internal object RecordingChannelFactory {
         hasArchive: Boolean,
         catchUpDays: Int,
         serverOffsetMs: Long?,
-    ): RecordingChannel = TODO("wave 3")
+    ): RecordingChannel = RecordingChannel(
+        key = contentId, sourceId = accountId, name = name, logo = logo, liveUrl = liveUrl, headers = headers(userAgent),
+        catchUp = if (!hasArchive) null else RecordingCatchUp.Xtream(
+            baseUrl = baseUrl, username = username, password = password, streamId = streamId,
+            days = if (catchUpDays > 0) catchUpDays else DEFAULT_ARCHIVE_DAYS,
+            containerExtension = null, serverOffsetMs = serverOffsetMs,
+        ),
+    )
 
     fun m3u(
         contentId: String,
@@ -44,7 +58,12 @@ internal object RecordingChannelFactory {
         userAgent: String?,
         info: M3uCatchUpInfo?,
         offsetMs: Long,
-    ): RecordingChannel = TODO("wave 3")
+    ): RecordingChannel = RecordingChannel(
+        key = contentId, sourceId = accountId, name = name, logo = logo, liveUrl = liveUrl, headers = headers(userAgent),
+        catchUp = info?.let {
+            RecordingCatchUp.M3u(type = m3uTypeName(it.type), source = it.source, days = it.days.coerceAtLeast(1), offsetMs = offsetMs)
+        },
+    )
 
     /** A playlist type with no catch-up we can save from (Stalker links are single-use). */
     fun withoutCatchUp(
@@ -54,5 +73,7 @@ internal object RecordingChannelFactory {
         logo: String?,
         liveUrl: String,
         userAgent: String?,
-    ): RecordingChannel = TODO("wave 3")
+    ): RecordingChannel = RecordingChannel(
+        key = contentId, sourceId = accountId, name = name, logo = logo, liveUrl = liveUrl, headers = headers(userAgent), catchUp = null,
+    )
 }

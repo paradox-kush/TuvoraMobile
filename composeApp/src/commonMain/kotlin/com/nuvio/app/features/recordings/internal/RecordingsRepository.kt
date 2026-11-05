@@ -15,6 +15,7 @@ import com.nuvio.app.features.recordings.api.RecordingProblem
 import com.nuvio.app.features.recordings.api.RecordingSaver
 import com.nuvio.app.features.recordings.api.RecordingSchedule
 import com.nuvio.app.features.recordings.api.RecordingStatus
+import com.nuvio.app.features.recordings.api.RecordingFileUri
 import com.nuvio.app.features.recordings.api.RecordingsPort
 import com.nuvio.app.features.recordings.api.RecordingsState
 import com.nuvio.app.features.recordings.api.SaveOutcome
@@ -80,7 +81,11 @@ class RecordingsRepository(
 
     private val ledgerJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    override fun playableUri(recording: Recording): String? = null // TODO(wave 3)
+    override fun playableUri(recording: Recording): String? {
+        if (recording.status != RecordingStatus.DONE) return null
+        val path = files.pathFor(recording.fileName)
+        return if (files.sizeOf(path) > 0L) RecordingFileUri.fromPath(path) else null
+    }
 
     private fun elapsedMs(): Long = origin.elapsedNow().inWholeMilliseconds
 
@@ -240,7 +245,7 @@ class RecordingsRepository(
         listings: List<ListingInfo>,
         nowMs: Long,
     ): List<RecordingSchedule> = locked(nowMs) {
-        val id = "series:${channel.key}:${SeriesExpansion.normalizeTitle(title)}"
+        val id = SeriesRuleIds.of(channel.key, title)
         val rule = SeriesRule(id = id, channel = channel, title = title, keepLast = keepLast)
         edit(series = { list -> list.filterNot { it.id == id } + rule })
         val created = expandLocked(rule, listings, nowMs)
