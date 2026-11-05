@@ -74,6 +74,12 @@ interface RecordingFiles {
 
     /** Deletes the file at [path] (no error when it is gone). */
     suspend fun delete(path: String)
+
+    /** Deletes the directory at [path] with everything in it (a live recording's pieces). Default: [delete]. */
+    suspend fun deleteTree(path: String) = delete(path)
+
+    /** Total size of the files under the directory [path], 0 when it does not exist. Default: [sizeOf]. */
+    fun treeSizeOf(path: String): Long = sizeOf(path)
 }
 
 data class RecordingsState(

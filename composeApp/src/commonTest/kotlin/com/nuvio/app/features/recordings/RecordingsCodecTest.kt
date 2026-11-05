@@ -24,6 +24,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -230,5 +231,14 @@ class RecordingsCodecTest {
         val rows = listOf(StoredRow.of(schedule("s1")), StoredRow.of(schedule("s2")))
         val rebuilt = rows.reconcile(listOf(schedule("s2"))) { it.id }
         assertEquals(listOf("s2"), rebuilt.mapNotNull { it.value?.id })
+    }
+
+    @Test
+    fun `a single-use channel survives the round trip and an older state without the flag reads as reusable`() {
+        val doc = RecordingsDocument(schedules = listOf(StoredRow.of(schedule("s1", CaptureMode.LIVE, ch = channel().copy(singleUse = true)))))
+        val text = RecordingsCodec.encode(doc)
+        assertTrue(RecordingsCodec.decode(text)!!.scheduleValues.single().channel.singleUse)
+        val old = text.replace("\"singleUse\":true", "\"x\":0")
+        assertFalse(RecordingsCodec.decode(old)!!.scheduleValues.single().channel.singleUse)
     }
 }

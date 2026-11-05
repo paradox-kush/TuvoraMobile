@@ -85,6 +85,8 @@ data class RecordingChannel(
     val liveUrl: String,
     val headers: Map<String, String> = emptyMap(),
     val catchUp: RecordingCatchUp? = null,
+    /** The provider hands out a link that is spent on its first open (Stalker create_link): a live capture mints one per open. */
+    val singleUse: Boolean = false,
 )
 
 @Serializable
