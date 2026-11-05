@@ -86,6 +86,12 @@ internal class StalkerSession(
     private val panelGuard: PanelHostGuard = IptvPanelGuard.guard,
 ) {
     private var token: String? = null
+    /**
+     * UX147: whether the portal's `get_modules` answer lists `series` as off (null = never asked, or an
+     * answer we do not recognise). Only the module-gated bootstrap asks, so unknown is the common case.
+     */
+    internal var seriesModuleDisabled: Boolean? = null
+        private set
     private var resolvedEndpoint: String? = null   // e.g. "/portal.php"
     /**
      * The STB identity this portal accepted. Starts at the one we have always sent (or the Model / HW
@@ -464,6 +470,8 @@ internal class StalkerSession(
                 }
                 StalkerBootstrapPolicy.Step.GET_MODULES -> {
                     runCatchingCancellable { rawRequestAt(endpoint, mapOf("type" to "stb", "action" to "get_modules")) }
+                        .getOrNull()?.jsOrNull()
+                        ?.let { seriesModuleDisabled = StalkerCapabilities.seriesModuleDisabled(it) }
                 }
             }
         }

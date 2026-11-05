@@ -37,7 +37,14 @@ struct IptvHubScreen: View {
                         onSearchAgain: { searchSheet = true },
                         onClose: { TvIptvHubSearch.shared.close(); chipFocus = "search" })
                 } else if let error = hub.loadError {
-                    NuvioStateMessage(title: "Couldn't load this playlist", message: error.detail) { TvIptvBrowse.shared.retry() }
+                    if IptvLoadFailurePolicy.shared.offersRetry(kind: error.kind) {
+                        NuvioStateMessage(title: "Couldn't load this playlist", message: error.detail) { TvIptvBrowse.shared.retry() }
+                    } else {
+                        // UX164: the portal answered that it has nothing in this section. A fact, not a failure:
+                        // plain words, no Retry (asking again gets the same answer), no exception name.
+                        NuvioStateMessage(title: noSectionTitle(hub.section),
+                                          message: "Its portal says there is nothing in this section, so there is nothing to retry.")
+                    }
                 } else if hub.section == .live {
                     LiveGuideView(accountId: hub.selectedAccountId ?? hub.accounts[0].id,
                                   categories: hub.categories.map { ($0.id, $0.name) },
@@ -104,9 +111,19 @@ struct IptvHubScreen: View {
         }
     }
 
+    private func noSectionTitle(_ section: XtreamHubSection) -> String {
+        switch section {
+        case .series: return "This provider has no series"
+        case .movies: return "This provider has no movies"
+        default: return "This provider has no live channels"
+        }
+    }
+
     private func header(_ hub: XtreamHubUiState) -> some View {
         HStack(spacing: dp(8)) {
-            ForEach([(XtreamHubSection.live, "Live TV"), (.movies, "Movies"), (.series, "Series")], id: \.1) { section, title in
+            // UX147: a portal that positively has no series loses the Series chip (unknown keeps it).
+            ForEach([(XtreamHubSection.live, "Live TV"), (.movies, "Movies"), (.series, "Series")]
+                .filter { !($0.0 == .series && hub.seriesUnavailable && hub.section != .series) }, id: \.1) { section, title in
                 HubChip(title: title, selected: hub.section == section) { TvIptvBrowse.shared.open(section: section) }
                     .accessibilityIdentifier("hubchip.\(title)")
             }
