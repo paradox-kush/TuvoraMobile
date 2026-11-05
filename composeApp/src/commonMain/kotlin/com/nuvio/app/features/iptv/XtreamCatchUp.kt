@@ -39,25 +39,8 @@ object XtreamCatchUp {
      * replay for every provider that works today.
      */
     fun formatStart(startMs: Long, serverOffsetMs: Long? = null): String {
-        val shiftedMs = startMs + (serverOffsetMs ?: 0L)
-        val totalSecs = shiftedMs.floorDiv(1_000L)
-        val days = totalSecs.floorDiv(86_400L)
-        val secsOfDay = totalSecs.mod(86_400L)
-        // Hinnant civil_from_days
-        val z = days + 719_468L
-        val era = (if (z >= 0) z else z - 146_096L) / 146_097L
-        val doe = z - era * 146_097L
-        val yoe = (doe - doe / 1_460L + doe / 36_524L - doe / 146_096L) / 365L
-        val y = yoe + era * 400L
-        val doy = doe - (365L * yoe + yoe / 4L - yoe / 100L)
-        val mp = (5L * doy + 2L) / 153L
-        val d = doy - (153L * mp + 2L) / 5L + 1L
-        val m = if (mp < 10L) mp + 3L else mp - 9L
-        val year = if (m <= 2L) y + 1L else y
-        val hh = secsOfDay / 3_600L
-        val mm = (secsOfDay % 3_600L) / 60L
-        fun pad(n: Long) = n.toString().padStart(2, '0')
-        return "${year.toString().padStart(4, '0')}-${pad(m)}-${pad(d)}:${pad(hh)}-${pad(mm)}"
+        val c = EpochCivil.fromEpochMs(startMs, serverOffsetMs ?: 0L)
+        return "${EpochCivil.pad(c.year, 4)}-${EpochCivil.pad(c.month)}-${EpochCivil.pad(c.day)}:${EpochCivil.pad(c.hour)}-${EpochCivil.pad(c.minute)}"
     }
 
     /** What the guide can offer for one programme. */
