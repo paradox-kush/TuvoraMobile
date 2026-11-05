@@ -59,6 +59,9 @@ struct IptvHubScreen: View {
             TvIptvBrowse.shared.open(section: hub?.section ?? .live)
             for await next in TvIptvBrowse.shared.state {
                 hub = next
+                // The hub's state changes what can take focus (empty, loading, error): let the shell check
+                // that something still holds it (B193: an empty or stuck hub left the remote dead).
+                ContentFocusActivity.contentChanged()
                 // Simulator smoke hook: `-smokeIptvOpen <movies|series>` opens the first loaded title's details.
                 let args = AppArguments.list
                 if details == nil, let i = args.firstIndex(of: "-smokeIptvOpen"), i + 1 < args.count {

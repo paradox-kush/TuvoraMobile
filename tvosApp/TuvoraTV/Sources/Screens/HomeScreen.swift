@@ -148,7 +148,10 @@ struct HomeScreen: View {
                     if entries.isEmpty && !rows.isLoading && continueWatching.isEmpty {
                         let hint = TvHome.shared.emptyHomeHint()
                         NuvioStateMessage(title: StoreCopy.emptyHomeTitle(hint),
-                                          message: rows.errorMessage ?? StoreCopy.emptyHomeMessage(hint))
+                                          message: rows.errorMessage ?? StoreCopy.emptyHomeMessage(hint),
+                                          actionTitle: "Set up sources", actionId: "home.empty.setupSources") {
+                            DeepLinkCenter.shared.openSetupCode = true
+                        }
                             .frame(height: dp(200))
                     }
                 }
