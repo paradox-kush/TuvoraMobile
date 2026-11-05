@@ -16,6 +16,8 @@ fun initializeAndroidProcessStorage(context: Context) {
     // B205: pending device claims (own preferences file, never wiped with the account data). Process-scoped,
     // because the claim coordinator starts with the feature registration, before MainActivity's startup tasks.
     com.nuvio.app.features.iptv.PendingDeviceClaimStorage.initialize(context)
+    // Recordings: alarm receivers and the foreground service run without an Activity, so the one repository is built per process, here.
+    com.nuvio.app.features.recordings.api.RecordingsAndroid.install(context)
 }
 
 /**
@@ -44,5 +46,7 @@ fun registerAndroidStartup() {
     // P3: periodic background refresh of overdue IPTV playlists (idempotent — KEEP).
     AndroidStartup.registerTask { IptvRefreshWorker.schedule(it) }
     // ACTION_OPEN_DOCUMENT launcher for the IPTV M3U picker (bound in onCreate, pre-STARTED).
+    // Recordings: load state, recover a dead run, hand overdue schedules to the foreground service (off main).
+    AndroidStartup.registerTask { com.nuvio.app.features.recordings.api.RecordingsAndroid.onAppStart(it) }
     AndroidStartup.registerBinder { M3UFilePicker.bindActivity(it) }
 }

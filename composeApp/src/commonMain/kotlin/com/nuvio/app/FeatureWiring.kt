@@ -23,6 +23,9 @@ import com.nuvio.app.core.contracts.LiveTvContentAccess
 import com.nuvio.app.features.livetv.LiveTvContentImpl
 import com.nuvio.app.core.contracts.HomeAnnouncementsSectionAccess
 import com.nuvio.app.features.announcements.api.AnnouncementsFeature
+import com.nuvio.app.features.recordings.api.LocalRecordings
+import com.nuvio.app.features.recordings.api.RecordingsAccess
+import com.nuvio.app.features.recordings.api.installPlatformRecordings
 
 /**
  * THE one firewall exception (rules doc Rule 1 / R2b): the only non-fork file allowed to name fork
@@ -64,6 +67,8 @@ fun registerFeatureContributions() {
     LiveTvContentAccess.register(LiveTvContentImpl)
     // In-app announcements card on Home (lazy: the repository touches storage on first refresh).
     HomeAnnouncementsSectionAccess.register(AnnouncementsFeature.homeSection())
+    // Recordings: the platform builds its repository once and publishes it (receivers and the service read it there).
+    installPlatformRecordings()
     FeatureRegistry.markInitialized()
 }
 
@@ -80,6 +85,7 @@ fun installFeatures(content: @Composable () -> Unit) {
     CompositionLocalProvider(
         LocalRevertFailureSink provides ::onRevertFailure,
         LocalIptvCatalog provides XtreamRepository,   // S3a — stable object, safe in a static local
+        LocalRecordings provides RecordingsAccess.current(),
         // Later seams add their ports here: LocalSportsData, LocalClock, …
     ) { content() }
 }
