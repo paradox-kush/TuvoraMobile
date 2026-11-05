@@ -18,6 +18,7 @@ import com.nuvio.app.features.player.PlayerLaunch
 import com.nuvio.app.features.profiles.ProfileRepository
 import com.nuvio.app.features.trakt.TraktPlatformClock
 import com.tuvora.tvos.player.TvPlayerSession
+import com.tuvora.tvos.player.TvResolvedSource
 import kotlinx.coroutines.delay
 
 /**
@@ -38,6 +39,8 @@ internal class TvReplay(
     private val ticket: Long,
     private val channel: LiveGuideChannel,
     private val programme: XtreamProgram,
+    /** The outside world (guide database, link resolver, player): the live app's by default, a fake in tests. */
+    private val io: TvReplayIo = LiveTvReplayIo(channel),
 ) : TvReplaySupervisor {
     private var run: TvReplayRun? = null
     private var finished = false
@@ -77,23 +80,25 @@ internal class TvReplay(
         return start(begun)
     }
 
-    private suspend fun start(begun: M3uReplayWalk.Begun?): TvReplayStep {
+    internal suspend fun start(begun: M3uReplayWalk.Begun?): TvReplayStep {
         begun ?: return if (fence.isCurrent(ticket)) noRecording() else stale()
         val started = TvReplayRun(ladder, channel.name, programme.title, programme.startMs, programme.endMs, begun)
         run = started
         return open(started, started.url)
     }
 
-    override suspend fun supervise(session: TvPlayerSession): TvReplayStep? {
+    override suspend fun supervise(session: TvPlayerSession): TvReplayStep? = superviseOn(TvSessionPlayback(session))
+
+    internal suspend fun superviseOn(session: TvReplayPlayback): TvReplayStep? {
         val current = run ?: return null
         if (finished) return null
         while (true) {
             if (session.isClosed || !fence.isCurrent(ticket)) { release(); return null }
             ensureNextRow(current)
-            val s = session.state.value
+            val s = session.snapshot()
             val move = current.observe(
                 isPlaying = s.isPlaying, positionMs = s.positionMs, isEnded = s.isEnded, errorMessage = s.errorMessage,
-                next = nextRow, nowMs = TraktPlatformClock.nowEpochMs(),
+                next = nextRow, nowMs = io.nowMs(),
             )
             when (move) {
                 TvReplayRun.Move.Wait -> delay(TICK_MS)
@@ -118,15 +123,12 @@ internal class TvReplay(
         val endMs = current.programmeEndMs
         if (nextRowFor == endMs) return
         nextRowFor = endMs
-        nextRow = runCatching { LiveTvData.replayRowAt(channel.contentId, endMs) }.getOrNull()
+        nextRow = runCatching { io.nextRow(endMs) }.getOrNull()
     }
 
     /** Resolves [url] like a live link (bounded) and wraps it in a replay session. */
     private suspend fun open(started: TvReplayRun, url: String): TvReplayStep {
-        val source = BoundedLoad.run(
-            surface = LoadSurface.LIVE_RESOLVE,
-            report = mapOf("source_type" to LiveTvData.sourceTypeOf(channel.contentId), "kind" to "catchup_source"),
-        ) { LiveTvData.catchUpSource(channel.contentId, url) }.valueOrNull()
+        val source = io.resolve(url)
         if (!fence.isCurrent(ticket)) { release(); return stale() }
         if (source == null) {
             // This link's host did not resolve in time: the next link on the ladder, else a failure with Retry.
@@ -144,7 +146,7 @@ internal class TvReplay(
             sourceHeaders = source.headers,
             streamTitle = title,
             streamType = "live",
-            providerName = LivePlaybackAccess.current().accountNameFor(channel.contentId) ?: "IPTV",
+            providerName = io.providerName(),
             providerAddonId = "xtream",
             logo = channel.logo,
             contentType = "live",
@@ -153,7 +155,7 @@ internal class TvReplay(
             parentMetaType = "tv",
             liveReplay = LiveReplayLaunch(programme.title, programme.startMs, programme.endMs),
         )
-        return TvReplayStep(TvPlayerSession(launch).also { it.setReplayBar(started.barOriginMs, started.barSpanMs, started.barProgrammeStartMs, started.barProgrammeEndMs) }, null)
+        return TvReplayStep(io.newSession(launch).also { it.setReplayBar(started.barOriginMs, started.barSpanMs, started.barProgrammeStartMs, started.barProgrammeEndMs) }, null)
     }
 
     private fun failed(move: TvReplayRun.Move.Failed): TvReplayStep {
@@ -164,7 +166,7 @@ internal class TvReplay(
     /** The replay ended: back on the live channel it belongs to. Without a live session the guide says so instead. */
     private suspend fun ended(notice: String?): TvReplayStep {
         release()
-        val live = runCatching { TvIptvBrowse.playChannel(channel.contentId, channel.name, channel.logo) }.getOrNull()
+        val live = runCatching { io.playLive() }.getOrNull()
         return TvReplayStep(live, notice ?: if (live == null) TvReplayPolicy.REPLAY_ENDED_TEXT else null, rejoinsLive = live != null)
     }
 
@@ -184,4 +186,51 @@ internal class TvReplay(
     private companion object {
         const val TICK_MS = 1_000L
     }
+}
+
+/** What a replay needs from outside, so its handover logic tests without the guide database, network or engine. */
+internal interface TvReplayIo {
+    /** The playable address of [url], resolved under the live-resolve deadline; null when it did not resolve in time. */
+    suspend fun resolve(url: String): TvResolvedSource?
+    suspend fun nextRow(endMs: Long): M3uReplayContinuation.Row?
+    suspend fun playLive(): TvPlayerSession?
+    fun newSession(launch: PlayerLaunch): TvPlayerSession
+    fun nowMs(): Long
+    fun providerName(): String
+}
+
+internal class LiveTvReplayIo(private val channel: LiveGuideChannel) : TvReplayIo {
+    override suspend fun resolve(url: String): TvResolvedSource? =
+        BoundedLoad.run(
+            surface = LoadSurface.LIVE_RESOLVE,
+            report = mapOf("source_type" to LiveTvData.sourceTypeOf(channel.contentId), "kind" to "catchup_source"),
+        ) { LiveTvData.catchUpSource(channel.contentId, url) }.valueOrNull()?.let { TvResolvedSource(it.url, it.headers) }
+
+    override suspend fun nextRow(endMs: Long) = LiveTvData.replayRowAt(channel.contentId, endMs)
+    override suspend fun playLive() = TvIptvBrowse.playChannel(channel.contentId, channel.name, channel.logo)
+    override fun newSession(launch: PlayerLaunch) = TvPlayerSession(launch)
+    override fun nowMs() = TraktPlatformClock.nowEpochMs()
+    override fun providerName() = LivePlaybackAccess.current().accountNameFor(channel.contentId) ?: "IPTV"
+}
+
+/** What the supervisor reads off the session it follows. */
+internal data class TvReplaySnapshot(val isPlaying: Boolean, val positionMs: Long, val isEnded: Boolean, val errorMessage: String?)
+
+/** The session being followed. The supervisor reads and retitles it; it must NOT close one it hands over (B229). */
+internal interface TvReplayPlayback {
+    val isClosed: Boolean
+    /** Only for a session the supervisor owns outright; a handover leaves closing to Swift's PlaybackCoordinator. */
+    fun close()
+    fun snapshot(): TvReplaySnapshot
+    fun retitle(title: String)
+    fun setReplayBar(originMs: Long, spanMs: Long, programmeStartMs: Long, programmeEndMs: Long)
+}
+
+internal class TvSessionPlayback(private val session: TvPlayerSession) : TvReplayPlayback {
+    override val isClosed get() = session.isClosed
+    override fun close() = session.close()
+    override fun snapshot() = session.state.value.let { TvReplaySnapshot(it.isPlaying, it.positionMs, it.isEnded, it.errorMessage) }
+    override fun retitle(title: String) = session.retitle(title)
+    override fun setReplayBar(originMs: Long, spanMs: Long, programmeStartMs: Long, programmeEndMs: Long) =
+        session.setReplayBar(originMs, spanMs, programmeStartMs, programmeEndMs)
 }
