@@ -208,4 +208,57 @@ class SourceLaneIsolationTest {
         assertTrue(pluginResults.single().isFailure)
         assertTrue(received.filter { it.addonId != "plugin:p" }.all { !it.error.isNullOrBlank() }, "failures are reported, not shown as empty")
     }
+
+    @Test
+    fun theSafetyDeadlineEndsAnIptvLaneWhoseOtherLanesNeverSettle() = runTest {
+        // a plugin lane parked by a paused search never completes othersSettled; the chip must still end
+        var group: AddonStreamGroup? = null
+        val job = launch {
+            group = IptvMatchSourceLane.resolveGroup(src, Job()) { delay(Long.MAX_VALUE); emptyList() }
+        }
+        advanceUntilIdle()
+        job.join()
+        assertEquals(SourceLaneGuard.IPTV_SAFETY_DEADLINE_MS, currentTime)
+        assertFalse(group!!.isLoading)
+        assertTrue(group!!.iptvPending)
+        assertNull(group!!.error)
+    }
+
+    @Test
+    fun theSafetyDeadlineOutlastsEveryLegitimatePluginAndAddonLane() {
+        assertTrue(SourceLaneGuard.IPTV_SAFETY_DEADLINE_MS > 120_000L, "above the longest plugin scraper (120 s)")
+        assertTrue(SourceLaneGuard.IPTV_SAFETY_DEADLINE_MS > SourceLaneGuard.LANE_DEADLINE_MS)
+    }
+
+    @Test
+    fun anInnerTimeoutIsShownAsTimedOutNotAsSettingsChanged() = runTest {
+        val interrupted = SourceLaneGuard.run(deadlineMs = null) { kotlinx.coroutines.withTimeout(5) { delay(100) } }.exceptionOrNull()!!
+        val timedOut = SourceLaneTimeoutException(1).laneFailureMessage()
+        assertEquals(timedOut, interrupted.laneFailureMessage())
+        val settings = SourceLaneGuard.run(deadlineMs = null) { throw kotlinx.coroutines.CancellationException("Source choices changed") }.exceptionOrNull()!!
+        assertTrue(settings.laneFailureMessage() != timedOut)
+    }
+
+    /** The direct IPTV/Stalker path: state is already isAnyLoading=true when registration runs. */
+    @Test
+    fun aProviderSideCancellationDuringDirectIptvRegistrationEndsNotLoading() = runTest {
+        var isAnyLoading = true
+        val job = launch {
+            val rebuilt = registerDirectIptv { throw kotlinx.coroutines.CancellationException("Source choices changed") }
+            isAnyLoading = false // the caller then shows its empty state
+            assertFalse(rebuilt)
+        }
+        job.join()
+        assertFalse(isAnyLoading, "old runCatchingUnlessCancelled ended the coroutine silently and left loading=true")
+        assertFalse(job.isCancelled)
+    }
+
+    @Test
+    fun aHungDirectIptvRegistrationEndsAtTheLaneDeadline() = runTest {
+        var result: Boolean? = null
+        launch { result = registerDirectIptv { delay(Long.MAX_VALUE); true } }
+        advanceUntilIdle()
+        assertEquals(false, result)
+        assertEquals(SourceLaneGuard.LANE_DEADLINE_MS, currentTime)
+    }
 }

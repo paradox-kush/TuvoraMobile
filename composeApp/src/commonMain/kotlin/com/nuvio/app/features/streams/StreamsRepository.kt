@@ -205,9 +205,9 @@ object StreamsRepository {
                 _uiState.value = StreamsUiState(requestToken = requestToken, isAnyLoading = true)
                 activeJob?.cancel()
                 activeJob = scope.launch {
-                    val rebuilt = SourceLaneGuard.run {
+                    val rebuilt = registerDirectIptv {
                         MetaDetailsRepository.ensureXtreamStreamRegistered(videoId, forceFresh = isStalkerSource)
-                    }.getOrDefault(false)
+                    }
                     ensureActive()
                     val retriedStreams = if (rebuilt) streamProvider.directStreamItems(videoId) else emptyList()
                     val retried = retriedStreams.firstOrNull()
@@ -577,7 +577,6 @@ object StreamsRepository {
                             addonLogo = addon.manifest.logoUrl,
                         )
                     }
-                    group.error?.let { log.w { "Failed to fetch streams from $displayName: $it" } }
                     publishCompletion(StreamLoadCompletion.Addon(group))
                 }
             }
@@ -630,7 +629,7 @@ object StreamsRepository {
                                 StreamLoadCompletion.PluginScraper(
                                     addonId = providerGroup.addonId,
                                     streams = emptyList(),
-                                    error = error.message ?: getString(Res.string.streams_failed_to_load_scraper, scraper.name),
+                                    error = error.laneFailureMessage() ?: getString(Res.string.streams_failed_to_load_scraper, scraper.name),
                                 )
                             },
                         )

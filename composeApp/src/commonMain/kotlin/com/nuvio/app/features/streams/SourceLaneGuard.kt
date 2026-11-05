@@ -1,6 +1,8 @@
 package com.nuvio.app.features.streams
 
+import co.touchlab.kermit.Logger
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
@@ -39,6 +41,15 @@ internal object SourceLaneGuard {
     /** Matches the 60 s whole-call HTTP limit; legitimately slow media-server lookups (15-20 s) fit inside it. */
     const val LANE_DEADLINE_MS = 60_000L
 
+    /**
+     * Safety net for IPTV/source-match lanes, measured from when the lane starts. They deliberately
+     * outwait add-ons and plugins (B63), so they end when the other lanes settle - but plugin lanes
+     * have no deadline of their own (the runtime owns it) and a paused plugin search can park them
+     * (PlayerStreamsRepository.stopSourcesLoading), so the IPTV chip needs a bound that cannot depend on
+     * them. Above the longest legitimate plugin scraper (120 s on TV).
+     */
+    const val IPTV_SAFETY_DEADLINE_MS = 150_000L
+
     private class Held<T>(val value: T)
 
     suspend fun <T> run(deadlineMs: Long? = LANE_DEADLINE_MS, block: suspend () -> T): Result<T> {
@@ -73,10 +84,13 @@ internal object SourceLaneGuard {
  */
 internal suspend fun Throwable.laneFailureMessage(): String? = when (this) {
     is SourceLaneTimeoutException -> localized(Res.string.streams_source_timed_out, "This source did not answer in time.")
-    is SourceLaneInterruptedException -> localized(
-        Res.string.streams_source_interrupted,
-        "Your source settings changed while this was loading. Reopen the title to try again.",
-    )
+    is SourceLaneInterruptedException ->
+        if (cause is TimeoutCancellationException) {
+            localized(Res.string.streams_source_timed_out, "This source did not answer in time.")
+        } else localized(
+            Res.string.streams_source_interrupted,
+            "Your source settings changed while this was loading. Reopen the title to try again.",
+        )
     else -> message
 }
 
@@ -85,10 +99,13 @@ private suspend fun localized(resource: org.jetbrains.compose.resources.StringRe
     try {
         getString(resource)
     } catch (error: CancellationException) {
-        throw error
+        currentCoroutineContext().ensureActive() // only the caller leaving propagates
+        fallback
     } catch (error: Throwable) {
         fallback
     }
+
+private val addonLog = Logger.withTag("AddonLane")
 
 /** An add-on's lane: Loaded, or Failed with a user-facing reason; never an unfinished lane. */
 internal suspend fun resolveAddonGroup(
@@ -99,6 +116,7 @@ internal suspend fun resolveAddonGroup(
     SourceLaneGuard.run { load() }.fold(
         onSuccess = { streams -> AddonStreamGroup(addonName = addonName, addonId = addonId, streams = streams, isLoading = false) },
         onFailure = { err ->
+            addonLog.w(err) { "Failed to fetch streams from $addonName" }
             AddonStreamGroup(
                 addonName = addonName,
                 addonId = addonId,
@@ -108,3 +126,16 @@ internal suspend fun resolveAddonGroup(
             )
         },
     )
+
+private val directIptvLog = Logger.withTag("DirectIptvLane")
+
+/**
+ * The direct IPTV/Stalker registration path (a namespaced id resolves to one stream after the screen
+ * is already `isAnyLoading = true`). A provider-side cancellation or a hang must end as "not
+ * registered" so the caller shows its empty state; it used to end the coroutine silently and leave the
+ * screen loading forever. Only the caller's own cancellation propagates.
+ */
+internal suspend fun registerDirectIptv(register: suspend () -> Boolean): Boolean =
+    SourceLaneGuard.run { register() }
+        .onFailure { directIptvLog.w(it) { "Direct IPTV registration failed" } }
+        .getOrDefault(false)
