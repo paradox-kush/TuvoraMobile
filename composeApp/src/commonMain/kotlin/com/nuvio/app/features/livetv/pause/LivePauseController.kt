@@ -4,6 +4,7 @@ import com.nuvio.app.features.common.lifecycle.EffectScope
 import com.nuvio.app.features.iptv.BoundedLoad
 import com.nuvio.app.features.iptv.LoadOutcome
 import com.nuvio.app.features.iptv.LoadSurface
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -13,6 +14,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.ContinuationInterceptor
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * Live pause / rewind for ONE player instance (multiview-ready: nothing here is global, everything is keyed by
@@ -362,7 +367,7 @@ class LivePauseController(
             instanceId = instanceId,
             firstLink = live,
             singleUseLink = singleUse,
-            minter = minter,
+            minter = sessionMinter(mine),
             keepMs = config.keepMs,
             bitrateBps = bitrateBps,
             lowMemoryTier = config.lowMemoryTier,
@@ -407,6 +412,24 @@ class LivePauseController(
                 }
             }
         }
+    }
+
+    /**
+     * The minter a capture of session [mine] gets. [minter] resolves "the channel on screen", so a mint that
+     * straddles a zap is wrong whichever channel it answers for: it would put the new channel's link into the old
+     * buffer, or spend a single-use link of a session that is over. The session is checked on the controller's
+     * dispatcher before the provider is asked and again before the link is handed over; a stale one is dropped.
+     */
+    private fun sessionMinter(mine: Int) = LiveLinkMinter {
+        val home: CoroutineContext = scope.coroutineContext[ContinuationInterceptor] ?: EmptyCoroutineContext
+        withContext(home) { ensureSession(mine) }
+        val minted = minter.mint()
+        withContext(home) { ensureSession(mine) }
+        minted
+    }
+
+    private fun ensureSession(mine: Int) {
+        if (mine != generation || disposed) throw CancellationException("live pause session $mine ended")
     }
 
     private fun onCaptureEvent(forGeneration: Int, event: LiveCaptureEvent, ready: CompletableDeferred<LiveCaptureEvent.Ready>) {
