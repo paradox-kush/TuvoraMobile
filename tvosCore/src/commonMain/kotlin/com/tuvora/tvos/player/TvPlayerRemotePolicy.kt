@@ -21,6 +21,9 @@ enum class TvRemoteAction {
     HideControls,
     ZapPrevious,
     ZapNext,
+    /** Live with a time shift available: one step back / forward through the window (LivePauseScrub). */
+    LiveStepBack,
+    LiveStepForward,
     OpenTracks,
     ClosePanel,
     CloseOverlay,
@@ -41,6 +44,10 @@ data class TvPlayerRemoteContext(
     val canZap: Boolean = false,
     /** A Skip / Start over button is up over the hidden controls and holds focus (it takes Select). */
     val actionButtonUp: Boolean = false,
+    /** Live only: the player can pause and rewind this channel, so the clickpad edges step through the window. */
+    val livePauseAvailable: Boolean = false,
+    /** Live pause failed: Play/Pause retries it, as it does a playback failure. */
+    val livePauseFailed: Boolean = false,
 )
 
 /**
@@ -71,7 +78,7 @@ object TvPlayerRemotePolicy {
         }
         TvRemoteInput.PlayPause -> when {
             ctx.scrubbing -> TvRemoteAction.CommitScrub
-            ctx.hasError -> TvRemoteAction.Retry
+            ctx.hasError || ctx.livePauseFailed -> TvRemoteAction.Retry
             else -> TvRemoteAction.TogglePlayPause
         }
         TvRemoteInput.Select -> when {
@@ -83,6 +90,8 @@ object TvPlayerRemotePolicy {
         }
         TvRemoteInput.Left, TvRemoteInput.Right -> when {
             !ownsArrows(ctx) -> TvRemoteAction.PassThrough
+            ctx.isLive && ctx.livePauseAvailable ->
+                if (input == TvRemoteInput.Left) TvRemoteAction.LiveStepBack else TvRemoteAction.LiveStepForward
             ctx.isLive -> TvRemoteAction.ShowControls
             input == TvRemoteInput.Left -> TvRemoteAction.SkipBack
             else -> TvRemoteAction.SkipForward
