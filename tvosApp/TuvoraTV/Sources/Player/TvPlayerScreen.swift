@@ -72,7 +72,7 @@ struct TvPlayerScreen: View {
 
     /// UI-test marker: the session this screen drives and whether *that* session is playing.
     private var nowMarker: some View {
-        Text("\(session.title)|\(session.state.value.isPlaying ? "playing" : "waiting")")
+        Text("\(session.state.value.replayTitle ?? session.title)|\(session.state.value.isPlaying ? "playing" : "waiting")")
             .font(.system(size: 1))
             .opacity(0.01)
             .allowsHitTesting(false)
@@ -549,7 +549,7 @@ private struct PlayerChrome: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: dp(10)) {
-            Text(session.title).font(NuvioType.headlineMedium).foregroundStyle(.white).lineLimit(1)
+            Text(state.replayTitle ?? session.title).font(NuvioType.headlineMedium).foregroundStyle(.white).lineLimit(1)
             if let subtitle = session.subtitle {
                 Text(ui: subtitle).font(NuvioType.titleMedium).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
             }
