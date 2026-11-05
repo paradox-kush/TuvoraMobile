@@ -6,7 +6,7 @@ import ComposeApp
 
 // MARK: - Player Bridge Implementation (Kotlin protocol conformance)
 
-final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropertyBridge, NuvioPlayerLinkReconnectBridge {
+final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropertyBridge, NuvioPlayerLinkReconnectBridge, NuvioPlayerLiveCacheBridge {
 
     private var playerVC: MPVPlayerViewController?
     /// Mirrors the user's Picture-in-Picture setting so a view controller created later still gets
@@ -139,6 +139,12 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropert
     func setMpvStringProperties(names: [String], values: [String]) {
         playerVC?.setStringProperties(names, values)
     }
+    /// NuvioPlayerLiveCacheBridge (Kotlin, hand-mirrored): live pause / rewind. The cache plan is written on the
+    /// mpv queue (never Main) and starts the `demuxer-cache-state` observation; the window is read from the shadow.
+    func applyLiveCacheProperties(names: [String], values: [String]) {
+        ensurePlayerViewController().applyLiveCacheProperties(names, values)
+    }
+    func getSeekableRanges() -> String { playerVC?.propertyShadow.seekableRangesText ?? "" }
     func syncVideoSurfaceLayout(width: Double, height: Double) {
         playerVC?.syncVideoSurfaceLayout(size: CGSize(width: width, height: height))
     }
@@ -486,6 +492,7 @@ final class MPVPlayerViewController: UIViewController {
         installRenderThreadExitGuard()
 
         setupMpv()
+        flushPendingLiveCache()
         activateAudioSessionForPlayback()
         setupNotifications()
         refreshImmersiveSystemUI()
@@ -1641,6 +1648,8 @@ final class MPVPlayerViewController: UIViewController {
                     let name = String(cString: property.name)
                     if name == "track-list" {
                         self.propertyShadow.setTracks(Self.decodeTrackList(property))
+                    } else if name == "demuxer-cache-state" {
+                        self.propertyShadow.setSeekableRanges(Self.decodeSeekableRanges(property))
                     } else {
                         self.propertyShadow.apply(name, Self.decodePropertyValue(property))
                     }
@@ -1729,6 +1738,40 @@ final class MPVPlayerViewController: UIViewController {
         }
     }
 
+    /// The observed `demuxer-cache-state` node's `seekable-ranges` (an array of {start, end} maps). Anything else
+    /// decodes to no ranges, so a file without a seekable cache reads as "nothing to rewind into".
+    private static func decodeSeekableRanges(_ property: mpv_event_property) -> [MPVSeekableRange] {
+        guard property.format == MPV_FORMAT_NODE, let data = property.data else { return [] }
+        let root = data.assumingMemoryBound(to: mpv_node.self).pointee
+        guard root.format == MPV_FORMAT_NODE_MAP, let map = root.u.list?.pointee,
+              let keys = map.keys, let values = map.values else { return [] }
+        for i in 0..<Int(map.num) {
+            guard let key = keys[i], String(cString: key) == "seekable-ranges" else { continue }
+            let ranges = values[i]
+            guard ranges.format == MPV_FORMAT_NODE_ARRAY, let list = ranges.u.list?.pointee,
+                  list.num > 0, let entries = list.values else { return [] }
+            var result: [MPVSeekableRange] = []
+            for j in 0..<Int(list.num) {
+                let entry = entries[j]
+                guard entry.format == MPV_FORMAT_NODE_MAP, let rangeMap = entry.u.list?.pointee,
+                      let rangeKeys = rangeMap.keys, let rangeValues = rangeMap.values else { continue }
+                var start: Double?
+                var end: Double?
+                for k in 0..<Int(rangeMap.num) {
+                    guard let rangeKey = rangeKeys[k] else { continue }
+                    switch String(cString: rangeKey) {
+                    case "start": start = decodeNodeScalar(rangeValues[k]).doubleValue
+                    case "end": end = decodeNodeScalar(rangeValues[k]).doubleValue
+                    default: break
+                    }
+                }
+                if let start, let end { result.append(MPVSeekableRange(start: start, end: end)) }
+            }
+            return result
+        }
+        return []
+    }
+
     /// The observed `track-list` node (an array of maps) as plain tracks. `.none`/unexpected
     /// shapes decode to no tracks, matching the old `track-list/count` read failing to 0.
     private static func decodeTrackList(_ property: mpv_event_property) -> [MPVTrackShadow] {
@@ -1811,6 +1854,38 @@ final class MPVPlayerViewController: UIViewController {
         guard mpv != nil else { return }
         for (name, value) in zip(names, values) {
             setStringProperty(name, value)
+        }
+    }
+
+    /// Live pause / rewind: raises (or restores) the demuxer cache plan at runtime. mpv applies a change of
+    /// `demuxer-max-bytes` / `demuxer-max-back-bytes` / `cache-secs` to the file already playing. The
+    /// `demuxer-cache-state` observation (a node conversion per change) starts with the first plan, so
+    /// players that never pause pay nothing. Runs on the serial mpv queue, so the flag is confined to it.
+    private var liveCacheObserved = false
+
+    private var pendingLiveCache: (names: [String], values: [String])?
+
+    private func flushPendingLiveCache() {
+        guard let pending = pendingLiveCache else { return }
+        pendingLiveCache = nil
+        applyLiveCacheProperties(pending.names, pending.values)
+    }
+
+    func applyLiveCacheProperties(_ names: [String], _ values: [String]) {
+        // Kotlin can hand the first plan over before the view (and with it the core) exists: keep the latest one
+        // and apply it the moment the core is up. Main thread only, like viewDidLoad.
+        guard mpv != nil else {
+            pendingLiveCache = (names, values)
+            return
+        }
+        onMpvQueue { [self] ctx in
+            if !liveCacheObserved {
+                liveCacheObserved = true
+                checkError(mpv_observe_property(ctx, 0, "demuxer-cache-state", MPV_FORMAT_NODE))
+            }
+            for (name, value) in zip(names, values) {
+                checkError(mpv_set_property_string(ctx, name, value))
+            }
         }
     }
 
