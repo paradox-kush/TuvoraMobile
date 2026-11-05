@@ -127,6 +127,8 @@ struct HomeScreen: View {
                     ContinueWatchingRow(items: continueWatching, style: cwStyle, size: cwStyle.modernSize, header: .modern,
                                         onFocus: focusCw, onOpen: open)
                 }
+                // Calendar: bell reminders card + the opt-in Coming up row (shared Calendar via TvCalendar).
+                CalendarHomeSection(onOpen: { details = PreviewBox(preview: $0) })
                 if let rows {
                     if TvHome.shared.showsPartialFailure(state: rows) {
                         NuvioStateMessage(title: "Some rows didn’t load",

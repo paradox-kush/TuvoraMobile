@@ -1,6 +1,7 @@
 package com.nuvio.app
 
 import com.nuvio.app.navigation.LiveTvRoute
+import com.nuvio.app.navigation.CalendarRoute
 import com.nuvio.app.navigation.SettingsPageRequest
 import com.nuvio.app.features.home.PosterShape
 import com.nuvio.app.features.player.ImmersivePlaybackGate
@@ -1737,6 +1738,7 @@ internal fun MainAppContent(
                                     }
                                 },
                                 onDownloadsClick = { navController.navigate(DownloadsRoute(downloadsTitle)) },
+                                onCalendarClick = { navController.navigate(CalendarRoute()) },
                                 onContinueWatchingClick = onContinueWatchingClick,
                                 onContinueWatchingLongPress = onContinueWatchingLongPress,
                                 onSwitchProfile = onSwitchProfile,
@@ -1986,6 +1988,20 @@ internal fun MainAppContent(
                         navController = navController,
                         useNativeNavigation = useNativeNavigation,
                         onOpenDownload = ::openDownloadedItem,
+                    )
+                }
+                entry<CalendarRoute> { route ->
+                    val onBack = rememberGuardedPopBackStack(navController, route)
+                    com.nuvio.app.core.contracts.CalendarScreenContentAccess.current()?.Render(
+                        onBack = onBack,
+                        onOpenTitle = { meta -> openPosterOrPlayLive(meta.id, meta.type, meta.name, meta.poster) },
+                        // Watch now: the Sports hub's channel-matching sheet for that game.
+                        onWatchGame = { gameId ->
+                            com.nuvio.app.core.contracts.SportsMatchRequest.request(gameId)
+                            onBack()
+                            activateTab(AppScreenTab.Sports)
+                        },
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
                 entry<DownloadShowRoute> { route ->

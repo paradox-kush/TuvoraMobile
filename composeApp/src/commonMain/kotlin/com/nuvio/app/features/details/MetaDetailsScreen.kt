@@ -1173,6 +1173,7 @@ fun MetaDetailsScreen(
                                             onHeightChanged = { heroHeightPx.intValue = it },
                                             actions = if (isSectionEnabled(MetaScreenSectionKey.ACTIONS)) {
                                                 {
+                                                    Column {
                                                     DetailActions(
                                                         playLabel = playButtonLabel,
                                                         playEnabled = isPrimaryPlayEnabled,
@@ -1187,6 +1188,10 @@ fun MetaDetailsScreen(
                                                         onSaveClick = toggleSaved,
                                                         onSaveLongClick = openLibraryListPicker,
                                                     )
+                                                    // Fork: the Calendar bell (features/calendar, through its port).
+                                                    com.nuvio.app.core.contracts.DetailsCalendarBellAccess.current()
+                                                        ?.Bell(meta.imdbId?.takeIf { it.startsWith("tt") } ?: meta.id, meta.type, meta.name, meta.poster, Modifier.padding(top = 8.dp))
+                                                    }
                                                 }
                                             } else {
                                                 null
@@ -2303,6 +2308,7 @@ private fun ConfiguredMetaSections(
     fun RenderSection(key: MetaScreenSectionKey, showHeader: Boolean = true) {
         when (key) {
             MetaScreenSectionKey.ACTIONS -> {
+                Column {
                 DetailActions(
                     playLabel = playButtonLabel,
                     playEnabled = isPrimaryPlayEnabled,
@@ -2317,6 +2323,10 @@ private fun ConfiguredMetaSections(
                     onSaveClick = onSaveClick,
                     onSaveLongClick = onSaveLongClick,
                 )
+                // Fork: the Calendar bell (features/calendar, through its port).
+                com.nuvio.app.core.contracts.DetailsCalendarBellAccess.current()
+                    ?.Bell(meta.imdbId?.takeIf { it.startsWith("tt") } ?: meta.id, meta.type, meta.name, meta.poster, Modifier.padding(top = 8.dp))
+                }
             }
             MetaScreenSectionKey.OVERVIEW -> {
                 DetailMetaInfo(

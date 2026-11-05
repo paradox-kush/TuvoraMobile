@@ -157,6 +157,7 @@ struct ClassicHomeView: View {
                     if !continueWatching.isEmpty {
                         ContinueWatchingRow(items: continueWatching, style: cwStyle, size: cwStyle.classicSize, header: .classic, onOpen: onOpenCw)
                     }
+                    CalendarHomeSection(onOpen: onOpen)
                     HomeRowsStates(rows: rows, hasContinueWatching: !continueWatching.isEmpty, hasCollections: entries.contains { $0.collection != nil })
                     if rows != nil {
                         ForEach(entries, id: \.key) { entry in
@@ -335,6 +336,7 @@ struct GridHomeView: View {
                         if !continueWatching.isEmpty {
                             ContinueWatchingRow(items: continueWatching, style: cwStyle, size: cwStyle.gridSize, header: .grid, onOpen: onOpenCw)
                         }
+                        CalendarHomeSection(onOpen: onOpen)
                         HomeRowsStates(rows: rows, hasContinueWatching: !continueWatching.isEmpty, hasCollections: entries.contains { $0.collection != nil })
                         if rows != nil {
                             ForEach(entries, id: \.key) { entry in
