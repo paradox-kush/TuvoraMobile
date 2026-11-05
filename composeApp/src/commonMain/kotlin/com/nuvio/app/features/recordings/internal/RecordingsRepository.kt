@@ -227,11 +227,14 @@ class RecordingsRepository(
 
     /**
      * A schedule that is leaving (cancelled, its series stopped) may hold a partial from an earlier
-     * attempt, with no row left to name it. The name is derived from the schedule, and only the
-     * extension depends on the link that was used, so both are cleared.
+     * attempt, with no row left to name it. The name is [fileNameFor] of the link the save used, so it is
+     * derived from the links this schedule would have saved from, plus every extension [fileNameFor]
+     * can produce (the window the links were built for has moved on).
      */
     private suspend fun deletePartialsOf(schedule: RecordingSchedule) {
-        for (link in listOf(null, "x.mp4")) deletePartial(files.pathFor(fileNameFor(schedule, link)))
+        val links = CatchUpSaveLinks.candidates(schedule.channel, schedule.programmeStartMs, schedule.programmeEndMs, clock())
+        val names = (links.map { fileNameFor(schedule, it) } + SAVE_EXTENSIONS.map { fileNameFor(schedule, "link.$it") }).distinct()
+        for (name in names) deletePartial(files.pathFor(name))
     }
 
     // ---- alarms ---------------------------------------------------------------------------
@@ -687,6 +690,8 @@ class RecordingsRepository(
     }
 
     private companion object {
+        /** Every extension [fileNameFor] can give a saved file. */
+        val SAVE_EXTENSIONS = listOf("ts", "mp4")
         const val STATE_FILE = "recordings.json"
         /** v1 only: read once to migrate into the document, then retired. */
         const val LEDGER_FILE = "recordings-ledger.json"

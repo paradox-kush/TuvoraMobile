@@ -698,6 +698,19 @@ class RecordingsRepositoryTest {
     }
 
     @Test
+    fun `cancelling deletes the partial under the name the saved link gave it - mp4 included`() = runTest {
+        val rig = Rig()
+        val mp4Channel = channel(catchUp = xtream(3).copy(containerExtension = "mp4"))
+        val s = dueCatchUp().copy(channel = mp4Channel)
+        rig.files.texts["recordings.json"] = stateText(s)
+        val target = retryWaitingWithPartial(rig, s)
+        assertTrue(target.endsWith(".mp4"), "the saver was handed an mp4 name: $target")
+        rig.repo.cancel("s1")
+        assertTrue("$target.part" in rig.files.deleted, "partial: ${rig.files.deleted}")
+        assertTrue("$target.part.meta" in rig.files.deleted, "sidecar: ${rig.files.deleted}")
+    }
+
+    @Test
     fun `stopping a series deletes the partials of its waiting retries`() = runTest {
         val rig = Rig()
         val s = dueCatchUp().copy(seriesRuleId = "rule1")
