@@ -108,6 +108,8 @@ data class TvPlayerState(
      * Continue at hh:mm?" Swift shows it for a few seconds; [TvPlayerSession.acceptServerResume] takes it.
      */
     val serverResumeOfferMs: Long? = null,
+    /** A continuing M3U replay's title once the playhead moved into the next programme (null = [TvPlayerSession.title]). */
+    val replayTitle: String? = null,
 )
 
 /**
@@ -315,6 +317,11 @@ class TvPlayerSession(
     val state: StateFlow<TvPlayerState> = _state.asStateFlow()
 
     val title: String get() = launch.title
+
+    /** A continuing replay entered its next programme: the player shows [title] from here ([TvPlayerState.replayTitle]). */
+    fun retitle(title: String) {
+        if (!closed) _state.value = _state.value.copy(replayTitle = title)
+    }
     val subtitle: String? get() = launch.episodeTitle ?: launch.streamTitle.takeIf { it != launch.title }
 
     /** The current engine's view controller. Changes when the session escalates; see [TvPlayerState.engineGeneration]. */

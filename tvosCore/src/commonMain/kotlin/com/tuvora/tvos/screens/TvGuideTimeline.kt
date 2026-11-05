@@ -186,6 +186,12 @@ object TvReplayPolicy {
     /** The shared compose_livetv_catchup_session_limit copy (NuvioTV has no separate string). */
     const val SESSION_LIMIT_TEXT = "Your provider allows fewer connections than you're using · Close another device and try again"
 
+    /** A replay that did not open or never started, with Retry beside it (never "no recording"). */
+    const val REPLAY_FAILED_TEXT = "Couldn't open this replay \u00b7 Try again"
+
+    /** The shared compose_livetv_catchup_ended copy: the replay ran out and the player is back on live. */
+    const val REPLAY_ENDED_TEXT = "This replay has ended \u00b7 Back on live"
+
     /** The player title for a replay: "Channel · Programme", as NuvioTV's ReplayLaunch. */
     fun title(channelName: String, programmeTitle: String): String = "$channelName · $programmeTitle"
 }
