@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class AndroidLivePauseCapture(
     private val rootDir: File,
     /** The call factory for a link; a single-use link must get one that never silently re-sends a request. */
-    private val callFactoryFor: (singleUse: Boolean) -> Call.Factory,
+    private val callFactoryFor: (singleUse: Boolean, link: LiveLink) -> Call.Factory,
     /** Adds the default User-Agent and drops what must not be sent (the app's playback header policy). */
     private val headerPolicy: (Map<String, String>) -> Map<String, String> = { it },
     private val freeBytes: (File) -> Long = { it.usableSpace },
@@ -68,16 +68,19 @@ internal class AndroidLivePauseCapture(
         private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
         private var job: Job? = null
         private val disposed = AtomicBoolean(false)
+        private val stopping = AtomicBoolean(false)
 
         /** Completes when the directory is gone after [dispose] (tests await it). */
         @Volatile var cleanup: Job? = null
             private set
 
         fun begin() {
+            val run = Run(request, dir, channel)
             job = scope.launch {
                 try {
-                    Run(request, dir, channel).run()
+                    run.run()
                 } catch (e: CancellationException) {
+                    if (stopping.get()) run.finishKeepingBuffer()
                     throw e
                 } catch (t: Throwable) {
                     channel.trySend(LiveCaptureEvent.Failed(LivePauseFailure.PROVIDER_REFUSED))
@@ -85,6 +88,12 @@ internal class AndroidLivePauseCapture(
                     channel.close()
                 }
             }
+        }
+
+        /** Stops recording, KEEPS the directory (finished as an ended playlist) for a player still watching it. */
+        override fun stop() {
+            if (disposed.get() || !stopping.compareAndSet(false, true)) return
+            job?.cancel()
         }
 
         override fun dispose() {
@@ -108,7 +117,7 @@ internal class AndroidLivePauseCapture(
         private val out: Channel<LiveCaptureEvent>,
     ) {
         private val store = FileLiveSegmentStore(dir)
-        private val reconnect = LiveCaptureReconnect(request.singleUseLink)
+        private val reconnect = request.reconnect   // shared with earlier captures of this channel (Retry)
         private var keepMs = request.keepMs
         private var budgetBytes = 0L
         private val playlistUrl = "file://" + File(dir, FileLiveSegmentStore.PLAYLIST_NAME).absolutePath
@@ -175,7 +184,19 @@ internal class AndroidLivePauseCapture(
         }
 
         private fun fail(reason: LivePauseFailure) {
+            finishKeepingBuffer()   // a viewer may still be watching what was recorded: it must end, not stall
             out.trySend(LiveCaptureEvent.Failed(reason))
+        }
+
+        /** Marks what is on disk as finished (ENDLIST) so a player playing it reaches the end instead of stalling. */
+        fun finishKeepingBuffer() {
+            if (!announcedReady) return
+            try {
+                segmenter?.finish(ended = true)
+                if (hlsPieces.isNotEmpty()) publishHlsPlaylist(ended = true)
+            } catch (e: LiveStoreException) {
+                // The disk refused (that may be why we are here): the playlist stays as it was.
+            }
         }
 
         private fun isHls(url: String): Boolean {
@@ -290,7 +311,7 @@ internal class AndroidLivePauseCapture(
 
         private suspend fun runTs(link: LiveLink) {
             val seg = segmenter ?: newSegmenter().also { segmenter = it }
-            val call = callFactoryFor(request.singleUseLink).newCall(requestFor(link, link.url))
+            val call = callFactoryFor(request.singleUseLink, link).newCall(requestFor(link, link.url))
             execute(call) { response ->
                 checkStatus(response)
                 val body = response.body ?: throw IOException("empty body")
@@ -325,7 +346,7 @@ internal class AndroidLivePauseCapture(
         // --- HLS ----------------------------------------------------------------------------
 
         private suspend fun fetchText(link: LiveLink, url: String): Pair<String, String> {
-            val call = callFactoryFor(request.singleUseLink).newCall(requestFor(link, url))
+            val call = callFactoryFor(request.singleUseLink, link).newCall(requestFor(link, url))
             return execute(call) { response ->
                 checkStatus(response)
                 response.body!!.string() to response.request.url.toString()
@@ -442,7 +463,7 @@ internal class AndroidLivePauseCapture(
                 }
             }
             val part = File(dir, "$name.part")
-            val call = callFactoryFor(request.singleUseLink).newCall(requestFor(link, uri))
+            val call = callFactoryFor(request.singleUseLink, link).newCall(requestFor(link, uri))
             try {
                 val written = execute(call) { response ->
                     checkStatus(response)

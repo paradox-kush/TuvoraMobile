@@ -15,7 +15,9 @@ object AndroidLivePauseWiring {
         LivePauseCaptureAccess.register(
             AndroidLivePauseCapture(
                 rootDir = root,
-                callFactoryFor = { singleUse -> PlayerPlaybackNetworking.captureCallFactory(retryConnectionFailures = !singleUse) },
+                callFactoryFor = { singleUse, link ->
+                    PlayerPlaybackNetworking.captureCallFactory(link.url, link.headers, retryConnectionFailures = !singleUse)
+                },
                 headerPolicy = PlayerPlaybackNetworking::captureHeaders,
             ),
         )

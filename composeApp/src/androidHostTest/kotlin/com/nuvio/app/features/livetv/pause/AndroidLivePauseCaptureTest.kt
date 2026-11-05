@@ -59,7 +59,7 @@ class AndroidLivePauseCaptureTest {
 
     private fun capture(factory: (Boolean) -> Call.Factory = { client(it) }) = AndroidLivePauseCapture(
         rootDir = root,
-        callFactoryFor = factory,
+        callFactoryFor = { singleUse, _ -> factory(singleUse) },
         freeBytes = { freeBytes.get() },
         monotonicMs = { mono.get() + System.nanoTime() / 1_000_000L },
         reconnectDelayMs = { 5L },
@@ -288,6 +288,75 @@ class AndroidLivePauseCaptureTest {
         val failed = run.await("failed") { it is LiveCaptureEvent.Failed } as LiveCaptureEvent.Failed
         assertEquals(LivePauseFailure.UNSUPPORTED_STREAM, failed.reason)
         assertEquals(0, hitCount("/seg0.ts"))
+    }
+
+    // --- Opus final-review additions --------------------------------------------------------------
+
+    @Test
+    fun `disposing while a read is blocked cancels it promptly and deletes the directory`() = runBlocking {
+        // Headers arrive, then the body trickles one byte per 30 s: the capture is parked inside a socket read.
+        serve { response(ByteArray(188 * 4) { 0x47 }).throttleBody(1, 30, TimeUnit.SECONDS) }
+        val run = capture().begin(request(url("/live/blocked.ts")))
+        withTimeout(10_000) { while (hitCount("/live/blocked.ts") == 0) delay(10) }
+        delay(300)
+        val started = System.nanoTime()
+        run.handle.dispose()
+        val cleanup = (run.handle as AndroidLivePauseCapture.Handle).cleanup!!
+        withTimeout(3_000) { cleanup.join() }   // the read timeout is 5 s: a swallowed cancellation would not make it
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 3_000)
+        assertFalse(File(root, "p1").exists(), "the directory is deleted even though the read was blocked")
+    }
+
+    @Test
+    fun `disk full mid capture on hls trims then fails as no space and leaves no part file`() = runBlocking {
+        val polls = AtomicInteger()
+        serve { path ->
+            when {
+                path == "/grow.m3u8" -> MockResponse().setBody(mediaPlaylist(0, 2 + polls.getAndIncrement()))
+                path.startsWith("/seg") -> MockResponse().setBody(Buffer().write(segmentBytes(path.removePrefix("/seg").removeSuffix(".ts").toInt())))
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        val run = capture().begin(request(url("/grow.m3u8")))
+        run.await("ready") { it is LiveCaptureEvent.Ready }
+        freeBytes.set(10L * 1024 * 1024)   // the disk filled up under us
+        val failed = run.await("failed") { it is LiveCaptureEvent.Failed } as LiveCaptureEvent.Failed
+        assertEquals(LivePauseFailure.NO_SPACE, failed.reason)
+        assertTrue(File(root, "p1").listFiles().orEmpty().none { it.name.endsWith(".part") })
+        withTimeout(5_000) { while ("#EXT-X-ENDLIST" !in localPlaylist()) delay(20) }   // what was recorded can be played to its end
+    }
+
+    @Test
+    fun `a failure leaves the recorded buffer as an ended playlist`() = runBlocking {
+        serve { response(tsBody()) }
+        val run = capture().begin(request(url("/live/8.ts")))
+        run.await("ready") { it is LiveCaptureEvent.Ready }
+        freeBytes.set(10L * 1024 * 1024)
+        run.await("failed") { it is LiveCaptureEvent.Failed }
+        withTimeout(5_000) { while ("#EXT-X-ENDLIST" !in localPlaylist()) delay(20) }
+        assertTrue(File(root, "p1").exists())
+    }
+
+    @Test
+    fun `stop keeps the files as an ended playlist and dispose deletes them`() = runBlocking {
+        serve { response(tsBody()) }
+        val run = capture().begin(request(url("/live/9.ts")))
+        run.await("ready") { it is LiveCaptureEvent.Ready }
+        run.handle.stop()
+        withTimeout(5_000) { while ("#EXT-X-ENDLIST" !in localPlaylist()) delay(20) }
+        assertTrue(File(root, "p1").listFiles().orEmpty().any { it.name.endsWith(".ts") }, "the pieces are still there")
+        run.handle.dispose()
+        withTimeout(5_000) { (run.handle as AndroidLivePauseCapture.Handle).cleanup!!.join() }
+        assertFalse(File(root, "p1").exists())
+    }
+
+    @Test
+    fun `the shared attempt counter bounds reconnects across captures`() = runBlocking {
+        serve { MockResponse().setResponseCode(500) }
+        val shared = LiveCaptureReconnect(singleUseLink = false).also { repeat(3) { _ -> it.onDrop() } }
+        val run = capture().begin(request(url("/live/10.ts")).copy(reconnect = shared))
+        run.await("failed") { it is LiveCaptureEvent.Failed }
+        assertEquals(1, hitCount("/live/10.ts"), "an exhausted counter allows no further reconnect")
     }
 
     // --- housekeeping ------------------------------------------------------------------------
