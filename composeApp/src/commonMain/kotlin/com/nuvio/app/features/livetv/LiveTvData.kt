@@ -398,6 +398,45 @@ object LiveTvData {
         )
     }
 
+    /**
+     * The snapshot a recording keeps of [channel]: its playlist, its live line, the playlist's User-Agent and, when the
+     * channel has one, how to reach its catch-up archive. Null when the playlist is gone from this device.
+     * The decisions (what counts as an archive, which headers) are [RecordingChannelFactory]'s; this only reads the facts.
+     */
+    suspend fun recordingChannel(channel: LiveGuideChannel): com.nuvio.app.features.recordings.api.RecordingChannel? {
+        val (account, streamId) = accountFor(channel.contentId) ?: return null
+        if (!account.availableOnDevice) return null
+        val userAgent = com.nuvio.app.features.iptv.StreamUserAgentPolicy.resolve(account)
+        return when (account.sourceType) {
+            com.nuvio.app.features.iptv.SOURCE_TYPE_XTREAM -> {
+                val serverOffsetMs = CatchUpEpgRepository.panelFacts(account).serverOffsetMs
+                val active = com.nuvio.app.features.iptv.PlaylistServerFailover.activeAccount(account)
+                RecordingChannelFactory.xtream(
+                    contentId = channel.contentId, accountId = account.id, name = channel.name, logo = channel.logo,
+                    liveUrl = runCatching { XtreamItemRegistry.liveStreamUrlForAsync(channel.contentId) }.getOrNull()
+                        ?: com.nuvio.app.features.iptv.XtreamClient.liveStreamUrl(account, streamId),
+                    userAgent = userAgent, baseUrl = active.baseUrl, username = account.username, password = account.password,
+                    streamId = streamId, hasArchive = channel.hasArchive, catchUpDays = channel.catchUpDays,
+                    serverOffsetMs = serverOffsetMs,
+                )
+            }
+            SOURCE_TYPE_M3U_URL, SOURCE_TYPE_M3U_FILE -> {
+                val row = IptvContentDb.channelRow(account.id, streamId) ?: return null
+                RecordingChannelFactory.m3u(
+                    contentId = channel.contentId, accountId = account.id, name = channel.name, logo = channel.logo,
+                    liveUrl = row.url, userAgent = userAgent,
+                    info = row.catchUp?.takeIf { CatchUpEpgRepository.supportsCatchUp(account, it) },
+                    offsetMs = XtreamCatchUp.replayOffsetMs(null, account.catchUpTimeCorrectionMinutes) ?: 0L,
+                )
+            }
+            // Stalker links are minted per open and single-use: nothing to save from.
+            else -> RecordingChannelFactory.withoutCatchUp(
+                contentId = channel.contentId, accountId = account.id, name = channel.name, logo = channel.logo,
+                liveUrl = "", userAgent = userAgent,
+            )
+        }
+    }
+
     /** The guide row covering [atMs] on this channel, else the next one to start - what a continuing replay moves its title to. */
     suspend fun replayRowAt(contentId: String, atMs: Long): M3uReplayContinuation.Row? {
         val rows = historyProgrammes(contentId, atMs - 60_000L, atMs + 6 * 60 * 60_000L)

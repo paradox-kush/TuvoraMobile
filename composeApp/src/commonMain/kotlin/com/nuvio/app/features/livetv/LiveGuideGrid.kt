@@ -65,6 +65,9 @@ import org.jetbrains.compose.resources.stringResource
 private val CHANNEL_COL_WIDTH = 88.dp
 private val ROW_HEIGHT = 64.dp
 private val MINUTE_WIDTH = 3.5.dp
+/** Narrower than this a REC badge is just its dot. */
+private val REC_BADGE_MIN_WIDTH = 70.dp
+private val NO_STARTS: Set<Long> = emptySet()
 private val SLOT_MINUTES = GuideTimeTravel.SLOT_MINUTES
 
 /**
@@ -105,6 +108,10 @@ fun LiveGuideGrid(
     onLongPressChannel: (LiveGuideChannel) -> Unit = {},
     onProgrammeAction: (LiveGuideChannel, XtreamProgram, XtreamCatchUp.ProgrammeAction) -> Unit,
     onTravel: (Long) -> Unit,
+    /** Channel key -> start times of programmes with a recording scheduled or running (derived once by the caller, see RecordingGuideKeys). */
+    recordedStarts: Map<String, Set<Long>> = emptyMap(),
+    /** Press-and-hold on a programme; null where recordings do not exist (the cell then behaves exactly as before). */
+    onProgrammeLongPress: ((LiveGuideChannel, XtreamProgram, XtreamCatchUp.ProgrammeAction) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.nuvio.colors
@@ -254,6 +261,8 @@ fun LiveGuideGrid(
                     onClick = { onSelectChannel(channel) },
                     onLongClick = { onLongPressChannel(channel) },
                     onProgrammeAction = { programme, action -> onProgrammeAction(channel, programme, action) },
+                    recordedStarts = recordedStarts[channel.contentId] ?: NO_STARTS,
+                    onProgrammeLongPress = onProgrammeLongPress?.let { cb -> { programme, action -> cb(channel, programme, action) } },
                 )
             }
         }
@@ -307,6 +316,8 @@ private fun GuideRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     onProgrammeAction: (XtreamProgram, XtreamCatchUp.ProgrammeAction) -> Unit,
+    recordedStarts: Set<Long> = NO_STARTS,
+    onProgrammeLongPress: ((XtreamProgram, XtreamCatchUp.ProgrammeAction) -> Unit)? = null,
 ) {
     val rowBg = if (isCurrent) accent.copy(alpha = 0.10f) else surface
     Row(
@@ -450,6 +461,10 @@ private fun GuideRow(
                             } else {
                                 null
                             },
+                            recording = prog.startMs in recordedStarts,
+                            dangerColor = nowLineColor,
+                            onInertClick = onClick,
+                            onLongClick = onProgrammeLongPress?.let { cb -> { cb(prog, action) } },
                         )
                     }
                 }
@@ -469,6 +484,7 @@ private fun GuideRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProgrammeBlock(
     title: String,
@@ -483,6 +499,11 @@ private fun ProgrammeBlock(
     border: Color,
     replayable: Boolean = false,
     onClick: (() -> Unit)? = null,
+    recording: Boolean = false,
+    /** What a tap does on a cell with nothing of its own to do: the lane's (switch channel). Only used with [onLongClick]. */
+    onInertClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    dangerColor: Color = MaterialTheme.nuvio.colors.danger,
 ) {
     Box(
         modifier = Modifier
@@ -501,7 +522,14 @@ private fun ProgrammeBlock(
                     Modifier
                 },
             )
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+            .then(
+                when {
+                    // Press-and-hold opens the programme sheet; a plain tap keeps doing exactly what it did.
+                    onLongClick != null -> Modifier.combinedClickable(onClick = onClick ?: onInertClick ?: {}, onLongClick = onLongClick)
+                    onClick != null -> Modifier.clickable(onClick = onClick)
+                    else -> Modifier
+                },
+            ),
         contentAlignment = Alignment.CenterStart,
     ) {
         Row(
@@ -509,6 +537,7 @@ private fun ProgrammeBlock(
             horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s2),
             modifier = Modifier.padding(horizontal = NuvioTokens.Space.s6, vertical = NuvioTokens.Space.s4),
         ) {
+            if (recording) RecBadge(danger = dangerColor, compact = width < REC_BADGE_MIN_WIDTH)
             if (replayable) {
                 Icon(
                     imageVector = Icons.Filled.Replay,
