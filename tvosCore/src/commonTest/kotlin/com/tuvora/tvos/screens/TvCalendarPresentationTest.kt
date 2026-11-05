@@ -7,6 +7,8 @@ import com.nuvio.app.features.calendar.internal.CalendarFilter
 import com.nuvio.app.features.calendar.internal.CalendarEpisodeLabel
 import com.nuvio.app.features.calendar.internal.CalendarEntryKind
 import com.nuvio.app.features.calendar.internal.CalendarIds
+import com.nuvio.app.features.calendar.internal.CalendarReminder
+import com.nuvio.app.features.calendar.internal.CalendarReminderCard
 import com.nuvio.app.features.calendar.internal.CalendarRunOutcome
 import com.nuvio.app.features.calendar.internal.CalendarSettings
 import com.nuvio.app.features.calendar.internal.CalendarSource
@@ -103,5 +105,22 @@ class TvCalendarPresentationTest {
         assertTrue(!screen.showSports)
         assertTrue(screen.sportsChip, "the viewer can turn Sports back on")
         assertTrue(screen.sections.flatMap { it.rows }.none { it.game != null })
+    }
+
+    /** Device finding (Apple TV Home): a reminder row said "Time not announced" for an episode whose time is known. */
+    @Test fun aReminderRowCarriesTheEpisodesDayAndTimeInTheCalendarsZone() {
+        val entry = show.sources.getValue(CalendarSource.TVMAZE).single()
+        val card = CalendarReminderCard(listOf(CalendarReminder(show, entry, dueAtMs = now)), more = 0, episodeKeys = listOf("k"))
+        val row = TvCalendarPresentation.reminders(card, TimeZone.of("Australia/Sydney"))!!.rows.single()
+        assertEquals("2026-10-06", row.dateIso)
+        assertEquals("12:00", row.timeText, "the known air time, not 'Time not announced'")
+    }
+
+    @Test fun aReminderForADateOnlyEpisodeHasItsDayButNoTime() {
+        val dated = CalendarEntry(season = 2, episode = 2, airDate = "2026-10-12")
+        val card = CalendarReminderCard(listOf(CalendarReminder(show, dated, dueAtMs = now)), more = 0, episodeKeys = listOf("k"))
+        val row = TvCalendarPresentation.reminders(card, TimeZone.UTC)!!.rows.single()
+        assertEquals("2026-10-12", row.dateIso)
+        assertEquals(null, row.timeText)
     }
 }

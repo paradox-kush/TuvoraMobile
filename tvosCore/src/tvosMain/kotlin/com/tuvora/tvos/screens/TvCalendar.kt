@@ -115,7 +115,7 @@ object TvCalendar {
             buildCalendarComingUp(state.titles.filteredBy(state.settings.filters), state.watched, nowMs, state.zone, state.settings.comingUpHiddenKeys),
         )
 
-    fun reminders(): TvCalendarReminders? = TvCalendarPresentation.reminders(calendarReminderCard(repository.dueReminders()))
+    fun reminders(): TvCalendarReminders? = TvCalendarPresentation.reminders(calendarReminderCard(repository.dueReminders()), state.value.zone)
 
     fun dismissReminders(episodeKeys: List<String>) {
         scope.launch { repository.markRemindersSeen(episodeKeys) }

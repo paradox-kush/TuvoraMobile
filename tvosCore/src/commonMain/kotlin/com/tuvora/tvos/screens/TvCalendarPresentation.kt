@@ -173,9 +173,17 @@ object TvCalendarPresentation {
             TvCalendarComingUp(row, entry.whenKind.name, entry.date.toString(), row.timeText)
         }
 
-    fun reminders(card: CalendarReminderCard?): TvCalendarReminders? = card?.let {
+    fun reminders(card: CalendarReminderCard?, zone: kotlinx.datetime.TimeZone): TvCalendarReminders? = card?.let {
         TvCalendarReminders(
-            rows = it.items.map { reminder -> row(CalendarItem(reminder.title, reminder.entry, null, null), "reminder") },
+            // The episode's own day and time in the Calendar's zone (device finding: without them the row read
+            // "Time not announced" for an episode whose time is known).
+            rows = it.items.map { reminder ->
+                val at = reminder.entry.airInstantMs
+                row(
+                    CalendarItem(reminder.title, reminder.entry, reminder.entry.localDate(zone), at?.let { ms -> calendarTimeAt(ms, zone) }),
+                    "reminder",
+                )
+            },
             more = it.more,
             episodeKeys = it.episodeKeys,
         )
