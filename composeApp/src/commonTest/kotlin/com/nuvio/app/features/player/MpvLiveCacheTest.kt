@@ -46,4 +46,34 @@ class MpvLiveCacheTest {
         assertEquals(20_000, LiveSeekWindow(0, 60_000, 40_000).behindLiveMs)
         assertEquals(0, LiveSeekWindow(0, 60_000, 70_000).behindLiveMs)
     }
+
+    @Test
+    fun `ranges text parses start and end seconds per range`() {
+        assertEquals(
+            listOf(MpvLiveCache.Range(10.5, 20.0), MpvLiveCache.Range(100.0, 160.25)),
+            MpvLiveCache.parseRanges("10.5,20;100,160.25"),
+        )
+    }
+
+    @Test
+    fun `ranges text drops malformed entries and keeps the good ones`() {
+        assertEquals(
+            listOf(MpvLiveCache.Range(1.0, 2.0)),
+            MpvLiveCache.parseRanges("junk;1,2;3;4,x;,"),
+        )
+    }
+
+    @Test
+    fun `empty or blank ranges text is no ranges`() {
+        assertEquals(emptyList(), MpvLiveCache.parseRanges(""))
+        assertEquals(emptyList(), MpvLiveCache.parseRanges("   "))
+    }
+
+    @Test
+    fun `a bridge ranges text feeds the window`() {
+        assertEquals(
+            LiveSeekWindow(100_000, 160_000, 140_000),
+            MpvLiveCache.window(MpvLiveCache.parseRanges("100,160"), 140_000),
+        )
+    }
 }

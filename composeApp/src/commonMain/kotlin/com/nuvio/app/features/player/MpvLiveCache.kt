@@ -36,6 +36,21 @@ internal object MpvLiveCache {
         return com.nuvio.app.features.player.LiveSeekWindow(start, end, positionMs.coerceIn(start, end))
     }
 
+    /**
+     * Seekable ranges as a bridge hands them over: `start,end;start,end` in seconds (Swift builds it from the
+     * observed `demuxer-cache-state`, so no mpv node crosses the language boundary). Malformed entries are dropped.
+     */
+    fun parseRanges(text: String): List<Range> {
+        if (text.isBlank()) return emptyList()
+        return text.split(';').mapNotNull { part ->
+            val bounds = part.split(',')
+            if (bounds.size != 2) return@mapNotNull null
+            val start = bounds[0].trim().toDoubleOrNull() ?: return@mapNotNull null
+            val end = bounds[1].trim().toDoubleOrNull() ?: return@mapNotNull null
+            Range(start, end)
+        }
+    }
+
     private const val EDGE_TOLERANCE_SEC = 0.5
     private const val MAX_CACHE_SECS = 1_000_000_000L
 }
