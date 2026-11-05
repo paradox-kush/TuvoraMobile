@@ -49,11 +49,14 @@ class AppUpdaterController internal constructor(
     private val scope: CoroutineScope,
     private val preferences: UpdatePreferences = UpdatePreferences.shared,
     private val fetchUpdate: suspend (UpdateChannel) -> Result<AppUpdate> = AppUpdaterRepository::getLatestChannelUpdate,
+    private val nowEpochSeconds: () -> Long = AppUpdaterRepository::nowEpochSeconds,
 ) {
     private val _uiState = MutableStateFlow(AppUpdaterUiState(updateChannel = preferences.channel.value))
     val uiState: StateFlow<AppUpdaterUiState> = _uiState.asStateFlow()
 
     private var autoCheckStarted = false
+    /** B175: set when GitHub rate-limited us; no check (automatic, channel change or manual) hits the network before it. */
+    private var rateLimitedUntilEpochSeconds: Long? = null
     private var updateCheckJob: Job? = null
     private var downloadJob: Job? = null
 
@@ -97,6 +100,18 @@ class AppUpdaterController internal constructor(
         updateCheckJob?.cancel()
         val channel = preferences.channel.value
         updateCheckJob = scope.launch {
+            val blockedUntil = rateLimitedUntilEpochSeconds
+            val now = nowEpochSeconds()
+            if (blockedUntil != null && !UpdaterHttpErrorPolicy.mayCheck(blockedUntil, now)) {
+                // Known limit, not lifted yet: no request. Say so only if the viewer asked.
+                val message = AppUpdaterRepository.rateLimitedMessage(blockedUntil, now)
+                if (force) {
+                    _uiState.update { state -> state.copy(isChecking = false, showDialog = true, errorMessage = message) }
+                }
+                if (showNoUpdateFeedback) NuvioToastController.show(message)
+                return@launch
+            }
+            rateLimitedUntilEpochSeconds = null
             _uiState.update { state ->
                 state.copy(
                     isChecking = true,
@@ -136,6 +151,9 @@ class AppUpdaterController internal constructor(
                     NuvioToastController.show(noUpdateMessage(channel))
                 }
             }.onFailure { error ->
+                if (error is UpdaterRateLimitedException) {
+                    rateLimitedUntilEpochSeconds = error.resetAtEpochSeconds
+                }
                 _uiState.update { state ->
                     state.copy(
                         isChecking = false,
