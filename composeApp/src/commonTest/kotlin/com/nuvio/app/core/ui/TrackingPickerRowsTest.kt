@@ -21,11 +21,11 @@ class TrackingPickerRowsTest {
     }
 
     @Test
-    fun `reminder row comes after the lists and mirrors on state`() {
+    fun `reminder row comes first and mirrors on state`() {
         assertEquals(
-            listOf(TrackingPickerRow.ListRow(watchlist), TrackingPickerRow.ReminderRow(on = true)),
+            listOf(TrackingPickerRow.ReminderRow(on = true), TrackingPickerRow.ListRow(watchlist)),
             trackingPickerRows(listOf(watchlist), DetailsReminderControl(on = true) {}),
-            "reminder row is last and carries the on state",
+            "reminder row is first and carries the on state",
         )
         assertEquals(
             TrackingPickerRow.ReminderRow(on = false),

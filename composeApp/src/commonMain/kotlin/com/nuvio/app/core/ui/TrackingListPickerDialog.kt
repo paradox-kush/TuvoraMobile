@@ -22,6 +22,7 @@ import com.nuvio.app.features.tracking.trackingMembershipDestinations
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.action_cancel
 import nuvio.composeapp.generated.resources.action_save
+import nuvio.composeapp.generated.resources.calendar_bell_applies_now
 import nuvio.composeapp.generated.resources.calendar_bell_off
 import nuvio.composeapp.generated.resources.compose_tracking_list_picker_loading
 import nuvio.composeapp.generated.resources.compose_tracking_list_picker_subtitle
@@ -40,13 +41,13 @@ sealed interface TrackingPickerRow {
 
 const val REMINDER_ROW_KEY = "calendar:reminder"
 
-/** The lists first, then the reminder switch when the Calendar can follow this title ([reminder] non-null). */
+/** The reminder switch first when the Calendar can follow this title ([reminder] non-null), then the lists. */
 fun trackingPickerRows(
     destinations: List<TrackingLibraryTab>,
     reminder: DetailsReminderControl?,
 ): List<TrackingPickerRow> =
-    destinations.map { TrackingPickerRow.ListRow(it) } +
-        listOfNotNull(reminder?.let { TrackingPickerRow.ReminderRow(it.on) })
+    listOfNotNull(reminder?.let { TrackingPickerRow.ReminderRow(it.on) }) +
+        destinations.map { TrackingPickerRow.ListRow(it) }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -122,9 +123,10 @@ fun TrackingListPickerDialog(
                             role = Role.Checkbox,
                             onClick = { onToggle(row.tab.key) },
                         )
-                        // Applies immediately (not part of Save), exactly as the old standalone bell did.
+                        // Applies immediately (not part of Save, Cancel does not undo it), as the old standalone bell did.
                         is TrackingPickerRow.ReminderRow -> DialogOption(
                             text = stringResource(Res.string.calendar_bell_off),
+                            description = stringResource(Res.string.calendar_bell_applies_now),
                             selected = row.on,
                             role = Role.Switch,
                             onClick = { reminder?.toggle?.invoke() },
