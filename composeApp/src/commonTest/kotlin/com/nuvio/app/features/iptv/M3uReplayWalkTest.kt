@@ -4,6 +4,10 @@ import com.nuvio.app.features.iptv.CatchUpDialectWalk.FailureKind
 import com.nuvio.app.features.iptv.CatchUpDialectWalk.Step
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.withLock
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNotEquals
@@ -160,6 +164,95 @@ class M3uReplayWalkTest {
         assertEquals(1, memory.writes)
         assertEquals(Step.Stale, w.onFailure(first.attempt.token, FailureKind.TRANSPORT), "a played replay never walks to another link")
         assertNotNull(w.restartAt(first.attempt.token, start + 150 * minute, now), "the ask outlives the proof")
+    }
+
+    // --- ownership, fencing, teardown ---------------------------------------------------------
+
+    @Test
+    fun `concurrent replays on many playlists keep unique tokens and a bounded table`(): Unit = kotlinx.coroutines.runBlocking {
+        val w = walk()
+        val tokens = kotlinx.coroutines.sync.Mutex().let { m ->
+            val seen = ArrayList<Long>()
+            (1..300).map { i ->
+                async(Dispatchers.Default) {
+                    val b = w.begin(request(account = "pl-${i % 20}"))!!
+                    w.onFailure(b.attempt.token, FailureKind.TRANSPORT)
+                    w.restartAt(b.attempt.token, start + minute, now)
+                    m.withLock { seen += b.attempt.token }
+                }
+            }.forEach { it.await() }
+            seen
+        }
+        assertEquals(tokens.size, tokens.toSet().size, "every begin got its own token")
+        assertTrue(w.held() <= 8, "the backstop bounds what is held: ${w.held()}")
+    }
+
+    @Test
+    fun `an open that finishes after its deadline publishes nothing`(): Unit = kotlinx.coroutines.runBlocking {
+        BoundedLoad.stallOverrideMsForTests = 100L
+        try {
+            val w = walk()
+            val fence = ReplayOpenFence()
+            val ticket = fence.next()
+            var lateBegin: M3uReplayWalk.Begun? = null
+            val open = M3uReplayOpen.run("m3u_url") {
+                // A blocking read that ignores cancellation finishes well after the 100 ms deadline.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    kotlinx.coroutines.delay(400)
+                    lateBegin = w.begin(request(), admit = { fence.isCurrent(ticket) })
+                    request()
+                }
+            }
+            assertEquals(M3uReplayOpen.Failed(timedOut = true), open)
+            fence.next()   // the screen moved on (Retry / exit) before the late result landed
+            kotlinx.coroutines.delay(600)
+            assertNull(lateBegin, "a begin that lands after the deadline is refused")
+            assertEquals(0, w.held(), "no ladder, context or winner was published")
+        } finally {
+            BoundedLoad.stallOverrideMsForTests = null
+        }
+    }
+
+    @Test
+    fun `the fence admits only the latest open`() {
+        val fence = ReplayOpenFence()
+        val first = fence.next()
+        val second = fence.next()
+        assertFalse(fence.isCurrent(first))
+        assertTrue(fence.isCurrent(second))
+    }
+
+    @Test
+    fun `tearing the owning scope down releases the replay`() {
+        val w = walk()
+        val scope = com.nuvio.app.features.common.lifecycle.EffectScope { throw it }
+        val begun = w.begin(request(), scope)!!
+        assertEquals(1, w.held())
+        scope.dispose()
+        assertEquals(0, w.held())
+        assertNull(w.restartAt(begun.attempt.token, start + minute, now), "a released replay cannot restart")
+    }
+
+    @Test
+    fun `releasing an old handle never drops a newer replay on the same playlist`() {
+        val w = walk()
+        val old = w.begin(request())!!
+        val newer = w.begin(request())!!
+        old.release.dispose()
+        assertEquals(1, w.held())
+        assertNotNull(w.restartAt(newer.attempt.token, start + minute, now))
+        newer.release.dispose()
+        assertEquals(0, w.held())
+    }
+
+    @Test
+    fun `a restart keeps the replay's release handle valid`() {
+        val w = walk()
+        val first = w.begin(request())!!
+        w.onSuccess(first.attempt.token)
+        w.restartAt(first.attempt.token, start + minute, now)!!
+        first.release.dispose()
+        assertEquals(0, w.held())
     }
 
     // --- the store ---------------------------------------------------------------------------

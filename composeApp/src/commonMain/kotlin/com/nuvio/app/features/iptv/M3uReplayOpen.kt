@@ -31,3 +31,18 @@ sealed interface M3uReplayOpen {
             }
     }
 }
+
+/**
+ * Fences the results of replay opens. An open runs detached under [BoundedLoad], so a slow one can finish
+ * after its deadline, after Retry, or after the viewer chose another programme. Each open takes a [next]
+ * ticket; only the latest one is [isCurrent], and the screen checks it before publishing anything (and
+ * hands it to [M3uReplayWalk.begin] as `admit`). Invalidate on exit with another [next].
+ */
+class ReplayOpenFence {
+    private val lock = kotlinx.atomicfu.locks.SynchronizedObject()
+    private var generation = 0L
+
+    fun next(): Long = kotlinx.atomicfu.locks.synchronized(lock) { ++generation }
+
+    fun isCurrent(ticket: Long): Boolean = kotlinx.atomicfu.locks.synchronized(lock) { ticket == generation }
+}

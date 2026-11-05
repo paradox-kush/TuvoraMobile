@@ -1,5 +1,10 @@
 package com.nuvio.app.features.iptv
 
+import com.nuvio.app.features.common.lifecycle.Disposable
+import com.nuvio.app.features.common.lifecycle.EffectScope
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
+
 /**
  * Walks the candidate links of ONE M3U catch-up replay until one plays: the Xtream walk's
  * counterpart for a playlist that says how to ask for its own archive ([M3uCatchUp]).
@@ -11,7 +16,14 @@ package com.nuvio.app.features.iptv
  *
  * Pure policy (no network, no persistence): [FormMemory] is injected and the caller performs each attempt.
  * Reports reuse the Xtream walk's [CatchUpDialectWalk.Step] / [CatchUpDialectWalk.Attempt] so the screen
- * handles both the same way. Drive it from one dispatcher; the state is deliberately unsynchronised.
+ * handles both the same way.
+ *
+ * Ownership: the per-replay ladders and the token counter have ONE owner, this object, and every access
+ * goes through [lock] (a data race on Kotlin/Native crashes). A replay's ask outlives its first frame (a
+ * continuing replay restarts from it), so it is registered on [begin] and released through the
+ * [Disposable] in [Begun.release] - owned by the caller's [EffectScope] when one is passed. [MAX_LADDERS]
+ * evicting the oldest is only a backstop. A [begin] whose result nobody wants any more ([admit] false,
+ * e.g. it finished after the open's deadline) publishes nothing.
  */
 class M3uReplayWalk(private val memory: FormMemory) {
 
@@ -34,9 +46,9 @@ class M3uReplayWalk(private val memory: FormMemory) {
     )
 
     /** A replay that can start: its first attempt, and where the window it asked the provider for ends (wall clock). */
-    data class Begun(val attempt: CatchUpDialectWalk.Attempt, val windowEndMs: Long)
+    data class Begun(val attempt: CatchUpDialectWalk.Attempt, val windowEndMs: Long, val release: Disposable)
 
-    private class Ladder(val request: Request, val primary: String, val urls: List<String>) {
+    private class Ladder(val request: Request, val primary: String, val urls: List<String>, val lineage: Long) {
         var index = 0
         var token = 0L
 
@@ -45,15 +57,20 @@ class M3uReplayWalk(private val memory: FormMemory) {
         fun attempt() = CatchUpDialectWalk.Attempt(token, CatchUpDialectWalk.Dialect.PLAYLIST_LINK, urls[index])
     }
 
-    private val ladders = HashMap<String, Ladder>()
+    private val lock = SynchronizedObject()
+    private val ladders = LinkedHashMap<String, Ladder>()
     private var tokenSeq = 0L
+    private var lineageSeq = 0L
+
+    /** Replays currently held (tests, and the backstop's bound). */
+    internal fun held(): Int = synchronized(lock) { ladders.size }
 
     /**
      * Starts the walk for [request], superseding any earlier one for the playlist. The window asked for is
      * the programme plus what follows it ([CatchUpContinuationPolicy.replayWindowEndMs]) so the next shows
      * play on. Null when the playlist's style cannot be built into a link, or the programme is degenerate.
      */
-    fun begin(request: Request): Begun? {
+    fun begin(request: Request, scope: EffectScope? = null, admit: () -> Boolean = { true }): Begun? {
         if (request.programmeStartMs <= 0L || request.programmeEndMs <= request.programmeStartMs) return null
         if (request.liveUrl.isBlank()) return null
         val windowEnd = CatchUpContinuationPolicy.replayWindowEndMs(
@@ -69,7 +86,12 @@ class M3uReplayWalk(private val memory: FormMemory) {
             showMinutes = (request.programmeEndMs - request.programmeStartMs) / 60_000L,
             airedMinutes = if (airing) (request.nowMs - request.programmeStartMs) / 60_000L else null,
         )
-        return start(request, primary, alternatives, windowEnd)
+        val begun = synchronized(lock) {
+            if (!admit()) return@synchronized null
+            start(request, primary, alternatives, windowEnd, ++lineageSeq)
+        } ?: return null
+        scope?.onRevert { begun.release.dispose() }
+        return begun
     }
 
     /**
@@ -77,43 +99,64 @@ class M3uReplayWalk(private val memory: FormMemory) {
      * aired. [token] must name the replay's current attempt. Null when the replay is gone or no link can be built.
      */
     fun restartAt(token: Long, atMs: Long, nowMs: Long): Begun? {
-        val old = ladderFor(token) ?: return null
-        val request = old.request.copy(programmeStartMs = atMs, programmeEndMs = atMs + 1L, nowMs = nowMs)
-        val windowEnd = CatchUpContinuationPolicy.replayWindowEndMs(
-            CatchUpContinuationPolicy.Programme(atMs, atMs + 1L), nowMs,
-        )
-        val primary = M3uCatchUp.build(request.info, request.liveUrl, atMs, windowEnd, nowMs, request.offsetMs) ?: return null
-        return start(request, primary, M3uCatchUp.alternatives(url = primary, offsetMs = request.offsetMs), windowEnd)
+        synchronized(lock) {
+            val old = ladderFor(token) ?: return null
+            val request = old.request.copy(programmeStartMs = atMs, programmeEndMs = atMs + 1L, nowMs = nowMs)
+            val windowEnd = CatchUpContinuationPolicy.replayWindowEndMs(
+                CatchUpContinuationPolicy.Programme(atMs, atMs + 1L), nowMs,
+            )
+            val primary = M3uCatchUp.build(request.info, request.liveUrl, atMs, windowEnd, nowMs, request.offsetMs) ?: return null
+            // Same replay, new window: the lineage (what [Begun.release] names) carries over.
+            return start(request, primary, M3uCatchUp.alternatives(url = primary, offsetMs = request.offsetMs), windowEnd, old.lineage)
+        }
     }
 
-    private fun start(request: Request, primary: String, alternatives: List<String>, windowEnd: Long): Begun {
+    /** Caller holds [lock]. */
+    private fun start(request: Request, primary: String, alternatives: List<String>, windowEnd: Long, lineage: Long): Begun {
         val urls = M3uCatchUp.preferForm(primary, alternatives, memory.recallM3uForm(request.accountId))
-        val ladder = Ladder(request, primary, urls)
+        val ladder = Ladder(request, primary, urls, lineage)
         ladder.token = ++tokenSeq
+        ladders.remove(request.accountId)
         ladders[request.accountId] = ladder
-        return Begun(ladder.attempt(), windowEnd)
+        while (ladders.size > MAX_LADDERS) ladders.remove(ladders.keys.first())
+        return Begun(ladder.attempt(), windowEnd, Disposable { release(request.accountId, lineage) })
+    }
+
+    private fun release(accountId: String, lineage: Long) {
+        synchronized(lock) { if (ladders[accountId]?.lineage == lineage) ladders.remove(accountId) }
     }
 
     /** The current attempt played: remember the form that worked on this playlist and end the walk. */
     fun onSuccess(token: Long): CatchUpDialectWalk.Step {
-        val ladder = ladderFor(token)?.takeUnless { it.settled } ?: return CatchUpDialectWalk.Step.Stale
-        memory.rememberM3uForm(ladder.request.accountId, M3uCatchUp.linkForm(ladder.urls[ladder.index], ladder.primary))
-        ladder.settled = true
+        val proof = synchronized(lock) {
+            val ladder = ladderFor(token)?.takeUnless { it.settled } ?: return CatchUpDialectWalk.Step.Stale
+            ladder.settled = true
+            ladder.request.accountId to M3uCatchUp.linkForm(ladder.urls[ladder.index], ladder.primary)
+        }
+        memory.rememberM3uForm(proof.first, proof.second)
         return CatchUpDialectWalk.Step.Done
     }
 
     /** The current attempt failed. TRANSPORT advances the ladder; DECODE or exhaustion ends it with nothing remembered. */
     fun onFailure(token: Long, kind: CatchUpDialectWalk.FailureKind): CatchUpDialectWalk.Step {
-        val ladder = ladderFor(token)?.takeUnless { it.settled } ?: return CatchUpDialectWalk.Step.Stale
-        val next = ladder.index + 1
-        if (kind != CatchUpDialectWalk.FailureKind.TRANSPORT || next >= ladder.urls.size) {
-            ladders.remove(ladder.request.accountId)
-            return CatchUpDialectWalk.Step.Unavailable
+        synchronized(lock) {
+            val ladder = ladderFor(token)?.takeUnless { it.settled } ?: return CatchUpDialectWalk.Step.Stale
+            val next = ladder.index + 1
+            if (kind != CatchUpDialectWalk.FailureKind.TRANSPORT || next >= ladder.urls.size) {
+                ladders.remove(ladder.request.accountId)
+                return CatchUpDialectWalk.Step.Unavailable
+            }
+            ladder.index = next
+            ladder.token = ++tokenSeq
+            return CatchUpDialectWalk.Step.Next(ladder.attempt())
         }
-        ladder.index = next
-        ladder.token = ++tokenSeq
-        return CatchUpDialectWalk.Step.Next(ladder.attempt())
     }
 
+    private companion object {
+        /** Backstop only: the real release is [Begun.release]. */
+        const val MAX_LADDERS = 8
+    }
+
+    /** Caller holds [lock]. */
     private fun ladderFor(token: Long): Ladder? = ladders.values.firstOrNull { it.token == token }
 }

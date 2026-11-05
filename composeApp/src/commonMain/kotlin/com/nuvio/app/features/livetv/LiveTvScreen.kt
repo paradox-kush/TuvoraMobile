@@ -78,6 +78,9 @@ import com.nuvio.app.features.iptv.CatchUpPlayback
 import com.nuvio.app.features.iptv.M3uReplayContinuation
 import com.nuvio.app.features.iptv.M3uReplayOpen
 import com.nuvio.app.features.iptv.M3uReplayWalk
+import com.nuvio.app.features.iptv.ReplayOpenFence
+import com.nuvio.app.features.common.lifecycle.Disposable
+import com.nuvio.app.features.common.lifecycle.rememberEffectScope
 import com.nuvio.app.features.iptv.GuideDataRefreshPolicy
 import com.nuvio.app.features.iptv.TileEpgQueue
 import com.nuvio.app.features.iptv.XtreamCatchUp
@@ -241,6 +244,12 @@ fun LiveTvScreen(
     val dialectWalk = remember { CatchUpDialectWalk(LiveTvData.winnerMemory()) }
     // The M3U playlists' counterpart: their own link, the alternatives, and the form remembered per playlist.
     val m3uWalk = remember { M3uReplayWalk(LiveTvData.winnerStore()) }
+    // Opens run detached under a deadline: only the latest one may publish a session.
+    val openFence = remember { ReplayOpenFence() }
+    // The replay's ask outlives its first frame (restart needs it); it is released when the replay ends or
+    // the screen leaves, through this scope.
+    val replayEffects = rememberEffectScope()
+    var replayRelease by remember { mutableStateOf<Disposable?>(null) }
     var catchUp by remember { mutableStateOf<CatchUpSession?>(null) }
     // Bumped by Retry during a replay: re-resolves the current attempt's source (the live resolve stands down then).
     var catchUpRetryTick by remember { mutableStateOf(0) }
@@ -397,6 +406,9 @@ fun LiveTvScreen(
 
     /** Leaves the replay and returns the screen to the live channel it belongs to. */
     fun exitCatchUp() {
+        openFence.next()
+        replayRelease?.dispose()
+        replayRelease = null
         catchUp = null
         replayRetry = null
         source = null
@@ -443,23 +455,31 @@ fun LiveTvScreen(
     fun startCatchUp(channel: LiveGuideChannel, programme: XtreamProgram) {
         sheetTarget = null
         replayRetry = null
+        val ticket = openFence.next()
+        replayRelease?.dispose()
+        replayRelease = null
         scope.launch {
             if (LiveTvData.isM3uPlaylist(channel.contentId)) {
                 // M3U: the playlist's own catch-up. Opening reads the channel's line from the content
                 // database under the live-resolve deadline; a stall is a failure with Retry, not a spinner.
                 val nowMs = TraktPlatformClock.nowEpochMs()
-                when (
-                    val open = M3uReplayOpen.run(LiveTvData.sourceTypeOf(channel.contentId)) {
-                        LiveTvData.m3uReplayRequest(channel.contentId, programme.startMs, programme.endMs, nowMs)
-                    }
-                ) {
+                val open = M3uReplayOpen.run(LiveTvData.sourceTypeOf(channel.contentId)) {
+                    LiveTvData.m3uReplayRequest(channel.contentId, programme.startMs, programme.endMs, nowMs)
+                }
+                // A newer open, a Back or a zap overtook this one: a late result publishes nothing.
+                if (!openFence.isCurrent(ticket)) return@launch
+                when (open) {
                     is M3uReplayOpen.Failed -> replayRetry = { startCatchUp(channel, programme) }
                     M3uReplayOpen.Unavailable -> catchUpNotice = CatchUpNotice.NO_RECORDING
                     is M3uReplayOpen.Ready -> {
-                        val session = beginM3uReplay(m3uWalk, open.request, channel.contentId, programme.title, programme.startMs, programme.endMs)
+                        val session = beginM3uReplay(
+                            m3uWalk, open.request, channel.contentId, programme.title, programme.startMs, programme.endMs,
+                            scope = replayEffects, admit = { openFence.isCurrent(ticket) },
+                        )
                         if (session == null) {
                             catchUpNotice = CatchUpNotice.NO_RECORDING
                         } else {
+                            replayRelease = session.release
                             currentContentId = channel.contentId
                             currentTitle = channel.name
                             currentLogo = channel.logo
@@ -1408,6 +1428,8 @@ internal data class CatchUpSession(
     val windowEndMs: Long = endMs,
     /** An M3U replay asks for more than its programme and follows the playhead into the next shows. */
     val continues: Boolean = false,
+    /** Releases the replay's ask held by the M3U walk (null for an Xtream replay). */
+    val release: Disposable? = null,
 ) {
     /**
      * Where the programme on screen starts in the player's own timeline (negative once a restarted link
@@ -1462,8 +1484,10 @@ internal fun beginM3uReplay(
     programmeTitle: String,
     startMs: Long,
     endMs: Long,
+    scope: com.nuvio.app.features.common.lifecycle.EffectScope? = null,
+    admit: () -> Boolean = { true },
 ): CatchUpSession? {
-    val begun = walk.begin(request) ?: return null
+    val begun = walk.begin(request, scope, admit) ?: return null
     return CatchUpSession(
         contentId = contentId,
         programmeTitle = programmeTitle,
@@ -1472,6 +1496,7 @@ internal fun beginM3uReplay(
         attempt = begun.attempt,
         windowEndMs = begun.windowEndMs,
         continues = true,
+        release = begun.release,
     )
 }
 
