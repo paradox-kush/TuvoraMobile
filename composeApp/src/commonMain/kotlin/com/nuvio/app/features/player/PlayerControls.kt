@@ -1181,9 +1181,20 @@ private fun PlayerActionPillButton(
     }
 }
 
+/**
+ * Fork: replaces the LIVE badge row with the pause / rewind transport while a live stream is time-shifted
+ * (provided by LiveFullscreenControls). Null = the plain badge.
+ */
+internal val LocalLiveTransportSlot = androidx.compose.runtime.compositionLocalOf<(@Composable () -> Unit)?> { null }
+
 /** Fork: the LIVE badge row that stands in for the scrubber on live streams. */
 @Composable
 private fun LiveBadgeRow(metrics: PlayerLayoutMetrics) {
+    val transport = LocalLiveTransportSlot.current
+    if (transport != null) {
+        transport()
+        return
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()

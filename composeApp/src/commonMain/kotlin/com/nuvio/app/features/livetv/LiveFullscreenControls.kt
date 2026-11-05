@@ -4,6 +4,16 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.unit.dp
+import com.nuvio.app.core.ui.nuvio
+import com.nuvio.app.features.livetv.pause.LivePauseState
+import com.nuvio.app.features.player.LocalLiveTransportSlot
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -61,6 +71,10 @@ internal fun LiveFullscreenControls(
     onZoomChanged: (VideoZoom) -> Unit,
     onBack: () -> Unit,
     onInteraction: () -> Unit,
+    /** Live pause / rewind: while shifted the badge row becomes the rewind transport (scrub + "-mm:ss - LIVE"). */
+    pauseState: LivePauseState = LivePauseState.Off,
+    onSeekInWindow: (Long) -> Unit = {},
+    onGoLive: () -> Unit = {},
 ) {
     // Track lists are read when a picker opens (engines answer from observed state); the tick
     // re-reads them after a pick so the selection mark follows.
@@ -85,7 +99,20 @@ internal fun LiveFullscreenControls(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val metrics = remember(maxWidth) { PlayerLayoutMetrics.fromWidth(maxWidth) }
         val safePadding = playerHorizontalSafePadding()
+        val colors = MaterialTheme.nuvio.colors
+        val shifted = pauseState as? LivePauseState.Shifted
+        val transport: (@Composable () -> Unit)? = shifted?.let { s ->
+            {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+                    LivePauseScrub(s, colors, onSeek = { onSeekInWindow(it); onInteraction() })
+                    Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 8.dp)) {
+                        LiveBadge(danger = colors.danger, behindLiveMs = s.behindLiveMs, onGoLive = onGoLive)
+                    }
+                }
+            }
+        }
         AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
+          CompositionLocalProvider(LocalLiveTransportSlot provides transport) {
             PlayerControlsShell(
                 title = title,
                 streamTitle = programmeTitle.orEmpty(),
@@ -120,6 +147,7 @@ internal fun LiveFullscreenControls(
                 onPreviousChannel = if (buttons.channelZap) onPreviousChannel else null,
                 onNextChannel = if (buttons.channelZap) onNextChannel else null,
             )
+          }
         }
 
         SubtitleModal(

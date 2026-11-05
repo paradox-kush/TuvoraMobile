@@ -43,6 +43,8 @@ fun registerAndroidStartup() {
     AndroidStartup.registerTask { com.nuvio.app.features.iptv.overlay.OverlayDbDriver.initialize(it) }
     AndroidStartup.registerTask { EpgMirrorDbDriver.initialize(it) }
     AndroidStartup.registerTask { com.nuvio.app.features.announcements.api.AnnouncementsAndroid.initialize(it) }
+    // Live pause/rewind disk buffer (+ the six-hour sweep of what a crash left in cacheDir/live-pause).
+    AndroidStartup.registerTask { com.nuvio.app.features.livetv.pause.AndroidLivePauseWiring.install(it) }
     // P3: periodic background refresh of overdue IPTV playlists (idempotent — KEEP).
     AndroidStartup.registerTask { IptvRefreshWorker.schedule(it) }
     // ACTION_OPEN_DOCUMENT launcher for the IPTV M3U picker (bound in onCreate, pre-STARTED).

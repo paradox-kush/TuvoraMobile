@@ -120,6 +120,17 @@ object LiveTvData {
         return XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }?.sourceType ?: "unknown"
     }
 
+    /**
+     * [headers] with the playlist's own User-Agent ([com.nuvio.app.features.iptv.StreamUserAgentPolicy]) for the
+     * stream request, when the playlist sets one: the live pause capture opens the stream itself and must look like
+     * the player (providers key their WAF on it). Unchanged for a channel without an override.
+     */
+    fun withStreamUserAgent(contentId: String, headers: Map<String, String>): Map<String, String> {
+        val account = accountFor(contentId)?.first ?: return headers
+        val ua = com.nuvio.app.features.iptv.StreamUserAgentPolicy.resolve(account) ?: return headers
+        return headers.filterKeys { !it.equals("User-Agent", ignoreCase = true) } + ("User-Agent" to ua)
+    }
+
     fun resetPanelGuard(contentId: String) {
         val parsed = XtreamItemRegistry.parseId(contentId) ?: return
         XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId }

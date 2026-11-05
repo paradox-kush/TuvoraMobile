@@ -152,6 +152,7 @@ actual fun PlatformPlayerSurface(
     playWhenReady: Boolean,
     initialPositionMs: Long?,
     initialPositionRequestKey: String?,
+    startAtLiveWindowStart: Boolean,
     resizeMode: PlayerResizeMode,
     videoZoom: VideoZoom,
     playbackEngine: AndroidPlaybackEngine?,
@@ -186,6 +187,7 @@ actual fun PlatformPlayerSurface(
         playWhenReady = playWhenReady,
         initialPositionMs = initialPositionMs,
         initialPositionRequestKey = initialPositionRequestKey,
+        startAtLiveWindowStart = startAtLiveWindowStart,
         resizeMode = resizeMode,
         videoZoom = videoZoom,
         playbackEngine = playbackEngine,
@@ -214,6 +216,7 @@ private fun PlatformPlayerSurfaceInner(
     playWhenReady: Boolean,
     initialPositionMs: Long?,
     initialPositionRequestKey: String?,
+    startAtLiveWindowStart: Boolean,
     resizeMode: PlayerResizeMode,
     videoZoom: VideoZoom,
     playbackEngine: AndroidPlaybackEngine?,
@@ -292,6 +295,7 @@ private fun PlatformPlayerSurfaceInner(
             playWhenReady = playWhenReady,
             initialPositionMs = initialPositionMs,
             initialPositionRequestKey = initialPositionRequestKey,
+            startAtLiveWindowStart = startAtLiveWindowStart,
             resizeMode = resizeMode,
             videoZoom = videoZoom,
             liveBufferPlan = liveBufferPlan,
@@ -387,6 +391,8 @@ private fun ExoPlayerSurface(
     playWhenReady: Boolean,
     initialPositionMs: Long?,
     initialPositionRequestKey: String?,
+    /** A local growing HLS playlist (live pause buffer): prepare paused at the start of its window. */
+    startAtLiveWindowStart: Boolean,
     resizeMode: PlayerResizeMode,
     videoZoom: VideoZoom,
     liveBufferPlan: LiveBufferPlan?,
@@ -404,7 +410,7 @@ private fun ExoPlayerSurface(
     val latestOnSnapshot = rememberUpdatedState(onSnapshot)
     val latestOnError = rememberUpdatedState(onError)
     val latestOnInitialPositionHandled = rememberUpdatedState(onInitialPositionHandled)
-    val latestPlayWhenReady = rememberUpdatedState(playWhenReady)
+    val latestPlayWhenReady = rememberUpdatedState(LocalLiveWindowPolicy.playWhenReady(startAtLiveWindowStart, playWhenReady))
     val coroutineScope = rememberCoroutineScope()
 
     val playerSettings = remember {
@@ -456,13 +462,15 @@ private fun ExoPlayerSurface(
     var fallbackStartPositionMs by remember(playerSourceKey) { mutableStateOf<Long?>(null) }
     val effectiveDecoderPriority = decoderPriorityOverride ?: playerSettings.decoderPriority
 
-    var resolvedMediaItem by remember(playerSourceKey, externalSubtitles) {
+    var resolvedMediaItem by remember(playerSourceKey, externalSubtitles, startAtLiveWindowStart) {
         mutableStateOf(
             playbackMediaItemFromUrl(
                 url = sourceUrl,
                 responseHeaders = sanitizedSourceResponseHeaders,
                 streamType = normalizedStreamType,
             ).buildUpon()
+                // The live pause buffer is a local HLS playlist whatever its file name says.
+                .apply { if (startAtLiveWindowStart) setMimeType(MimeTypes.APPLICATION_M3U8) }
                 .setMediaId(sourceUrl)
                 .apply {
                     val subtitleConfigs = startupSubtitleConfigurations(externalSubtitles)
@@ -779,8 +787,10 @@ private fun ExoPlayerSurface(
         val mediaItem = attachedAddonSubtitleConfig?.let { config ->
             resolvedMediaItem.buildUpon().setSubtitleConfigurations(listOf(config)).build()
         } ?: resolvedMediaItem
-        val requestedStartPositionMs = fallbackStartPositionMs
-            ?: initialPositionMs?.takeIf { it > 0L }
+        val requestedStartPositionMs = LocalLiveWindowPolicy.startPositionMs(
+            startAtLiveWindowStart,
+            fallbackStartPositionMs ?: initialPositionMs?.takeIf { it > 0L },
+        )
         playbackDiagnostics.attempt += 1
         playbackDiagnostics.prepareStartedAtMs = SystemClock.elapsedRealtime()
         Log.i(
@@ -886,6 +896,13 @@ private fun ExoPlayerSurface(
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 syncPlayerViewKeepScreenOn()
+                // The viewer of a pause buffer is not at the live edge: falling behind the window means
+                // "back to its start", not "rejoin live" (and not a mime probe of a local file).
+                if (LocalLiveWindowPolicy.restartsAtWindowStart(startAtLiveWindowStart, error.errorCode)) {
+                    exoPlayer.seekTo(0L)
+                    exoPlayer.prepare()
+                    return
+                }
                 Log.e(
                     PLAYER_DIAGNOSTIC_TAG,
                     "error attempt=${playbackDiagnostics.attempt} " +
@@ -2038,6 +2055,9 @@ private class NuvioLibmpvView(
     @Volatile private var obsCachePositionMs = 0L
     @Volatile private var obsSpeed = 1.0
     @Volatile private var obsTrackList: MPVNode? = null
+    // demuxer-cache-state.seekable-ranges, mirrored from the event thread once a live back buffer is in use.
+    @Volatile private var obsSeekableRanges: List<MpvLiveCache.Range> = emptyList()
+    private val cacheStateObserved = AtomicBoolean(false)
     @Volatile private var obsVideoParams: MPVNode? = null
     // Rolling estimates. Live MPEG-TS rarely declares a bitrate in the container, so
     // mpv's running measurement is the only number the stream info panel can show.
@@ -2089,6 +2109,7 @@ private class NuvioLibmpvView(
                 "speed" -> obsSpeed = 1.0
                 "track-list" -> obsTrackList = null
                 "video-params" -> obsVideoParams = null
+                "demuxer-cache-state" -> obsSeekableRanges = emptyList()
                 "video-bitrate" -> obsVideoBitrate = null
                 "audio-bitrate" -> obsAudioBitrate = null
                 // Unavailable means no active video output — mirror it as zero fps so the read-time
@@ -2138,6 +2159,7 @@ private class NuvioLibmpvView(
             when (property) {
                 "track-list" -> obsTrackList = value
                 "video-params" -> obsVideoParams = value
+                "demuxer-cache-state" -> obsSeekableRanges = value.seekableRanges()
             }
         }
 
@@ -2612,6 +2634,27 @@ private class NuvioLibmpvView(
                 return true
             }
 
+            // Live pause / rewind: the engine's own demuxer cache is the buffer. Writes queue on mpv-ctl like
+            // every other mpv write; the window is read off the property shadow, never from mpv on Main.
+            override val supportsLiveBackBuffer: Boolean = true
+
+            override fun setLiveCacheBudget(maxBytes: Long, maxBackBytes: Long, cacheSecs: Long) {
+                ctl {
+                    // Observing demuxer-cache-state costs a node conversion per change: only once a live
+                    // back buffer is actually in use.
+                    if (cacheStateObserved.compareAndSet(false, true)) {
+                        mpv.observeProperty("demuxer-cache-state", MPV.mpvFormat.MPV_FORMAT_NODE)
+                    }
+                    MpvLiveCache.properties(maxBytes, maxBackBytes, cacheSecs).forEach { (name, value) ->
+                        mpv.setPropertyString(name, value)
+                    }
+                    Log.i(TAG, "mpv live cache: fwd=$maxBytes back=$maxBackBytes secs=$cacheSecs")
+                }
+            }
+
+            override fun liveSeekWindow(): LiveSeekWindow? =
+                MpvLiveCache.window(obsSeekableRanges, obsPositionMs)
+
             override fun getStreamInfo(): PlayerStreamInfo = readStreamInfo()
 
             // Upstream's HDR / bit-depth fields feed the player badges; read from the property shadow
@@ -2957,6 +3000,15 @@ private fun MPVNode.nodeBoolean(key: String): Boolean? =
 
 private fun MPVNode.nodeDouble(key: String): Double? =
     runCatching { this[key]?.asDouble() }.getOrNull()
+
+/** `demuxer-cache-state.seekable-ranges` as plain ranges (seconds), so no MPVNode outlives the event callback. */
+private fun MPVNode.seekableRanges(): List<MpvLiveCache.Range> = runCatching {
+    this["seekable-ranges"]?.asArray()?.toList().orEmpty().mapNotNull { node ->
+        val start = node.nodeDouble("start")
+        val end = node.nodeDouble("end")
+        if (start != null && end != null) MpvLiveCache.Range(start, end) else null
+    }
+}.getOrDefault(emptyList())
 
 private fun androidx.compose.ui.graphics.Color.toMpvColor(): String {
     val argb = toArgb()

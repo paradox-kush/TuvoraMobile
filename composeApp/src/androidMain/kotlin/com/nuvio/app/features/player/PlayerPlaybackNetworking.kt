@@ -100,16 +100,18 @@ internal object PlayerPlaybackNetworking {
         }
     }
 
-    fun createHttpDataSourceFactory(
-        defaultHeaders: Map<String, String> = emptyMap(),
-        useLongReadTimeout: Boolean = false,
-        /** False for a single-use link (LiveLinkReconnectPolicy): a silent OkHttp re-send would re-open a spent URL. */
-        retryConnectionFailures: Boolean = true,
-    ): DataSource.Factory {
-        val requestHeaders = sanitizeHeaders(defaultHeaders)
+    /**
+     * The one place that decides how a playback request is sent: retry policy, the loopback long read timeout and
+     * the same-host Authorization re-injection. The player and the live pause capture both go through it, so a
+     * capture never behaves differently from the player it replaces.
+     */
+    private fun playerCallFactory(
+        requestHeaders: Map<String, String>,
+        loopback: Boolean,
+        retryConnectionFailures: Boolean,
+    ): Call.Factory {
         val authorization = requestHeaders.headerValue("Authorization")
-        val loopback = useLongReadTimeout
-        val client = playbackCallFactory {
+        return playbackCallFactory {
             if (!retryConnectionFailures) retryOnConnectionFailure(false)
             if (loopback) loopbackConfigure()(this)
             authorization?.let { value ->
@@ -127,6 +129,16 @@ internal object PlayerPlaybackNetworking {
                 }
             }
         }
+    }
+
+    fun createHttpDataSourceFactory(
+        defaultHeaders: Map<String, String> = emptyMap(),
+        useLongReadTimeout: Boolean = false,
+        /** False for a single-use link (LiveLinkReconnectPolicy): a silent OkHttp re-send would re-open a spent URL. */
+        retryConnectionFailures: Boolean = true,
+    ): DataSource.Factory {
+        val requestHeaders = sanitizeHeaders(defaultHeaders)
+        val client = playerCallFactory(requestHeaders, loopback = useLongReadTimeout, retryConnectionFailures = retryConnectionFailures)
 
         return OkHttpDataSource.Factory(client).apply {
             setDefaultRequestProperties(requestHeaders)
@@ -135,6 +147,20 @@ internal object PlayerPlaybackNetworking {
             }
         }
     }
+
+    /**
+     * The playback stack for the live pause capture (same DNS, TLS policy, timeouts and Sentry breadcrumbs as the
+     * player). [retryConnectionFailures] false for a single-use link: a silent OkHttp re-send would re-open a spent URL.
+     */
+    fun captureCallFactory(url: String, headers: Map<String, String>, retryConnectionFailures: Boolean): Call.Factory =
+        playerCallFactory(
+            sanitizeHeaders(headers),
+            loopback = runCatching { isLoopbackHost(java.net.URI(url).host.orEmpty().trim('[', ']')) }.getOrDefault(false),
+            retryConnectionFailures = retryConnectionFailures,
+        )
+
+    /** The request headers the player would send for [headers]: sanitised, with the default User-Agent when none is set. */
+    fun captureHeaders(headers: Map<String, String>): Map<String, String> = withDefaultUserAgent(headers)
 
     fun createDataSourceFactory(
         context: Context,

@@ -120,6 +120,62 @@ class TvPlayerRemotePolicyTest {
     }
 }
 
+/** Live pause / rewind on the Siri Remote: the clickpad edges step through the window instead of doing nothing. */
+class TvPlayerRemoteLivePauseTest {
+    private val live = TvPlayerRemoteContext(
+        controlsVisible = false, panelOpen = false, overlayOpen = false,
+        isLive = true, isPlaying = true, hasError = false, scrubbing = false,
+        livePauseAvailable = true,
+    )
+
+    private fun decide(input: TvRemoteInput, ctx: TvPlayerRemoteContext) = TvPlayerRemotePolicy.decide(input, ctx)
+
+    @Test
+    fun `live edges step back and forward through the window over bare video`() {
+        assertEquals(TvRemoteAction.LiveStepBack, decide(TvRemoteInput.Left, live))
+        assertEquals(TvRemoteAction.LiveStepForward, decide(TvRemoteInput.Right, live))
+    }
+
+    @Test
+    fun `live edges only show the controls where no pause is available`() {
+        val plain = live.copy(livePauseAvailable = false)
+        assertEquals(TvRemoteAction.ShowControls, decide(TvRemoteInput.Left, plain))
+        assertEquals(TvRemoteAction.ShowControls, decide(TvRemoteInput.Right, plain))
+    }
+
+    @Test
+    fun `with the controls up the arrows still belong to the focus engine`() {
+        assertEquals(TvRemoteAction.PassThrough, decide(TvRemoteInput.Left, live.copy(controlsVisible = true)))
+        assertEquals(TvRemoteAction.PassThrough, decide(TvRemoteInput.Right, live.copy(panelOpen = true)))
+    }
+
+    @Test
+    fun `a video on demand never steps through a live window`() {
+        val vod = live.copy(isLive = false)
+        assertEquals(TvRemoteAction.SkipBack, decide(TvRemoteInput.Left, vod))
+        assertEquals(TvRemoteAction.SkipForward, decide(TvRemoteInput.Right, vod))
+    }
+
+    @Test
+    fun `play pause and select pause a live channel and a failed pause retries`() {
+        assertEquals(TvRemoteAction.TogglePlayPause, decide(TvRemoteInput.PlayPause, live))
+        assertEquals(TvRemoteAction.TogglePlayPause, decide(TvRemoteInput.Select, live))
+        assertEquals(TvRemoteAction.Retry, decide(TvRemoteInput.PlayPause, live.copy(controlsVisible = true, livePauseFailed = true)))
+    }
+
+    @Test
+    fun `back from a paused live channel leaves even with the controls showing`() {
+        assertEquals(TvRemoteAction.Leave, decide(TvRemoteInput.Back, live.copy(controlsVisible = true, isPlaying = false)))
+    }
+
+    @Test
+    fun `up and down still zap a live channel`() {
+        val zapping = live.copy(canZap = true)
+        assertEquals(TvRemoteAction.ZapPrevious, decide(TvRemoteInput.Up, zapping))
+        assertEquals(TvRemoteAction.ZapNext, decide(TvRemoteInput.Down, zapping))
+    }
+}
+
 class TvPlaybackRequestGateTest {
     // B112: a guide preview / zap that resolved after the viewer moved on kept playing with no screen.
     @Test

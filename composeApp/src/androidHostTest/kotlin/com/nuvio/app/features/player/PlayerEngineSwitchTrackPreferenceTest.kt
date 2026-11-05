@@ -15,6 +15,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -296,6 +297,25 @@ class PlayerEngineSwitchTrackPreferenceTest {
         val pending = runtime.pendingEngineSwitchTrackPreference
         assertEquals("ja", pending?.preference?.audioLanguage)
         assertEquals(AndroidPlaybackEngine.Libmpv, pending?.targetEngine)
+    }
+
+    @Test
+    fun autoFailoverNeverReopensASpentSingleUseLink() {
+        // A live Stalker create_link is spent after its first open: once the credential refresh has
+        // stopped re-minting, the other engine would only open the same dead URL (one more 401).
+        val runtime = runtime()
+        runtime.playerController = FakeController(playbackEngine = AndroidPlaybackEngine.ExoPlayer)
+        runtime.playerSettingsUiState = runtime.playerSettingsUiState.copy(
+            autoSwitchPlaybackEngineOnError = true,
+        )
+
+        val failedOver = runtime.maybeFailoverPlaybackEngine(
+            resolvedAutoEngine = AndroidPlaybackEngine.ExoPlayer,
+            singleUseLink = true,
+        )
+
+        assertFalse(failedOver, "a spent single-use link must surface its error, not switch engines")
+        assertNull(runtime.playbackEngineOverride)
     }
 
     @Test

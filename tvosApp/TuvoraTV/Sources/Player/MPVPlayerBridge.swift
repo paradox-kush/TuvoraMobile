@@ -6,7 +6,7 @@ import TuvoraCore
 
 // MARK: - Player Bridge Implementation (Kotlin protocol conformance)
 
-final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayControl, TvVideoFormatSource, NuvioPlayerLinkReconnectBridge {
+final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayControl, TvVideoFormatSource, NuvioPlayerLinkReconnectBridge, NuvioPlayerLiveCacheBridge {
     func setAudioDelayMs(delayMs: Int32) { playerVC?.setAudioDelayMs(Int(delayMs)) }
     /// Live display frame-rate matching (LiveDisplayCriteriaPolicy): the cached format, no mpv read.
     func videoFormat() -> TvVideoFormat? { playerVC?.liveVideoFormat }
@@ -132,6 +132,13 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayContro
     func setPlaybackSpeed(speed: Float) { playerVC?.setSpeed(speed) }
     func setMuted(muted: Bool) { playerVC?.setMuted(muted) }
     func setResizeMode(mode: Int32) { playerVC?.setResize(Int(mode)) }
+    /// NuvioPlayerLiveCacheBridge (Kotlin, hand-mirrored): live pause / rewind. The cache plan is written on the
+    /// mpv queue (never Main) and starts the `demuxer-cache-state` observation; the window is read from the store.
+    func applyLiveCacheProperties(names: [String], values: [String]) {
+        // Never create a player view controller here: after teardown this would leave an orphan VC.
+        playerVC?.applyLiveCacheProperties(names, values)
+    }
+    func getSeekableRanges() -> String { playerVC?.seekableRanges.text ?? "" }
     func syncVideoSurfaceLayout(width: Double, height: Double) {
         playerVC?.syncVideoSurfaceLayout(size: CGSize(width: width, height: height))
     }
@@ -324,6 +331,11 @@ final class MPVPlayerViewController: UIViewController {
     private lazy var nowPlayingController = PlayerNowPlayingController(owner: self)
     private lazy var eventQueue = DispatchQueue(label: "mpv-events", qos: .userInitiated)
 
+    /// Live pause / rewind: the observed `demuxer-cache-state` seekable ranges (see MPVLiveCache.swift).
+    let seekableRanges = MPVSeekableRangesStore()
+    /// Whether `demuxer-cache-state` is observed yet. Touched only on the serial mpv queue.
+    private var liveCacheObserved = false
+
     /// B187: every libmpv client call waits for the core lock, and the core holds it while the
     /// demuxer waits on the network — a seek in a remote file re-reads it. Made on Main, a burst of
     /// seeks blocked past the system watchdog deadline (0x8badf00d, iPad). Writes therefore run in
@@ -504,6 +516,7 @@ final class MPVPlayerViewController: UIViewController {
         installRenderThreadExitGuard()
 
         setupMpv()
+        flushPendingLiveCache()
         // Must run after setupMpv (it needs the live metalLayer) and before the view is on screen.
         installExperimentalPictureInPictureCaptureIfNeeded()
         activateAudioSessionForPlayback()
@@ -1628,6 +1641,15 @@ final class MPVPlayerViewController: UIViewController {
 
                 switch eventPtr.pointee.event_id {
                 case MPV_EVENT_PROPERTY_CHANGE:
+                    // The cache state changes several times a second and nothing on Main shows it: store the
+                    // ranges here and skip the Main refresh the playback properties trigger.
+                    if let data = eventPtr.pointee.data {
+                        let property = UnsafePointer<mpv_event_property>(OpaquePointer(data)).pointee
+                        if String(cString: property.name) == "demuxer-cache-state" {
+                            self.seekableRanges.set(MPVLiveCacheDecoder.seekableRanges(property))
+                            break
+                        }
+                    }
                     DispatchQueue.main.async { self.updateState() }
                 case MPV_EVENT_FILE_LOADED:
                     DispatchQueue.main.async {
@@ -1721,6 +1743,35 @@ final class MPVPlayerViewController: UIViewController {
         onMpvQueue { ctx in
             var data: Int = flag ? 1 : 0
             mpv_set_property(ctx, name, MPV_FORMAT_FLAG, &data)
+        }
+    }
+
+    /// Live pause / rewind: raises (or restores) the demuxer cache plan at runtime. mpv applies a change of
+    /// `demuxer-max-bytes` / `demuxer-max-back-bytes` / `cache-secs` to the file already playing. The
+    /// `demuxer-cache-state` observation starts with the first plan, so players that never pause pay nothing.
+    private var pendingLiveCache: (names: [String], values: [String])?
+
+    private func flushPendingLiveCache() {
+        guard let pending = pendingLiveCache else { return }
+        pendingLiveCache = nil
+        applyLiveCacheProperties(pending.names, pending.values)
+    }
+
+    func applyLiveCacheProperties(_ names: [String], _ values: [String]) {
+        // Kotlin can hand the first plan over before the view (and with it the core) exists: keep the latest one
+        // and apply it the moment the core is up. Main thread only, like viewDidLoad.
+        guard mpv != nil else {
+            pendingLiveCache = (names, values)
+            return
+        }
+        onMpvQueue { [self] ctx in
+            if !liveCacheObserved {
+                liveCacheObserved = true
+                checkError(mpv_observe_property(ctx, 0, "demuxer-cache-state", MPV_FORMAT_NODE))
+            }
+            for (name, value) in zip(names, values) {
+                checkError(mpv_set_property_string(ctx, name, value))
+            }
         }
     }
 
