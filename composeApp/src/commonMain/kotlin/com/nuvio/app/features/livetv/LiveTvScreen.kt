@@ -171,6 +171,13 @@ fun LiveTvScreen(
     // per channel below rather than recreated.
     val freezeReporter = remember { LivePlaybackFreezeReporter() }
     val freezeReconnector = remember { LivePlaybackReconnector(freezeReporter) }
+    // The one automatic re-resolve after a playback error, per tune (never per URL: see the guard).
+    val autoRefreshGuard = remember { LiveTvAutoRefreshGuard() }
+    // A zap is a new tune: neither recovery budget carries over from the previous channel.
+    LaunchedEffect(currentContentId) {
+        freezeReconnector.onChannelChanged()
+        autoRefreshGuard.reset()
+    }
     // Keyed on the channel: fires on a channel switch and on leaving the screen, which are the
     // two ways a viewer escapes a frozen picture.
     DisposableEffect(currentContentId) {
@@ -315,7 +322,9 @@ fun LiveTvScreen(
     // single-use/short-TTL), so controller.retry() would just replay the dead URL.
     // USER retry only: reset the panel breaker first (WP6) so the re-resolve is never met with a
     // fast-fail — the AUTOMATIC one-shot re-resolve below must not reset.
-    val onRetry: () -> Unit = {
+    // reResolve is also the freeze watcher's automatic reconnect, so it never touches the recovery
+    // budgets; only [onRetry] (the viewer's Retry) starts them over.
+    val reResolve: () -> Unit = {
         LiveTvData.resetPanelGuard(currentContentId)
         reconnectGaveUp = false
         source = null
@@ -323,20 +332,24 @@ fun LiveTvScreen(
         snapshot = PlayerPlaybackSnapshot()
         retryTick++
     }
+    val onRetry: () -> Unit = {
+        freezeReconnector.onUserRetry()
+        autoRefreshGuard.reset()
+        reResolve()
+    }
 
-    // One AUTOMATIC fresh re-resolve per resolved URL: a mid-watch 401 (token expired, or the
-    // portal session was rotated by another device on the same MAC) recovers invisibly; a second
-    // failure on the freshly minted link means the channel/account is the problem — surface the
-    // error pill instead of hammering the portal.
+    // One AUTOMATIC fresh re-resolve per tune: a mid-watch 401 (token expired, or the portal
+    // session was rotated by another device on the same MAC) recovers invisibly; a second failure
+    // on the freshly minted link means the channel/account is the problem — surface the error pill
+    // instead of hammering the portal. Counted per tune, not per URL: each create_link is a new
+    // URL, so the old URL-keyed guard minted again on every failure (LiveTvAutoRefreshGuard).
     //
     // Never during a replay: there the dialect walk owns failure, and a re-resolve would rebuild
     // the LIVE url for a viewer who asked for a recording.
-    var autoRefreshBurntUrl by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(playbackError) {
         if (isCatchUp) return@LaunchedEffect
-        val failedUrl = source?.url ?: return@LaunchedEffect
-        if (playbackError != null && autoRefreshBurntUrl != failedUrl) {
-            autoRefreshBurntUrl = failedUrl
+        if (source?.url == null) return@LaunchedEffect
+        if (playbackError != null && autoRefreshGuard.admit(snapshot.positionMs)) {
             retryTick++
         }
     }
@@ -744,6 +757,7 @@ fun LiveTvScreen(
                                 it.isEnded -> onCatchUpFailure(playbackError)
                             }
                         }
+                        if (LivePlaybackStartupPolicy.hasStarted(it)) autoRefreshGuard.onPlayback(it.positionMs)
                         if (!playbackStartRecorded.value && LivePlaybackStartupPolicy.hasStarted(it)) {
                             playbackStartRecorded.value = true
                             Breadcrumbs.playbackStarted(
@@ -769,7 +783,7 @@ fun LiveTvScreen(
                                 // Re-resolve rather than controller.retry(): live links carry
                                 // expiring tokens, so replaying the same URL can reconnect to a
                                 // link the provider has already invalidated.
-                                reconnect = onRetry,
+                                reconnect = reResolve,
                                 // Video-only freeze: the stream is still delivering audio, so reset
                                 // the decoder before spending a live link on a re-resolve.
                                 resetVideo = { controller?.resetVideoPipeline() == true },
@@ -1172,6 +1186,8 @@ private fun LivePlayerSurface(
             // it, which every live-only behaviour reads.
             streamType = "live",
             isCatchUpPlayback = isCatchUpPlayback,
+            // A Stalker create_link is spent after its first open: no in-engine re-open after a drop.
+            singleUseLink = current.singleUseLink && !isCatchUpPlayback,
             playbackSurface = com.nuvio.app.features.player.LIVE_FREEZE_SURFACE_DOCKED,
             modifier = Modifier.fillMaxSize(),
             playWhenReady = true,

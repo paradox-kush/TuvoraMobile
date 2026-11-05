@@ -114,6 +114,12 @@ expect fun PlatformPlayerSurface(
      */
     isCatchUpPlayback: Boolean = false,
     /**
+     * The URL is spent after its first open (a live Stalker `create_link`). The engine then makes no
+     * re-open of its own after a drop (mpv `stream-lavf-o reconnect=0`, no Media3 load retry), and the
+     * app-level recovery mints a fresh link. See [LiveLinkReconnectPolicy].
+     */
+    singleUseLink: Boolean = false,
+    /**
      * Which screen is hosting this surface — one of [LIVE_FREEZE_SURFACE_DOCKED] /
      * [LIVE_FREEZE_SURFACE_PLAYER], the same vocabulary freeze reporting already uses.
      *

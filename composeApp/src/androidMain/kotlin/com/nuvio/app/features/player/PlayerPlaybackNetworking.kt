@@ -103,11 +103,14 @@ internal object PlayerPlaybackNetworking {
     fun createHttpDataSourceFactory(
         defaultHeaders: Map<String, String> = emptyMap(),
         useLongReadTimeout: Boolean = false,
+        /** False for a single-use link (LiveLinkReconnectPolicy): a silent OkHttp re-send would re-open a spent URL. */
+        retryConnectionFailures: Boolean = true,
     ): DataSource.Factory {
         val requestHeaders = sanitizeHeaders(defaultHeaders)
         val authorization = requestHeaders.headerValue("Authorization")
         val loopback = useLongReadTimeout
         val client = playbackCallFactory {
+            if (!retryConnectionFailures) retryOnConnectionFailure(false)
             if (loopback) loopbackConfigure()(this)
             authorization?.let { value ->
                 addNetworkInterceptor { chain ->

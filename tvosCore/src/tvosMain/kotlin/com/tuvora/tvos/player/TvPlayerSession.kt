@@ -18,6 +18,8 @@ import com.nuvio.app.features.player.PlayerStreamInfo
 import com.nuvio.app.features.player.PlayerTrackPreferenceStorage
 import com.nuvio.app.features.player.ResumeLoadPolicy
 import com.nuvio.app.features.player.setMpvProperties
+import com.nuvio.app.features.player.applyStreamLavfOptions
+import com.nuvio.app.features.player.LiveLinkReconnectPolicy
 import androidx.compose.ui.graphics.toArgb
 import com.nuvio.app.features.player.SubtitleRepository
 import com.nuvio.app.features.player.addonSubtitleRequests
@@ -154,6 +156,24 @@ class TvPlayerSession(
         serverPlaybackUrl = playbackUrl
         this.onClosed = onClosed
         return this
+    }
+
+    /** The live link is spent after its first open (Stalker create_link): no in-engine re-open. */
+    private var singleUseLink = false
+
+    /** Kept off the constructor for the same reason as [bindServer]. See [LiveLinkReconnectPolicy]. */
+    internal fun bindSingleUseLink(singleUse: Boolean): TvPlayerSession {
+        singleUseLink = singleUse
+        return this
+    }
+
+    /** mpv `stream-lavf-o` before every live load; the AVPlayer lane does not adopt it and is unaffected. */
+    private fun applyLinkReconnectPolicy(b: NuvioPlayerBridge) {
+        b.applyStreamLavfOptions(
+            LiveLinkReconnectPolicy.mpvStreamLavfOptions(
+                LiveLinkReconnectPolicy.modeFor(singleUseLink && liveChannel && launch.liveReplay == null),
+            ),
+        )
     }
 
     private val log = Logger.withTag("TvPlayerSession")
@@ -452,6 +472,12 @@ class TvPlayerSession(
         if (!isLive && vodReresolve != null) {
             val position = if (snapshot.positionMs > 0) snapshot.positionMs else resumeTargetMs
             vodRetry.retry(position, !wantsToPlay)
+        } else if (isLive) {
+            // The viewer's Retry: a fresh, still bounded ladder, and a fresh link. Replaying the old
+            // URL (bridge.retry) re-opened a spent Stalker create_link, and the monitor, still at
+            // its cap, answered GiveUp on the first sample, so Retry could not recover the channel.
+            monitor.onUserRetry()
+            reconnectLive()
         } else bridge?.retry()
     }
 
@@ -763,6 +789,7 @@ class TvPlayerSession(
             subtitleStyleSupported = lane == PlaybackLane.Libmpv,
         )
         created.setIsLiveStream(isLive)
+        applyLinkReconnectPolicy(created)
         val headers = TvPlaybackHeaders.sanitize(activeSourceHeaders)
         created.loadFileWithAudio(
             videoUrl = activeSourceUrl,
@@ -892,6 +919,7 @@ class TvPlayerSession(
             val fresh = runCatching { reresolve() }.getOrNull()
             if (fresh == null) { bridge?.retry(); return@launch }
             val headers = TvPlaybackHeaders.sanitize(fresh.headers)
+            bridge?.let(::applyLinkReconnectPolicy)
             bridge?.loadFileWithAudio(
                 videoUrl = fresh.url,
                 audioUrl = null,

@@ -90,4 +90,22 @@ class TvPlaybackSupportTest {
             assertEquals(TvLiveAction.Reconnect, action)
         }
     }
+
+    @Test
+    fun `a user Retry after give up gets a fresh reconnect ladder`() {
+        // Apple TV: the Failed screen's Retry left the monitor at its cap, so the first sample of the
+        // retried stream answered GiveUp again and Retry could never recover a dropped channel.
+        val m = TvLiveMonitor()
+        var now = 0L
+        repeat(10) { i -> m.sample(now, playing(i * 500L), wantsToPlay = true); now += 500 }
+        val ended = PlayerPlaybackSnapshot(isLoading = false, isEnded = true, positionMs = 5_000, bufferedPositionMs = 5_000)
+        var gaveUp = false
+        var guard = 0
+        while (!gaveUp && guard++ < 2_000) { gaveUp = m.sample(now, ended, wantsToPlay = true) == TvLiveAction.GiveUp; now += 500 }
+        assertTrue(gaveUp, "the ladder should end in GiveUp on a dead provider")
+
+        m.onUserRetry()
+        val first = m.sample(now, ended, wantsToPlay = true)
+        assertEquals(TvLiveAction.Reconnect, first, "a Retry's first failure reconnects instead of giving up at once")
+    }
 }

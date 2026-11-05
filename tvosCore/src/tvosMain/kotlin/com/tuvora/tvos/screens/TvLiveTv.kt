@@ -82,6 +82,6 @@ object TvIptvBrowse {
         )
         return TvPlayerSession(launch) {
             LiveTvData.resolveSource(contentId, name, logo, forceMint = true)?.let { TvResolvedSource(it.url, it.headers) }
-        }
+        }.bindSingleUseLink(source.singleUseLink)
     }
 }

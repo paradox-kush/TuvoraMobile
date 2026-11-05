@@ -5,7 +5,9 @@ package com.nuvio.app.core.analytics
  * [LivePlaybackRecoveryPolicy], and keeps the freeze record open across the attempts so the
  * emitted event can say whether the reconnect is what brought the picture back.
  *
- * Held per live surface alongside the reporter, and reset whenever a new channel starts.
+ * Held per live surface alongside the reporter. The ladder belongs to a stream identity (the channel
+ * or content id): it starts over on a new channel and on the viewer's Retry, never on the pipeline's
+ * own reconnects or on a URL change.
  */
 class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) {
 
@@ -17,12 +19,41 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
     /** Whether the reconnect ladder has been exhausted for the open freeze. */
     val hasGivenUp: Boolean get() = gaveUp
 
-    /** Call when a new channel starts, so its ladder does not inherit the previous one's. */
+    /** Clears the ladder. Callers use [onUserRetry], [onChannelChanged] or [onPlaybackArmed]. */
     fun reset() {
         attempts = 0
         lastAttemptAtMs = 0L
         gaveUp = false
         attemptsWithoutPlayback = 0
+    }
+
+    /** The stream identity (channel / content id, never the URL) the ladder belongs to. */
+    private var armedIdentity: String? = null
+
+    /**
+     * The viewer pressed Retry: one fresh ladder. Only a user action calls this; the automatic
+     * reconnect never does (skill 02 2.1), so Failed still ends the wait on a dead provider.
+     */
+    fun onUserRetry() {
+        reset()
+        armedIdentity = null
+    }
+
+    /** A zap: the next channel (even the same one tuned again) does not inherit this ladder. */
+    fun onChannelChanged() {
+        reset()
+        armedIdentity = null
+    }
+
+    /**
+     * The watcher armed on [streamIdentity]. A different stream starts a fresh ladder; re-arming the
+     * same one (the full player re-arms on every URL change, and a Stalker re-mint changes the URL
+     * each time) keeps the attempt count, so the backoff and the give-up still hold. Null identity
+     * means "unknown", and is treated as new.
+     */
+    fun onPlaybackArmed(streamIdentity: String?) {
+        if (streamIdentity == null || streamIdentity != armedIdentity) reset()
+        armedIdentity = streamIdentity
     }
 
     /**

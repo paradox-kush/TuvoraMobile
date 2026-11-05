@@ -6,7 +6,7 @@ import ComposeApp
 
 // MARK: - Player Bridge Implementation (Kotlin protocol conformance)
 
-final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropertyBridge {
+final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropertyBridge, NuvioPlayerLinkReconnectBridge {
 
     private var playerVC: MPVPlayerViewController?
     /// Mirrors the user's Picture-in-Picture setting so a view controller created later still gets
@@ -26,6 +26,9 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropert
     }
 
     func loadFile(url: String) { ensurePlayerViewController().loadFile(url) }
+    /// NuvioPlayerLinkReconnectBridge (Kotlin, hand-mirrored): the `stream-lavf-o` the NEXT loadfile opens
+    /// with. A single-use Stalker link gets reconnect=0 (LiveLinkReconnectPolicy); stored, then applied in startLoad.
+    func setStreamLavfOptions(options: String) { ensurePlayerViewController().streamLavfOptions = options }
     func loadFileWithAudio(videoUrl: String, audioUrl: String?, headersJson: String?, subtitlesJson: String?, startOption: String?) {
         ensurePlayerViewController().loadFile(
             videoUrl,
@@ -369,6 +372,9 @@ final class MPVPlayerViewController: UIViewController {
     }
     private var recentPlaybackLogs: [String] = []
     var activeRequestHeaders: [String: String] = [:]
+    /// `stream-lavf-o` for the next loadfile (set from Kotlin LiveLinkReconnectPolicy). The default is the
+    /// reconnect list set at init; a single-use link replaces it with reconnect=0 so FFmpeg never re-opens it.
+    var streamLavfOptions = "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5"
     private var preferredAudioLanguages: [String] = []
     var isLiveStream = false
 
@@ -928,6 +934,9 @@ final class MPVPlayerViewController: UIViewController {
         let sanitizedHeaders = sanitizeRequestHeaders(request.requestHeaders)
         activeRequestHeaders = sanitizedHeaders
         applyRequestHeaders(sanitizedHeaders)
+        // Same serial mpv queue as the loadfile below, so the new file opens with it. A global (not a
+        // per-file loadfile option), so retry()/rejoin reloads of this source keep it.
+        setStringProperty("stream-lavf-o", streamLavfOptions)
         isPlayerLoading = true
         isPlayerEnded = false
         // A resume opens the file AT the position (`start=`): a seek sent before playback is
