@@ -217,7 +217,7 @@ struct TvPlayerScreen: View {
             }
             // `-smokeAddonSub <url>` picks that file as an add-on subtitle after 6 s; `-smokeSubDelay <ms>` sets the delay.
             if let i = args.firstIndex(of: "-smokeAddonSub"), i + 1 < args.count {
-                let sub = AddonSubtitle(id: "smoke", url: args[i + 1], language: "en", display: "Smoke (English)", addonName: "Smoke", isSelected: false)
+                let sub = AddonSubtitle(id: "smoke", url: args[i + 1], language: "en", display: "Smoke (English)", addonName: "Smoke", isSelected: false, label: nil)
                 Task { try? await Task.sleep(nanoseconds: 6_000_000_000); session.selectAddonSubtitle(subtitle: sub) }
             }
             if let i = args.firstIndex(of: "-smokeSubDelay"), i + 1 < args.count, let ms = Int32(args[i + 1]) {
