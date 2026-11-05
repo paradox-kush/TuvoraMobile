@@ -46,7 +46,27 @@ interface LiveTvContent {
         initialReplay: LiveReplayLaunch?,
         onBack: () -> Unit,
         onFavoriteChannel: (String) -> Unit,
+        /** The programme sheet's "View recordings" after something was scheduled. */
+        onOpenRecordings: () -> Unit,
         modifier: Modifier,
+    )
+}
+
+/** A finished recording handed to the player: a local file, played directly (no server in between). */
+data class RecordingPlayback(
+    val recordingId: String,
+    val title: String,
+    val subtitle: String?,
+    val channelName: String,
+    val fileUri: String,
+)
+
+/** The Recordings page. Null (no registration) means this build has no recordings and the entry points hide. */
+interface RecordingsContent {
+    @Composable
+    fun Render(
+        onBack: () -> Unit,
+        onPlay: (RecordingPlayback) -> Unit,
     )
 }
 
@@ -68,5 +88,12 @@ object LiveTvContentAccess {
     private var content: LiveTvContent? = null
     fun register(c: LiveTvContent) { content = c }
     fun current(): LiveTvContent? = content
+    fun resetForTest() { content = null }
+}
+
+object RecordingsContentAccess {
+    private var content: RecordingsContent? = null
+    fun register(c: RecordingsContent) { content = c }
+    fun current(): RecordingsContent? = content
     fun resetForTest() { content = null }
 }

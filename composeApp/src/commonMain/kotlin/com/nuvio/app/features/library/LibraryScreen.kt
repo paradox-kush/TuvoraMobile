@@ -114,6 +114,7 @@ fun LibraryScreen(
     onPreviewClick: ((MetaPreview) -> Unit)? = null,
     onPreviewLongClick: ((MetaPreview) -> Unit)? = null,
     onDownloadsClick: (() -> Unit)? = null,
+    onRecordingsClick: (() -> Unit)? = null,
     disintegrationRequest: DisintegrationRequest<String>? = null,
 ) {
     val uiState by remember {
@@ -366,6 +367,9 @@ fun LibraryScreen(
                                             )
                                         }
                                     }
+                                }
+                                if (onRecordingsClick != null) {
+                                    LibraryRecordingsButton(onClick = onRecordingsClick)
                                 }
                                 if (onDownloadsClick != null) {
                                     LibraryDownloadsButton(onClick = onDownloadsClick)

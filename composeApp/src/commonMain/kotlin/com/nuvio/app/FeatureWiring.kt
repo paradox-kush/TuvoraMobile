@@ -65,6 +65,7 @@ fun registerFeatureContributions() {
     SetupCodeEntryAccess.register(SetupCodeEntryImpl)
     SportsHubContentAccess.register(RadarHubContent)
     LiveTvContentAccess.register(LiveTvContentImpl)
+    com.nuvio.app.core.contracts.RecordingsContentAccess.register(com.nuvio.app.features.recordings.api.RecordingsContentImpl)
     // In-app announcements card on Home (lazy: the repository touches storage on first refresh).
     HomeAnnouncementsSectionAccess.register(AnnouncementsFeature.homeSection())
     // Recordings: the platform builds its repository once and publishes it (receivers and the service read it there).
