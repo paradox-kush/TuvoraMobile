@@ -550,6 +550,11 @@ object XtreamHubRepository {
             }.getOrThrow()
         }
         if (catalogueEpoch(accountId) != epoch) return
+        if (section == XtreamHubSection.SERIES && account.sourceType == SOURCE_TYPE_STALKER) {
+            // UX147: the series probe has settled; a portal with positive "no series" evidence loses the tab.
+            val absent = com.nuvio.app.features.iptv.stalker.StalkerClient.seriesAbsent(account)
+            _uiState.update { it.copy(seriesUnavailableIds = XtreamHubSections.withSeriesAbsent(it.seriesUnavailableIds, accountId, absent)) }
+        }
         val fresh = outcome.valueOrNull() ?: run {
             // Failed fetch: keep any warm cache, but if there's none the section would otherwise spin
             // forever — surface an error so the user knows the portal is unreachable, not just slow.

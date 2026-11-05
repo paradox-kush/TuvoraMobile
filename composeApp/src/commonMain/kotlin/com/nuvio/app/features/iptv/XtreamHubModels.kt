@@ -24,11 +24,29 @@ data class XtreamHubUiState(
     // shows this instead of spinning forever (dead portal / Cloudflare block / timeout). Carries
     // WHICH of those it was, so the card can stop telling every viewer the portal is down.
     val loadError: IptvLoadFailurePolicy.Failure? = null,
+    /** UX147: playlists whose portal positively has no series section this session; their Series tab is hidden. */
+    val seriesUnavailableIds: Set<String> = emptySet(),
 ) {
     val loadingCategories: Boolean get() = categoriesLoad is LoadStatus.Loading
+
+    /** UX147: the SELECTED playlist's portal positively has no series (read by the Apple TV screen's chip row). */
+    val seriesUnavailable: Boolean get() = selectedAccountId != null && selectedAccountId in seriesUnavailableIds
 }
 
 enum class XtreamHubSection { LIVE, MOVIES, SERIES }
+
+/** Which section chips the hub offers (pure, so Compose and the Apple TV screen share one answer). */
+object XtreamHubSections {
+    /**
+     * [typeEnabled] is the playlist-manager content toggle per section; [seriesAbsent] is the portal's
+     * own positive "no series" evidence (UX147). Unknown evidence is false, so the tab stays.
+     */
+    fun visible(typeEnabled: (XtreamHubSection) -> Boolean, seriesAbsent: Boolean): List<XtreamHubSection> =
+        XtreamHubSection.entries.filter { typeEnabled(it) && !(it == XtreamHubSection.SERIES && seriesAbsent) }
+
+    fun withSeriesAbsent(ids: Set<String>, accountId: String, absent: Boolean): Set<String> =
+        if (absent) ids + accountId else ids - accountId
+}
 
 /** The account.contentTypes / categorySelections key this hub section corresponds to. */
 val XtreamHubSection.contentKey: String

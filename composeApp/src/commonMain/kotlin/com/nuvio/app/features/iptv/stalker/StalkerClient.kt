@@ -94,6 +94,8 @@ object StalkerClient : IptvClient {
     private val ministraSeasons = mutableMapOf<String, List<StalkerSeriesDialect.Node>>()
     private val ministraEpisodes = mutableMapOf<String, List<MinistraEpisode>>()
     private val ministraMutex = Mutex()
+    // UX147/UX164: playlists whose series probe ended with positive evidence of "no series section".
+    private val seriesAbsentIds = mutableSetOf<String>()
 
     /** Test seam: lets a test drive the whole client against a fake portal (StalkerRequestCountTest). */
     internal var sessionFactory: (XtreamAccount) -> StalkerSession = { StalkerSession(it) }
@@ -104,6 +106,7 @@ object StalkerClient : IptvClient {
         linkFlags.clear()
         seasonCache.clear()
         seriesDialects.clear()
+        seriesAbsentIds.clear()
         ministraSeasons.clear()
         ministraEpisodes.clear()
     }
@@ -128,6 +131,7 @@ object StalkerClient : IptvClient {
             epgUnsupported.remove(acc.id)
             seasonCache.keys.removeAll { it.startsWith("${acc.id}:") }
             seriesDialects.remove(acc.id)
+            seriesAbsentIds.remove(acc.id)
             ministraSeasons.keys.removeAll { it.startsWith("${acc.id}:") }
             ministraEpisodes.keys.removeAll { it.startsWith("${acc.id}:") }
             Entry(fp).also { sessions[acc.id] = it }
@@ -199,20 +203,42 @@ object StalkerClient : IptvClient {
         val xc = categories(acc, "series", "get_categories")
         if (xc.getOrNull()?.isNotEmpty() == true) {
             rememberDialect(acc, StalkerSeriesDialect.Dialect.XC)
+            setSeriesAbsent(acc, false)
             return xc
         }
         val failure = xc.exceptionOrNull()
         if (failure is kotlinx.coroutines.CancellationException) throw failure
+        val emptySection = (failure as? StalkerSessionUnavailableException)?.emptySection == true
         // An unavailable series module is capability evidence; a network/auth failure is not.
-        if (!StalkerSeriesDialect.allowsVodFallback(failure != null, (failure as? StalkerSessionUnavailableException)?.emptySection == true)) return xc
+        if (!StalkerSeriesDialect.allowsVodFallback(failure != null, emptySection)) return xc
         val vod = categories(acc, "vod", "get_categories")
-        return when (StalkerSeriesDialect.decide(false, vod.getOrNull()?.isNotEmpty() == true)) {
-            StalkerSeriesDialect.Dialect.MINISTRA -> {
-                rememberDialect(acc, StalkerSeriesDialect.Dialect.MINISTRA)
-                vod
-            }
-            else -> xc
+        val ministra = StalkerSeriesDialect.decide(false, vod.getOrNull()?.isNotEmpty() == true) ==
+            StalkerSeriesDialect.Dialect.MINISTRA
+        // UX147: "no series" is only claimed on positive evidence (see StalkerCapabilities); a failed vod
+        // probe proves nothing, and unknown keeps the Series tab.
+        setSeriesAbsent(
+            acc,
+            vod.isSuccess && StalkerCapabilities.seriesAbsent(
+                modulesSeriesDisabled = runCatching { sessionFor(acc).seriesModuleDisabled }.getOrNull(),
+                xcEmptySection = emptySection,
+                xcAnsweredEmpty = failure == null,
+                xcFailedOtherwise = false,
+                vodFallbackHasSeries = ministra,
+            ),
+        )
+        return if (ministra) {
+            rememberDialect(acc, StalkerSeriesDialect.Dialect.MINISTRA)
+            vod
+        } else {
+            xc
         }
+    }
+
+    /** True once this session's series probe positively found the portal has no series section (UX147). */
+    suspend fun seriesAbsent(acc: XtreamAccount): Boolean = ministraMutex.withLock { acc.id in seriesAbsentIds }
+
+    private suspend fun setSeriesAbsent(acc: XtreamAccount, absent: Boolean) = ministraMutex.withLock {
+        if (absent) seriesAbsentIds += acc.id else seriesAbsentIds -= acc.id
     }
 
     private suspend fun knownDialect(acc: XtreamAccount): StalkerSeriesDialect.Dialect? =

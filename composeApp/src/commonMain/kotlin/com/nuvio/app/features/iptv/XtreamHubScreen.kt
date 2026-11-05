@@ -99,6 +99,10 @@ import nuvio.composeapp.generated.resources.compose_iptv_hub_blocked_message
 import nuvio.composeapp.generated.resources.compose_iptv_hub_blocked_title
 import nuvio.composeapp.generated.resources.compose_iptv_hub_error_message
 import nuvio.composeapp.generated.resources.compose_iptv_hub_error_title
+import nuvio.composeapp.generated.resources.compose_iptv_hub_no_live_title
+import nuvio.composeapp.generated.resources.compose_iptv_hub_no_movies_title
+import nuvio.composeapp.generated.resources.compose_iptv_hub_no_section_message
+import nuvio.composeapp.generated.resources.compose_iptv_hub_no_series_title
 import nuvio.composeapp.generated.resources.compose_iptv_hub_refused_title
 import nuvio.composeapp.generated.resources.compose_iptv_hub_all_favorites
 import nuvio.composeapp.generated.resources.compose_iptv_hub_favorites
@@ -179,7 +183,10 @@ fun XtreamHubScreen(
     // Playlist-manager enforcement, all display-level (caches stay intact): disabled content
     // types lose their section chip; category selections filter the visible rows.
     val account = state.accounts.firstOrNull { it.id == state.selectedAccountId }
-    val enabledSections = XtreamHubSection.entries.filter { account?.typeEnabled(it.contentKey) != false }
+    val enabledSections = XtreamHubSections.visible(
+        typeEnabled = { account?.typeEnabled(it.contentKey) != false },
+        seriesAbsent = account?.id in state.seriesUnavailableIds,
+    )
     val visibleCategories = if (account == null) state.categories else {
         // A custom group (F02) is the viewer's own row, not a provider category, so selections never hide it.
         state.categories.filter { XtreamHubRepository.isCustomGroupRow(it.id) || account.allowsCategory(state.section.contentKey, it.id, it.name) }
@@ -363,6 +370,12 @@ fun XtreamHubScreen(
                         IptvLoadFailurePolicy.Kind.BLOCKED_BY_PROVIDER -> stringResource(Res.string.compose_iptv_hub_blocked_title)
                         IptvLoadFailurePolicy.Kind.REFUSED -> stringResource(Res.string.compose_iptv_hub_refused_title)
                         IptvLoadFailurePolicy.Kind.UNREACHABLE -> stringResource(Res.string.compose_iptv_hub_error_title)
+                        // UX164: a provider with no such section is a fact, not a failure.
+                        IptvLoadFailurePolicy.Kind.SECTION_UNAVAILABLE -> when (state.section) {
+                            XtreamHubSection.SERIES -> stringResource(Res.string.compose_iptv_hub_no_series_title)
+                            XtreamHubSection.MOVIES -> stringResource(Res.string.compose_iptv_hub_no_movies_title)
+                            XtreamHubSection.LIVE -> stringResource(Res.string.compose_iptv_hub_no_live_title)
+                        }
                     }
                     val generic = stringResource(Res.string.compose_iptv_hub_error_message)
                     val blocked = stringResource(Res.string.compose_iptv_hub_blocked_message, failure.status ?: 0)
@@ -372,7 +385,9 @@ fun XtreamHubScreen(
                         // arrived without text still beats spinning, so fall back to the generic.
                         IptvLoadFailurePolicy.Kind.REFUSED -> failure.portalText ?: generic
                         IptvLoadFailurePolicy.Kind.UNREACHABLE -> generic
+                        IptvLoadFailurePolicy.Kind.SECTION_UNAVAILABLE -> stringResource(Res.string.compose_iptv_hub_no_section_message)
                     }
+                    val canRetry = IptvLoadFailurePolicy.offersRetry(failure.kind)
                     // Step 2: a managed playlist's provider is who can fix a refusal, so their contacts sit
                     // under Retry (only the ones they set).
                     val managedProfile = com.nuvio.app.features.profiles.ProfileRepository.activeProfileId
@@ -383,9 +398,9 @@ fun XtreamHubScreen(
                         // The breadcrumb rides the message rather than a new card slot: it is then
                         // guaranteed to be in the same screenshot as the error, and the shared
                         // HomeEmptyStateCard vocabulary stays untouched.
-                        message = "$message\n\n${failure.detail}",
-                        actionLabel = stringResource(Res.string.action_retry),
-                        onAction = { XtreamHubRepository.retryCategories() },
+                        message = if (IptvLoadFailurePolicy.showsBreadcrumb(failure.kind)) "$message\n\n${failure.detail}" else message,
+                        actionLabel = if (canRetry) stringResource(Res.string.action_retry) else null,
+                        onAction = if (canRetry) ({ XtreamHubRepository.retryCategories() }) else null,
                         sectionPadding = sectionPadding,
                         footer = provider?.takeIf { !it.support.isEmpty }?.let { info ->
                             {
