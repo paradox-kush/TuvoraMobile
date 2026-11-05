@@ -16,12 +16,22 @@ interface HomeCalendarSection {
     fun Render(onOpenTitle: (MetaPreview) -> Unit, onOpenCalendar: () -> Unit)
 }
 
-/** Show / film details: the bell that adds the title to the Calendar and turns its new-release reminders on. */
+/**
+ * Show / film details: the "Remind me of new episodes" switch. The details screen renders it as a row inside the
+ * add-to-library list picker (the + control's menu); the Calendar owns the state and what toggling does.
+ */
 interface DetailsCalendarBell {
-    /** [type] is the app's content type ("series", "movie", …); a type the Calendar cannot follow renders nothing. */
+    /**
+     * [type] is the app's content type ("series", "movie", …). Null when the Calendar cannot follow the title
+     * (unsupported type or no usable id), in which case the host shows no row. Off → on adds the title to the
+     * Calendar and turns its new-release reminders on.
+     */
     @Composable
-    fun Bell(contentId: String, type: String, name: String?, poster: String?, modifier: Modifier)
+    fun reminder(contentId: String, type: String, name: String?, poster: String?): DetailsReminderControl?
 }
+
+/** A neutral value the host renders: [on] is the current state, [toggle] flips it. */
+class DetailsReminderControl(val on: Boolean, val toggle: () -> Unit)
 
 /** The Calendar page itself, hosted by the navigation as `CalendarRoute`. */
 interface CalendarScreenContent {
