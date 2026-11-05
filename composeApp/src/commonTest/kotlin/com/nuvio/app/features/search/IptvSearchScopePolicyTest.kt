@@ -69,13 +69,12 @@ class IptvSearchScopePolicyTest {
 
     @Test
     fun `body mirrors the screen order`() {
-        val b = IptvSearchScopePolicy.Body
-        assertEquals(b.SKELETON, IptvSearchScopePolicy.bodyOf(loadingOrPending = true, noRows = true, errorWithNoRows = false))
-        assertEquals(b.SKELETON, IptvSearchScopePolicy.bodyOf(true, true, true))
-        assertEquals(b.ERROR, IptvSearchScopePolicy.bodyOf(false, true, true))
-        assertEquals(b.NO_RESULTS, IptvSearchScopePolicy.bodyOf(false, true, false))
-        assertEquals(b.RESULTS, IptvSearchScopePolicy.bodyOf(true, false, false))
-        assertEquals(b.RESULTS, IptvSearchScopePolicy.bodyOf(false, false, false))
+        assertEquals(IptvSearchScopePolicy.Body.SKELETON, IptvSearchScopePolicy.bodyOf(loadingOrPending = true, noRows = true, errorWithNoRows = false))
+        assertEquals(IptvSearchScopePolicy.Body.SKELETON, IptvSearchScopePolicy.bodyOf(true, true, true))
+        assertEquals(IptvSearchScopePolicy.Body.ERROR, IptvSearchScopePolicy.bodyOf(false, true, true))
+        assertEquals(IptvSearchScopePolicy.Body.NO_RESULTS, IptvSearchScopePolicy.bodyOf(false, true, false))
+        assertEquals(IptvSearchScopePolicy.Body.RESULTS, IptvSearchScopePolicy.bodyOf(true, false, false))
+        assertEquals(IptvSearchScopePolicy.Body.RESULTS, IptvSearchScopePolicy.bodyOf(false, false, false))
     }
 
     @Test
