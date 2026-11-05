@@ -47,13 +47,7 @@ struct HomeScreen: View {
     /// Simulator hook `-smokeEmptyHome` (DEBUG): shows Home as a fresh install with no sources does, whatever the
     /// simulator profile already holds (EmptyHomeFocusTests, B193). Never compiled into a release build.
     private static let emptyRows = HomeUiState(isLoading: false, heroItems: [], sections: [], errorMessage: nil, failedRowCount: 0)
-    private static var smokeEmptyHome: Bool {
-        #if DEBUG
-        return AppArguments.list.contains("-smokeEmptyHome")
-        #else
-        return false
-        #endif
-    }
+    private static var smokeEmptyHome: Bool { EmptyHomeSmoke.enabled }
 
     var body: some View {
         layoutBody
@@ -139,7 +133,8 @@ struct HomeScreen: View {
                                         onFocus: focusCw, onOpen: open)
                 }
                 if let rows {
-                    if TvHome.shared.showsPartialFailure(state: rows) {
+                    // When nothing at all is shown, the empty state below carries the one Retry (never two cards).
+                    if TvHome.shared.showsPartialFailure(state: rows) && !(entries.isEmpty && continueWatching.isEmpty && rows.sections.isEmpty) {
                         NuvioStateMessage(title: "Some rows didn’t load",
                                           message: "Tuvora tries again each time you come back to Home.",
                                           retry: { TvHome.shared.retryFailed() })
@@ -157,7 +152,7 @@ struct HomeScreen: View {
                         }
                     }
                     EmptyHomeState(candidate: entries.isEmpty && continueWatching.isEmpty && rows.sections.isEmpty && !rows.isLoading,
-                                   errorMessage: rows.errorMessage)
+                                   errorMessage: rows.errorMessage, failedRows: TvHome.shared.showsPartialFailure(state: rows))
                 }
             }
             .padding(.bottom, dp(48))
