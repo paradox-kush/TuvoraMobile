@@ -2,6 +2,8 @@ package com.nuvio.app.features.iptv
 
 import com.nuvio.app.features.iptv.identity.M3uSeriesGrouping
 
+// Catch-up attribute parsing adapted from homelessbrian/NuvioPlusIPTV (GPL-3.0), M3uParser.kt.
+
 /**
  * Pure, streaming-friendly parser for M3U / M3U-plus playlists. Kept free of IO so it unit-tests
  * against inline fixtures and so the ingest path can feed it one line at a time (a provider M3U is
@@ -32,6 +34,8 @@ object M3UParser {
         val episode: Int? = null,
         /** tvg-name — the series-key fallback when a promoted VOD row's name has no show part. */
         val tvgName: String? = null,
+        /** Catch-up declared by the entry (or the playlist header); live entries only. */
+        val catchUp: M3uCatchUpInfo? = null,
     )
 
     /**
@@ -42,6 +46,7 @@ object M3UParser {
      */
     class StreamingParser(private val onEntry: (Entry) -> Unit) {
         private var pendingExtInf: String? = null
+        private var catchUpHeader: Map<String, String> = emptyMap()
 
         /**
          * The playlist's EPG URL declared on the `#EXTM3U` header (`url-tvg` or `x-tvg-url`), captured
@@ -56,18 +61,30 @@ object M3UParser {
             val line = raw.trim()
             if (line.isEmpty()) return
             when {
-                line.startsWith("#EXTM3U", ignoreCase = true) -> captureHeaderEpgUrl(line)
+                line.startsWith("#EXTM3U", ignoreCase = true) -> {
+                    captureHeaderEpgUrl(line)
+                    captureHeaderCatchUp(line)
+                }
                 line.startsWith("#EXTINF", ignoreCase = true) -> pendingExtInf = line
                 line.startsWith("#") -> Unit // #EXTGRP, #KODIPROP, etc. — ignored
                 else -> {
                     val ext = pendingExtInf
                     if (ext != null) {
-                        parseEntry(ext, line)?.let(onEntry)
+                        parseEntry(ext, line, catchUpHeader)?.let(onEntry)
                         pendingExtInf = null
                     }
                     // A bare URL with no preceding #EXTINF is skipped (can't classify/name it well).
                 }
             }
+        }
+
+        /** Playlist-wide catch-up defaults on the `#EXTM3U` line; the first header that sets any wins. */
+        private fun captureHeaderCatchUp(headerLine: String) {
+            if (catchUpHeader.isNotEmpty()) return
+            val attrs = attributesIn(headerLine)
+            catchUpHeader = M3uCatchUp.ATTRIBUTE_KEYS
+                .mapNotNull { k -> attrs[k]?.takeIf { it.isNotBlank() }?.let { k to it } }
+                .toMap()
         }
 
         private fun captureHeaderEpgUrl(headerLine: String) {
@@ -103,7 +120,7 @@ object M3UParser {
     }
 
     /** Builds an [Entry] from one `#EXTINF` header line + its stream URL. Public for unit tests. */
-    fun parseEntry(extInf: String, url: String): Entry? {
+    fun parseEntry(extInf: String, url: String, catchUpHeader: Map<String, String> = emptyMap()): Entry? {
         val cleanUrl = url.trim()
         if (cleanUrl.isBlank() || cleanUrl.startsWith("#")) return null
         val attrs = parseAttributes(extInf)
@@ -137,6 +154,7 @@ object M3UParser {
                 group = group,
                 ext = ext,
                 tvgName = attrs["tvg-name"]?.ifBlank { null },
+                catchUp = if (kind == M3UKind.LIVE) M3uCatchUp.fromAttributes(attrs, catchUpHeader) else null,
             )
         }
     }
@@ -161,8 +179,10 @@ object M3UParser {
     }
 
     /** Extracts the `key="value"` attributes from an #EXTINF line (before the trailing `,name`). */
-    fun parseAttributes(extInf: String): Map<String, String> {
-        val head = extInf.substringBefore(',')
+    fun parseAttributes(extInf: String): Map<String, String> = attributesIn(extInf.substringBefore(','))
+
+    /** `key="value"` / `key=value` pairs anywhere in [head]; quoted values may contain commas. */
+    internal fun attributesIn(head: String): Map<String, String> {
         val out = LinkedHashMap<String, String>()
         var i = 0
         while (i < head.length) {

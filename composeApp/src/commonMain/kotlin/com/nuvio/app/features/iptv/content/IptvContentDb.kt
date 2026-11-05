@@ -3,6 +3,8 @@ package com.nuvio.app.features.iptv.content
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.SQLiteStatement
 import androidx.sqlite.execSQL
+import com.nuvio.app.features.iptv.M3uCatchUpInfo
+import com.nuvio.app.features.iptv.M3uCatchUpType
 import com.nuvio.app.features.trakt.TraktPlatformClock
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -35,6 +37,8 @@ internal data class IptvStreamRow(
     val hasArchive: Boolean = false,
     val useHttpTmpLink: Boolean = false,
     val useLoadBalancing: Boolean = false,
+    /** An M3U live channel's own catch-up (`catchup-*` attributes); null = none. Stored as three nullable columns. */
+    val catchUp: M3uCatchUpInfo? = null,
 )
 
 /** A series row (one per distinct series within a playlist). */
@@ -145,6 +149,11 @@ internal object IptvContentDb {
      */
     private const val GEN = "generation = COALESCE((SELECT active_generation FROM ingest_meta WHERE playlist_id = ?), 0)"
 
+    private val CATCHUP_COLUMNS = listOf("catchup_type" to "TEXT", "catchup_source" to "TEXT", "catchup_days" to "INTEGER")
+
+    /** Test seam: drops the cached connection so the next call reopens (and re-migrates) the database. */
+    internal suspend fun closeForTests() = mutex.withLock { conn?.close(); conn = null }
+
     /** Staging table for the EPG generation swap ([beginEpg]→[insertEpgChunk]→[finishEpg]); holds
      *  only the in-flight refresh's rows, never what readers are serving. */
     private const val EPG_SHADOW = "epg_programmes_shadow"
@@ -208,6 +217,10 @@ internal object IptvContentDb {
         // B64: which item-id scheme built the catalog. A missing column/row reads as 1 (pre-B64), so an
         // M3U catalog re-ingests once under the login-free ids; no version bump (that drops every catalog).
         it.ensureColumn("ingest_meta", "id_scheme", "id_scheme INTEGER NOT NULL DEFAULT 1")
+        // M3U catch-up per live channel (catchup-type / -source / -days). Added in place like id_scheme: a
+        // version bump drops every cached catalog. NULL on rows ingested before this reads as "no catch-up"
+        // until the playlist's next refresh writes it.
+        for ((column, type) in CATCHUP_COLUMNS) it.ensureColumn("channels", column, "$column $type")
         if (version < 5) it.execSQL("PRAGMA user_version = 5")
         // Per-(playlist, channel) EPG fetch stamp — the guide's lazy-fetch gate (v4, but created
         // unconditionally like the other epg tables: IF NOT EXISTS is self-healing).
@@ -285,7 +298,7 @@ internal object IptvContentDb {
             // Inside an ingest the chunk belongs to the generation being built; outside one (the
             // Stalker write-through, which never calls beginIngest) it joins the served generation.
             val gen = pendingGeneration[playlistId] ?: activeGeneration(c, playlistId)
-            if (channels.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
+            if (channels.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing, catchup_type, catchup_source, catchup_days) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
                 for (r in channels) {
                     st.reset()
                     st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.sid.toLong())
@@ -298,6 +311,7 @@ internal object IptvContentDb {
                     st.bindLong(10, if (r.hasArchive) 1L else 0L)
                     st.bindLong(11, if (r.useHttpTmpLink) 1L else 0L)
                     st.bindLong(12, if (r.useLoadBalancing) 1L else 0L)
+                    bindCatchUp(st, 13, r.catchUp)
                     st.step()
                 }
             }
@@ -858,10 +872,13 @@ internal object IptvContentDb {
         val archiveCol = if (table == "channels") "tv_archive" else "NULL"
         val tmpLinkCol = if (table == "channels") "use_http_tmp_link" else "NULL"
         val lbCol = if (table == "channels") "use_load_balancing" else "NULL"
+        val cuTypeCol = if (table == "channels") "catchup_type" else "NULL"
+        val cuSourceCol = if (table == "channels") "catchup_source" else "NULL"
+        val cuDaysCol = if (table == "channels") "catchup_days" else "NULL"
         val sql = if (categoryId == null)
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? AND $GEN ORDER BY name, sid LIMIT ? OFFSET ?"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol FROM $table WHERE playlist_id = ? AND $GEN ORDER BY name, sid LIMIT ? OFFSET ?"
         else
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name, sid LIMIT ? OFFSET ?"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol FROM $table WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name, sid LIMIT ? OFFSET ?"
         return connection().prepare(sql).use { st ->
             st.bindText(1, playlistId); st.bindText(2, playlistId)
             var i = 3
@@ -881,6 +898,7 @@ internal object IptvContentDb {
                     hasArchive = !st.isNull(8) && st.getLong(8) > 0,
                     useHttpTmpLink = !st.isNull(9) && st.getLong(9) > 0,
                     useLoadBalancing = !st.isNull(10) && st.getLong(10) > 0,
+                    catchUp = readCatchUp(st, 11),
                 )
             )
             out
@@ -901,10 +919,13 @@ internal object IptvContentDb {
         val archiveCol = if (table == "channels") "tv_archive" else "NULL"
         val tmpLinkCol = if (table == "channels") "use_http_tmp_link" else "NULL"
         val lbCol = if (table == "channels") "use_load_balancing" else "NULL"
+        val cuTypeCol = if (table == "channels") "catchup_type" else "NULL"
+        val cuSourceCol = if (table == "channels") "catchup_source" else "NULL"
+        val cuDaysCol = if (table == "channels") "catchup_days" else "NULL"
         val sql = if (categoryId == null)
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? AND $GEN ORDER BY name"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol FROM $table WHERE playlist_id = ? AND $GEN ORDER BY name"
         else
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol FROM $table WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol FROM $table WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name"
         return connection().prepare(sql).use { st ->
             st.bindText(1, playlistId); st.bindText(2, playlistId)
             if (categoryId != null) st.bindText(3, categoryId)
@@ -922,6 +943,7 @@ internal object IptvContentDb {
                     hasArchive = !st.isNull(8) && st.getLong(8) > 0,
                     useHttpTmpLink = !st.isNull(9) && st.getLong(9) > 0,
                     useLoadBalancing = !st.isNull(10) && st.getLong(10) > 0,
+                    catchUp = readCatchUp(st, 11),
                 )
             )
             out
@@ -1096,7 +1118,7 @@ internal object IptvContentDb {
 
     /** A single channel row by sid — rebuilds a favorited channel's URL (or Stalker cmd) after a cold launch. */
     suspend fun channelRow(playlistId: String, sid: Int): IptvStreamRow? = mutex.withLock {
-        connection().prepare("SELECT sid, name, logo, tvg_id, category_id, url, NULL, cmd, tv_archive, use_http_tmp_link, use_load_balancing FROM channels WHERE playlist_id = ? AND $GEN AND sid = ?").use { st ->
+        connection().prepare("SELECT sid, name, logo, tvg_id, category_id, url, NULL, cmd, tv_archive, use_http_tmp_link, use_load_balancing, catchup_type, catchup_source, catchup_days FROM channels WHERE playlist_id = ? AND $GEN AND sid = ?").use { st ->
             st.bindText(1, playlistId); st.bindText(2, playlistId); st.bindLong(3, sid.toLong())
             if (st.step()) IptvStreamRow(
                 sid = st.getLong(0).toInt(),
@@ -1110,8 +1132,38 @@ internal object IptvContentDb {
                 hasArchive = !st.isNull(8) && st.getLong(8) > 0,
                 useHttpTmpLink = !st.isNull(9) && st.getLong(9) > 0,
                 useLoadBalancing = !st.isNull(10) && st.getLong(10) > 0,
+                catchUp = readCatchUp(st, 11),
             ) else null
         }
+    }
+
+    /** Stream id -> archive days for the playlist's M3U channels that carry catch-up (the guide's history depth). */
+    suspend fun liveCatchUpDays(playlistId: String): Map<Int, Int> = mutex.withLock {
+        connection().prepare("SELECT sid, catchup_days FROM channels WHERE playlist_id = ? AND $GEN AND catchup_type IS NOT NULL").use { st ->
+            st.bindText(1, playlistId); st.bindText(2, playlistId)
+            val out = HashMap<Int, Int>()
+            while (st.step()) out[st.getLong(0).toInt()] = if (st.isNull(1)) 1 else st.getLong(1).toInt().coerceAtLeast(1)
+            out
+        }
+    }
+
+    private fun bindCatchUp(st: SQLiteStatement, index: Int, info: M3uCatchUpInfo?) {
+        if (info == null) {
+            st.bindNull(index); st.bindNull(index + 1); st.bindNull(index + 2)
+        } else {
+            st.bindText(index, info.type.name)
+            if (info.source != null) st.bindText(index + 1, info.source) else st.bindNull(index + 1)
+            st.bindLong(index + 2, info.days.toLong())
+        }
+    }
+
+    /** A stored triple back to its settings; an unknown type (a future dialect) or none at all reads as no catch-up. */
+    private fun readCatchUp(st: SQLiteStatement, index: Int): M3uCatchUpInfo? {
+        if (st.isNull(index)) return null
+        val type = M3uCatchUpType.entries.firstOrNull { it.name == st.getText(index) } ?: return null
+        val source = if (st.isNull(index + 1)) null else st.getText(index + 1)
+        val days = if (st.isNull(index + 2)) 1 else st.getLong(index + 2).toInt().coerceAtLeast(1)
+        return M3uCatchUpInfo(type, source, days)
     }
 
     /** Substring name search within one playlist + kind — backs the IPTV rows in Search. */

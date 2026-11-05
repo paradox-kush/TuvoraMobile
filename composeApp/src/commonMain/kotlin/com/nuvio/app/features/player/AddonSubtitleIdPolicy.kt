@@ -25,9 +25,15 @@ object AddonSubtitleIdPolicy {
     /**
      * Whether the stream behind [activeVideoId] may be fetched just to compute an OpenSubtitles hash.
      * The hash reads the first and last bytes of the stream URL; an IPTV or media-server URL can be a
-     * single-use link, so probing it can burn the link the player is about to use.
+     * single-use link, so probing it can burn the link the player is about to use. A live channel or a
+     * catch-up replay ([isLivePlayback]) has no stable file to hash and its link may be single-use too.
      */
-    fun allowsStreamHashProbe(activeVideoId: String?): Boolean = !isProviderScoped(activeVideoId)
+    fun allowsStreamHashProbe(activeVideoId: String?, isLivePlayback: Boolean = false): Boolean =
+        !isLivePlayback && !isProviderScoped(activeVideoId)
+
+    /** Live channels and catch-up replays (which stay `streamType = "live"`) are never range-probed. */
+    fun isLivePlayback(streamType: String?, contentType: String?): Boolean =
+        streamType.equals("live", ignoreCase = true) || contentType.equals("live", ignoreCase = true)
 
     /** The Stremio-style public id for an IPTV item, or null when it cannot be formed. */
     fun publicVideoId(imdbId: String?, isSeries: Boolean, season: Int?, episode: Int?): String? {

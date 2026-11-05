@@ -149,6 +149,7 @@ fun HomeScreen(
     onPlaySportsChannel: (String) -> Unit = {},
     onPlaySportsReplay: (com.nuvio.app.core.contracts.SportsReplay) -> Unit = {},
     onAddIptvPlaylist: () -> Unit = {},
+    onOpenCalendar: () -> Unit = {},
 ) {
     LaunchedEffect(Unit) {
         AddonRepository.initialize()
@@ -1147,6 +1148,14 @@ fun HomeScreen(
                         }
                     }
                 }
+            }
+
+            // Calendar (fork, through its port): bell reminders card + the opt-in "Coming up" row.
+            item(key = "calendar-home-section") {
+                com.nuvio.app.core.contracts.HomeCalendarSectionAccess.current()?.Render(
+                    onOpenTitle = { onPosterClick?.invoke(it) },
+                    onOpenCalendar = onOpenCalendar,
+                )
             }
 
             // Sports Centre home presence: featured-event rail (opt-in) + set-up-Radar promo.

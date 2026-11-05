@@ -132,6 +132,8 @@ struct HomeScreen: View {
                     ContinueWatchingRow(items: continueWatching, style: cwStyle, size: cwStyle.modernSize, header: .modern,
                                         onFocus: focusCw, onOpen: open)
                 }
+                // Calendar: bell reminders card + the opt-in Coming up row (shared Calendar via TvCalendar).
+                CalendarHomeSection(onOpen: { details = PreviewBox(preview: $0) })
                 if let rows {
                     // When nothing at all is shown, the empty state below carries the one Retry (never two cards).
                     if TvHome.shared.showsPartialFailure(state: rows) && !(entries.isEmpty && !(cwEnabled && !continueWatching.isEmpty) && rows.sections.isEmpty) {

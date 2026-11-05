@@ -23,6 +23,10 @@ import com.nuvio.app.core.contracts.LiveTvContentAccess
 import com.nuvio.app.features.livetv.LiveTvContentImpl
 import com.nuvio.app.core.contracts.HomeAnnouncementsSectionAccess
 import com.nuvio.app.features.announcements.api.AnnouncementsFeature
+import com.nuvio.app.core.contracts.CalendarScreenContentAccess
+import com.nuvio.app.core.contracts.DetailsCalendarBellAccess
+import com.nuvio.app.core.contracts.HomeCalendarSectionAccess
+import com.nuvio.app.features.calendar.api.CalendarUiSlots
 
 /**
  * THE one firewall exception (rules doc Rule 1 / R2b): the only non-fork file allowed to name fork
@@ -64,6 +68,10 @@ fun registerFeatureContributions() {
     LiveTvContentAccess.register(LiveTvContentImpl)
     // In-app announcements card on Home (lazy: the repository touches storage on first refresh).
     HomeAnnouncementsSectionAccess.register(AnnouncementsFeature.homeSection())
+    // Calendar + reminders: the Home section (reminders card, opt-in Coming up row), the bell on details, the page.
+    HomeCalendarSectionAccess.register(CalendarUiSlots.homeSection())
+    DetailsCalendarBellAccess.register(CalendarUiSlots.detailsBell())
+    CalendarScreenContentAccess.register(CalendarUiSlots.screen())
     FeatureRegistry.markInitialized()
 }
 

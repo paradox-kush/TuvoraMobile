@@ -6,7 +6,7 @@ import TuvoraCore
 /// a selection closes it. Content sits 54dp in from the left edge.
 struct MainShell: View {
     enum Destination: String, CaseIterable, Identifiable {
-        case home, search, library, iptv, sports, settings
+        case home, search, library, iptv, sports, calendar, settings
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -15,6 +15,7 @@ struct MainShell: View {
             case .library: return "Library"
             case .iptv: return "IPTV"
             case .sports: return "Sports"
+            case .calendar: return "Calendar"
             case .settings: return "Settings"
             }
         }
@@ -26,6 +27,7 @@ struct MainShell: View {
             case .library: return "sidebar_library"
             case .iptv: return "md_live_tv"
             case .sports: return "md_sports_soccer"
+            case .calendar: return "md_calendar_month"
             case .settings: return "sidebar_settings"
             }
         }
@@ -33,7 +35,7 @@ struct MainShell: View {
 
     @StateObject private var playback = PlaybackCoordinator()
     @StateObject private var theme = NuvioThemeModel()
-    /// Simulator smoke hook: `-smokeTab <home|search|library|iptv|sports|settings>`.
+    /// Simulator smoke hook: `-smokeTab <home|search|library|iptv|sports|calendar|settings>`.
     @State private var destination: Destination = {
         let args = AppArguments.list
         if let i = args.firstIndex(of: "-smokeTab"), i + 1 < args.count, let d = Destination(rawValue: args[i + 1]) { return d }
@@ -221,6 +223,7 @@ struct MainShell: View {
         case .library: LibraryScreen()
         case .iptv: IptvHubScreen()
         case .sports: SportsScreen()
+        case .calendar: CalendarScreen()
         case .settings: SettingsScreen()
         }
     }

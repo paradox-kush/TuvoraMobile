@@ -85,6 +85,13 @@ data class PartyRoute(
     override val title: String = "",
 ) : SettingsDestinationRoute
 
+/** The Calendar page (features/calendar, hosted through CalendarScreenContentAccess). */
+@Serializable
+data class CalendarRoute(override val title: String = "") : AppRoute {
+    override val preferredTabName: String
+        get() = "Library"
+}
+
 @Serializable
 data class DownloadsRoute(override val title: String = "") : AppRoute {
     override val preferredTabName: String

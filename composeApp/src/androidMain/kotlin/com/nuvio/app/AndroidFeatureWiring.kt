@@ -16,6 +16,9 @@ fun initializeAndroidProcessStorage(context: Context) {
     // B205: pending device claims (own preferences file, never wiped with the account data). Process-scoped,
     // because the claim coordinator starts with the feature registration, before MainActivity's startup tasks.
     com.nuvio.app.features.iptv.PendingDeviceClaimStorage.initialize(context)
+    // Calendar snapshot + settings: process-scoped so a Home that settles before MainActivity's startup tasks
+    // never reads an empty store (and later saves over the real one).
+    com.nuvio.app.features.calendar.api.CalendarAndroid.initialize(context)
 }
 
 /**

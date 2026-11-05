@@ -65,3 +65,66 @@ class XmltvIngestWindowTest {
         assertFalse(XmltvIngestWindow.keeps(0L, hour, now))
     }
 }
+
+/** M3U catch-up: a channel that replays N days keeps N days of guide history instead of six hours. */
+class XmltvCatchUpHistoryWindowTest {
+
+    private val hour = 60L * 60 * 1000
+    private val day = 24 * hour
+    private val now = 1_800_000_000_000L
+
+    @Test
+    fun `the lookback follows catchup-days and is capped at a week`() {
+        assertTrue(XmltvIngestWindow.backMsForCatchUpDays(3) == 3 * day)
+        assertTrue(XmltvIngestWindow.backMsForCatchUpDays(30) == 7 * day, "capped at 7 days")
+        assertTrue(XmltvIngestWindow.backMsForCatchUpDays(0) == XmltvIngestWindow.BACK_MS, "no archive keeps the default")
+        assertTrue(XmltvIngestWindow.backMsForCatchUpDays(-2) == XmltvIngestWindow.BACK_MS)
+    }
+
+    @Test
+    fun `a programme from two days ago is kept with a three day lookback and refused by default`() {
+        val start = now - 2 * day
+        assertTrue(XmltvIngestWindow.keeps(start, start + hour, now, XmltvIngestWindow.backMsForCatchUpDays(3)))
+        assertFalse(XmltvIngestWindow.keeps(start, start + hour, now), "the default window still refuses it")
+    }
+
+    @Test
+    fun `the deepest archive among channels sharing one guide id wins`() {
+        val byGuide = XmltvIngestWindow.backMsByGuide(
+            listOf(1 to "Shared.Id", 2 to "shared.id", 3 to "other"),
+            mapOf(1 to 2, 2 to 5),
+        )
+        assertTrue(byGuide[normalizeChannelId("Shared.Id")] == 5 * day)
+        assertFalse("other" in byGuide, "a channel with no catch-up adds no entry")
+    }
+
+    @Test
+    fun `an ingest replay keeps past programmes only for the catch-up channel`() {
+        val nowMs = parseXmltvTime("20261010120000 +0000")!!
+        fun at(offsetMs: Long): String {
+            // Build the XMLTV stamp from epoch ms through the same parser's inverse: day-granular offsets only.
+            val days = (-offsetMs) / day
+            val d = 10 - days.toInt()
+            return "202610${d.toString().padStart(2, '0')}120000 +0000"
+        }
+        fun ch(id: String, name: String) = "<channel id=\"$id\"><display-name>$name</display-name></channel>"
+        fun prog(id: String, title: String, daysBack: Int) =
+            "<programme channel=\"$id\" start=\"${at(-daysBack * day)}\" stop=\"${at(-daysBack * day + hour)}\"><title>$title</title></programme>"
+        val xml = "<tv>" + ch("replayable", "Replayable") + ch("plain", "Plain") +
+            prog("replayable", "Replayable 2d", 2) + prog("plain", "Plain 2d", 2) + "</tv>"
+        val replay = XmltvGuideReplay(
+            listOf(
+                com.nuvio.app.features.epg.GuideChannelMatcher.LineupChannel(1, "Replayable", "replayable"),
+                com.nuvio.app.features.epg.GuideChannelMatcher.LineupChannel(2, "Plain", "plain"),
+            ),
+            emptySet(), com.nuvio.app.features.epg.ChannelNameCleaner.Rules.DEFAULT, nowMs,
+            catchUpDaysBySid = mapOf(1 to 3),
+        )
+        try {
+            replay.feed(xml)
+            val rows = mutableListOf<XmltvProgramme>()
+            replay.finish(rows::add)
+            assertTrue(rows.map { it.title } == listOf("Replayable 2d"), "only the catch-up channel keeps its past: ${rows.map { it.title }}")
+        } finally { replay.dispose() }
+    }
+}

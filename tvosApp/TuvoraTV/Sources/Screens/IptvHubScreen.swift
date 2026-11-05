@@ -442,6 +442,8 @@ private struct LiveGuideView: View {
     @State private var cellDescription: String?
     @State private var historyShown: Set<String> = []
     @State private var sheet: GuideSheetTarget?
+    /// A replay that did not open or never started (an M3U catch-up link that hung): Retry asks for it again.
+    @State private var replayRetry: GuideSheetTarget?
     @State private var notice: String?
     @State private var hideAsk: (String, String)?
     @State private var catchUpSupported = false
@@ -491,12 +493,16 @@ private struct LiveGuideView: View {
                 .focusSection()
             }
             .padding(.leading, NuvioTokens.Layout.gutter).padding(.trailing, dp(24))
-            .disabled(sheet != nil || hideAsk != nil)
+            .disabled(sheet != nil || hideAsk != nil || replayRetry != nil)
             if let sheet {
                 GuideStartOverSheet(target: sheet,
                                     onStartOver: { self.sheet = nil; startReplay(sheet.channel, sheet.programme) },
                                     onWatchLive: { self.sheet = nil; select(sheet.channel) },
                                     onDismiss: { self.sheet = nil })
+            }
+            if let replayRetry {
+                ReplayFailedDialog(onRetry: { self.replayRetry = nil; startReplay(replayRetry.channel, replayRetry.programme) },
+                                   onCancel: { self.replayRetry = nil })
             }
             if let hideAsk {
                 HideGroupDialog(name: hideAsk.1,
@@ -1023,26 +1029,34 @@ private struct LiveGuideView: View {
     /// and a programme nothing plays comes back to the guide as NuvioTV's notice.
     private func startReplay(_ channel: LiveGuideChannel, _ programme: XtreamProgram) {
         notice = nil
+        replayRetry = nil
         previewRequests.cancel()
         previewSession?.close(); previewSession = nil; previewing = nil
         smokeLog("SMOKE guide replay channel=%@ programme=%@", channel.name, programme.title)
+        let target = GuideSheetTarget(channel: channel, programme: programme)
+        /// The replay ended without a session to show: its notice, and Retry when asking again could help.
+        func end(_ step: TvReplayStep) {
+            notice = step.notice
+            if step.canRetry { replayRetry = target }
+            smokeLog("SMOKE guide replay notice=%@ retry=%d", step.notice ?? "-", step.canRetry)
+        }
         Task {
             guard let pair = try? await TvCatchUp.shared.startReplay(channel: channel, programme: programme) else { return }
-            guard var current = pair.first.session else {
-                notice = pair.first.notice
-                smokeLog("SMOKE guide replay notice=%@", pair.first.notice ?? "-")
-                return
-            }
+            guard var current = pair.first.session else { end(pair.first); return }
             playback.play(current)
             while let step = try? await pair.replay.supervise(session: current) {
                 if let next = step.session {
-                    smokeLog("SMOKE guide replay next dialect")
+                    smokeLog("SMOKE guide replay next rejoinsLive=%d", step.rejoinsLive)
                     guard playback.session?.session === current else { next.close(); return }   // viewer left
                     playback.continuePlaying(next, from: current)
+                    if step.rejoinsLive {
+                        // The replay ran out: the live channel plays on, and the player says why.
+                        if let text = step.notice { playback.notify(text) }
+                        return
+                    }
                     current = next
                 } else {
-                    notice = step.notice
-                    smokeLog("SMOKE guide replay notice=%@", step.notice ?? "-")
+                    end(step)
                     if playback.session?.session === current { playback.stop() }
                     return
                 }
@@ -1059,6 +1073,7 @@ private struct LiveGuideView: View {
     /// OK previews a channel in the strip; OK on the previewing channel goes full screen.
     private func select(_ channel: LiveGuideChannel) {
         notice = nil
+        TvCatchUp.shared.cancelOpens()   // a replay still opening for another programme publishes nothing
         let action = TvGuideSelectionPolicy.shared.decide(
             sameChannel: previewing?.contentId == channel.contentId,
             hasSession: previewSession != nil)
@@ -1448,6 +1463,27 @@ private struct HideGroupDialog: View {
                         width: dp(460)) {
                 SettingsDialogButton(title: "Hide group", fullWidth: true, action: onHide)
                 SettingsDialogButton(title: "Cancel", fullWidth: true, initialFocus: true, action: onCancel)
+            }
+            .focusSection()
+        }
+        .onExitCommand(perform: onCancel)
+    }
+}
+
+/// A replay that did not open: Retry (focused first) asks for the same programme again; Cancel / Menu
+/// returns to its cell in the guide. Same shape as HideGroupDialog.
+private struct ReplayFailedDialog: View {
+    let onRetry: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.6).ignoresSafeArea()
+            NuvioDialog(title: "Couldn\u{2019}t open this replay",
+                        subtitle: "The provider didn\u{2019}t start it in time. Try again, or go back to the guide.",
+                        width: dp(460)) {
+                SettingsDialogButton(title: "Retry", primary: true, fullWidth: true, initialFocus: true, action: onRetry)
+                SettingsDialogButton(title: "Cancel", fullWidth: true, action: onCancel)
             }
             .focusSection()
         }

@@ -88,4 +88,18 @@ class AddonSubtitleIdPolicyTest {
         assertTrue(AddonSubtitleIdPolicy.allowsStreamHashProbe("tt0133093"))
         assertTrue(AddonSubtitleIdPolicy.allowsStreamHashProbe(null))
     }
+
+    @Test
+    fun aLiveOrCatchUpStreamIsNeverProbedForAnOpenSubtitlesHash() {
+        // Catch-up replays stay streamType "live"; their link can be single-use.
+        assertTrue(AddonSubtitleIdPolicy.isLivePlayback("live", null), "streamType live")
+        assertTrue(AddonSubtitleIdPolicy.isLivePlayback(null, "LIVE"), "contentType live, any case")
+        assertFalse(AddonSubtitleIdPolicy.isLivePlayback("movie", "movie"), "vod")
+        assertFalse(AddonSubtitleIdPolicy.isLivePlayback(null, null), "unknown")
+        assertFalse(
+            AddonSubtitleIdPolicy.allowsStreamHashProbe("tt0133093", isLivePlayback = true),
+            "a plain id on a live stream must not be probed",
+        )
+        assertTrue(AddonSubtitleIdPolicy.allowsStreamHashProbe("tt0133093", isLivePlayback = false), "vod still hashed")
+    }
 }
