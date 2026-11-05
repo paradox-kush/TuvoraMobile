@@ -472,6 +472,12 @@ class TvPlayerSession(
         if (!isLive && vodReresolve != null) {
             val position = if (snapshot.positionMs > 0) snapshot.positionMs else resumeTargetMs
             vodRetry.retry(position, !wantsToPlay)
+        } else if (isLive) {
+            // The viewer's Retry: a fresh, still bounded ladder, and a fresh link. Replaying the old
+            // URL (bridge.retry) re-opened a spent Stalker create_link, and the monitor, still at
+            // its cap, answered GiveUp on the first sample, so Retry could not recover the channel.
+            monitor.onUserRetry()
+            reconnectLive()
         } else bridge?.retry()
     }
 

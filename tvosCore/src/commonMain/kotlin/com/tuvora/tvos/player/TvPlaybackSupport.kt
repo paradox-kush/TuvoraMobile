@@ -65,6 +65,16 @@ class TvLiveMonitor {
         const val STABLE_RESET_MS = 30_000L
     }
 
+    /**
+     * The viewer pressed Retry: one fresh, still bounded, ladder. Never called by the automatic
+     * reconnect, so a dead provider still ends in GiveUp (Failed + Retry). A zap opens a new session,
+     * and with it a new monitor.
+     */
+    fun onUserRetry() {
+        attempts = 0
+        lastAttemptAt = Long.MIN_VALUE / 2
+    }
+
     fun sample(nowMs: Long, snapshot: PlayerPlaybackSnapshot, wantsToPlay: Boolean): TvLiveAction {
         if (lastPosition < 0 || kotlin.math.abs(snapshot.positionMs - lastPosition) > LivePlaybackFreezePolicy.POSITION_TOLERANCE_MS) {
             lastPosition = snapshot.positionMs; lastPositionAt = nowMs

@@ -172,6 +172,8 @@ internal class PlayerScreenRuntime(
     var errorMessage by mutableStateOf<String?>(null)
     /** The live reconnect ladder ran out: the error modal offers Retry beside Go back. */
     var liveReconnectFailed by mutableStateOf(false)
+    /** Bumped by the viewer's Retry on that error; the live freeze ladder starts over on it (never on its own reconnects). */
+    var liveUserRetryGeneration by mutableStateOf(0)
     /**
      * Resolves a user-facing string for a message the runtime raises itself (toasts). Production uses the
      * Compose resource environment; tests replace it, since the Android host JVM has no resource system.

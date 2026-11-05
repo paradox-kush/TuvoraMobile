@@ -57,7 +57,9 @@ fun LivePlaybackFreezeReporter.onLiveSnapshot(
             positionMs = snapshot.positionMs,
             videoProgressTicks = snapshot.videoProgressTicks,
         )
-        reconnector.reset()
+        // Keyed on the channel, not the URL: the full player re-arms on every URL change, and a
+        // Stalker re-mint changes it every time, so a URL-keyed reset refilled the ladder (skill 02 2.1).
+        reconnector.onPlaybackArmed(contentId)
     }
 
     // The controller lands in its own effect and can lose the race against the first playing
