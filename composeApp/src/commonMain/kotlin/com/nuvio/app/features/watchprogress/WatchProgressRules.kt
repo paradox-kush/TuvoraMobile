@@ -152,6 +152,8 @@ internal fun WatchProgressEntry.shouldTreatAsInProgressForContinueWatching(): Bo
 
 internal fun WatchProgressEntry.isLiveChannelProgress(): Boolean =
     contentType.equals("live", ignoreCase = true) ||
+        // A recorded programme is a file on this device: no Continue Watching card (nothing to resolve it) and no sync.
+        contentType.equals("recording", ignoreCase = true) ||
         IptvContentClassifierAccess.classifier.isLiveId(parentMetaId) ||
         IptvContentClassifierAccess.classifier.isLiveId(videoId)
 

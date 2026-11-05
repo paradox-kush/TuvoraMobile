@@ -534,6 +534,14 @@ class WatchProgressRulesTest {
     }
 
     @Test
+    fun `a recorded programme never shows as continue watching and is never synced`() {
+        val recording = entry(videoId = "rec-1", parentMetaId = "recording:rec-1").copy(contentType = "recording")
+
+        assertFalse(recording.shouldTreatAsInProgressForContinueWatching())
+        assertTrue(recording.isLiveChannelProgress())
+    }
+
+    @Test
     fun `B55 episodes all stopped before the credits surface the latest one`() {
         // 88% watched each: below the 90% completion threshold, so every episode stays in progress.
         val episodes = (1..6).map { episode ->
