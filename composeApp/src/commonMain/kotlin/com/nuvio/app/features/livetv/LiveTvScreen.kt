@@ -78,6 +78,8 @@ import com.nuvio.app.features.iptv.CatchUpPlayback
 import com.nuvio.app.features.iptv.M3uReplayContinuation
 import com.nuvio.app.features.iptv.M3uReplayOpen
 import com.nuvio.app.features.iptv.M3uReplayWalk
+import com.nuvio.app.features.iptv.CatchUpStartupBudget
+import com.nuvio.app.features.iptv.CatchUpStartupPolicy
 import com.nuvio.app.features.iptv.ReplayOpenFence
 import com.nuvio.app.features.common.lifecycle.Disposable
 import com.nuvio.app.features.common.lifecycle.rememberEffectScope
@@ -119,6 +121,7 @@ import nuvio.composeapp.generated.resources.action_back
 import nuvio.composeapp.generated.resources.compose_iptv_hub_epg_next
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_badge
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_ended
+import nuvio.composeapp.generated.resources.compose_livetv_catchup_no_answer
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_no_recording
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_no_scrub
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_session_limit
@@ -253,6 +256,11 @@ fun LiveTvScreen(
     var catchUp by remember { mutableStateOf<CatchUpSession?>(null) }
     // Bumped by Retry during a replay: re-resolves the current attempt's source (the live resolve stands down then).
     var catchUpRetryTick by remember { mutableStateOf(0) }
+    // The replay's first-frame budget (15 s per link, 45 s / 3 timeouts in all). One per replay: the count
+    // lives here, not on the URL, so the walk's ever-changing links and a re-arm after a pause cannot reset it.
+    var startupBudget by remember { mutableStateOf(CatchUpStartupBudget()) }
+    // The budget ran out with no frame: a terminal Failed (explanatory pill + Retry), never "Starting stream".
+    var replayStartupFailed by remember { mutableStateOf(false) }
     // Set when opening a replay failed or timed out: the error pill's Retry runs it again.
     var replayRetry by remember { mutableStateOf<(() -> Unit)?>(null) }
     // The guide row after the one a continuing (M3U) replay is playing: what its title moves to.
@@ -298,6 +306,7 @@ fun LiveTvScreen(
             // notice a guide replay shows, over the live channel the viewer at least asked about.
             catchUpNotice = CatchUpNotice.NO_RECORDING
         } else {
+            startupBudget = CatchUpStartupBudget()
             catchUp = session
         }
         pendingInitialReplay = false
@@ -381,6 +390,8 @@ fun LiveTvScreen(
                 controller = null
                 snapshot = PlayerPlaybackSnapshot()
                 playbackError = null
+                startupBudget.reset()
+                replayStartupFailed = false
                 catchUp = session.copy(proven = false)
                 catchUpRetryTick++
             }
@@ -411,6 +422,7 @@ fun LiveTvScreen(
         replayRelease = null
         catchUp = null
         replayRetry = null
+        replayStartupFailed = false
         source = null
         playbackError = null
         retryTick = 0
@@ -451,10 +463,34 @@ fun LiveTvScreen(
         }
     }
 
+    /**
+     * The current link produced no frame in time. The walk is told it was a transport failure and
+     * offers the next candidate; when the budget is spent, or the ladder is exhausted, the replay ends
+     * as a terminal Failed with Retry (a hung link is the provider's, so it is not "no recording").
+     */
+    fun onCatchUpStartupTimeout() {
+        val session = catchUp ?: return
+        if (session.proven) return
+        val advance = startupBudget.onTimeout() == CatchUpStartupPolicy.Decision.ADVANCE
+        val kind = CatchUpDialectWalk.FailureKind.TRANSPORT
+        val step = if (!advance) null else if (session.continues) m3uWalk.onFailure(session.attempt.token, kind) else dialectWalk.onFailure(session.attempt.token, kind)
+        when (step) {
+            is CatchUpDialectWalk.Step.Next -> catchUp = session.copy(attempt = step.attempt)
+            CatchUpDialectWalk.Step.Stale -> Unit
+            else -> {
+                snapshot = snapshot.copy(isLoading = false, isPlaying = false)
+                controller = null
+                replayStartupFailed = true
+            }
+        }
+    }
+
     /** Opens a replay: the walk picks the first URL to try, and the sheet (if any) closes. */
     fun startCatchUp(channel: LiveGuideChannel, programme: XtreamProgram) {
         sheetTarget = null
         replayRetry = null
+        replayStartupFailed = false
+        startupBudget = CatchUpStartupBudget()
         val ticket = openFence.next()
         replayRelease?.dispose()
         replayRelease = null
@@ -726,7 +762,20 @@ fun LiveTvScreen(
                 }
             }
         }
-        val hasError = resolveError || playbackError != null || startupFailed || reconnectGaveUp || replayRetry != null
+        // Replay first-frame deadline: lifecycle-bound (only while the screen is RESUMED) and cancelled with
+        // the replay - a new attempt token, a proven replay, Retry or leaving the screen all restart/stop it.
+        // Time is read from the budget's monotonic clock, so re-arming after a pause cannot extend the total.
+        LaunchedEffect(catchUp?.attempt?.token, catchUp?.proven, catchUpRetryTick, replayStartupFailed, lifecycleOwner) {
+            val session = catchUp ?: return@LaunchedEffect
+            if (session.proven) { startupBudget.markPlayed(); return@LaunchedEffect }
+            if (replayStartupFailed) return@LaunchedEffect
+            lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                val waitMs = startupBudget.arm() ?: return@repeatOnLifecycle
+                delay(waitMs)
+                onCatchUpStartupTimeout()
+            }
+        }
+        val hasError = resolveError || playbackError != null || startupFailed || reconnectGaveUp || replayRetry != null || replayStartupFailed
 
         fun setFullscreen(enabled: Boolean) {
             if (LiveTvFullscreenFollowsWindowAspect) manualOrientation = enabled
@@ -816,7 +865,7 @@ fun LiveTvScreen(
                     ),
             ) {
                 LivePlayerSurface(
-                    source = source.takeUnless { startupFailed },
+                    source = source.takeUnless { startupFailed || replayStartupFailed },
                     isCatchUpPlayback = isCatchUp,
                     // B123: the live picture was hard-wired to Fit.
                     resizeMode = livePicture.resizeMode,
@@ -968,12 +1017,14 @@ fun LiveTvScreen(
                     contentPadding = PaddingValues(end = 16.dp, top = 76.dp),
                 )
 
-                if (LiveTvErrorFramePolicy.coverVideo(resolveError || startupFailed, playbackError != null)) {
+                if (LiveTvErrorFramePolicy.coverVideo(resolveError || startupFailed || replayStartupFailed, playbackError != null)) {
                     Box(Modifier.fillMaxSize().background(Color.Black))
                 }
                 // Loading / error indicators (both orientations).
                 when {
-                    hasError -> Box(Modifier.fillMaxSize(), Alignment.Center) { ErrorPill(colors.danger, onRetry) }
+                    hasError -> Box(Modifier.fillMaxSize(), Alignment.Center) {
+                        ErrorPill(colors.danger, onRetry, message = if (replayStartupFailed) stringResource(Res.string.compose_livetv_catchup_no_answer) else null)
+                    }
                     snapshot.isLoading && !snapshot.isPlaying ->
                         Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = colors.accent) }
                 }
@@ -1355,9 +1406,10 @@ private fun LiveBadge(danger: Color) {
 }
 
 @Composable
-private fun ErrorPill(danger: Color, onRetry: () -> Unit) {
+private fun ErrorPill(danger: Color, onRetry: () -> Unit, message: String? = null) {
     Row(
         modifier = Modifier
+            .padding(horizontal = NuvioTokens.Space.s16)
             .clip(RoundedCornerShape(NuvioTokens.Radius.md))
             .background(Color.Black.copy(alpha = 0.6f))
             .clickable(onClick = onRetry)
@@ -1367,7 +1419,8 @@ private fun ErrorPill(danger: Color, onRetry: () -> Unit) {
     ) {
         Icon(Icons.Filled.Refresh, contentDescription = null, tint = danger)
         Text(
-            text = stringResource(Res.string.compose_livetv_error_tap_retry),
+            // A replay that never started explains itself; every other failure keeps the short tap-to-retry line.
+            text = message ?: stringResource(Res.string.compose_livetv_error_tap_retry),
             style = MaterialTheme.typography.bodyMedium,
             color = Color.White,
         )
