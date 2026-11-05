@@ -602,15 +602,18 @@ private struct LiveStatus: View {
     let onActivity: () -> Void
     @Environment(\.nuvio) private var colors
     @State private var preparingExpired = false
+    /// While time-shifted the scrub bar owns the clickpad edges, so every further press steps again (a press over
+    /// the chrome otherwise belongs to the focus engine and would only move between the buttons).
+    @FocusState private var scrubFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: dp(10)) {
             switch view.kind {
             case .shifted:
                 if view.showsScrubBar {
-                    LiveScrubBar(view: view) { session.liveStep(deltaMs: $0); onActivity() }
+                    LiveScrubBar(view: view, focused: $scrubFocused) { session.liveStep(deltaMs: $0); onActivity() }
                 }
-                LivePillButton(title: view.chipText, filled: true) { session.goLive(); onActivity() }
+                LivePillButton(title: view.chipText, filled: true, id: "player.live.chip") { session.goLive(); onActivity() }
             case .preparing:
                 if preparingExpired {
                     failureRow(text: "The pause buffer took too long to start")
@@ -635,6 +638,10 @@ private struct LiveStatus: View {
                 badge
             }
         }
+        .onAppear { if view.showsScrubBar { DispatchQueue.main.async { scrubFocused = true } } }
+        .onChange(of: view.showsScrubBar) { _, shows in
+            if shows { DispatchQueue.main.async { scrubFocused = true } }
+        }
     }
 
     private var badge: some View {
@@ -643,15 +650,18 @@ private struct LiveStatus: View {
             Text(view.chipText).font(NuvioType.inter(16, .bold))
         }
         .foregroundStyle(colors.primary)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(view.chipText)
+        .accessibilityIdentifier("player.live.badge")
     }
 
     private func failureRow(text: String) -> some View {
         HStack(spacing: dp(16)) {
             Text(text).font(NuvioType.bodyMedium).foregroundStyle(.white.opacity(0.9))
             if view.kind == .failed {
-                LivePillButton(title: "Retry", filled: false) { session.retry(); onActivity() }
+                LivePillButton(title: "Retry", filled: false, id: "player.live.retry") { session.retry(); onActivity() }
             }
-            LivePillButton(title: "Go live", filled: true) { session.goLive(); onActivity() }
+            LivePillButton(title: "Go live", filled: true, id: "player.live.golive") { session.goLive(); onActivity() }
         }
     }
 }
@@ -660,16 +670,16 @@ private struct LiveStatus: View {
 /// Focusable like the VOD seek bar (thicker and brighter when focused); the clickpad edges step through it.
 private struct LiveScrubBar: View {
     let view: LivePauseView
+    var focused: FocusState<Bool>.Binding
     let onStep: (Int64) -> Void
     @Environment(\.nuvio) private var colors
-    @FocusState private var focused: Bool
 
     var body: some View {
-        let height = focused ? dp(12) : dp(8)
+        let height = focused.wrappedValue ? dp(12) : dp(8)
         VStack(alignment: .leading, spacing: dp(6)) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: dp(3)).fill(Color.white.opacity(focused ? 0.45 : 0.3))
+                    RoundedRectangle(cornerRadius: dp(3)).fill(Color.white.opacity(focused.wrappedValue ? 0.45 : 0.3))
                     RoundedRectangle(cornerRadius: dp(3)).fill(colors.secondary).frame(width: geo.size.width * CGFloat(view.progress))
                 }
                 .frame(height: height)
@@ -684,12 +694,15 @@ private struct LiveScrubBar: View {
             .font(NuvioType.bodyMedium).foregroundStyle(.white.opacity(0.68)).monospacedDigit()
         }
         .focusable()
-        .focused($focused)
+        .focused(focused)
         .onMoveCommand { direction in
             if direction == .left { onStep(-LivePauseScrub.shared.STEP_MS) }
             else if direction == .right { onStep(LivePauseScrub.shared.STEP_MS) }
         }
-        .animation(NuvioTokens.Motion.fast, value: focused)
+        .animation(NuvioTokens.Motion.fast, value: focused.wrappedValue)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(view.reachText + " " + String(format: "%.0f", view.progress * 100))
+        .accessibilityIdentifier("player.live.scrub")
     }
 }
 
@@ -697,6 +710,7 @@ private struct LiveScrubBar: View {
 private struct LivePillButton: View {
     let title: String
     let filled: Bool
+    let id: String
     let action: () -> Void
     @Environment(\.nuvio) private var colors
     @FocusState private var focused: Bool
@@ -713,6 +727,7 @@ private struct LivePillButton: View {
         }
         .buttonStyle(PlainNoChromeButtonStyle())
         .focused($focused)
+        .accessibilityIdentifier(id)
     }
 }
 
