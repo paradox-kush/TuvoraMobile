@@ -128,4 +128,42 @@ class CalendarRefreshPolicyTest {
         assertEquals(CalendarRunOutcome.EMPTY, calendarRunOutcome(0, 0, traktAsked = false, traktFailed = false, hasEntries = false))
         assertEquals(CalendarRunOutcome.LOADED, calendarRunOutcome(0, 0, traktAsked = false, traktFailed = false, hasEntries = true))
     }
+
+    /** Device finding: a run that asks nothing must not clear the failure of the run before it. */
+    @Test fun aRunThatAsksNothingKeepsACarriedFailure() {
+        assertEquals(CalendarRunOutcome.FAILED, calendarRunOutcome(0, 0, traktAsked = false, traktFailed = false, hasEntries = false, carriedFailure = true))
+        assertEquals(CalendarRunOutcome.FAILED, calendarRunOutcome(0, 0, traktAsked = false, traktFailed = false, hasEntries = true, carriedFailure = true))
+        assertEquals(CalendarRunOutcome.EMPTY, calendarRunOutcome(0, 0, traktAsked = false, traktFailed = false, hasEntries = false, carriedFailure = false))
+    }
+
+    @Test fun aCarriedFailureNeverOverridesARunThatGotAnswers() {
+        assertEquals(CalendarRunOutcome.LOADED, calendarRunOutcome(2, 1, traktAsked = false, traktFailed = false, hasEntries = true, carriedFailure = true))
+        assertEquals(CalendarRunOutcome.EMPTY, calendarRunOutcome(1, 0, traktAsked = false, traktFailed = false, hasEntries = false, carriedFailure = true))
+    }
+
+    @Test fun aFailureIsCarriedOnlyWhileAFollowedTitleIsStillFailing() {
+        val failing = record(nextInMs = DAY, failures = 1)
+        val healthy = record(nextInMs = DAY)
+        assertTrue(calendarCarriesFailure(CalendarRunOutcome.FAILED, listOf(healthy, failing)))
+        assertFalse(calendarCarriesFailure(CalendarRunOutcome.FAILED, listOf(healthy)), "nothing is failing any more")
+        assertFalse(calendarCarriesFailure(CalendarRunOutcome.FAILED, emptyList()), "the bell was turned off")
+        assertFalse(calendarCarriesFailure(CalendarRunOutcome.LOADED, listOf(failing)), "the last run did not fail")
+        assertFalse(calendarCarriesFailure(CalendarRunOutcome.EMPTY, listOf(failing)))
+        assertFalse(calendarCarriesFailure(null, listOf(failing)))
+    }
+
+    @Test fun retryAsksAFailedTitleInsideItsBackOffButOtherReasonsDoNot() {
+        val backingOff = record(nextInMs = DAY, failures = 1).copy(nextRefreshAtMs = now + HOUR)
+        assertTrue(calendarDueForRun(backingOff, now, CalendarRefreshReason.RETRY))
+        listOf(
+            CalendarRefreshReason.CALENDAR_OPENED, CalendarRefreshReason.HOME_SETTLED,
+            CalendarRefreshReason.SETTINGS_CHANGED, CalendarRefreshReason.BELL_CHANGED,
+        ).forEach { assertFalse(calendarDueForRun(backingOff, now, it), "$it keeps the back-off") }
+    }
+
+    @Test fun retryLeavesAHealthyTitleInsideItsWaitAlone() {
+        val resting = record(nextInMs = DAY).copy(nextRefreshAtMs = now + HOUR)
+        assertFalse(calendarDueForRun(resting, now, CalendarRefreshReason.RETRY))
+        assertTrue(calendarDueForRun(resting.copy(nextRefreshAtMs = now), now, CalendarRefreshReason.CALENDAR_OPENED), "a due title is still due")
+    }
 }

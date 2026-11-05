@@ -254,4 +254,56 @@ class CalendarRepositoryTest {
         settle()
         assertEquals(2, traktCalendarCalls, "a good answer is fresh for 6 h")
     }
+
+    // ---- device finding: a failure survives a run that asks nothing, and Retry re-asks the failed title ----
+
+    private suspend fun TestScope.bellOneShowWhileTheNetworkIsDown(): CalendarRepository {
+        followed = emptyList()
+        remote.lookups["tt7"] = TvMazeLookup.Found(7, CalendarIds(imdb = "tt7"))
+        remote.shows[7] = CalendarShowDates(entries = listOf(CalendarEntry(season = 1, episode = 3, airInstantMs = start + 3 * DAY)))
+        remote.fail = true
+        val repository = repository()
+        repository.setBell(CalendarTitleType.SERIES, CalendarIds(imdb = "tt7"), on = true)
+        settle()
+        return repository
+    }
+
+    @Test fun openingTheCalendarWhileTheFailedTitleBacksOffKeepsTheFailureAndAsksNothing() = runTest {
+        val repository = bellOneShowWhileTheNetworkIsDown()
+        assertEquals(LoadStatus.Failed(timedOut = false), repository.state.value.status, "the only fetch failed")
+        val calls = remote.calls.size
+        assertTrue(calls > 0)
+
+        advanceTimeBy(30_000L)
+        repository.requestRefresh(CalendarRefreshReason.CALENDAR_OPENED)
+        settle()
+        assertEquals(calls, remote.calls.size, "the failed title is backing off: nothing is asked")
+        assertEquals(LoadStatus.Failed(timedOut = false), repository.state.value.status, "no all-quiet page over a failure")
+    }
+
+    @Test fun retryAsksTheBackedOffFailedTitleAndTheCalendarLoads() = runTest {
+        val repository = bellOneShowWhileTheNetworkIsDown()
+        advanceTimeBy(30_000L)
+        repository.requestRefresh(CalendarRefreshReason.CALENDAR_OPENED)
+        settle()
+        val calls = remote.calls.size
+
+        remote.fail = false
+        repository.requestRefresh(CalendarRefreshReason.RETRY)
+        settle()
+        assertTrue(remote.calls.size > calls, "Retry fetched the failed title again")
+        assertEquals(LoadStatus.Loaded, repository.state.value.status)
+        assertEquals(1, repository.state.value.titles.single().entries.size)
+    }
+
+    @Test fun theCarriedFailureClearsWhenTheFailingTitleIsNoLongerFollowed() = runTest {
+        val repository = bellOneShowWhileTheNetworkIsDown()
+        assertEquals(LoadStatus.Failed(timedOut = false), repository.state.value.status)
+        val calls = remote.calls.size
+
+        repository.setBell(CalendarTitleType.SERIES, CalendarIds(imdb = "tt7"), on = false)
+        settle()
+        assertEquals(calls, remote.calls.size, "nothing left to ask")
+        assertEquals(LoadStatus.Empty, repository.state.value.status, "the bell is off, so nothing is failing")
+    }
 }

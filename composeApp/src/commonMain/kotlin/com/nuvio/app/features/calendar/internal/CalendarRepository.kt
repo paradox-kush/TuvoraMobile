@@ -137,7 +137,7 @@ class CalendarRepository(
             job = scope.launch {
                 var next: CalendarRefreshReason? = reason
                 while (next != null) {
-                    runBounded()
+                    runBounded(next)
                     next = synchronized(jobLock) {
                         val again = runAgain
                         runAgain = null
@@ -155,7 +155,7 @@ class CalendarRepository(
         }
     }
 
-    private suspend fun runBounded() {
+    private suspend fun runBounded(reason: CalendarRefreshReason) {
         publish(status = BoundedLoad.begin(LoadSurface.CALENDAR), remaining = 0)
         val outcome = BoundedLoad.run(
             surface = LoadSurface.CALENDAR,
@@ -164,7 +164,7 @@ class CalendarRepository(
             isEmpty = { it == CalendarRunOutcome.EMPTY },
             // The screen stops waiting at the deadline; the titles still being fetched keep landing in the background.
             cancelOnTimeout = false,
-        ) { runRefresh() }
+        ) { runRefresh(reason) }
         val status = when (outcome) {
             is LoadOutcome.Loaded -> LoadStatus.Loaded
             is LoadOutcome.Empty -> LoadStatus.Empty
@@ -175,7 +175,7 @@ class CalendarRepository(
     }
 
     /** One refresh. Throws [CalendarAllFetchesFailed] when it asked the network and nothing answered. */
-    private suspend fun runRefresh(): CalendarRunOutcome {
+    private suspend fun runRefresh(reason: CalendarRefreshReason): CalendarRunOutcome {
         synchronized(jobLock) { workInFlight = true }
         val profileId = accounts.activeProfileId.value
         try {
@@ -235,7 +235,7 @@ class CalendarRepository(
                     updatedAtMs = nowMs,
                 )
                 watched = index
-                records.filter { it.isDue(nowMs) }
+                records.filter { calendarDueForRun(it, nowMs, reason) }
                     .sortedWith(compareByDescending<CalendarTitleRecord> { CalendarOrigin.BELL in it.origins }.thenBy { it.nextRefreshAtMs })
             } ?: return CalendarRunOutcome.EMPTY
             publish(remaining = due.size)
@@ -260,13 +260,17 @@ class CalendarRepository(
                 }
                 save(profileId)
             }
-            val hasEntries = dataMutex.withLock { data.titles.visible(settings).any { it.entries.isNotEmpty() } }
+            val (hasEntries, carriedFailure) = dataMutex.withLock {
+                data.titles.visible(settings).any { it.entries.isNotEmpty() } to
+                    calendarCarriesFailure(_state.value.lastOutcome, data.titles)
+            }
             val outcome = calendarRunOutcome(
                 titlesAsked = due.size,
                 titlesFailed = failed,
                 traktAsked = traktAsked,
                 traktFailed = traktAsked && traktItems == null,
                 hasEntries = hasEntries,
+                carriedFailure = carriedFailure,
             )
             finish(profileId, outcome)
             if (outcome == CalendarRunOutcome.FAILED) throw CalendarAllFetchesFailed()

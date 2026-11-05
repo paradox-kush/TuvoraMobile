@@ -68,12 +68,30 @@ fun calendarRunOutcome(
     traktAsked: Boolean,
     traktFailed: Boolean,
     hasEntries: Boolean,
+    carriedFailure: Boolean = false,
 ): CalendarRunOutcome {
     val asked = titlesAsked + (if (traktAsked) 1 else 0)
     val failed = titlesFailed + (if (traktAsked && traktFailed) 1 else 0)
     return when {
         asked > 0 && failed == asked -> CalendarRunOutcome.FAILED
+        asked == 0 && carriedFailure -> CalendarRunOutcome.FAILED
         hasEntries -> CalendarRunOutcome.LOADED
         else -> CalendarRunOutcome.EMPTY
     }
 }
+
+
+/**
+ * Retry re-asks a title whose last fetch failed even inside its back-off; every other reason keeps the back-off, so
+ * opening the Calendar or Home never hammers a failing source. Device finding: without this Retry asked nothing.
+ */
+fun calendarDueForRun(record: CalendarTitleRecord, nowMs: Long, reason: CalendarRefreshReason): Boolean =
+    record.isDue(nowMs) || (reason == CalendarRefreshReason.RETRY && record.failures > 0)
+
+/**
+ * The last run failed and a followed title is still waiting out that failure: a run that asks nothing keeps the
+ * failure instead of reporting "all quiet" (device finding: the next open's run cleared it). It clears once nothing
+ * followed is failing, e.g. the bell was turned off.
+ */
+fun calendarCarriesFailure(previous: CalendarRunOutcome?, followed: List<CalendarTitleRecord>): Boolean =
+    previous == CalendarRunOutcome.FAILED && followed.any { it.failures > 0 }
