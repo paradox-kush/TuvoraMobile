@@ -301,7 +301,22 @@ class RecordingsRepository(
     }
 
     override suspend fun removeSeriesRule(ruleId: String, cancelUpcoming: Boolean) {
-        // STUB (red commit): implemented in the next commit.
+        locked(clock()) {
+            val waiting = if (cancelUpcoming) {
+                // A schedule with a live capture is in `running`: it finishes and keeps its row.
+                doc.scheduleValues.filter { it.seriesRuleId == ruleId && it.id !in running }.map { it.id }
+            } else {
+                emptyList()
+            }
+            val hadRule = doc.seriesValues.any { it.id == ruleId }
+            if (!hadRule && waiting.isEmpty()) return@locked
+            waiting.forEach { alarms.disarm(it); ledger.forget(it) }
+            edit(
+                schedules = { list -> list.filterNot { it.id in waiting } },
+                series = { list -> list.filterNot { it.id == ruleId } },
+            )
+            commit()
+        }
     }
 
     // ---- cancel, delete, retry ------------------------------------------------------------

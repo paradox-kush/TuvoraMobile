@@ -2760,6 +2760,7 @@
     <string name="recordings_problem_live_pending">Live recording isn’t available in this version yet.</string>
     <string name="recordings_action_record">Record</string>
     <string name="recordings_action_record_series">Record series</string>
+    <string name="recordings_action_stop_series">Stop series recording</string>
     <string name="recordings_series_active">Series recording is on for this show.</string>
     <string name="recordings_action_view">View recordings</string>
     <string name="recordings_action_allow_exact">Allow exact alarms</string>

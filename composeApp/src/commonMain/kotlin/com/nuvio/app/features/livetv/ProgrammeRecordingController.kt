@@ -109,6 +109,19 @@ internal class ProgrammeRecordingController(
         }
     }
 
+    /** "Stop series recording": drops the rule and its waiting airings; saved and running recordings stay. */
+    fun stopSeries(ruleId: String) {
+        scope.launch {
+            try {
+                port.removeSeriesRule(ruleId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _work.value = RecordWork.Failed
+            }
+        }
+    }
+
     fun cancel(scheduleId: String) {
         scope.launch {
             try {

@@ -44,6 +44,7 @@ import nuvio.composeapp.generated.resources.recordings_confirm_series_nothing
 import nuvio.composeapp.generated.resources.recordings_confirm_set
 import nuvio.composeapp.generated.resources.recordings_prepare_failed
 import nuvio.composeapp.generated.resources.recordings_series_active
+import nuvio.composeapp.generated.resources.recordings_action_stop_series
 import nuvio.composeapp.generated.resources.recordings_unavailable_bad_times
 import nuvio.composeapp.generated.resources.recordings_unavailable_needs_catch_up
 import nuvio.composeapp.generated.resources.recordings_unavailable_over
@@ -112,9 +113,7 @@ internal fun ProgrammeRecordSection(
                                 )
                             }
                         }
-                        if (ProgrammeRecordPolicy.seriesOffer(p.channel, programme.title, port.capabilities, state) is SeriesOffer.Active) {
-                            Note(stringResource(Res.string.recordings_series_active))
-                        }
+                        StopSeriesOffer(ProgrammeRecordPolicy.seriesOffer(p.channel, programme.title, port.capabilities, state), controller)
                     }
                     is RecordOffer.Scheduled -> {
                         NuvioSheetActionButton(
@@ -126,9 +125,7 @@ internal fun ProgrammeRecordSection(
                             onClick = { controller.cancel(offer.scheduleId) },
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        if (ProgrammeRecordPolicy.seriesOffer(p.channel, programme.title, port.capabilities, state) is SeriesOffer.Active) {
-                            Note(stringResource(Res.string.recordings_series_active))
-                        }
+                        StopSeriesOffer(ProgrammeRecordPolicy.seriesOffer(p.channel, programme.title, port.capabilities, state), controller)
                     }
                     RecordOffer.AlreadySaved -> {
                         Note(stringResource(Res.string.recordings_already_saved))
@@ -202,5 +199,22 @@ private fun Note(text: String, warn: Boolean = false) {
         text = text,
         style = MaterialTheme.typography.bodySmall,
         color = if (warn) colors.danger else colors.textSecondary,
+    )
+}
+
+/** Where a series rule is already on: the note, and the way to turn it off. */
+@Composable
+private fun StopSeriesOffer(offer: SeriesOffer, controller: ProgrammeRecordingController) {
+    if (offer !is SeriesOffer.Active) return
+    val colors = MaterialTheme.nuvio.colors
+    Note(stringResource(Res.string.recordings_series_active))
+    NuvioSheetActionButton(
+        icon = Icons.Filled.Close,
+        label = stringResource(Res.string.recordings_action_stop_series),
+        background = Color.Transparent,
+        contentColor = colors.textPrimary,
+        border = colors.borderSubtle,
+        onClick = { controller.stopSeries(offer.ruleId) },
+        modifier = Modifier.fillMaxWidth(),
     )
 }
