@@ -556,6 +556,69 @@ class RecordingsRepositoryTest {
         assertEquals(2, rig.alarms.armed.size)
     }
 
+    private fun showListings() = listOf(
+        com.nuvio.app.features.recordings.api.ListingInfo("Show", null, NOW + 3 * HOUR, NOW + 4 * HOUR, "S01E01"),
+        com.nuvio.app.features.recordings.api.ListingInfo("Show", null, NOW + 1 * DAY, NOW + 1 * DAY + HOUR, "S01E02"),
+    )
+
+    @Test
+    fun `removing a series rule drops the rule and disarms its waiting schedules`() = runTest {
+        val rig = Rig()
+        rig.repo.addSeriesRule(catchUpChannel, "Show", 0, showListings(), NOW)
+        val ruleId = rig.repo.state.value.series.single().id
+        val ids = rig.repo.state.value.schedules.map { it.id }
+        assertEquals(2, ids.size)
+        rig.repo.scheduleProgramme(catchUpChannel, "Other", null, null, NOW + 5 * HOUR, NOW + 6 * HOUR, NOW)
+        rig.repo.removeSeriesRule(ruleId)
+        assertTrue(rig.repo.state.value.series.isEmpty())
+        assertEquals(listOf("Other"), rig.repo.state.value.schedules.map { it.title }, "only the one-off stays")
+        ids.forEach { assertNull(rig.alarms.armed[it], "alarm for $it is disarmed") }
+        assertEquals(1, rig.alarms.armed.size)
+        val saved = RecordingsCodec.decode(rig.files.texts["recordings.json"])!!
+        assertTrue(saved.seriesValues.isEmpty())
+        assertTrue(rig.repo.expandSeries(ruleId, showListings(), NOW).isEmpty(), "a removed rule does not come back")
+    }
+
+    @Test
+    fun `removing a series rule with cancelUpcoming false keeps the waiting schedules`() = runTest {
+        val rig = Rig()
+        rig.repo.addSeriesRule(catchUpChannel, "Show", 0, showListings(), NOW)
+        val ruleId = rig.repo.state.value.series.single().id
+        rig.repo.removeSeriesRule(ruleId, cancelUpcoming = false)
+        assertTrue(rig.repo.state.value.series.isEmpty())
+        assertEquals(2, rig.repo.state.value.schedules.size)
+        assertEquals(2, rig.alarms.armed.size)
+    }
+
+    @Test
+    fun `removing a series rule keeps finished recordings and lets a running capture finish`() = runTest {
+        val rig = Rig()
+        val ch = catchUpChannel
+        val rule = com.nuvio.app.features.recordings.api.SeriesRule(id = "rule1", channel = ch, title = "Show")
+        val running = schedule(id = "s1", mode = CaptureMode.CATCH_UP, start = NOW - 2 * HOUR, end = NOW - HOUR, ch = ch, seriesRuleId = "rule1")
+        val waiting = schedule(id = "s2", mode = CaptureMode.CATCH_UP, start = NOW + 2 * HOUR, end = NOW + 3 * HOUR, ch = ch, seriesRuleId = "rule1")
+        rig.files.texts["recordings.json"] = RecordingsCodec.encode(
+            RecordingsDocument(
+                schedules = listOf(running, waiting).map { StoredRow.of(it) },
+                series = listOf(StoredRow.of(rule)),
+            ),
+        )
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        rig.saver.next = { _, _ -> started.complete(Unit); release.await(); SaveOutcome.Done(5) }
+        val result = async { rig.repo.fire("s1", NOW) }
+        started.await()
+        rig.repo.removeSeriesRule("rule1")
+        assertTrue(rig.repo.state.value.series.isEmpty())
+        assertEquals(listOf("s1"), rig.repo.state.value.schedules.map { it.id }, "the waiting airing is cancelled, the running one is not")
+        assertNull(rig.alarms.armed["s2"])
+        release.complete(Unit)
+        assertEquals(FireResult.Saved, result.await())
+        assertEquals(RecordingStatus.DONE, rig.repo.state.value.recordings.single().status, "the finished recording stays")
+        rig.repo.removeSeriesRule("rule1")
+        assertEquals(RecordingStatus.DONE, rig.repo.state.value.recordings.single().status)
+    }
+
     @Test
     fun `the space check during a save asks the policy and can stop the capture`() = runTest {
         val rig = Rig()

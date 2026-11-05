@@ -143,6 +143,12 @@ interface RecordingsPort {
     /** Schedules matching airings of an existing rule from a fresh guide. Idempotent. */
     suspend fun expandSeries(ruleId: String, listings: List<ListingInfo>, nowMs: Long): List<RecordingSchedule>
 
+    /**
+     * Stops a series: removes the rule and, with [cancelUpcoming], disarms and removes its waiting schedules.
+     * Finished and failed recordings stay; a capture already running finishes.
+     */
+    suspend fun removeSeriesRule(ruleId: String, cancelUpcoming: Boolean = true)
+
     /** Removes a schedule, or stops the capture if it is running. */
     suspend fun cancel(scheduleId: String)
 

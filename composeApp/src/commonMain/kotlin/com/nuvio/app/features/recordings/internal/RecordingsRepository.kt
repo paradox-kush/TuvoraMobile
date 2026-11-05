@@ -300,6 +300,10 @@ class RecordingsRepository(
         return created
     }
 
+    override suspend fun removeSeriesRule(ruleId: String, cancelUpcoming: Boolean) {
+        // STUB (red commit): implemented in the next commit.
+    }
+
     // ---- cancel, delete, retry ------------------------------------------------------------
 
     override suspend fun cancel(scheduleId: String) {
