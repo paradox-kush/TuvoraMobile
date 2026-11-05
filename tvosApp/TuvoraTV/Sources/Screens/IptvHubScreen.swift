@@ -10,6 +10,7 @@ struct IptvHubScreen: View {
     @State private var choosingPlaylist = false
     @State private var details: PreviewBox?
     @State private var smokeOpened = false
+    @State private var lastShape = ""
     // F48: search inside the selected playlist's Movies / Series. The keyboard is a sheet (the guide's pattern);
     // submitting shows the results page under the header; Menu closes it and focus returns to the Search chip.
     @State private var searchSheet = false
@@ -66,6 +67,10 @@ struct IptvHubScreen: View {
             TvIptvBrowse.shared.open(section: hub?.section ?? .live)
             for await next in TvIptvBrowse.shared.state {
                 hub = next
+                // Only a change in what the hub SHOWS (loading, empty, error, loaded) can change what holds focus; a
+                // ping per emission would re-render the shell and restart its focus check for nothing.
+                let shape = "\(next.accountsLoaded)|\(next.accounts.isEmpty)|\(next.loadError != nil)"
+                if shape != lastShape { lastShape = shape; ContentFocusActivity.contentChanged() }
                 // Simulator smoke hook: `-smokeIptvOpen <movies|series>` opens the first loaded title's details.
                 let args = AppArguments.list
                 if details == nil, let i = args.firstIndex(of: "-smokeIptvOpen"), i + 1 < args.count {
