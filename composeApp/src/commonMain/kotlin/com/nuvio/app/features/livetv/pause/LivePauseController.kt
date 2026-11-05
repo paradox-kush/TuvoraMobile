@@ -73,6 +73,10 @@ class LivePauseController(
     // engine lands near it or [SEEK_HOLD_MS] passes, so a stale playhead can neither undo a step nor fake "caught up".
     private var pendingSeek: Long? = null
     private var pendingSeekAtMs = 0L
+    // How far in front of the playhead the engine's window ends while the viewer is live (a read-ahead lead, not a
+    // delay): part of "caught up" ([LiveCaughtUp]). Sampled until the first pause of a source, per source.
+    private var liveLeadMs = 0L
+    private var sampleLead = true
 
     /** True when the pause button drives this controller (otherwise the caller keeps the plain pause). */
     val handlesPlayPause: Boolean get() = !disposed && activeMechanism() != LivePauseMechanism.UNAVAILABLE
@@ -104,6 +108,8 @@ class LivePauseController(
         this.bitrateBps = bitrateBps
         // A new source is a new player: the old engine is gone, [attachEngine] brings the next one.
         this.engine = null
+        liveLeadMs = 0L
+        sampleLead = true
         _surface.value = LivePauseSurface.Live
         _state.value = LivePauseState.Off
     }
@@ -128,6 +134,9 @@ class LivePauseController(
             rePauseArmed = false
             onPause()
             return
+        }
+        if (sampleLead && isPlaying && _state.value is LivePauseState.Off && _surface.value is LivePauseSurface.Live && caps.engineBackBuffer) {
+            engine?.liveWindow()?.let { liveLeadMs = LiveCaughtUp.noteLead(liveLeadMs, it.behindLiveMs) }
         }
         val current = _state.value as? LivePauseState.Shifted ?: return
         when (mechanism) {
@@ -156,7 +165,7 @@ class LivePauseController(
                         return
                     }
                 }
-                if (!wantPaused && isPlaying && window.behindLiveMs <= config.edgeSlackMs) {
+                if (!wantPaused && isPlaying && LiveCaughtUp.isCaughtUp(window.behindLiveMs, config.edgeSlackMs, liveLeadMs)) {
                     finishSession()   // caught up with the live edge on its own
                     return
                 }
@@ -194,6 +203,8 @@ class LivePauseController(
         endSession()
         channel = null
         contentId = null
+        liveLeadMs = 0L
+        sampleLead = true
         _surface.value = LivePauseSurface.Live
         _state.value = LivePauseState.Off
     }
@@ -211,6 +222,7 @@ class LivePauseController(
             }
             return
         }
+        sampleLead = false
         when (val m = activeMechanism()) {
             LivePauseMechanism.UNAVAILABLE -> engine?.pause()
             LivePauseMechanism.PROVIDER_CATCHUP -> {
