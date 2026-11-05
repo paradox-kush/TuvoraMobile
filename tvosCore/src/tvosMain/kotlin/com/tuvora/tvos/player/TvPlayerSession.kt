@@ -9,6 +9,7 @@ import com.nuvio.app.features.player.MpvStartPosition
 import com.nuvio.app.features.player.NuvioPlayerBridge
 import com.nuvio.app.features.player.NuvioPlayerBridgeCreator
 import com.nuvio.app.features.player.PlayerLaunch
+import com.nuvio.app.features.player.VodStartDeadlinePolicy
 import com.nuvio.app.features.player.PlayerPlaybackSnapshot
 import com.nuvio.app.features.player.PlayerSettingsRepository
 import com.nuvio.app.features.player.externalPlaybackSession
@@ -296,6 +297,8 @@ class TvPlayerSession(
 
     // Resume offer (ResumeLoadPolicy): when this engine load began, and whether a frame has shown.
     private var loadStartedAtMs = 0L
+    /** B214/B217: start of the viewer's wait; survives engine escalations, restarts on Retry/start-over. -1 = not begun. */
+    private var vodDeadlineStartedAtMs = -1L
     private var playbackStarted = false
     private var resumeTargetMs = launch.initialPositionMs
 
@@ -481,6 +484,7 @@ class TvPlayerSession(
     fun retry() {
         if (closed) return
         vodRetryFailure = null
+        vodDeadlineStartedAtMs = clock.elapsedNow().inWholeMilliseconds
         _state.value = _state.value.copy(errorMessage = null, isLoading = true)
         if (!isLive && vodReresolve != null) {
             val position = if (snapshot.positionMs > 0) snapshot.positionMs else resumeTargetMs
@@ -570,6 +574,28 @@ class TvPlayerSession(
         ) && _state.value.errorMessage == null
         val offerAt = if (offer) resumeTargetMs else null
         if (_state.value.startOverAtMs != offerAt) _state.value = _state.value.copy(startOverAtMs = offerAt)
+        enforceVodStartDeadline()
+    }
+
+    /** A VOD start that never shows a frame ends in a terminal error with Retry (the screen's own backstop). */
+    private fun enforceVodStartDeadline() {
+        val now = clock.elapsedNow().inWholeMilliseconds
+        if (vodDeadlineStartedAtMs < 0L) vodDeadlineStartedAtMs = now
+        val action = VodStartDeadlinePolicy.decide(
+            elapsedMs = now - vodDeadlineStartedAtMs,
+            started = playbackStarted,
+            isLive = isLive,
+            isTorrent = false,
+            suspended = !wantsToPlay,
+            hasError = _state.value.errorMessage != null,
+            canFailover = false,
+        )
+        if (action == VodStartDeadlinePolicy.Action.Fail) {
+            log.w { "vod start deadline hit; failing with Retry" }
+            _state.value = _state.value.copy(
+                errorMessage = VOD_START_FAILED_MESSAGE, isLoading = false, isPlaying = false,
+            )
+        }
     }
 
     /** NuvioTV "Start from beginning": drop the resume and play from 0:00 on the same engine. */
@@ -577,6 +603,7 @@ class TvPlayerSession(
         resumeTargetMs = 0L
         playbackStarted = false
         loadStartedAtMs = clock.elapsedNow().inWholeMilliseconds
+        vodDeadlineStartedAtMs = loadStartedAtMs
         _state.value = _state.value.copy(startOverAtMs = null, isLoading = true)
         bridge?.restartFromBeginning()
         bridge?.play()
@@ -1117,6 +1144,8 @@ class TvPlayerSession(
     }
 
     private companion object {
+        const val VOD_START_FAILED_MESSAGE =
+            "This stream didn't start. It may be slow, offline, or its video output failed to start. Check your connection and retry, or pick another source."
         /** Reports outlive the session scope (close cancels it right after the stop is queued). */
         val reportScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         const val TOGGLE_REPORT_DELAY_MS = 700L

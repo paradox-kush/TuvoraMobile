@@ -38,7 +38,9 @@ import com.nuvio.app.features.servers.ServerStreams
 import com.nuvio.app.features.streams.ExternalPlayerAvailability
 import com.nuvio.app.features.streams.streamAddonInstanceId
 import com.nuvio.app.isIos
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.TimeSource
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
 
@@ -232,6 +234,39 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
             )
         }
         val resolvedAutoEngine = resolvedAutoEngineState.value
+
+        // B214/B217: a VOD start that never shows a frame ends in Failed + Retry (the engine's own
+        // watchdogs cannot cover a native open that never returns). The clock restarts on a new
+        // source, "Start from beginning" and Retry, never on an engine failover.
+        val vodStartFailedMessage = stringResource(Res.string.player_vod_start_failed)
+        LaunchedEffect(activePlaybackKey, startOverGeneration, vodStartRetryGeneration) {
+            val startedAt = TimeSource.Monotonic.markNow()
+            while (true) {
+                delay(VodStartDeadlinePolicy.POLL_INTERVAL_MS)
+                when (
+                    VodStartDeadlinePolicy.decide(
+                        elapsedMs = startedAt.elapsedNow().inWholeMilliseconds,
+                        started = resumePlaybackStarted,
+                        isLive = isLiveStream,
+                        isTorrent = activeTorrentInfoHash != null,
+                        suspended = !shouldPlay,
+                        hasError = errorMessage != null,
+                        canFailover = playerSettingsUiState.autoSwitchPlaybackEngineOnError &&
+                            !engineFailoverTriggered && !engineFailoverDisarmed,
+                    )
+                ) {
+                    VodStartDeadlinePolicy.Action.Wait -> Unit
+                    VodStartDeadlinePolicy.Action.FailOver ->
+                        maybeFailoverPlaybackEngine(resolvedAutoEngineState.value)
+                    VodStartDeadlinePolicy.Action.Fail -> {
+                        vodStartFailed = true
+                        errorMessage = vodStartFailedMessage
+                        controlsVisible = !playerControlsLocked
+                        return@LaunchedEffect
+                    }
+                }
+            }
+        }
 
         if (playerSurfaceSourceUrl != null) {
             // startOverGeneration: "Start from beginning" re-mounts the surface to reopen at 0:00.
@@ -715,7 +750,14 @@ private fun BoxScope.RenderPlaybackOverlays(
                 flushWatchProgress()
                 args.onBack()
             },
-            onRetryError = if (liveReconnectFailed) {
+            onRetryError = if (vodStartFailed) {
+                {
+                    vodStartFailed = false
+                    errorMessage = null
+                    vodStartRetryGeneration++
+                    playerController?.retry()
+                }
+            } else if (liveReconnectFailed) {
                 {
                     liveReconnectFailed = false
                     errorMessage = null
