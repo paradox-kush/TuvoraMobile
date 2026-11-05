@@ -37,6 +37,14 @@ class LiveCaptureReconnect(
         attempts = 0
     }
 
+    /**
+     * The viewer pressed Retry after this channel's capture gave up: they get ONE more reconnect, not a fresh
+     * [maxAttemptsWithoutProgress], so repeated Retry cannot burn through single-use links.
+     */
+    fun onRetry() {
+        attempts = minOf(attempts, maxAttemptsWithoutProgress - 1)
+    }
+
     private companion object {
         const val BASE_DELAY_MS = 2_000L
         const val MAX_DELAY_MS = 8_000L

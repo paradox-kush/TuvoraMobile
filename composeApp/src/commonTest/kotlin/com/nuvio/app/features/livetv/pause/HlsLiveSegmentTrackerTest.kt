@@ -101,6 +101,17 @@ class HlsLiveSegmentTrackerTest {
     }
 
     @Test
+    fun `a re-minted link whose path carries a new token is not a reset`() {
+        val t = HlsLiveSegmentTracker()
+        t.onPlaylist(media(100, names(100, 102).map { "/tokA/$it" }), base)
+        // The capture reconnected on a freshly minted link: same segments, a new token directory.
+        val u = t.onPlaylist(media(100, names(100, 103).map { "/tokB/$it" }), base)
+        assertEquals(listOf(103L), segs(u).map { it.sequence })
+        assertIs<Update.NewSegments>(u)
+        assertEquals(0, t.resetCount)
+    }
+
+    @Test
     fun `a changing signature on the same segment is not a reset`() {
         val t = HlsLiveSegmentTracker()
         t.onPlaylist(media(100, listOf("s100.ts?token=a", "s101.ts?token=a")), base)

@@ -82,8 +82,11 @@ class HlsLiveSegmentTracker {
         while (seenUris.size > REMEMBERED) seenUris.remove(seenUris.keys.first())
     }
 
-    /** Providers sign segment URLs with a token that changes per fetch; identity is the path. */
-    private fun stable(uri: String): String = uri.substringBefore('#').substringBefore('?')
+    /**
+     * Providers sign segment URLs with a token that changes per fetch, in the query or in a path directory (a
+     * re-minted link): identity is the file name alone.
+     */
+    private fun stable(uri: String): String = uri.substringBefore('#').substringBefore('?').substringAfterLast('/')
 
     private class Parsed(
         val segments: List<MediaSegment>,
