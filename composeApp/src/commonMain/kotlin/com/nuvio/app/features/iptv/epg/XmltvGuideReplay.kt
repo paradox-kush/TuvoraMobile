@@ -14,6 +14,8 @@ internal class XmltvGuideReplay(
     private val rules: ChannelNameCleaner.Rules,
     private val nowMs: Long,
     private val maxChars: Long = 256L * 1024 * 1024,
+    /** M3U channels that replay: stream id -> `catchup-days`. Their guide keeps that many days of past programmes. */
+    private val catchUpDaysBySid: Map<Int, Int> = emptyMap(),
 ) {
     private val staging = EpgIngestStaging()
     val guide = ArrayList<GuideChannelMatcher.GuideChannel>()
@@ -53,8 +55,12 @@ internal class XmltvGuideReplay(
         val result = GuideChannelMatcher.match(lineup, guide, rules)
         val allow = result.assignments.mapTo(HashSet()) { it.guideId }
         guide.forEach { g -> normalizeChannelId(g.id).let { if (it in picked) allow.add(it) } }
+        val backByGuide = XmltvIngestWindow.backMsByGuide(
+            result.assignments.map { it.streamId to it.guideId }, catchUpDaysBySid,
+        )
         val replay = XmltvStreamingParser(keepChannelIds = allow, onProgramme = { p ->
-            if (XmltvIngestWindow.keeps(p.startMs, p.endMs, nowMs)) onProgramme(p)
+            val back = if (backByGuide.isEmpty()) XmltvIngestWindow.BACK_MS else backByGuide[normalizeChannelId(p.channelId)] ?: XmltvIngestWindow.BACK_MS
+            if (XmltvIngestWindow.keeps(p.startMs, p.endMs, nowMs, back)) onProgramme(p)
         })
         staging.openForRead()
         var replayedChars = 0L

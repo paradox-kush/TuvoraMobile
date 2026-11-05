@@ -28,8 +28,35 @@ internal object XmltvIngestWindow {
     const val BACK_MS = 6L * 60 * 60 * 1000
     const val AHEAD_MS = 48L * 60 * 60 * 1000
 
+    /** The longest archive worth mirroring (the longest window seen in the field, see [CatchUpEpgPolicy]). */
+    const val MAX_CATCHUP_BACK_MS = 7L * 24 * 60 * 60 * 1000
+
+    /**
+     * How far back to keep a channel that replays [catchUpDays] days (an M3U playlist's `catchup-days`):
+     * the whole archive, so the guide has something to replay. Never more than [MAX_CATCHUP_BACK_MS], never
+     * less than the default [BACK_MS]; a channel without an archive keeps the default.
+     */
+    fun backMsForCatchUpDays(catchUpDays: Int): Long =
+        (catchUpDays.coerceAtLeast(0) * 24L * 60 * 60 * 1000).coerceIn(BACK_MS, MAX_CATCHUP_BACK_MS)
+
+    /**
+     * The lookback per matched GUIDE channel: the deepest archive among the lineup channels reading it.
+     * [assignments] are (stream id, guide id) pairs, [catchUpDaysBySid] the M3U channels that carry catch-up.
+     * Guide ids are keyed normalised, like the rows they select.
+     */
+    fun backMsByGuide(assignments: List<Pair<Int, String>>, catchUpDaysBySid: Map<Int, Int>): Map<String, Long> {
+        if (catchUpDaysBySid.isEmpty()) return emptyMap()
+        val out = HashMap<String, Long>()
+        for ((sid, guideId) in assignments) {
+            val days = catchUpDaysBySid[sid] ?: continue
+            val key = normalizeChannelId(guideId)
+            out[key] = maxOf(out[key] ?: 0L, backMsForCatchUpDays(days))
+        }
+        return out
+    }
+
     /** Oldest instant worth keeping. */
-    fun windowStartMs(nowMs: Long): Long = nowMs - BACK_MS
+    fun windowStartMs(nowMs: Long, backMs: Long = BACK_MS): Long = nowMs - backMs
 
     /** Newest instant worth keeping. */
     fun windowEndMs(nowMs: Long): Long = nowMs + AHEAD_MS
@@ -42,9 +69,9 @@ internal object XmltvIngestWindow {
      * zero-length programme stored at epoch is returned by every window read that spans it, and a
      * feed with a broken date format produces thousands of them.
      */
-    fun keeps(programmeStartMs: Long, programmeEndMs: Long, nowMs: Long): Boolean {
+    fun keeps(programmeStartMs: Long, programmeEndMs: Long, nowMs: Long, backMs: Long = BACK_MS): Boolean {
         if (programmeEndMs <= programmeStartMs) return false
         if (programmeStartMs <= 0L) return false
-        return programmeEndMs > windowStartMs(nowMs) && programmeStartMs < windowEndMs(nowMs)
+        return programmeEndMs > windowStartMs(nowMs, backMs) && programmeStartMs < windowEndMs(nowMs)
     }
 }
