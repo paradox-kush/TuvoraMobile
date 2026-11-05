@@ -5,6 +5,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import nuvio.composeapp.generated.resources.Res
+import nuvio.composeapp.generated.resources.streams_source_interrupted
 import nuvio.composeapp.generated.resources.streams_source_timed_out
 import org.jetbrains.compose.resources.getString
 
@@ -65,6 +66,45 @@ internal object SourceLaneGuard {
     }
 }
 
-/** User-facing text for a lane failure: the localized timeout line for a deadline, else the provider's message. */
-internal suspend fun Throwable.laneFailureMessage(): String? =
-    if (this is SourceLaneTimeoutException) getString(Res.string.streams_source_timed_out) else message
+/**
+ * User-facing text for a lane failure. A deadline and a provider-side interruption (a device-source
+ * setting changed mid-load, a stale server scope, an inner timeout) get localized text; raw
+ * CancellationException messages such as "Source choices changed" are never shown to the user.
+ */
+internal suspend fun Throwable.laneFailureMessage(): String? = when (this) {
+    is SourceLaneTimeoutException -> localized(Res.string.streams_source_timed_out, "This source did not answer in time.")
+    is SourceLaneInterruptedException -> localized(
+        Res.string.streams_source_interrupted,
+        "Your source settings changed while this was loading. Reopen the title to try again.",
+    )
+    else -> message
+}
+
+/** A missing resource environment must never kill a lane's report, so fall back to the English text. */
+private suspend fun localized(resource: org.jetbrains.compose.resources.StringResource, fallback: String): String =
+    try {
+        getString(resource)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        fallback
+    }
+
+/** An add-on's lane: Loaded, or Failed with a user-facing reason; never an unfinished lane. */
+internal suspend fun resolveAddonGroup(
+    addonName: String,
+    addonId: String,
+    load: suspend () -> List<StreamItem>,
+): AddonStreamGroup =
+    SourceLaneGuard.run { load() }.fold(
+        onSuccess = { streams -> AddonStreamGroup(addonName = addonName, addonId = addonId, streams = streams, isLoading = false) },
+        onFailure = { err ->
+            AddonStreamGroup(
+                addonName = addonName,
+                addonId = addonId,
+                streams = emptyList(),
+                isLoading = false,
+                error = err.laneFailureMessage(),
+            )
+        },
+    )

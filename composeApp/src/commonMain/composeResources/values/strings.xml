@@ -1805,6 +1805,7 @@
     <string name="profile_primary_addons_required">This profile uses the main profile's addons, so they can only be changed there.</string>
     <string name="addons_managed_by_main_title">Managed by your main profile</string>
     <string name="addons_managed_by_main_body">This profile uses the main profile's addons. To install or remove addons, switch to the main profile, or turn off "Use primary addons" in this profile's settings.</string>
+    <string name="streams_source_interrupted">Your source settings changed while this was loading. Reopen the title to try again.</string>
     <string name="streams_source_timed_out">This source did not answer in time.</string>
     <string name="streams_failed_to_load_scraper">Failed to load %1$s</string>
     <string name="stream_default_name">Stream</string>

@@ -23,7 +23,10 @@ internal object IptvMatchSourceLane {
         othersSettled: Job,
         resolve: suspend () -> List<StreamItem>,
     ): AddonStreamGroup =
-        SourceLaneGuard.run { IptvSourceWaitPolicy.await(othersSettled) { resolve() } }.fold(
+        // No lane deadline of its own: IptvSourceWaitPolicy already ends the wait once nothing else is
+        // loading (B63), and every other lane is bounded. A fixed deadline here dropped panels that
+        // answer while add-ons/plugins are legitimately still running.
+        SourceLaneGuard.run(deadlineMs = null) { IptvSourceWaitPolicy.await(othersSettled) { resolve() } }.fold(
             onSuccess = { resolved ->
                 val streams = resolved ?: emptyList<StreamItem>().also {
                     log.w { "Xtream match for ${source.addonName} cut after ${IptvSourceWaitPolicy.PLAYLIST_BUDGET_MS} ms (playlist not answering)" }
@@ -39,18 +42,6 @@ internal object IptvMatchSourceLane {
                 )
             },
             onFailure = { err ->
-                if (err is SourceLaneTimeoutException) {
-                    // The lane deadline ended a playlist that was still answering: same outcome as a
-                    // budget cut ("still loading"), not a fetch failure.
-                    log.w { "Xtream match for ${source.addonName} cut at the lane deadline" }
-                    return@fold AddonStreamGroup(
-                        addonName = source.addonName,
-                        addonId = source.sourceId,
-                        streams = emptyList(),
-                        isLoading = false,
-                        iptvPending = true,
-                    )
-                }
                 if (err is IptvCatalogPendingException) {
                     log.i { "Xtream match for ${source.addonName}: catalog still loading" }
                     return@fold AddonStreamGroup(

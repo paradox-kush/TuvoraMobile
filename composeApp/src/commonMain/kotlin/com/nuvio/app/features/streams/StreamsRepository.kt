@@ -205,7 +205,7 @@ object StreamsRepository {
                 _uiState.value = StreamsUiState(requestToken = requestToken, isAnyLoading = true)
                 activeJob?.cancel()
                 activeJob = scope.launch {
-                    val rebuilt = runCatchingUnlessCancelled {
+                    val rebuilt = SourceLaneGuard.run {
                         MetaDetailsRepository.ensureXtreamStreamRegistered(videoId, forceFresh = isStalkerSource)
                     }.getOrDefault(false)
                     ensureActive()
@@ -565,7 +565,7 @@ object StreamsRepository {
                     log.d { "Fetching streams from: $url" }
 
                     val displayName = addon.addonName
-                    val group = SourceLaneGuard.run {
+                    val group = resolveAddonGroup(displayName, addon.addonId) {
                         val payload = fetchAddonResponseText(
                             url = url,
                             forceRefresh = forceRefresh,
@@ -576,27 +576,8 @@ object StreamsRepository {
                             addonId = addon.addonId,
                             addonLogo = addon.manifest.logoUrl,
                         )
-                    }.fold(
-                        onSuccess = { streams ->
-                            log.d { "Got ${streams.size} streams from ${displayName}" }
-                            AddonStreamGroup(
-                                addonName = displayName,
-                                addonId = addon.addonId,
-                                streams = streams,
-                                isLoading = false,
-                            )
-                        },
-                        onFailure = { err ->
-                            log.w(err) { "Failed to fetch streams from ${displayName}" }
-                            AddonStreamGroup(
-                                addonName = displayName,
-                                addonId = addon.addonId,
-                                streams = emptyList(),
-                                isLoading = false,
-                                error = err.laneFailureMessage(),
-                            )
-                        },
-                    )
+                    }
+                    group.error?.let { log.w { "Failed to fetch streams from $displayName: $it" } }
                     publishCompletion(StreamLoadCompletion.Addon(group))
                 }
             }

@@ -98,22 +98,48 @@ class SourceLaneIsolationTest {
         }
         assertFalse(group.isLoading)
         assertTrue(group.streams.isEmpty())
-        assertEquals("Source choices changed", group.error, "failure is reported, never swallowed as empty")
+        assertTrue(!group.error.isNullOrBlank(), "failure is reported, never swallowed as empty")
+        assertTrue(group.error != "Source choices changed", "localized, not the raw provider message")
     }
 
     @Test
-    fun aPlaylistStillAnsweringAtTheLaneDeadlineIsStillLoadingNotFailed() = runTest {
+    fun aSlowPanelStillAnswersWhileAddonsAndPluginsAreRunning() = runTest {
+        // B63: the playlist waits past every fixed budget while other lanes are loading; a plugin
+        // that runs for 120 s must not turn a 70 s panel answer into a dropped source.
+        val othersSettled = Job()
+        launch { delay(120_000); othersSettled.complete() }
         var group: AddonStreamGroup? = null
         val job = launch {
-            // others never settle, so the 8 s budget cut never applies; only the lane deadline can end it
-            group = IptvMatchSourceLane.resolveGroup(src, Job()) { delay(Long.MAX_VALUE); emptyList() }
+            group = IptvMatchSourceLane.resolveGroup(src, othersSettled) { delay(70_000); listOf(StreamItem(name = "p", url = "http://panel/p.mkv", addonName = "p", addonId = src.sourceId)) }
         }
         advanceUntilIdle()
         job.join()
-        assertEquals(SourceLaneGuard.LANE_DEADLINE_MS, currentTime)
-        assertFalse(group!!.isLoading)
-        assertTrue(group!!.iptvPending, "same outcome as a budget cut: shown as still loading")
+        assertEquals(1, group!!.streams.size)
         assertNull(group!!.error)
+    }
+
+    @Test
+    fun aHungPanelStillEndsOnceTheOtherLanesSettle() = runTest {
+        val othersSettled = Job()
+        launch { delay(100_000); othersSettled.complete() }
+        var group: AddonStreamGroup? = null
+        val job = launch {
+            group = IptvMatchSourceLane.resolveGroup(src, othersSettled) { delay(Long.MAX_VALUE); emptyList() }
+        }
+        advanceUntilIdle()
+        job.join()
+        assertEquals(100_000L, currentTime)
+        assertFalse(group!!.isLoading)
+        assertTrue(group!!.iptvPending, "cut like a budget cut: still loading, not failed")
+        assertNull(group!!.error)
+    }
+
+    @Test
+    fun anInterruptedAddonShowsLocalizedTextNeverTheRawProviderMessage() = runTest {
+        val group = resolveAddonGroup("a", "addon:a") { throw kotlinx.coroutines.CancellationException("Source choices changed") }
+        assertFalse(group.isLoading)
+        assertTrue(!group.error.isNullOrBlank())
+        assertTrue(group.error != "Source choices changed", "raw provider message leaked: ${group.error}")
     }
 
     @Test
@@ -166,13 +192,7 @@ class SourceLaneIsolationTest {
         val pluginResults = mutableListOf<Result<List<Int>>>()
         val server = com.nuvio.app.features.servers.ServerStreamSource("server:s", "s", false) { throw foreign() }
         val settled = launch {
-            launch { // add-on lane, exactly as StreamsRepository runs it
-                val group = SourceLaneGuard.run<List<StreamItem>> { throw foreign() }.fold(
-                    onSuccess = { AddonStreamGroup("a", "addon:a", it, isLoading = false) },
-                    onFailure = { AddonStreamGroup("a", "addon:a", emptyList(), isLoading = false, error = it.message) },
-                )
-                completions.send(group)
-            }
+            launch { completions.send(resolveAddonGroup("a", "addon:a") { throw foreign() }) } // add-on lane, the production helper
             launch { // plugin lane
                 pluginResults += SourceLaneGuard.run(deadlineMs = null) { throw foreign() }
                 completions.send(AddonStreamGroup("p", "plugin:p", emptyList(), isLoading = false))
