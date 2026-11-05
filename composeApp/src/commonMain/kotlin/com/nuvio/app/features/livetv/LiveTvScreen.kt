@@ -446,20 +446,27 @@ fun LiveTvScreen(
         autoRefreshGuard.reset()
         val reopen = replayRetry
         val session = catchUp
-        when {
+        when (ReplayRetryPolicy.stepFor(hasPendingReopen = reopen != null, session = session?.let { ReplayRetryPolicy.Session(it.singleUse) })) {
             // A replay that never opened: ask for it again.
-            reopen != null -> { replayRetry = null; reopen() }
-            // A replay on screen: re-resolve ITS source (the live resolve is standing down).
-            session != null -> {
+            ReplayRetryPolicy.Step.REOPEN_PENDING -> { replayRetry = null; reopen?.invoke() }
+            // A single-use replay (Stalker archive): its URL was spent by the first open, so Retry mints a FRESH
+            // create_link under BoundedLoad, whether the failure was a playback error or a failed DNS resolve.
+            ReplayRetryPolicy.Step.MINT_FRESH -> {
+                session?.let { spent ->
+                    scope.launch { openReplay(spent.contentId, spent.programmeTitle, spent.startMs, spent.endMs) {} }
+                }
+            }
+            // A reusable replay on screen: re-resolve ITS source (the live resolve is standing down).
+            ReplayRetryPolicy.Step.RE_RESOLVE_REPLAY -> session?.let { current ->
                 controller = null
                 snapshot = PlayerPlaybackSnapshot()
                 playbackError = null
                 startupBudget.reset()
                 replayStartupFailed = false
-                catchUp = session.copy(proven = false)
+                catchUp = current.copy(proven = false)
                 catchUpRetryTick++
-            }
-            else -> reResolve()
+            } ?: Unit
+            ReplayRetryPolicy.Step.RE_RESOLVE_LIVE -> reResolve()
         }
     }
 
@@ -1549,7 +1556,7 @@ private fun CatchUpScrubBar(
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val seekable = CatchUpPlayback.isSeekable(streamUrl)
+    val seekable = CatchUpPlayback.isSeekable(streamUrl, singleUse = session.singleUse)
     // The programme's own length is the timeline, not the engine's reported duration: a timeshift
     // stream frequently reports nothing, or the whole remaining archive.
     val durationMs = (session.endMs - session.startMs).coerceAtLeast(1L)

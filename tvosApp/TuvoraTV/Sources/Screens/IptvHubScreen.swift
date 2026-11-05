@@ -479,7 +479,8 @@ private struct LiveGuideView: View {
                                     onDismiss: { self.sheet = nil })
             }
             if let replayRetry {
-                ReplayFailedDialog(onRetry: { self.replayRetry = nil; startReplay(replayRetry.channel, replayRetry.programme) },
+                ReplayFailedDialog(reason: notice,
+                                   onRetry: { self.replayRetry = nil; startReplay(replayRetry.channel, replayRetry.programme) },
                                    onCancel: { self.replayRetry = nil })
             }
             if let hideAsk {
@@ -1451,6 +1452,9 @@ private struct HideGroupDialog: View {
 /// A replay that did not open: Retry (focused first) asks for the same programme again; Cancel / Menu
 /// returns to its cell in the guide. Same shape as HideGroupDialog.
 private struct ReplayFailedDialog: View {
+    /// The portal's own words from `TvReplayStep.notice` (session limit / nothing to play / link fault, or the
+    /// hang text); nil falls back to the generic timeout line.
+    let reason: String?
     let onRetry: () -> Void
     let onCancel: () -> Void
 
@@ -1458,7 +1462,7 @@ private struct ReplayFailedDialog: View {
         ZStack {
             Color.black.opacity(0.6).ignoresSafeArea()
             NuvioDialog(title: "Couldn\u{2019}t open this replay",
-                        subtitle: "The provider didn\u{2019}t start it in time. Try again, or go back to the guide.",
+                        subtitle: reason ?? "The provider didn\u{2019}t start it in time. Try again, or go back to the guide.",
                         width: dp(460)) {
                 SettingsDialogButton(title: "Retry", primary: true, fullWidth: true, initialFocus: true, action: onRetry)
                 SettingsDialogButton(title: "Cancel", fullWidth: true, action: onCancel)

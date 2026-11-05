@@ -52,6 +52,11 @@ internal object CatchUpEpgRepository {
             (m3uCatchUp != null &&
                 (account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_M3U_FILE))
 
+    /** The Stalker bulk guide, landed - THROWS on failure (a replay must not read a failed guide as "no recording"). */
+    suspend fun ensureStalkerGuide(account: XtreamAccount) {
+        com.nuvio.app.features.iptv.stalker.StalkerClient.ensureGuide(account)
+    }
+
     /**
      * Ensures this channel's guide table is on disk and fresh enough, then returns.
      *
@@ -65,7 +70,7 @@ internal object CatchUpEpgRepository {
         // addressed by) come from the ONE bulk guide, so "history is on disk" means that fetch has landed.
         // The window read that follows waits on it instead of racing it on a first open.
         if (account.sourceType == SOURCE_TYPE_STALKER) {
-            runCatching { com.nuvio.app.features.iptv.stalker.StalkerClient.ensureGuide(account) }
+            GuideRead.softly(Unit) { ensureStalkerGuide(account) }
             return
         }
         if (!supportsCatchUp(account)) return
@@ -138,9 +143,12 @@ internal object CatchUpEpgRepository {
         streamId: Int,
         fromMs: Long,
         toMs: Long,
-    ): List<XtreamProgram> = runCatching {
+    ): List<XtreamProgram> =
+        GuideRead.softly(emptyList()) { windowOrThrow(account, streamId, fromMs, toMs) }
+
+    /** [window] that lets a database failure through: for a caller that must tell "failed" from "nothing there" (a replay's programme id). */
+    suspend fun windowOrThrow(account: XtreamAccount, streamId: Int, fromMs: Long, toMs: Long): List<XtreamProgram> =
         IptvContentDb.epgWindow(account.id, streamId.toString(), fromMs, toMs).map { it.toProgramme() }
-    }.getOrDefault(emptyList())
 
     /** The FULL description for the programme sheet — the only place the whole text is read. */
     suspend fun fullDescription(account: XtreamAccount, streamId: Int, startMs: Long): String? =

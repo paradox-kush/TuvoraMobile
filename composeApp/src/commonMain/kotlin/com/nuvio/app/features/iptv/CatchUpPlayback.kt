@@ -71,7 +71,9 @@ object CatchUpPlayback {
      * Unknown reads as NOT seekable: an absent bar is a provider fact, a handle that ignores drags
      * is a broken app.
      */
-    fun isSeekable(url: String?): Boolean {
+    fun isSeekable(url: String?, singleUse: Boolean = false): Boolean {
+        // A scrub is a new Range request; a single-use link answers only its first open.
+        if (singleUse) return false
         val u = url?.trim()?.lowercase() ?: return false
         if (u.isEmpty()) return false
         val withoutFragment = u.substringBefore('#')

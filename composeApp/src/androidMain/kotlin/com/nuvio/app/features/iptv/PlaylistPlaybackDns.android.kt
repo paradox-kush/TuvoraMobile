@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
  * plus a `Host:` header so the origin still routes. `https://` is left untouched (SNI-by-IP breaks TLS)
  * and every failure falls back to the original URL — playback must never break for the sake of DNS.
  */
-actual suspend fun resolveLivePlaybackUrl(url: String, dnsProvider: String?): LivePlaybackResolution {
+actual suspend fun resolveLivePlaybackUrl(url: String, dnsProvider: String?, followRedirects: Boolean): LivePlaybackResolution {
     val original = LivePlaybackResolution(url)
     if (!PlaylistDns.isDohProvider(dnsProvider)) return original
 
@@ -33,7 +33,8 @@ actual suspend fun resolveLivePlaybackUrl(url: String, dnsProvider: String?): Li
                 ?: return@runCatching original
 
             // 1) Follow redirects over the DoH client to the FINAL media URL (HEAD-like GET, no body read).
-            val finalUrl = resolveFinalUrl(dohClient, parsed) ?: parsed
+            // A single-use link is never GET-probed here: the request itself would spend it.
+            val finalUrl = finalUrlFor(parsed, followRedirects) { resolveFinalUrl(dohClient, it) }
             if (finalUrl.isHttps) return@runCatching original  // a redirect bounced us to https — leave it
 
             // 2) Resolve the final host to an IP over the same DoH endpoint. Prefer IPv4 — an IPv6
@@ -50,6 +51,10 @@ actual suspend fun resolveLivePlaybackUrl(url: String, dnsProvider: String?): Li
         }.getOrDefault(original)
     }
 }
+
+/** The URL the host rewrite starts from: the redirect target when [followRedirects], else [parsed] with [probe] never called (the probe is a real GET). */
+internal inline fun finalUrlFor(parsed: HttpUrl, followRedirects: Boolean, probe: (HttpUrl) -> HttpUrl?): HttpUrl =
+    if (followRedirects) probe(parsed) ?: parsed else parsed
 
 /**
  * Follows redirects to the final URL WITHOUT downloading the body. A single GET with the DoH client

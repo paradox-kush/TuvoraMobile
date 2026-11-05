@@ -297,6 +297,7 @@ private fun PlatformPlayerSurfaceInner(
             liveBufferPlan = liveBufferPlan,
             allowTransportRetry = LiveLinkReconnectPolicy.allowsTransportRetry(linkReconnectMode),
             allowMediaCache = LiveLinkReconnectPolicy.allowsMediaCache(linkReconnectMode),
+            allowDecoderFallback = LiveLinkReconnectPolicy.allowsDecoderFallback(linkReconnectMode),
             useNativeController = useNativeController,
             onInitialPositionHandled = onInitialPositionHandled,
             onControllerReady = onControllerReady,
@@ -397,6 +398,8 @@ private fun ExoPlayerSurface(
     allowTransportRetry: Boolean,
     /** False for a single-use link: it bypasses the on-disk media cache ([LiveLinkReconnectPolicy.allowsMediaCache]). */
     allowMediaCache: Boolean,
+    /** False for a single-use link: a decoder-failure rebuild would re-open the spent URL ([LiveLinkReconnectPolicy.allowsDecoderFallback]). */
+    allowDecoderFallback: Boolean,
     useNativeController: Boolean,
     onInitialPositionHandled: (key: String, handled: Boolean) -> Unit,
     onControllerReady: (PlayerEngineController) -> Unit,
@@ -869,6 +872,7 @@ private fun ExoPlayerSurface(
 
         fun reportPlayerError(error: PlaybackException) {
             if (
+                allowDecoderFallback &&
                 playerSettings.decoderPriority == DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON &&
                 effectiveDecoderPriority != DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER &&
                 error.isDecoderFailure()

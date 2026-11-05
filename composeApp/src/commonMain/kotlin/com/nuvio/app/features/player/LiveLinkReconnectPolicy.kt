@@ -65,6 +65,19 @@ object LiveLinkReconnectPolicy {
      */
     fun allowsMediaCache(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
 
+    /**
+     * May the app GET the URL itself to learn where it redirects (the DoH redirect-follow before an IP rewrite)?
+     * Never for a single-use link: that GET is a real request and spends the token before the player opens it.
+     * The host is rewritten as it stands, with no redirect walk.
+     */
+    fun allowsRedirectProbe(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
+
+    /**
+     * May the same Media3 player be rebuilt with other decoders and re-open the URL after a decoder failure?
+     * Never for a single-use link: the rebuild is a second open of a spent token. Same rule as an engine failover.
+     */
+    fun allowsDecoderFallback(mode: Mode): Boolean = allowsEngineFailover(mode)
+
     /** Media3 lane: OkHttp `retryOnConnectionFailure` and the load-error retries. */
     fun allowsTransportRetry(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
 }

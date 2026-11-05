@@ -6,5 +6,5 @@ package com.nuvio.app.features.iptv
  * returned unchanged. The settings form already tells the user this is Android-only. (Re-resolving in
  * the MPVKit bridge is a possible future upgrade; deferred.)
  */
-actual suspend fun resolveLivePlaybackUrl(url: String, dnsProvider: String?): LivePlaybackResolution =
+actual suspend fun resolveLivePlaybackUrl(url: String, dnsProvider: String?, followRedirects: Boolean): LivePlaybackResolution =
     LivePlaybackResolution(url)
