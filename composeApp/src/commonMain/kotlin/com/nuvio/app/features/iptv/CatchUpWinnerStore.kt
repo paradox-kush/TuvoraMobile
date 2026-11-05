@@ -23,7 +23,7 @@ package com.nuvio.app.features.iptv
 internal class CatchUpWinnerStore(
     private val accountOf: (accountId: String) -> XtreamAccount?,
     private val update: (accountId: String, edit: (XtreamAccount) -> XtreamAccount) -> Unit,
-) : CatchUpDialectWalk.WinnerMemory {
+) : CatchUpDialectWalk.WinnerMemory, M3uReplayWalk.FormMemory {
 
     override fun recall(accountId: String): CatchUpDialectWalk.StoredWinner? {
         val account = accountOf(accountId) ?: return null
@@ -48,5 +48,29 @@ internal class CatchUpWinnerStore(
         // a successful replay re-proves its winner every single time.
         if (account.catchUpWinner == next) return
         update(accountId) { it.copy(catchUpWinner = next) }
+    }
+
+    // --- M3U playlists -------------------------------------------------------------------------
+    // Same record, same store: an M3U playlist's winner is the link FORM that played last
+    // ([M3uCatchUp.linkForm]), kept under an `m3u:` dialect name. An Xtream account never holds one (it
+    // has no M3U links) and [recall] reads any non-Dialect name as "nothing learned", so the two can
+    // never be mistaken for each other.
+
+    override fun recallM3uForm(accountId: String): String? =
+        accountOf(accountId)?.catchUpWinner?.dialect
+            ?.takeIf { it.startsWith(M3U_PREFIX) }
+            ?.removePrefix(M3U_PREFIX)
+            ?.takeIf { it.isNotBlank() }
+
+    override fun rememberM3uForm(accountId: String, form: String) {
+        val account = accountOf(accountId) ?: return
+        val next = CatchUpWinner(formatsSignature = M3U_PREFIX, dialect = M3U_PREFIX + form, preferM3u8 = account.catchUpPreferM3u8)
+        // A successful replay re-proves its form every time; an unchanged proof must not be a sync push.
+        if (account.catchUpWinner == next) return
+        update(accountId) { it.copy(catchUpWinner = next) }
+    }
+
+    private companion object {
+        const val M3U_PREFIX = "m3u:"
     }
 }
