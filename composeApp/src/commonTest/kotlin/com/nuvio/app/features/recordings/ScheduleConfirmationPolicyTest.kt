@@ -82,4 +82,45 @@ class ScheduleConfirmationPolicyTest {
         assertEquals(ConfirmationKind.SAVES_ON_NEXT_OPEN, iphone.kind)
         assertFalse(iphone.offerExactAlarmSettings)
     }
+
+    private val live = schedule(id = "live", mode = CaptureMode.LIVE)
+
+    @Test
+    fun `an exact live recording says it records as the show airs and that the phone must stay on`() {
+        val c = ScheduleConfirmationPolicy.forResult(ScheduleResult.Scheduled(live, ArmKind.EXACT, emptyList())) { false }
+        assertEquals(ConfirmationKind.LIVE_SET, c.kind)
+        assertEquals(1, c.count)
+    }
+
+    @Test
+    fun `an inexact live recording still leads with the late start which is the bigger risk`() {
+        val c = ScheduleConfirmationPolicy.forResult(ScheduleResult.Scheduled(live, ArmKind.INEXACT, emptyList())) { true }
+        assertEquals(ConfirmationKind.MAY_START_LATE, c.kind)
+        assertTrue(c.offerExactAlarmSettings)
+    }
+
+    @Test
+    fun `a live recording keeps its clash warning`() {
+        val other = schedule(id = "o", title = "Other show")
+        val c = ScheduleConfirmationPolicy.forResult(ScheduleResult.Scheduled(live, ArmKind.EXACT, listOf(other))) { false }
+        assertEquals(ConfirmationKind.LIVE_SET, c.kind)
+        assertEquals(listOf("Other show"), c.clashTitles)
+    }
+
+    @Test
+    fun `a catch-up recording is unchanged by live`() {
+        assertEquals(ConfirmationKind.SET, ScheduleConfirmationPolicy.forResult(scheduled(ArmKind.EXACT)) { false }.kind)
+    }
+
+    @Test
+    fun `a series with any live airing says live counts them all and still defers to late starts`() {
+        val mixed = listOf(s, live)
+        val exact = ScheduleConfirmationPolicy.forSeries(mixed, RecordingCapabilities.ANDROID, exactAllowed = true) { true }
+        assertEquals(ConfirmationKind.LIVE_SET, exact.kind)
+        assertEquals(2, exact.count)
+        val late = ScheduleConfirmationPolicy.forSeries(mixed, RecordingCapabilities.ANDROID, exactAllowed = false) { true }
+        assertEquals(ConfirmationKind.MAY_START_LATE, late.kind)
+        val catchUpOnly = ScheduleConfirmationPolicy.forSeries(listOf(s), RecordingCapabilities.ANDROID, exactAllowed = true) { true }
+        assertEquals(ConfirmationKind.SET, catchUpOnly.kind)
+    }
 }

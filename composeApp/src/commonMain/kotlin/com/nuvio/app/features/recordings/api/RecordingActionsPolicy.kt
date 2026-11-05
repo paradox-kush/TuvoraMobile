@@ -11,4 +11,10 @@ object RecordingActionsPolicy {
         RecordingStatus.FAILED, RecordingStatus.CANCELLED ->
             if (row.canRetry) listOf(RecordingAction.RETRY, RecordingAction.DELETE) else listOf(RecordingAction.DELETE)
     }
+
+    /**
+     * Stopping a RUNNING live recording keeps what was recorded (the show so far becomes a finished recording), so
+     * its button says so; cancelling a waiting schedule or a catch-up save keeps nothing.
+     */
+    fun cancelKeepsFootage(row: RecordingRow): Boolean = row.status == RecordingStatus.RECORDING && row.mode == CaptureMode.LIVE
 }

@@ -42,4 +42,12 @@ class RecordingActionsPolicyTest {
             )
         }
     }
+
+    @Test
+    fun `stopping a running live recording keeps the footage cancelling anything else does not`() {
+        val live = row(RecordingSection.RECORDING, RecordingStatus.RECORDING).copy(mode = CaptureMode.LIVE)
+        assertEquals(true, RecordingActionsPolicy.cancelKeepsFootage(live))
+        assertEquals(false, RecordingActionsPolicy.cancelKeepsFootage(row(RecordingSection.RECORDING, RecordingStatus.RECORDING)), "a catch-up save has no footage to keep")
+        assertEquals(false, RecordingActionsPolicy.cancelKeepsFootage(live.copy(status = RecordingStatus.SCHEDULED)), "a waiting schedule has none yet")
+    }
 }

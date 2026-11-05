@@ -304,4 +304,29 @@ class RecordingSchedulePolicyTest {
         assertFalse(P.isDuplicate(schedule("b", start = NOW + 2 * HOUR), listOf(a)))
         assertFalse(P.isDuplicate(schedule("c", start = NOW + HOUR, ch = channel("different")), listOf(a)))
     }
+
+    @Test
+    fun `mode matrix with live capture available - archive or not upcoming airing or over`() {
+        val withArchive = channel(catchUp = xtream(3))
+        val bare = channel()
+        val caps = RecordingCapabilities.ANDROID
+        assertTrue(caps.canRecordLive)
+        // upcoming
+        assertEquals(CaptureMode.CATCH_UP, P.modeFor(withArchive, NOW + HOUR, NOW + 2 * HOUR, NOW, caps), "upcoming + archive: the reliable path wins")
+        assertEquals(CaptureMode.LIVE, P.modeFor(bare, NOW + HOUR, NOW + 2 * HOUR, NOW, caps), "upcoming, no archive")
+        // airing now
+        assertEquals(CaptureMode.CATCH_UP, P.modeFor(withArchive, NOW - 10 * MIN, NOW + 50 * MIN, NOW, caps), "airing + archive")
+        assertEquals(CaptureMode.LIVE, P.modeFor(bare, NOW - 10 * MIN, NOW + 50 * MIN, NOW, caps), "airing, no archive: record from now")
+        // over
+        assertEquals(CaptureMode.CATCH_UP, P.modeFor(withArchive, NOW - 2 * HOUR, NOW - HOUR, NOW, caps), "over + archive")
+        assertNull(P.modeFor(bare, NOW - 2 * HOUR, NOW - HOUR, NOW, caps), "over, no archive: nothing to record")
+    }
+
+    @Test
+    fun `the same matrix where live is off never returns live`() {
+        val caps = RecordingCapabilities(canRecordLive = false, canSaveCatchUp = true)
+        assertNull(P.modeFor(channel(), NOW + HOUR, NOW + 2 * HOUR, NOW, caps))
+        assertNull(P.modeFor(channel(), NOW - 10 * MIN, NOW + 50 * MIN, NOW, caps))
+        assertEquals(CaptureMode.CATCH_UP, P.modeFor(channel(catchUp = xtream(3)), NOW + HOUR, NOW + 2 * HOUR, NOW, caps))
+    }
 }

@@ -14,6 +14,12 @@ enum class ConfirmationKind {
 
     /** A series rule was saved but no airing needed scheduling yet. */
     SERIES_NOTHING_YET,
+
+    /**
+     * A LIVE recording is set: it records while the show airs, so the phone has to stay on and connected.
+     * (Late-start risk wins: an inexact alarm still says [MAY_START_LATE].)
+     */
+    LIVE_SET,
 }
 
 /**
@@ -35,7 +41,9 @@ object ScheduleConfirmationPolicy {
         is ScheduleResult.Scheduled -> {
             val clashes = result.clashes.map { it.title }.distinct()
             when (result.arm) {
-                ArmKind.EXACT -> ScheduleConfirmation(ConfirmationKind.SET, clashes)
+                ArmKind.EXACT -> ScheduleConfirmation(
+                    if (result.schedule.mode == CaptureMode.LIVE) ConfirmationKind.LIVE_SET else ConfirmationKind.SET, clashes,
+                )
                 ArmKind.INEXACT -> ScheduleConfirmation(ConfirmationKind.MAY_START_LATE, clashes, offerExactAlarmSettings = takeExactPromptTurn())
                 ArmKind.NONE -> ScheduleConfirmation(ConfirmationKind.SAVES_ON_NEXT_OPEN, clashes)
             }
@@ -55,6 +63,7 @@ object ScheduleConfirmationPolicy {
         !exactAllowed -> ScheduleConfirmation(
             ConfirmationKind.MAY_START_LATE, offerExactAlarmSettings = takeExactPromptTurn(), count = created.size,
         )
+        created.any { it.mode == CaptureMode.LIVE } -> ScheduleConfirmation(ConfirmationKind.LIVE_SET, count = created.size)
         else -> ScheduleConfirmation(ConfirmationKind.SET, count = created.size)
     }
 }

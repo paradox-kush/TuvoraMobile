@@ -20,6 +20,7 @@ import nuvio.composeapp.generated.resources.recordings_problem_unknown
 import nuvio.composeapp.generated.resources.recordings_problem_unsupported_format
 import nuvio.composeapp.generated.resources.recordings_status_cancelled
 import nuvio.composeapp.generated.resources.recordings_status_done
+import nuvio.composeapp.generated.resources.recordings_status_done_partial
 import nuvio.composeapp.generated.resources.recordings_status_failed
 import nuvio.composeapp.generated.resources.recordings_status_recording
 import nuvio.composeapp.generated.resources.recordings_status_retrying
@@ -54,7 +55,11 @@ internal fun recordingStatusLine(row: RecordingRow): String = when (row.status) 
     RecordingStatus.SCHEDULED ->
         stringResource(if (row.retryPending) Res.string.recordings_status_retrying else Res.string.recordings_status_scheduled)
     RecordingStatus.RECORDING -> stringResource(Res.string.recordings_status_recording, formatRecordingBytes(row.sizeBytes))
-    RecordingStatus.DONE -> stringResource(Res.string.recordings_status_done, formatRecordingBytes(row.sizeBytes))
+    // A DONE row that carries a problem was cut short (storage filled up, the stream was lost): say so.
+    RecordingStatus.DONE -> stringResource(
+        if (row.problem != null) Res.string.recordings_status_done_partial else Res.string.recordings_status_done,
+        formatRecordingBytes(row.sizeBytes),
+    )
     RecordingStatus.FAILED -> stringResource(Res.string.recordings_status_failed)
     RecordingStatus.CANCELLED -> stringResource(Res.string.recordings_status_cancelled)
 }

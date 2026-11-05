@@ -2744,15 +2744,18 @@
     <string name="recordings_status_retrying">Scheduled · trying again later</string>
     <string name="recordings_status_recording">Saving · %1$s so far</string>
     <string name="recordings_status_done">Saved · %1$s</string>
+    <string name="recordings_status_done_partial">Saved, cut short · %1$s</string>
     <string name="recordings_status_failed">Failed · tap to see why</string>
     <string name="recordings_status_cancelled">Cancelled</string>
     <string name="recordings_saving_catch_up">Saved from your provider’s catch-up archive after the programme ends.</string>
-    <string name="recordings_saving_live">Recorded live as it airs.</string>
+    <string name="recordings_saving_live">Recorded live as it airs. Stopping early keeps what was recorded.</string>
     <string name="recordings_details_channel">Channel</string>
     <string name="recordings_details_aired">Aired</string>
     <string name="recordings_details_size">Size</string>
     <string name="recordings_details_what_happened">What happened</string>
     <string name="recordings_action_cancel">Cancel recording</string>
+    <string name="recordings_action_stop_keep">Stop and keep what’s recorded</string>
+    <string name="recordings_done_cut_short">This recording is shorter than the show: it stopped early, for example because storage filled up or the stream was lost. What was recorded is kept.</string>
     <string name="recordings_action_delete_confirm">Delete this recording? The file goes with it.</string>
     <string name="recordings_action_delete_keep">Keep it</string>
     <string name="recordings_action_failed">That didn’t work. Try again.</string>
@@ -2782,6 +2785,11 @@
     <string name="recordings_unavailable_bad_times">Can’t record this one: the guide has no start and end time for it.</string>
     <string name="recordings_already_saved">Already recorded. You’ll find it in Recordings.</string>
     <string name="recordings_confirm_set">Recording set.</string>
+    <string name="recordings_confirm_live_set">Set. This one records live as it airs, so keep your phone on and connected until it ends.</string>
+    <plurals name="recordings_confirm_live_series_count">
+        <item quantity="one">%1$d episode set to record live. Keep your phone on and connected while it airs.</item>
+        <item quantity="other">%1$d episodes set to record live. Keep your phone on and connected while they air.</item>
+    </plurals>
     <string name="recordings_confirm_late">Recording set, but your phone may start it a little late. If Android can’t start it in the background, it saves the next time you open Tuvora. Allow exact alarms and it will be on time.</string>
     <string name="recordings_confirm_next_open">Saves the next time you open Tuvora after the show ends. Keep Tuvora open until the save finishes.</string>
     <string name="recordings_confirm_already">Already scheduled.</string>

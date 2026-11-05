@@ -39,6 +39,8 @@ import nuvio.composeapp.generated.resources.action_delete
 import nuvio.composeapp.generated.resources.action_play
 import nuvio.composeapp.generated.resources.action_retry
 import nuvio.composeapp.generated.resources.recordings_action_cancel
+import nuvio.composeapp.generated.resources.recordings_action_stop_keep
+import nuvio.composeapp.generated.resources.recordings_done_cut_short
 import nuvio.composeapp.generated.resources.recordings_action_delete_confirm
 import nuvio.composeapp.generated.resources.recordings_action_delete_keep
 import nuvio.composeapp.generated.resources.recordings_details_what_happened
@@ -111,6 +113,13 @@ internal fun RecordingDetailsSheet(
                     color = colors.textPrimary,
                 )
             }
+            if (row.status == RecordingStatus.DONE && row.problem != null) {
+                Text(
+                    text = stringResource(Res.string.recordings_done_cut_short),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textPrimary,
+                )
+            }
             if (row.status == RecordingStatus.DONE && !fileAvailable) {
                 Text(
                     text = stringResource(Res.string.recordings_file_missing),
@@ -151,7 +160,8 @@ internal fun RecordingDetailsSheet(
                         val (icon, labelRes) = when (action) {
                             RecordingAction.PLAY -> Icons.Rounded.PlayArrow to Res.string.action_play
                             RecordingAction.RETRY -> Icons.Rounded.Refresh to Res.string.action_retry
-                            RecordingAction.CANCEL -> Icons.Rounded.Close to Res.string.recordings_action_cancel
+                            RecordingAction.CANCEL -> Icons.Rounded.Close to
+                                if (RecordingActionsPolicy.cancelKeepsFootage(row)) Res.string.recordings_action_stop_keep else Res.string.recordings_action_cancel
                             RecordingAction.DELETE -> Icons.Rounded.Delete to Res.string.action_delete
                         }
                         NuvioSheetActionButton(

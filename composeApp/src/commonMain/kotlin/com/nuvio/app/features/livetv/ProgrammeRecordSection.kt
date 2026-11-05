@@ -40,6 +40,8 @@ import nuvio.composeapp.generated.resources.recordings_confirm_already
 import nuvio.composeapp.generated.resources.recordings_confirm_cannot
 import nuvio.composeapp.generated.resources.recordings_confirm_clash
 import nuvio.composeapp.generated.resources.recordings_confirm_late
+import nuvio.composeapp.generated.resources.recordings_confirm_live_series_count
+import nuvio.composeapp.generated.resources.recordings_confirm_live_set
 import nuvio.composeapp.generated.resources.recordings_confirm_next_open
 import nuvio.composeapp.generated.resources.recordings_confirm_series_nothing
 import nuvio.composeapp.generated.resources.recordings_confirm_set
@@ -155,6 +157,9 @@ private fun ConfirmationBlock(c: ScheduleConfirmation, controller: ProgrammeReco
             ConfirmationKind.SET ->
                 if (c.count > 1) pluralStringResource(Res.plurals.recordings_confirm_series_count, c.count, c.count)
                 else stringResource(Res.string.recordings_confirm_set)
+            ConfirmationKind.LIVE_SET ->
+                if (c.count > 1) pluralStringResource(Res.plurals.recordings_confirm_live_series_count, c.count, c.count)
+                else stringResource(Res.string.recordings_confirm_live_set)
             ConfirmationKind.MAY_START_LATE -> stringResource(Res.string.recordings_confirm_late)
             ConfirmationKind.SAVES_ON_NEXT_OPEN -> stringResource(Res.string.recordings_confirm_next_open)
             ConfirmationKind.ALREADY_SCHEDULED -> stringResource(Res.string.recordings_confirm_already)
