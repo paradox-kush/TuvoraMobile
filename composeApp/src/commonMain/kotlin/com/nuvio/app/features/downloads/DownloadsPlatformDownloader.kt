@@ -10,6 +10,12 @@ internal data class DownloadPlatformRequest(
 
 internal interface DownloadsTaskHandle {
     fun cancel()
+
+    /**
+     * Returns once the task has really stopped: after [cancel] a platform task may still be finishing
+     * (moving a completed file into place). Callers that clean up files wait here first. Default: nothing to wait for.
+     */
+    suspend fun awaitStopped() {}
 }
 
 internal expect object DownloadsPlatformDownloader {

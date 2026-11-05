@@ -42,6 +42,8 @@ internal class ProgrammeRecordingController(
     private val port: RecordingsPort,
     private val scope: CoroutineScope,
     private val clock: () -> Long,
+    /** The stored guide read; a seam so a failing read can be tested. */
+    private val historyProgrammes: suspend (channelKey: String, fromMs: Long, toMs: Long) -> List<XtreamProgram> = LiveTvData::historyProgrammes,
 ) {
     private val _prep = MutableStateFlow<RecordPrep>(RecordPrep.Preparing)
     val prep: StateFlow<RecordPrep> = _prep
@@ -93,7 +95,7 @@ internal class ProgrammeRecordingController(
                 val now = clock()
                 val days = channel.catchUp?.days ?: 0
                 val stored = when (val read = readStoredGuide {
-                    LiveTvData.historyProgrammes(channel.key, now - days * DAY_MS, now + SERIES_LOOKAHEAD_MS)
+                    historyProgrammes(channel.key, now - days * DAY_MS, now + SERIES_LOOKAHEAD_MS)
                 }) {
                     is StoredGuideRead.Ok -> read.programmes
                     // Never "nothing here": saving the rule with fewer airings than the guide has would look like success.
@@ -157,7 +159,7 @@ internal class ProgrammeRecordingController(
                 val now = clock()
                 for (rule in port.state.value.series) {
                     // A rule whose guide cannot be read this visit is skipped; the next visit asks again.
-                    val stored = (readStoredGuide { LiveTvData.historyProgrammes(rule.channel.key, now, now + SERIES_LOOKAHEAD_MS) }
+                    val stored = (readStoredGuide { historyProgrammes(rule.channel.key, now, now + SERIES_LOOKAHEAD_MS) }
                         as? StoredGuideRead.Ok)?.programmes ?: continue
                     if (stored.isNotEmpty()) port.expandSeries(rule.id, stored.toListings(), now)
                 }

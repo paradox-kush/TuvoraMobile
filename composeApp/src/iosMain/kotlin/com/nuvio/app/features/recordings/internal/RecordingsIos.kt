@@ -4,6 +4,7 @@ import com.nuvio.app.features.downloads.DownloadItem
 import com.nuvio.app.features.downloads.DownloadPlatformRequest
 import com.nuvio.app.features.downloads.DownloadStatus
 import com.nuvio.app.features.downloads.DownloadsPlatformDownloader
+import com.nuvio.app.features.downloads.DownloadsTaskHandle
 import com.nuvio.app.features.recordings.api.ArmKind
 import com.nuvio.app.features.recordings.api.RecordingAlarms
 import com.nuvio.app.features.recordings.api.RecordingCapabilities
@@ -175,6 +176,22 @@ internal class IosPartialStaging {
     fun clearPin(part: String) = remove("$part.meta")
 }
 
+internal typealias DownloaderStart = (
+    DownloadPlatformRequest,
+    (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+    (localFileUri: String, totalBytes: Long?) -> Unit,
+    (message: String) -> Unit,
+    () -> Unit,
+) -> DownloadsTaskHandle
+
+private fun startRealDownloader(
+    request: DownloadPlatformRequest,
+    onProgress: (Long, Long?) -> Unit,
+    onSuccess: (String, Long?) -> Unit,
+    onFailure: (String) -> Unit,
+    onPaused: () -> Unit,
+): DownloadsTaskHandle = DownloadsPlatformDownloader.start(request, onProgress, onSuccess, onFailure, onPaused)
+
 /**
  * Saves through upstream's downloader, so the platform's own behaviour (and its limits) apply: this is
  * not a background URLSession, so the save only runs while Tuvora is open, and the UI says so. The
@@ -184,7 +201,14 @@ internal class IosPartialStaging {
  * the repository's view of the partial file stays true and a different link never extends it.
  */
 @OptIn(ExperimentalForeignApi::class)
-internal class IosRecordingSaver(private val files: RecordingFiles) : RecordingSaver {
+internal class IosRecordingSaver(
+    private val files: RecordingFiles,
+    /** Where the downloader works. The real downloader always uses [IosRecordingPaths.defaultDownloadsDir]; tests point both at a temp folder. */
+    private val downloadsDir: String = IosRecordingPaths.defaultDownloadsDir(),
+    private val start: DownloaderStart = ::startRealDownloader,
+    /** How long a stopped save waits for the downloader to really stop before it gives up and cleans up anyway. */
+    @Suppress("unused") private val stopWaitMs: Long = 3_000L,
+) : RecordingSaver {
     private val staging = IosPartialStaging()
 
     override suspend fun save(req: SaveRequest, progress: (Long) -> Unit): SaveOutcome {
@@ -238,15 +262,15 @@ internal class IosRecordingSaver(private val files: RecordingFiles) : RecordingS
     private suspend fun runDownload(item: DownloadItem, req: SaveRequest, progress: (Long) -> Unit): SaveOutcome = coroutineScope {
         val result = CompletableDeferred<SaveOutcome>()
         val ticks = Channel<Long>(Channel.CONFLATED)
-        val handle = DownloadsPlatformDownloader.start(
-            request = DownloadPlatformRequest(item),
-            onProgress = { downloaded, _ -> progress(downloaded); ticks.trySend(downloaded) },
-            onSuccess = { _, total -> result.complete(SaveOutcome.Done(total ?: 0L)) },
-            onFailure = { _ ->
+        val handle = start(
+            DownloadPlatformRequest(item),
+            { downloaded, _ -> progress(downloaded); ticks.trySend(downloaded) },
+            { _, total -> result.complete(SaveOutcome.Done(total ?: 0L)) },
+            { _ ->
                 // The downloader reports a message, not a class: a failure is NETWORK (retried, bounded by the schedule policy).
                 result.complete(SaveOutcome.Failed(RecordingProblem.NETWORK, offline = false, writtenBytes = 0, rangeSupported = true))
             },
-            onPaused = { result.complete(SaveOutcome.Failed(RecordingProblem.STALLED, offline = false, writtenBytes = 0, rangeSupported = true)) },
+            { result.complete(SaveOutcome.Failed(RecordingProblem.STALLED, offline = false, writtenBytes = 0, rangeSupported = true)) },
         )
         val spaceCheck = req.spaceCheck
         val checker = launch {
@@ -273,7 +297,7 @@ internal class IosRecordingSaver(private val files: RecordingFiles) : RecordingS
         }
     }
 
-    private fun downloaderFilePath(name: String): String = "${IosRecordingPaths.defaultDownloadsDir()}/$name"
+    private fun downloaderFilePath(name: String): String = "$downloadsDir/$name"
 
     private fun throwawayItem(url: String, req: SaveRequest, workName: String) = DownloadItem(
         id = "recording:$workName", contentType = "recording", parentMetaId = "recording", parentMetaType = "recording",
