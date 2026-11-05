@@ -37,6 +37,7 @@ val tvosExcludedCommon = listOf(
     // Composition root and navigation: Apple TV has TvAppGraph and SwiftUI navigation.
     "com/nuvio/app/FeatureWiring.kt", "com/nuvio/app/AppGateOverlay.kt", "com/nuvio/app/DownloadsDestinations.kt",
     "com/nuvio/app/RecordingsDestinations.kt", "com/nuvio/app/features/recordings/api/RecordingsContentImpl.kt",
+    "com/nuvio/app/features/recordings/internal/ui/RecordingsController.kt",
     "com/nuvio/app/navigation/PlayerChromePolicy.kt", "com/nuvio/app/navigation/RouteAnalyticsName.kt",
     // Compose UI slots and effects (use collectAsStateWithLifecycle / LazyList / composable hosts).
     "com/nuvio/app/features/announcements/api/Announcements.kt", "com/nuvio/app/features/radar/RadarHomeSportsSection.kt",

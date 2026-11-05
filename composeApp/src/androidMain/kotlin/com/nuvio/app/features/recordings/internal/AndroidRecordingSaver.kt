@@ -179,3 +179,32 @@ internal class AndroidRecordingSaver(
         const val SPACE_CHECK_BYTES = 16L * 1024 * 1024
     }
 }
+
+/**
+ * Where a `.part` came from: the link, and the validators that link answered with. Stored beside it as
+ * `<part>.meta` so a resume is only ever tried against the same link (and, when the server gave a
+ * validator, conditioned on it with If-Range). Missing or unreadable = "unknown source" = no resume.
+ */
+internal data class ResumeMeta(val url: String, val etag: String?, val lastModified: String?) {
+    /** The value for If-Range: the strong ETag when there is one, else the Last-Modified date. */
+    val validator: String? get() = etag?.takeIf { !it.startsWith("W/") } ?: lastModified
+
+    companion object {
+        private fun file(part: File) = File(part.path + ".meta")
+
+        fun write(part: File, url: String, etag: String?, lastModified: String?) {
+            val text = listOf(url, etag.orEmpty(), lastModified.orEmpty()).joinToString("\n")
+            val tmp = File(part.path + ".meta.tmp")
+            tmp.writeText(text)
+            if (!tmp.renameTo(file(part))) { file(part).writeText(text); tmp.delete() }
+        }
+
+        fun read(part: File): ResumeMeta? {
+            val lines = try { file(part).takeIf { it.isFile }?.readText()?.split("\n") } catch (e: IOException) { null } ?: return null
+            val url = lines.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return null
+            return ResumeMeta(url, lines.getOrNull(1)?.takeIf { it.isNotBlank() }, lines.getOrNull(2)?.takeIf { it.isNotBlank() })
+        }
+
+        fun delete(part: File) { file(part).delete() }
+    }
+}
