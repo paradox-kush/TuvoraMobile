@@ -2041,6 +2041,9 @@ private class NuvioLibmpvView(
     @Volatile private var obsCachePositionMs = 0L
     @Volatile private var obsSpeed = 1.0
     @Volatile private var obsTrackList: MPVNode? = null
+    // demuxer-cache-state.seekable-ranges, mirrored from the event thread once a live back buffer is in use.
+    @Volatile private var obsSeekableRanges: List<MpvLiveCache.Range> = emptyList()
+    private val cacheStateObserved = AtomicBoolean(false)
     @Volatile private var obsVideoParams: MPVNode? = null
     // Rolling estimates. Live MPEG-TS rarely declares a bitrate in the container, so
     // mpv's running measurement is the only number the stream info panel can show.
@@ -2092,6 +2095,7 @@ private class NuvioLibmpvView(
                 "speed" -> obsSpeed = 1.0
                 "track-list" -> obsTrackList = null
                 "video-params" -> obsVideoParams = null
+                "demuxer-cache-state" -> obsSeekableRanges = emptyList()
                 "video-bitrate" -> obsVideoBitrate = null
                 "audio-bitrate" -> obsAudioBitrate = null
                 // Unavailable means no active video output — mirror it as zero fps so the read-time
@@ -2141,6 +2145,7 @@ private class NuvioLibmpvView(
             when (property) {
                 "track-list" -> obsTrackList = value
                 "video-params" -> obsVideoParams = value
+                "demuxer-cache-state" -> obsSeekableRanges = value.seekableRanges()
             }
         }
 
@@ -2615,6 +2620,27 @@ private class NuvioLibmpvView(
                 return true
             }
 
+            // Live pause / rewind: the engine's own demuxer cache is the buffer. Writes queue on mpv-ctl like
+            // every other mpv write; the window is read off the property shadow, never from mpv on Main.
+            override val supportsLiveBackBuffer: Boolean = true
+
+            override fun setLiveCacheBudget(maxBytes: Long, maxBackBytes: Long, cacheSecs: Long) {
+                ctl {
+                    // Observing demuxer-cache-state costs a node conversion per change: only once a live
+                    // back buffer is actually in use.
+                    if (cacheStateObserved.compareAndSet(false, true)) {
+                        mpv.observeProperty("demuxer-cache-state", MPV.mpvFormat.MPV_FORMAT_NODE)
+                    }
+                    MpvLiveCache.properties(maxBytes, maxBackBytes, cacheSecs).forEach { (name, value) ->
+                        mpv.setPropertyString(name, value)
+                    }
+                    Log.i(TAG, "mpv live cache: fwd=$maxBytes back=$maxBackBytes secs=$cacheSecs")
+                }
+            }
+
+            override fun liveSeekWindow(): LiveSeekWindow? =
+                MpvLiveCache.window(obsSeekableRanges, obsPositionMs)
+
             override fun getStreamInfo(): PlayerStreamInfo = readStreamInfo()
 
             // Upstream's HDR / bit-depth fields feed the player badges; read from the property shadow
@@ -2960,6 +2986,15 @@ private fun MPVNode.nodeBoolean(key: String): Boolean? =
 
 private fun MPVNode.nodeDouble(key: String): Double? =
     runCatching { this[key]?.asDouble() }.getOrNull()
+
+/** `demuxer-cache-state.seekable-ranges` as plain ranges (seconds), so no MPVNode outlives the event callback. */
+private fun MPVNode.seekableRanges(): List<MpvLiveCache.Range> = runCatching {
+    this["seekable-ranges"]?.asArray()?.toList().orEmpty().mapNotNull { node ->
+        val start = node.nodeDouble("start")
+        val end = node.nodeDouble("end")
+        if (start != null && end != null) MpvLiveCache.Range(start, end) else null
+    }
+}.getOrDefault(emptyList())
 
 private fun androidx.compose.ui.graphics.Color.toMpvColor(): String {
     val argb = toArgb()
