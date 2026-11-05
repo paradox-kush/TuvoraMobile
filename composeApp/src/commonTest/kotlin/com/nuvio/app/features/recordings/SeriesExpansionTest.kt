@@ -2,7 +2,7 @@ package com.nuvio.app.features.recordings
 
 import com.nuvio.app.features.recordings.api.CaptureMode
 import com.nuvio.app.features.recordings.api.RecordingStatus
-import com.nuvio.app.features.recordings.internal.ListingInfo
+import com.nuvio.app.features.recordings.api.ListingInfo
 import com.nuvio.app.features.recordings.internal.SeriesExpansion
 import kotlin.test.Test
 import kotlin.test.assertEquals

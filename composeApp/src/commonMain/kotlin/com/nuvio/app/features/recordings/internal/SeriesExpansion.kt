@@ -1,19 +1,11 @@
 package com.nuvio.app.features.recordings.internal
 
 import com.nuvio.app.features.recordings.api.CaptureMode
+import com.nuvio.app.features.recordings.api.ListingInfo
 import com.nuvio.app.features.recordings.api.Recording
 import com.nuvio.app.features.recordings.api.RecordingSchedule
 import com.nuvio.app.features.recordings.api.RecordingStatus
 import com.nuvio.app.features.recordings.api.SeriesRule
-
-/** One programme from the guide, as a series rule sees it. [episodeText] is the guide's own episode field (xmltv_ns or on-screen). */
-data class ListingInfo(
-    val title: String,
-    val description: String?,
-    val startMs: Long,
-    val endMs: Long,
-    val episodeText: String? = null,
-)
 
 /**
  * "Record series": turns a rule plus the guide's listings into schedules. Pure and idempotent:
