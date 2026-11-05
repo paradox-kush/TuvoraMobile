@@ -533,8 +533,12 @@ internal fun PlayerScreenRuntime.switchPlaybackEngine() {
  */
 internal fun PlayerScreenRuntime.maybeFailoverPlaybackEngine(
     resolvedAutoEngine: AndroidPlaybackEngine?,
+    singleUseLink: Boolean = false,
 ): Boolean {
     if (!playerSettingsUiState.autoSwitchPlaybackEngineOnError) return false
+    // A spent single-use link (live Stalker create_link) would only 401 on the other engine too: its
+    // recovery is the credential refresh's fresh mint, and once that is exhausted, the error.
+    if (!LiveLinkReconnectPolicy.allowsEngineFailover(LiveLinkReconnectPolicy.modeFor(singleUseLink))) return false
     if (engineFailoverDisarmed) return false
     if (engineFailoverTriggered) return false
 

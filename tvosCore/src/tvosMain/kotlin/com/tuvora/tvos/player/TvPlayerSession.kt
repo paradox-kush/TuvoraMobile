@@ -33,7 +33,10 @@ import com.nuvio.app.features.watchprogress.WatchProgressRepository
 import com.tuvora.tvos.party.TvParty
 import com.tuvora.tvos.party.TvPartyPlayerControls
 import com.tuvora.tvos.party.TvPartyPlayerLink
+import com.nuvio.app.core.diag.LogRedaction
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -161,18 +164,28 @@ class TvPlayerSession(
     /** The live link is spent after its first open (Stalker create_link): no in-engine re-open. */
     private var singleUseLink = false
 
+    /** Whether a live reconnect can ask for a fresh link (tests; the factory must wire it). */
+    internal val remintsLiveLink: Boolean get() = liveReresolve != null
+
     /** Kept off the constructor for the same reason as [bindServer]. See [LiveLinkReconnectPolicy]. */
     internal fun bindSingleUseLink(singleUse: Boolean): TvPlayerSession {
         singleUseLink = singleUse
         return this
     }
 
+    /** The playing address is spent after its first open: a live Stalker channel (never a replay). */
+    private val spentLinkAfterOpen: Boolean get() = singleUseLink && liveChannel && launch.liveReplay == null
+
+    /** The live re-mint in flight, if any: one create_link at a time ([TvLiveRelinkPolicy]). */
+    private var remintJob: Job? = null
+
+    /** When a fresh live link was handed to the engine, until the engine stops reporting the old end. */
+    private var freshOpenedAtMs: Long? = null
+
     /** mpv `stream-lavf-o` before every live load; the AVPlayer lane does not adopt it and is unaffected. */
     private fun applyLinkReconnectPolicy(b: NuvioPlayerBridge) {
         b.applyStreamLavfOptions(
-            LiveLinkReconnectPolicy.mpvStreamLavfOptions(
-                LiveLinkReconnectPolicy.modeFor(singleUseLink && liveChannel && launch.liveReplay == null),
-            ),
+            LiveLinkReconnectPolicy.mpvStreamLavfOptions(LiveLinkReconnectPolicy.modeFor(spentLinkAfterOpen)),
         )
     }
 
@@ -476,8 +489,10 @@ class TvPlayerSession(
             // The viewer's Retry: a fresh, still bounded ladder, and a fresh link. Replaying the old
             // URL (bridge.retry) re-opened a spent Stalker create_link, and the monitor, still at
             // its cap, answered GiveUp on the first sample, so Retry could not recover the channel.
+            // The reconnect itself goes through the monitor (sampled now), so it counts as the
+            // ladder's first attempt and the next poll cannot mint a second link on top of it.
             monitor.onUserRetry()
-            reconnectLive()
+            poll()
         } else bridge?.retry()
     }
 
@@ -868,10 +883,17 @@ class TvPlayerSession(
         driveSessionReports()
         if (isLive) {
             // While the TV switches display mode the video is idled on purpose (displayModeSwitch).
-            if (!displayModeSwitching) when (monitor.sample(clock.elapsedNow().inWholeMilliseconds, snapshot, wantsToPlay)) {
+            val now = clock.elapsedNow().inWholeMilliseconds
+            val sinceFreshOpen = freshOpenedAtMs?.let { now - it }
+            if (!snapshot.isEnded) freshOpenedAtMs = null
+            // The previous link's end, still reported while the fresh one opens, is not a new outage.
+            val sampled = if (TvLiveRelinkPolicy.isStaleEnd(snapshot.isEnded, sinceFreshOpen)) {
+                snapshot.copy(isEnded = false, isLoading = true)
+            } else snapshot
+            if (!displayModeSwitching) when (monitor.sample(now, sampled, wantsToPlay)) {
                 TvLiveAction.None -> Unit
                 TvLiveAction.Reconnect -> { log.i { "live freeze: reconnecting" }; reconnectLive() }
-                TvLiveAction.GiveUp -> _state.value = _state.value.copy(errorMessage = "The channel stopped responding")
+                TvLiveAction.GiveUp -> _state.value = _state.value.copy(errorMessage = TvLiveRelinkPolicy.viewerMessage(null))
             }
         } else {
             val now = clock.elapsedNow().inWholeMilliseconds
@@ -884,14 +906,23 @@ class TvPlayerSession(
 
     /** Handles a reported error; true means this poll is done (state already updated).*/
     private fun handleFailure(lane: PlaybackLane, error: String): Boolean {
+        // A spent live link never moves to another engine: it would open the same dead URL there.
+        // The reconnect ladder below mints a fresh one, and every later open uses that.
         val next = PlaybackLanePolicy.escalation(lane, escalated)
+            ?.takeIf { !isLive || TvLiveRelinkPolicy.mayEscalateLane(spentLinkAfterOpen) }
         if (next == null) {
             if (isLive) {
                 // A live error is a stream that ended: same bounded reconnect ladder as a freeze.
                 val ended = snapshot.copy(isEnded = true, isPlaying = false, isLoading = false)
                 when (monitor.sample(clock.elapsedNow().inWholeMilliseconds, ended, wantsToPlay = true)) {
                     TvLiveAction.Reconnect -> reconnectLive()
-                    TvLiveAction.GiveUp -> _state.value = _state.value.copy(errorMessage = error, isLoading = false, isPlaying = false)
+                    TvLiveAction.GiveUp -> {
+                        // The engine's text carries the stream URL and play token: log it redacted, show plain words.
+                        if (_state.value.errorMessage == null) log.w { "live gave up: ${LogRedaction.text(error)}" }
+                        _state.value = _state.value.copy(
+                            errorMessage = TvLiveRelinkPolicy.viewerMessage(error), isLoading = false, isPlaying = false,
+                        )
+                    }
                     TvLiveAction.None -> _state.value = _state.value.copy(isLoading = true)
                 }
                 return true
@@ -913,21 +944,77 @@ class TvPlayerSession(
         return true
     }
 
+    /**
+     * A reconnect the monitor scheduled (it owns the pacing). What it opens is [TvLiveRelinkPolicy]'s
+     * call: a fresh link from the re-resolver, the same stable address, or nothing — a spent Stalker
+     * link is never re-opened, by this engine or the next one.
+     */
     private fun reconnectLive() {
-        val reresolve = liveReresolve ?: run { bridge?.retry(); return }
-        scope.launch {
-            val fresh = runCatching { reresolve() }.getOrNull()
-            if (fresh == null) { bridge?.retry(); return@launch }
-            val headers = TvPlaybackHeaders.sanitize(fresh.headers)
-            bridge?.let(::applyLinkReconnectPolicy)
-            bridge?.loadFileWithAudio(
-                videoUrl = fresh.url,
-                audioUrl = null,
-                headersJson = headers.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
-                subtitlesJson = null,
-                startOption = null,
-            )
+        val spent = spentLinkAfterOpen
+        val step = TvLiveRelinkPolicy.onReconnect(spent, canRemint = liveReresolve != null, remintInFlight = remintJob?.isActive == true)
+        log.i { "live reconnect: $step (single-use=$spent)" }
+        when (step) {
+            TvLiveRelinkPolicy.Step.Replay -> replayLiveLink()
+            TvLiveRelinkPolicy.Step.Remint -> remint(spent)
+            TvLiveRelinkPolicy.Step.OpenFresh, TvLiveRelinkPolicy.Step.Skip -> Unit
         }
+    }
+
+    private fun remint(spent: Boolean) {
+        val reresolve = liveReresolve ?: return
+        remintJob = scope.launch {
+            val fresh = withTimeoutOrNull(TvLiveRelinkPolicy.REMINT_TIMEOUT_MS) {
+                try {
+                    reresolve()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    log.w { "live re-mint failed: ${error::class.simpleName}" }
+                    null
+                }
+            }
+            val step = TvLiveRelinkPolicy.afterRemint(spent, gotFresh = fresh != null)
+            log.i { "live re-mint: $step" }
+            when (step) {
+                TvLiveRelinkPolicy.Step.OpenFresh -> fresh?.let(::openFreshLiveLink)
+                TvLiveRelinkPolicy.Step.Replay -> replayLiveLink()
+                TvLiveRelinkPolicy.Step.Remint, TvLiveRelinkPolicy.Step.Skip -> Unit
+            }
+        }
+    }
+
+    /** Plays [fresh] on the current engine; any later engine open (a lane switch) uses it too. */
+    private fun openFreshLiveLink(fresh: TvResolvedSource) {
+        if (closed) return
+        activeSourceUrl = fresh.url
+        activeSourceHeaders = fresh.headers
+        val b = bridge ?: return
+        freshOpenedAtMs = clock.elapsedNow().inWholeMilliseconds
+        val headers = TvPlaybackHeaders.sanitize(fresh.headers)
+        applyLinkReconnectPolicy(b)
+        b.loadFileWithAudio(
+            videoUrl = fresh.url,
+            audioUrl = null,
+            headersJson = headers.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
+            subtitlesJson = null,
+            startOption = null,
+        )
+        restorePlayIntent(b)
+    }
+
+    /** Re-opens a stable (Xtream / M3U) live address on the current engine. */
+    private fun replayLiveLink() {
+        val b = bridge ?: return
+        b.retry()
+        restorePlayIntent(b)
+    }
+
+    /**
+     * mpv keeps its pause flag across a loadfile, and a live stream that ran dry ended paused
+     * (keep-open), so a reconnect would sit on its first frame. Restore the viewer's intent.
+     */
+    private fun restorePlayIntent(b: NuvioPlayerBridge) {
+        if (wantsToPlay) b.play() else b.pause()
     }
 
     private fun sessionState() = PlaybackSessionState(
