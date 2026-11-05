@@ -108,4 +108,15 @@ class CatchUpStartupPolicyTest {
         clock.nowMs += CatchUpStartupPolicy.LINK_DEADLINE_MS
         assertEquals(Decision.ADVANCE, budget.onTimeout())
     }
+
+    // Review 11-05: a continuation Restart (or Retry on a played replay) opens a NEW link; with `played`
+    // latched it got no deadline and a stalled restart spun forever.
+    @Test
+    fun `budget - a restart after the replay played arms a deadline again`() {
+        val budget = CatchUpStartupBudget(FakeClock())
+        budget.arm()
+        budget.markPlayed()
+        budget.reset()
+        assertEquals(CatchUpStartupPolicy.LINK_DEADLINE_MS, budget.arm())
+    }
 }

@@ -959,6 +959,9 @@ fun LiveTvScreen(
                                         // Same reset as a re-resolve: the old stream's snapshot must not "prove" the new link.
                                         controller = null
                                         snapshot = PlayerPlaybackSnapshot()
+                                        // A new link gets its own startup deadline: a stalled restart must end, not spin.
+                                        startupBudget.reset()
+                                        replayStartupFailed = false
                                         catchUp = running.copy(
                                             attempt = begun.attempt,
                                             streamStartMs = action.atMs,

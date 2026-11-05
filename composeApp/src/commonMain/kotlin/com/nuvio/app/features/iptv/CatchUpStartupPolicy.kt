@@ -68,11 +68,15 @@ class CatchUpStartupBudget(
         played = true
     }
 
-    /** The viewer pressed Retry: a fresh budget for a fresh attempt. */
+    /**
+     * A fresh attempt: the viewer pressed Retry, or a continuing replay restarted on a NEW link. Either
+     * way the new link must reach a frame within its own deadline, even if an earlier link played.
+     */
     fun reset() {
         began = NOT_STARTED
         timeouts = 0
         gaveUp = false
+        played = false
     }
 
     private companion object {
