@@ -1,6 +1,10 @@
 package com.nuvio.app.features.recordings.api
 
+import android.app.Activity
+import android.app.Application
 import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.os.Bundle
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -8,10 +12,12 @@ import androidx.core.content.ContextCompat
 import com.nuvio.app.features.recordings.internal.AndroidRecordingAlarms
 import com.nuvio.app.features.recordings.internal.AndroidRecordingFiles
 import com.nuvio.app.features.recordings.internal.AndroidRecordingSaver
+import com.nuvio.app.features.recordings.internal.ExactAlarmSettingsLaunch
 import com.nuvio.app.features.recordings.internal.RecordingNotifications
 import com.nuvio.app.features.recordings.internal.RecordingService
 import com.nuvio.app.features.recordings.internal.RecordingsRepository
 import java.io.File
+import java.lang.ref.WeakReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,8 +43,9 @@ object RecordingsAndroid {
 
     @Synchronized
     fun install(context: Context) {
-        val app = context.applicationContext
+        val app = context.applicationContext as Application
         appContext = app
+        trackForegroundActivity(app)
         if (RecordingsAccess.current() != null) return
         val files = AndroidRecordingFiles(
             stateDir = File(app.filesDir, "recordings-state"),
@@ -94,14 +101,43 @@ object RecordingsAndroid {
         val context = appContext ?: return false
         val intent = AndroidRecordingAlarms.exactAlarmSettingsIntent(context) ?: return false
         if (intent.resolveActivity(context.packageManager) == null) return false
+        val activity = resumedActivity?.get()?.takeUnless { it.isFinishing }
+        if (ExactAlarmSettingsLaunch.needsNewTask(hasForegroundActivity = activity != null)) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         return try {
-            context.startActivity(intent)
+            (activity ?: context).startActivity(intent)
             true
         } catch (e: ActivityNotFoundException) {
             false
         } catch (e: SecurityException) {
             false
         }
+    }
+
+    @Volatile
+    private var resumedActivity: WeakReference<Activity>? = null
+    private var tracking = false
+
+    @Synchronized
+    private fun trackForegroundActivity(app: Application) {
+        if (tracking) return
+        tracking = true
+        app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: Activity) {
+                resumedActivity = WeakReference(activity)
+            }
+
+            override fun onActivityPaused(activity: Activity) {
+                if (resumedActivity?.get() === activity) resumedActivity = null
+            }
+
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityStarted(activity: Activity) {}
+            override fun onActivityStopped(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
     }
 
     private const val PREFS = "recordings_prefs"
