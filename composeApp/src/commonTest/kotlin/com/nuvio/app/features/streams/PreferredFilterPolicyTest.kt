@@ -33,7 +33,7 @@ class PreferredFilterPolicyTest {
     }
 
     @Test
-    fun `selecting a filter marks it touched, a fresh load clears it`() {
+    fun `selecting a filter marks it touched and a fresh load clears it`() {
         val fresh = StreamsUiState(requestToken = "t")
         assertFalse(fresh.filterTouched)
         val touched = fresh.withSelectedFilter(null)
