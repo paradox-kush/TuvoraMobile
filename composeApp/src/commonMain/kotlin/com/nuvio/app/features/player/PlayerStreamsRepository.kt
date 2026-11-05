@@ -28,6 +28,8 @@ import com.nuvio.app.features.streams.StreamParser
 import com.nuvio.app.features.streams.StreamsUiState
 import com.nuvio.app.features.streams.asDirectSourceGroup
 import com.nuvio.app.features.streams.SourceLaneGuard
+import com.nuvio.app.features.streams.laneFailureMessage
+import com.nuvio.app.features.streams.registerDirectIptv
 import com.nuvio.app.features.streams.resolveAddonGroup
 import com.nuvio.app.features.streams.sortedForGroupedDisplay
 import com.nuvio.app.features.streams.streamAddonInstanceId
@@ -45,6 +47,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
@@ -258,14 +261,15 @@ object PlayerStreamsRepository {
             val job = scope.launch {
                 val needsRegistration = isStalkerSource || streamProvider.needsStreamRegistration(videoId)
                 val rebuilt = if (needsRegistration) {
-                    SourceLaneGuard.run {
+                    registerDirectIptv {
                         MetaDetailsRepository.ensureXtreamStreamRegistered(
                             videoId,
                             forceFresh = isStalkerSource,
                             forceMint = forceMintIptv && isStalkerSource,
                         )
-                    }.getOrDefault(false)
+                    }
                 } else true
+                ensureActive()
                 val directStreams = if (rebuilt) streamProvider.directStreamItems(videoId) else emptyList()
                 val stream = directStreams.firstOrNull()
                 stateFlow.value = if (stream != null) {
@@ -477,7 +481,6 @@ object PlayerStreamsRepository {
                             addonLogo = addon.manifest.logoUrl,
                         )
                     }
-                    group.error?.let { log.w { "Failed to fetch streams from $displayName: $it" } }
                     publishCompletion(StreamLoadCompletion.Addon(group))
                 }
             }
@@ -531,7 +534,7 @@ object PlayerStreamsRepository {
                                 StreamLoadCompletion.PluginScraper(
                                     addonId = providerGroup.addonId,
                                     streams = emptyList(),
-                                    error = error.message ?: getString(Res.string.streams_failed_to_load_scraper, scraper.name),
+                                    error = error.laneFailureMessage() ?: getString(Res.string.streams_failed_to_load_scraper, scraper.name),
                                 )
                             },
                         )
