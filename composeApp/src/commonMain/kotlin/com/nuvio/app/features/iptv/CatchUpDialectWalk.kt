@@ -1,5 +1,10 @@
 package com.nuvio.app.features.iptv
 
+import com.nuvio.app.features.common.lifecycle.Disposable
+import com.nuvio.app.features.common.lifecycle.EffectScope
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
+
 /**
  * Walks the catch-up URL dialects for one replay until one plays.
  *
@@ -15,7 +20,7 @@ package com.nuvio.app.features.iptv
  * KMP twin of NuvioTV's CatchUpDialectWalk; the only divergence is that commonMain URLs carry the
  * measured clock-pair offset alone (no IANA-timezone-name path here).
  */
-class CatchUpDialectWalk(private val memory: WinnerMemory) {
+class CatchUpDialectWalk(private val memory: WinnerMemory) : ReplayLadder {
 
     /** What a dialect asks the panel to emit. */
     enum class Container { TS, M3U8, PANEL_DEFAULT }
@@ -91,18 +96,33 @@ class CatchUpDialectWalk(private val memory: WinnerMemory) {
     private class Session(
         val request: Request,
         val candidates: List<Pair<Dialect, String>>,
+        /** Names the replay across [restartAt]: [Begun.release] drops the session only while it is still this lineage. */
+        val lineage: Long,
+        val windowEndMs: Long,
     ) {
         var index = 0
         var token = 0L
+
+        /** Played: the winner is recorded and failures no longer walk, but the ask stays so a continuing replay can [restartAt]. */
+        var settled = false
         fun attempt(): Attempt {
             val (dialect, url) = candidates[index]
             return Attempt(token, dialect, url)
         }
     }
 
-    /** At most one walk per account — the single-flight guard the references both carry. */
+    /**
+     * At most one walk per account — the single-flight guard the references both carry. Every access
+     * goes through [lock]: [Begun.release] runs from whichever thread tears the replay down, and a data
+     * race on Kotlin/Native crashes rather than misreads.
+     */
+    private val lock = SynchronizedObject()
     private val sessions = HashMap<String, Session>()
     private var tokenSeq = 0L
+    private var lineageSeq = 0L
+
+    /** Replays currently held (tests). */
+    internal fun held(): Int = synchronized(lock) { sessions.size }
 
     /**
      * Starts (or joins) the walk for [request] and answers the first attempt.
@@ -111,31 +131,91 @@ class CatchUpDialectWalk(private val memory: WinnerMemory) {
      * stampede the panel. A DIFFERENT request for the same account (the viewer zapped) supersedes
      * the old walk; its token dies with it, so its late results land as [Step.Stale].
      */
-    fun begin(request: Request): Step {
+    fun begin(request: Request): Step = synchronized(lock) {
         val active = sessions[request.accountId]
-        if (active != null && active.request == request) return Step.Next(active.attempt())
-
-        val urls = urlsByDialect(request) ?: return Step.Unavailable
-        val order = winnerFirst(request, prune(walkOrder(request.preferM3u8), request.allowedOutputFormats))
-        if (order.isEmpty()) return Step.Unavailable
-
-        val session = Session(request, order.map { it to urls.getValue(it) })
-        session.token = ++tokenSeq
-        sessions[request.accountId] = session
-        return Step.Next(session.attempt())
+        if (active != null && !active.settled && active.request == request) return@synchronized Step.Next(active.attempt())
+        startLocked(request, request.endMs, ++lineageSeq)?.let { Step.Next(it.attempt()) } ?: Step.Unavailable
     }
 
-    /** The current attempt played: remember the proof, end the walk. */
-    fun onSuccess(token: Long): Step {
-        val session = sessionFor(token) ?: return Step.Stale
-        memory.remember(
-            session.request.accountId,
-            StoredWinner(
+    /**
+     * Starts a REPLAY of the programme [request] names ([Request.startMs]..[Request.endMs] are the
+     * programme's bounds) and answers the first attempt, the window it asked the provider for, and its release.
+     *
+     * The link asks for [CatchUpContinuationPolicy.replayWindowEndMs], not the programme's own end, so
+     * playback runs on into the next programmes ([restartAt] continues when the window runs out). Same
+     * single-flight and supersede rules as [begin]. [admit] false (the open overtook its deadline) publishes
+     * nothing; [scope] owns the release. Null when nothing can be replayed.
+     */
+    fun beginReplay(
+        request: Request,
+        nowMs: Long,
+        scope: EffectScope? = null,
+        admit: () -> Boolean = { true },
+    ): M3uReplayWalk.Begun? {
+        if (request.startMs <= 0L || request.endMs <= request.startMs) return null
+        val windowEnd = CatchUpContinuationPolicy.replayWindowEndMs(
+            CatchUpContinuationPolicy.Programme(request.startMs, request.endMs), nowMs,
+        )
+        val windowed = request.copy(endMs = windowEnd)
+        val begun = synchronized(lock) {
+            if (!admit()) return@synchronized null
+            val active = sessions[request.accountId]
+            if (active != null && !active.settled && active.request == windowed) {
+                return@synchronized M3uReplayWalk.Begun(active.attempt(), active.windowEndMs, releaseOf(active))
+            }
+            val session = startLocked(windowed, windowEnd, ++lineageSeq) ?: return@synchronized null
+            M3uReplayWalk.Begun(session.attempt(), windowEnd, releaseOf(session))
+        } ?: return null
+        scope?.onRevert { begun.release.dispose() }
+        return begun
+    }
+
+    /**
+     * The replay ran past its window: a fresh one starting at [atMs] (the playhead), capped at what has
+     * aired. [token] must name the replay's current attempt. The winning dialect, pinned by the earlier
+     * success, leads. Null when the replay is gone or no link can be built.
+     */
+    override fun restartAt(token: Long, atMs: Long, nowMs: Long): M3uReplayWalk.Begun? = synchronized(lock) {
+        val old = sessionFor(token) ?: return@synchronized null
+        val windowEnd = CatchUpContinuationPolicy.replayWindowEndMs(
+            CatchUpContinuationPolicy.Programme(atMs, atMs + 1L), nowMs,
+        )
+        val request = old.request.copy(startMs = atMs, endMs = windowEnd)
+        // Same replay, new window: the lineage (what the release names) carries over.
+        val session = startLocked(request, windowEnd, old.lineage) ?: return@synchronized null
+        M3uReplayWalk.Begun(session.attempt(), windowEnd, releaseOf(session))
+    }
+
+    private fun releaseOf(session: Session): Disposable {
+        val accountId = session.request.accountId
+        val lineage = session.lineage
+        return Disposable {
+            synchronized(lock) { if (sessions[accountId]?.lineage == lineage) sessions.remove(accountId) }
+        }
+    }
+
+    /** Caller holds [lock]. Registers the walk for [request], superseding the account's earlier one. */
+    private fun startLocked(request: Request, windowEndMs: Long, lineage: Long): Session? {
+        val urls = urlsByDialect(request) ?: return null
+        val order = winnerFirst(request, prune(walkOrder(request.preferM3u8), request.allowedOutputFormats))
+        if (order.isEmpty()) return null
+        val session = Session(request, order.map { it to urls.getValue(it) }, lineage, windowEndMs)
+        session.token = ++tokenSeq
+        sessions[request.accountId] = session
+        return session
+    }
+
+    /** The current attempt played: remember the proof; the walk is over, the ask stays for [restartAt]. */
+    override fun onSuccess(token: Long): Step {
+        val proof = synchronized(lock) {
+            val session = sessionFor(token)?.takeUnless { it.settled } ?: return Step.Stale
+            session.settled = true
+            session.request.accountId to StoredWinner(
                 formatsSignature(session.request.allowedOutputFormats),
                 session.attempt().dialect,
-            ),
-        )
-        sessions.remove(session.request.accountId)
+            )
+        }
+        memory.remember(proof.first, proof.second)
         return Step.Done
     }
 
@@ -145,9 +225,9 @@ class CatchUpDialectWalk(private val memory: WinnerMemory) {
      * pinned: a dead stream_id (a renumbered catalog) or a panel briefly down must not poison the
      * winner memory (iptvnator persists its fallback here, arguably their bug).
      */
-    fun onFailure(token: Long, kind: FailureKind): Step {
-        val session = sessionFor(token) ?: return Step.Stale
-        return when (kind) {
+    override fun onFailure(token: Long, kind: FailureKind): Step = synchronized(lock) {
+        val session = sessionFor(token)?.takeUnless { it.settled } ?: return@synchronized Step.Stale
+        when (kind) {
             FailureKind.DECODE -> {
                 sessions.remove(session.request.accountId)
                 Step.Unavailable

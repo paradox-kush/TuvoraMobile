@@ -318,4 +318,112 @@ class CatchUpDialectWalkTest {
         assertEquals(Step.Unavailable, CatchUpDialectWalk(FakeMemory()).begin(request(username = "")))
         assertEquals(Step.Unavailable, CatchUpDialectWalk(FakeMemory()).begin(request(password = "  ")))
     }
+
+    // --- continuation: the window, restartAt, release --------------------------------------
+
+    private val minute = 60_000L
+    private val longAfter = end + 10 * 60 * minute
+
+    @Test
+    fun `a replay asks the provider for the window and not the programme`() {
+        val begun = CatchUpDialectWalk(FakeMemory()).beginReplay(request(), longAfter)!!
+        // 60 min programme + 3 h of what follows: the timeshift duration segment is 240.
+        assertEquals("https://example.com/timeshift/user/pass/240/2024-03-09:16-00/777.ts", begun.attempt.url)
+        assertEquals(end + CatchUpContinuationPolicy.CONTINUE_MS, begun.windowEndMs)
+    }
+
+    @Test
+    fun `a replay of a programme still airing never asks past what has aired`() {
+        val now = start + 30 * minute
+        val begun = CatchUpDialectWalk(FakeMemory()).beginReplay(request(), now)!!
+        assertEquals(end, begun.windowEndMs, "an airing programme keeps its own end")
+    }
+
+    @Test
+    fun `a degenerate programme begins no replay`() {
+        val w = CatchUpDialectWalk(FakeMemory())
+        assertNull(w.beginReplay(request().copy(endMs = start), longAfter))
+        assertNull(w.beginReplay(request().copy(startMs = 0L), longAfter))
+        assertNull(w.beginReplay(request(username = ""), longAfter))
+    }
+
+    @Test
+    fun `restartAt asks for a fresh window from the playhead with the winner first`() {
+        val memory = FakeMemory()
+        val w = CatchUpDialectWalk(memory)
+        val first = w.beginReplay(request(), longAfter)!!
+        // The first dialect failed, the second played: it is pinned.
+        val second = next(w.onFailure(first.attempt.token, FailureKind.TRANSPORT))
+        assertEquals(Step.Done, w.onSuccess(second.token))
+        val restarted = w.restartAt(second.token, start + 90 * minute, longAfter)!!
+        assertEquals(second.dialect, restarted.attempt.dialect, "the proven dialect leads the new window")
+        assertTrue("2024-03-09:17-30" in restarted.attempt.url, "starts at the playhead: ${restarted.attempt.url}")
+        assertEquals(start + 90 * minute + 1L + CatchUpContinuationPolicy.CONTINUE_MS, restarted.windowEndMs, "same window rule as the M3U restart")
+        assertNotEquals(second.token, restarted.attempt.token)
+        // The old attempt is dead; the new one walks and settles like any other.
+        assertEquals(Step.Stale, w.onFailure(second.token, FailureKind.TRANSPORT))
+        assertEquals(Step.Done, w.onSuccess(restarted.attempt.token))
+    }
+
+    @Test
+    fun `restartAt is null for a dead token or a released replay`() {
+        val w = CatchUpDialectWalk(FakeMemory())
+        assertNull(w.restartAt(999L, start, longAfter))
+        val begun = w.beginReplay(request(), longAfter)!!
+        begun.release.dispose()
+        assertEquals(0, w.held())
+        assertNull(w.restartAt(begun.attempt.token, start + minute, longAfter))
+    }
+
+    @Test
+    fun `releasing an old replay never drops a newer one on the same account`() {
+        val w = CatchUpDialectWalk(FakeMemory())
+        val old = w.beginReplay(request(), longAfter)!!
+        val newer = w.beginReplay(request().copy(startMs = start + 5 * minute), longAfter)!!
+        old.release.dispose()
+        assertEquals(1, w.held())
+        assertEquals(Step.Done, w.onSuccess(newer.attempt.token))
+    }
+
+    @Test
+    fun `a restart keeps the replay's release handle valid`() {
+        val w = CatchUpDialectWalk(FakeMemory())
+        val first = w.beginReplay(request(), longAfter)!!
+        w.onSuccess(first.attempt.token)
+        w.restartAt(first.attempt.token, start + minute, longAfter)!!
+        first.release.dispose()
+        assertEquals(0, w.held())
+    }
+
+    @Test
+    fun `the owning scope releases the replay`() {
+        val w = CatchUpDialectWalk(FakeMemory())
+        val scope = com.nuvio.app.features.common.lifecycle.EffectScope { throw it }
+        w.beginReplay(request(), longAfter, scope)!!
+        assertEquals(1, w.held())
+        scope.dispose()
+        assertEquals(0, w.held())
+    }
+
+    @Test
+    fun `an open that was overtaken publishes nothing`() {
+        val w = CatchUpDialectWalk(FakeMemory())
+        assertNull(w.beginReplay(request(), longAfter, admit = { false }))
+        assertEquals(0, w.held())
+    }
+
+    @Test
+    fun `a settled replay is not joined by the identical ask`() {
+        val w = CatchUpDialectWalk(FakeMemory())
+        val first = w.beginReplay(request(), longAfter)!!
+        w.onSuccess(first.attempt.token)
+        val again = w.beginReplay(request(), longAfter)!!
+        assertNotEquals(first.attempt.token, again.attempt.token)
+    }
+
+    @Test
+    fun `both walks answer to the one ladder contract`() {
+        val ladders: List<ReplayLadder> = listOf(CatchUpDialectWalk(FakeMemory()))
+        assertEquals(Step.Stale, ladders.first().onSuccess(12345L))
+    }
 }

@@ -25,7 +25,7 @@ import kotlinx.atomicfu.locks.synchronized
  * evicting the oldest is only a backstop. A [begin] whose result nobody wants any more ([admit] false,
  * e.g. it finished after the open's deadline) publishes nothing.
  */
-class M3uReplayWalk(private val memory: FormMemory) {
+class M3uReplayWalk(private val memory: FormMemory) : ReplayLadder {
 
     /** What played last, per playlist. Injected storage; the policy decides when to read and write. */
     interface FormMemory {
@@ -98,7 +98,7 @@ class M3uReplayWalk(private val memory: FormMemory) {
      * The replay ran past its window: a fresh one starting at [atMs] (the playhead), capped at what has
      * aired. [token] must name the replay's current attempt. Null when the replay is gone or no link can be built.
      */
-    fun restartAt(token: Long, atMs: Long, nowMs: Long): Begun? {
+    override fun restartAt(token: Long, atMs: Long, nowMs: Long): Begun? {
         synchronized(lock) {
             val old = ladderFor(token) ?: return null
             val request = old.request.copy(programmeStartMs = atMs, programmeEndMs = atMs + 1L, nowMs = nowMs)
@@ -127,7 +127,7 @@ class M3uReplayWalk(private val memory: FormMemory) {
     }
 
     /** The current attempt played: remember the form that worked on this playlist and end the walk. */
-    fun onSuccess(token: Long): CatchUpDialectWalk.Step {
+    override fun onSuccess(token: Long): CatchUpDialectWalk.Step {
         val proof = synchronized(lock) {
             val ladder = ladderFor(token)?.takeUnless { it.settled } ?: return CatchUpDialectWalk.Step.Stale
             ladder.settled = true
@@ -138,7 +138,7 @@ class M3uReplayWalk(private val memory: FormMemory) {
     }
 
     /** The current attempt failed. TRANSPORT advances the ladder; DECODE or exhaustion ends it with nothing remembered. */
-    fun onFailure(token: Long, kind: CatchUpDialectWalk.FailureKind): CatchUpDialectWalk.Step {
+    override fun onFailure(token: Long, kind: CatchUpDialectWalk.FailureKind): CatchUpDialectWalk.Step {
         synchronized(lock) {
             val ladder = ladderFor(token)?.takeUnless { it.settled } ?: return CatchUpDialectWalk.Step.Stale
             val next = ladder.index + 1
