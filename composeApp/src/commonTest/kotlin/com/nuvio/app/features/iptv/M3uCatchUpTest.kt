@@ -185,6 +185,14 @@ class M3uCatchUpTest {
     }
 
     @Test
+    fun xtreamKeepsTheLiveUrlQueryString() {
+        assertEquals(
+            "http://h.example:8080/timeshift/user/pass/30/2024-01-02:03-04/123.ts?token=abc&x=1",
+            build(info(M3uCatchUpType.XTREAM), "$live?token=abc&x=1"),
+        )
+    }
+
+    @Test
     fun xtreamRejectsNonXtreamUrl() {
         assertNull(build(info(M3uCatchUpType.XTREAM), flat))
     }

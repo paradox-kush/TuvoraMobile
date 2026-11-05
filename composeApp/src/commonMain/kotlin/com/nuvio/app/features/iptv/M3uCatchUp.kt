@@ -170,7 +170,7 @@ object M3uCatchUp {
             endMs = startMs + durationSecs * 1000L,
             containerExtension = ext,
             serverOffsetMs = offsetMs,
-        ).firstOrNull()
+        ).firstOrNull()?.let { it + m.groupValues[6] } // keep a token the panel put in the query
     }
 
     private fun percentDecode(s: String): String {
