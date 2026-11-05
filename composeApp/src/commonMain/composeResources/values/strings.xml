@@ -2751,7 +2751,7 @@
     <string name="calendar_label_season_finale">Season finale</string>
     <string name="calendar_label_series_finale">Series finale</string>
     <string name="calendar_empty_title">Nothing on the horizon</string>
-    <string name="calendar_empty_body">Shows in your library and the ones you are watching land here when a new episode is dated. Tap the bell on any show to make sure.</string>
+    <string name="calendar_empty_body">Shows in your library and the ones you are watching land here when a new episode is dated. Press and hold + on a show to turn on its reminder.</string>
     <string name="calendar_failed_title">Couldn't load the calendar</string>
     <string name="calendar_failed_body">The TV listings didn't answer. Your shows are safe; the listings are just being shy.</string>
     <string name="calendar_failed_timeout_body">The TV listings are taking too long. We'll keep fetching in the background.</string>
