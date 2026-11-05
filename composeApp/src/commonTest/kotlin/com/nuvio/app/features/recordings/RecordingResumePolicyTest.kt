@@ -2,9 +2,11 @@ package com.nuvio.app.features.recordings
 
 import com.nuvio.app.features.recordings.internal.RecordingCompletenessPolicy
 import com.nuvio.app.features.recordings.internal.RecordingResumePolicy
+import com.nuvio.app.features.recordings.internal.ResumePin
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class RecordingResumePolicyTest {
@@ -48,5 +50,32 @@ class RecordingResumePolicyTest {
     @Test
     fun `a plausible size with no declared length is accepted`() {
         assertEquals(false, RecordingCompletenessPolicy.endedTooEarly(writtenBytes = 900_000_000, declaredLength = null, estimatedBytes = 2_000_000_000))
+    }
+
+    @Test
+    fun `a pin round-trips the link and both validators`() {
+        val pin = ResumePin(link, "\"abc\"", "Wed, 05 Nov 2026 10:00:00 GMT")
+        assertEquals(pin, ResumePin.decode(pin.encode()))
+    }
+
+    @Test
+    fun `a pin with only a link decodes with no validators`() {
+        val pin = ResumePin.decode(link)
+        assertEquals(ResumePin(link, null, null), pin)
+        assertNull(pin?.validator)
+    }
+
+    @Test
+    fun `the strong etag is the validator and a weak one falls back to the date`() {
+        assertEquals("\"abc\"", ResumePin(link, "\"abc\"", "date").validator)
+        assertEquals("date", ResumePin(link, "W/\"abc\"", "date").validator)
+        assertNull(ResumePin(link, "W/\"abc\"", null).validator)
+    }
+
+    @Test
+    fun `unreadable pin text means an unknown source`() {
+        assertNull(ResumePin.decode(null))
+        assertNull(ResumePin.decode(""))
+        assertNull(ResumePin.decode("\n\n"))
     }
 }

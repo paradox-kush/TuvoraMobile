@@ -5,6 +5,7 @@ import com.nuvio.app.features.downloads.DownloadPlatformRequest
 import com.nuvio.app.features.downloads.DownloadStatus
 import com.nuvio.app.features.downloads.DownloadsPlatformDownloader
 import com.nuvio.app.features.downloads.DownloadsTaskHandle
+import com.nuvio.app.features.downloads.StrictResume
 import com.nuvio.app.features.recordings.api.ArmKind
 import com.nuvio.app.features.recordings.api.RecordingAlarms
 import com.nuvio.app.features.recordings.api.RecordingCapabilities
@@ -123,14 +124,18 @@ internal object IosRecordingPaths {
 internal class IosPartialStaging {
     private val fm get() = NSFileManager.defaultManager
 
-    fun readPin(part: String): String? {
+    fun readResumePin(part: String): ResumePin? {
         val path = "$part.meta"
         if (!fm.fileExistsAtPath(path)) return null
-        return NSString.stringWithContentsOfFile(path, NSUTF8StringEncoding, null)?.lines()?.firstOrNull()?.takeIf { it.isNotBlank() }
+        return ResumePin.decode(NSString.stringWithContentsOfFile(path, NSUTF8StringEncoding, null))
     }
 
-    fun writePin(part: String, url: String) {
-        NSString.create(string = url).writeToFile("$part.meta", atomically = true, encoding = NSUTF8StringEncoding, error = null)
+    /** The link a partial came from (first line of the sidecar). */
+    fun readPin(part: String): String? = readResumePin(part)?.url
+
+    fun writePin(part: String, url: String, etag: String? = null, lastModified: String? = null) {
+        NSString.create(string = ResumePin(url, etag, lastModified).encode())
+            .writeToFile("$part.meta", atomically = true, encoding = NSUTF8StringEncoding, error = null)
     }
 
     private fun remove(path: String) {
@@ -160,7 +165,7 @@ internal class IosPartialStaging {
      * After a save stopped for any reason (failure, pause, cancel): whatever the downloader wrote goes
      * back beside the target with its link, or is dropped if empty. Safe to call twice. Returns the bytes kept.
      */
-    fun parkAfterStop(url: String, part: String, workPart: String): Long {
+    fun parkAfterStop(url: String, part: String, workPart: String, etag: String? = null, lastModified: String? = null): Long {
         if (!fm.fileExistsAtPath(workPart)) return 0L
         val size = sizeOf(workPart)
         if (size <= 0L) {
@@ -169,7 +174,7 @@ internal class IosPartialStaging {
         }
         remove(part)
         fm.moveItemAtPath(workPart, part, null)
-        writePin(part, url)
+        writePin(part, url, etag, lastModified)
         return size
     }
 
@@ -240,30 +245,38 @@ internal class IosRecordingSaver(
     private suspend fun downloadOne(url: String, req: SaveRequest, workName: String, part: String, progress: (Long) -> Unit): SaveOutcome {
         val workPart = downloaderFilePath(workName) + ".part"
         // Hand a previous partial back to the downloader only if THIS link wrote it; otherwise start at zero.
-        staging.stageForResume(url, part, workPart, req.resumeFromBytes)
+        val pinBefore = staging.readResumePin(part)
+        val resumed = staging.stageForResume(url, part, workPart, req.resumeFromBytes)
+        // The partial keeps the validators it came with; a fresh response replaces them (the downloader reports those).
+        var etag = if (resumed) pinBefore?.etag else null
+        var lastModified = if (resumed) pinBefore?.lastModified else null
+        val strict = StrictResume(
+            validator = if (resumed) pinBefore?.validator else null,
+            onValidators = { e, l -> etag = e; lastModified = l },
+        )
         val item = throwawayItem(url, req, workName)
         var finished = false
         try {
-            val outcome = runDownload(item, req, progress)
+            val outcome = runDownload(item, strict, req, progress)
             if (outcome is SaveOutcome.Done) {
                 finished = true
                 return outcome
             }
             // Keep the partial (and its link) where the repository looks for it.
-            val written = staging.parkAfterStop(url, part, workPart)
+            val written = staging.parkAfterStop(url, part, workPart, etag, lastModified)
             return (outcome as SaveOutcome.Failed).copy(writtenBytes = written)
         } finally {
             // A cancel throws past the code above: the partial still goes home, so the repository can
             // resume it after a teardown or delete it after a user cancel instead of leaking it.
-            if (!finished) staging.parkAfterStop(url, part, workPart)
+            if (!finished) staging.parkAfterStop(url, part, workPart, etag, lastModified)
         }
     }
 
-    private suspend fun runDownload(item: DownloadItem, req: SaveRequest, progress: (Long) -> Unit): SaveOutcome = coroutineScope {
+    private suspend fun runDownload(item: DownloadItem, strict: StrictResume, req: SaveRequest, progress: (Long) -> Unit): SaveOutcome = coroutineScope {
         val result = CompletableDeferred<SaveOutcome>()
         val ticks = Channel<Long>(Channel.CONFLATED)
         val handle = start(
-            DownloadPlatformRequest(item),
+            DownloadPlatformRequest(item, strict),
             { downloaded, _ -> progress(downloaded); ticks.trySend(downloaded) },
             { _, total -> result.complete(SaveOutcome.Done(total ?: 0L)) },
             { _ ->
