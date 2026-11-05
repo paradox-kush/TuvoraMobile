@@ -8,6 +8,14 @@ import com.nuvio.app.features.iptv.EpgSourceLadder
 import com.nuvio.app.features.iptv.CatchUpWinnerStore
 import com.nuvio.app.features.iptv.IptvClient
 import com.nuvio.app.features.iptv.IptvPanelGuard
+import com.nuvio.app.features.iptv.CatchUpNextProgramme
+import com.nuvio.app.features.iptv.M3uReplayContinuation
+import com.nuvio.app.features.iptv.M3uReplayWalk
+import com.nuvio.app.features.iptv.XtreamCatchUp
+import com.nuvio.app.features.iptv.SOURCE_TYPE_M3U_FILE
+import com.nuvio.app.features.iptv.SOURCE_TYPE_M3U_URL
+import com.nuvio.app.features.iptv.content.IptvContentDb
+import com.nuvio.app.features.iptv.epg.XmltvClient
 import com.nuvio.app.features.iptv.XtreamAccount
 import com.nuvio.app.features.iptv.XtreamHubRepository
 import com.nuvio.app.features.iptv.displayChannelName
@@ -133,7 +141,6 @@ object LiveTvData {
         val channels = visibleGuideChannels(account, allChannels, currentStreamId = parsed.id)
 
         val currentCategory = channels.firstOrNull { it.streamId.toString() == parsed.id }?.categoryId
-        val supportsCatchUp = CatchUpEpgRepository.supportsCatchUp(account)
         val mapped = channels.map { ch ->
             LiveGuideChannel(
                 contentId = XtreamItemRegistry.liveId(account.id, ch.streamId),
@@ -142,7 +149,7 @@ object LiveTvData {
                 logo = ch.logo,
                 streamId = ch.streamId,
                 categoryId = ch.categoryId,
-                hasArchive = supportsCatchUp && ch.hasArchive,
+                hasArchive = CatchUpEpgRepository.supportsCatchUp(account, ch.m3uCatchUp) && ch.hasArchive,
                 catchUpDays = ch.catchUpDays,
                 entityId = com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(account.id, ch.name, ch.epgChannelId),
             )
@@ -299,7 +306,14 @@ object LiveTvData {
     /** Stored programmes overlapping a guide window — the only source of PAST rows. */
     suspend fun historyProgrammes(contentId: String, fromMs: Long, toMs: Long): List<XtreamProgram> {
         val (account, streamId) = accountFor(contentId) ?: return emptyList()
-        return CatchUpEpgRepository.window(account, streamId, fromMs, toMs)
+        // An M3U channel's past is its own XMLTV guide on disk (6 h for every channel, the whole archive for a
+        // catch-up one); without catch-up the past shows but has nothing to replay. See [GuideHistorySource].
+        val isM3u = account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_M3U_FILE
+        return when (GuideHistorySource.forChannel(isM3u, hasCatchUp = false)) {
+            GuideHistorySource.Source.STORED_XMLTV ->
+                runCatching { XmltvClient.storedWindow(account, streamId, fromMs, toMs) }.getOrDefault(emptyList())
+            GuideHistorySource.Source.CATCHUP_TABLE -> CatchUpEpgRepository.window(account, streamId, fromMs, toMs)
+        }
     }
 
     /** The whole synopsis for the programme sheet — truncated everywhere else. */
@@ -346,11 +360,46 @@ object LiveTvData {
         return LiveChannelSource(url = playback.url, headers = playback.headers)
     }
 
-    /** The learned-winner memory the walk is constructed with. */
-    fun winnerMemory(): CatchUpDialectWalk.WinnerMemory = CatchUpWinnerStore(
+    /** The learned-winner memory the walks are constructed with (Xtream dialects and M3U link forms share it). */
+    internal fun winnerStore(): CatchUpWinnerStore = CatchUpWinnerStore(
         accountOf = { id -> XtreamRepository.uiState.value.accounts.firstOrNull { it.id == id } },
         update = { id, edit -> XtreamRepository.updateOptions(id) { edit(it) } },
     )
+
+    fun winnerMemory(): CatchUpDialectWalk.WinnerMemory = winnerStore()
+
+    /** Whether [contentId] belongs to a URL/file M3U playlist (replays are built from the playlist's own catch-up). */
+    fun isM3uPlaylist(contentId: String): Boolean =
+        sourceTypeOf(contentId).let { it == SOURCE_TYPE_M3U_URL || it == SOURCE_TYPE_M3U_FILE }
+
+    /**
+     * The M3U replay ask for one programme on [contentId]'s channel, or null when the channel has no catch-up
+     * (or the playlist is gone). The channel's own live line and `catchup-*` come from the content database;
+     * the offset is the playlist's catch-up correction. Run it through [M3uReplayOpen.run] so it is bounded.
+     */
+    suspend fun m3uReplayRequest(contentId: String, startMs: Long, endMs: Long, nowMs: Long): M3uReplayWalk.Request? {
+        val (account, streamId) = accountFor(contentId) ?: return null
+        if (!account.availableOnDevice) return null
+        val row = IptvContentDb.channelRow(account.id, streamId) ?: return null
+        val info = row.catchUp ?: return null
+        if (!CatchUpEpgRepository.supportsCatchUp(account, info)) return null
+        return M3uReplayWalk.Request(
+            accountId = account.id,
+            info = info,
+            liveUrl = row.url,
+            programmeStartMs = startMs,
+            programmeEndMs = endMs,
+            nowMs = nowMs,
+            offsetMs = XtreamCatchUp.replayOffsetMs(null, account.catchUpTimeCorrectionMinutes) ?: 0L,
+        )
+    }
+
+    /** The guide row covering [atMs] on this channel, else the next one to start - what a continuing replay moves its title to. */
+    suspend fun replayRowAt(contentId: String, atMs: Long): M3uReplayContinuation.Row? {
+        val rows = historyProgrammes(contentId, atMs - 60_000L, atMs + 6 * 60 * 60_000L)
+            .map { M3uReplayContinuation.Row(it.title, it.startMs, it.endMs) }
+        return CatchUpNextProgramme.pick(rows, atMs)
+    }
 }
 
 /** F03 — Move earlier / later for a pinned channel in the phone guide (null when it cannot move that way). */

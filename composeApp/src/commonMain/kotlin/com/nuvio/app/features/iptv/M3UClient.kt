@@ -361,14 +361,17 @@ object M3UClient : IptvClient {
 
     private fun IptvCategoryRow.toCategory() = XtreamCategory(id, name)
 
-    private fun IptvStreamRow.toChannel() = XtreamChannel(
+    /** An M3U channel with [catchUp] gets the replay glyph and its `catchup-days` window; every other row stays as before (no archive). */
+    internal fun IptvStreamRow.toChannel() = XtreamChannel(
         streamId = sid,
         name = name,
         logo = logo,
         epgChannelId = tvgId,
         categoryId = categoryId,
-        hasArchive = false,
+        hasArchive = catchUp != null,
+        catchUpDays = catchUp?.days ?: 0,
         streamUrl = url,
+        m3uCatchUp = catchUp,
     )
 
     private fun IptvStreamRow.toMovie() = XtreamMovie(

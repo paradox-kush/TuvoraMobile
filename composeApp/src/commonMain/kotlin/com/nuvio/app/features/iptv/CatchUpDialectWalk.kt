@@ -34,6 +34,9 @@ class CatchUpDialectWalk(private val memory: WinnerMemory) {
         PATH_M3U8(Container.M3U8),
         PATH_SWAPPED_M3U8(Container.M3U8),
         PHP_STREAMING_EXT_M3U8(Container.M3U8),
+
+        /** An M3U playlist's own link ([M3uReplayWalk]); never part of an Xtream walk, never remembered here. */
+        PLAYLIST_LINK(Container.PANEL_DEFAULT),
     }
 
     /**

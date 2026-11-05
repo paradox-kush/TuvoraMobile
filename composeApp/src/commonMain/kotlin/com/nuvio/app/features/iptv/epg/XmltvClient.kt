@@ -3,6 +3,8 @@ package com.nuvio.app.features.iptv.epg
 import co.touchlab.kermit.Logger
 import com.nuvio.app.features.addons.httpStreamLines
 import com.nuvio.app.features.epg.GuideChannelMatcher
+import com.nuvio.app.features.iptv.SOURCE_TYPE_M3U_FILE
+import com.nuvio.app.features.iptv.SOURCE_TYPE_M3U_URL
 import com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER
 import com.nuvio.app.features.iptv.SOURCE_TYPE_XTREAM
 import com.nuvio.app.features.iptv.channelNameRules
@@ -221,7 +223,13 @@ object XmltvClient {
         collector: EpgCollector,
         guideRows: MutableList<EpgGuideChannelRow>,
     ): GuideChannelMatcher.Result {
-        val replay = XmltvGuideReplay(lineup, picked, rules, TraktPlatformClock.nowEpochMs())
+        // M3U catch-up: a channel that replays N days keeps N days of guide history (capped), not six hours.
+        val catchUpDays = if (acc.sourceType == SOURCE_TYPE_M3U_URL || acc.sourceType == SOURCE_TYPE_M3U_FILE) {
+            runCatching { IptvContentDb.liveCatchUpDays(acc.id) }.getOrDefault(emptyMap())
+        } else {
+            emptyMap()
+        }
+        val replay = XmltvGuideReplay(lineup, picked, rules, TraktPlatformClock.nowEpochMs(), catchUpDaysBySid = catchUpDays)
         fun feedLine(line: String) { replay.feed(line); replay.feed("\n") }
         try {
             if (source.kind == EpgSourceKind.XTREAM_DERIVED) {
@@ -277,6 +285,35 @@ object XmltvClient {
         ) ?: return emptyList()
         val now = TraktPlatformClock.nowEpochMs()
         return selectNowNext(IptvContentDb.epgAround(partition, key, now, limit), now)
+    }
+
+    /**
+     * Programmes overlapping [fromMs, toMs) for one channel from the stored guide, past ones included (an M3U
+     * catch-up channel keeps up to its `catchup-days` of them, see [XmltvIngestWindow.backMsForCatchUpDays]).
+     * Same key as the ladder's top rungs: the viewer's manual pick, else the ingest's match, else the
+     * provider's own id. [] when the channel has no stored guide.
+     */
+    suspend fun storedWindow(acc: XtreamAccount, streamId: Int, fromMs: Long, toMs: Long): List<XtreamProgram> {
+        val partition = partitionOf(acc)
+        val manualKey = runCatching {
+            val guideId = entityIdFor(acc, streamId)?.let { EpgOverrides.forPlaylist(acc.id)[it] }
+            guideId?.let { IptvContentDb.epgGuideKeyForGuideId(partition, it) }
+        }.getOrNull()
+        val key = manualKey ?: EpgGuideKeyPolicy.resolve(
+            manualGuideId = null,
+            keyForGuideId = { null },
+            mappedKey = IptvContentDb.epgGuideKey(partition, streamId),
+            providerId = providerIdFor(acc, streamId),
+        ) ?: return emptyList()
+        return IptvContentDb.epgWindow(partition, key, fromMs, toMs).map {
+            XtreamProgram(
+                title = it.title,
+                description = it.desc.orEmpty(),
+                startMs = it.startMs,
+                endMs = it.endMs,
+                nowPlaying = false,
+            )
+        }
     }
 
     /**
