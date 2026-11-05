@@ -189,7 +189,7 @@ struct TvPlayerScreen: View {
             // thumb, or a swipe across the control buttons, paused playback into a scrub).
             RemoteTouchCatcher(
                 isActive: { TvPlayerRemotePolicy.shared.scrubAllowed(ctx: remoteContext, seekBarFocused: seekBarFocused) },
-                onBegan: { scrubOriginMs = scrubMs ?? state?.positionMs ?? 0 },
+                onBegan: { scrubOriginMs = scrubMs ?? state?.barPositionMs ?? 0 },
                 onMoved: { dx, dy in scrub(dx: dx, dy: dy) },
                 onEnded: { _, _ in }
             )
@@ -378,7 +378,7 @@ struct TvPlayerScreen: View {
 
     private func commitScrub() {
         guard let target = scrubMs else { return }
-        session.seekTo(positionMs: target)
+        session.seekToBar(barMs: target)
         scrubMs = nil
         session.play()
         bumpControls()
@@ -402,7 +402,7 @@ struct TvPlayerScreen: View {
     private func scrub(dx: CGFloat, dy: CGFloat) {
         guard let state,
               let target = TvPlayerRemotePolicy.shared.scrubTarget(
-                originMs: scrubOriginMs, dx: Double(dx), dy: Double(dy), durationMs: state.durationMs, scrubbing: scrubMs != nil
+                originMs: scrubOriginMs, dx: Double(dx), dy: Double(dy), durationMs: state.barDurationMs, scrubbing: scrubMs != nil
               ) else { return }
         if scrubMs == nil {
             resumeAfterScrub = state.isPlaying
@@ -560,7 +560,7 @@ private struct PlayerChrome: View {
                 }
                 .foregroundStyle(colors.primary)
             } else {
-                SeekBar(positionMs: scrubMs ?? state.positionMs, bufferedMs: state.bufferedMs, durationMs: state.durationMs,
+                SeekBar(positionMs: scrubMs ?? state.barPositionMs, bufferedMs: state.bufferedMs, durationMs: state.barDurationMs,
                         scrubbing: scrubMs != nil, onSeek: { session.seekBy(offsetMs: $0); onActivity() },
                         onFocusChange: onSeekBarFocus)
             }

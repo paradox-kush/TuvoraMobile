@@ -63,6 +63,12 @@ class TvM3uReplayRun(
     /** End of the programme on screen: the facade looks up the guide row after it when this changes. */
     val programmeEndMs: Long get() = endMs
 
+    /** Where the programme on screen starts in the player's timeline: the seek bar's origin ([TvReplayBar]). */
+    val barOriginMs: Long get() = TvReplayBar.originMs(startMs, streamStartMs)
+
+    /** The seek bar spans the programme on screen. */
+    val barSpanMs: Long get() = (endMs - startMs).coerceAtLeast(1L)
+
     /** The replay's player title as the first session shows it. */
     fun initialTitle(): String = TvReplayPolicy.title(channelName, title)
 

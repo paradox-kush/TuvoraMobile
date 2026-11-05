@@ -115,6 +115,17 @@ class TvM3uReplayRunTest {
     }
 
     @Test
+    fun `the seek bar spans the programme and moves on with the retitle`() {
+        val r = run()
+        assertEquals(0L, r.barOriginMs)
+        assertEquals(60 * minute, r.barSpanMs)
+        r.tick(playing = true, pos = 1_000L)
+        r.tick(playing = true, pos = 61 * minute, next = M3uReplayContinuation.Row("Midday", end, end + 30 * minute))
+        assertEquals(60 * minute, r.barOriginMs, "the next programme starts one hour into the link")
+        assertEquals(30 * minute, r.barSpanMs)
+    }
+
+    @Test
     fun `a blank next title keeps the current one`() {
         val r = run()
         r.tick(playing = true, pos = 1_000L)
