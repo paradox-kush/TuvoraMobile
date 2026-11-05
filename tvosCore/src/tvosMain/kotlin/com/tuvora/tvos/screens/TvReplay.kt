@@ -206,6 +206,13 @@ internal class LiveTvReplayIo(private val channel: LiveGuideChannel) : TvReplayI
             report = mapOf("source_type" to LiveTvData.sourceTypeOf(channel.contentId), "kind" to "catchup_source"),
         ) { LiveTvData.catchUpSource(channel.contentId, url) }.valueOrNull()?.let { TvResolvedSource(it.url, it.headers) }
 
+    /** A Stalker archive link: the same live-resolve (DoH) path, marked single-use so nothing later probes or re-opens it. */
+    suspend fun resolveSingleUse(url: String): TvResolvedSource? =
+        BoundedLoad.run(
+            surface = LoadSurface.LIVE_RESOLVE,
+            report = mapOf("source_type" to LiveTvData.sourceTypeOf(channel.contentId), "kind" to "catchup_source"),
+        ) { LiveTvData.catchUpSource(channel.contentId, url, singleUse = true) }.valueOrNull()?.let { TvResolvedSource(it.url, it.headers) }
+
     override suspend fun nextRow(endMs: Long) = LiveTvData.replayRowAt(channel.contentId, endMs)
     override suspend fun playLive() = TvIptvBrowse.playChannel(channel.contentId, channel.name, channel.logo)
     override fun newSession(launch: PlayerLaunch) = TvPlayerSession(launch)

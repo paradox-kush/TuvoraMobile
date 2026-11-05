@@ -75,7 +75,11 @@ object TvCatchUp {
     /** The viewer chose something else or left: an open still in flight publishes nothing. */
     fun cancelOpens() { openFence.next() }
 
+    /** A Stalker portal's replays: one minted single-use link each (no walk), one mint at a time. */
+    private val stalkerStarter by lazy { TvStalkerReplayStarter(openFence) }
+
     suspend fun startReplay(channel: LiveGuideChannel, programme: XtreamProgram): TvReplayPair {
+        if (LiveTvData.isStalkerPortal(channel.contentId)) return startStalkerReplay(channel, programme)
         val ticket = openFence.next()
         if (LiveTvData.isM3uPlaylist(channel.contentId)) {
             val replay = TvReplay(m3uWalk, openFence, ticket, channel, programme)
@@ -84,6 +88,53 @@ object TvCatchUp {
         val replay = TvReplay(walk, openFence, ticket, channel, programme)
         return TvReplayPair(replay, replay.beginXtream(walk))
     }
+
+    /**
+     * A Stalker portal's replay: mint ONE `create_link` for the programme (its portal id; none = the no-recording
+     * notice), open ONE session on it flagged single-use, and follow it with [TvStalkerReplay]. Retry from Swift
+     * calls this again, which is a fresh mint; the spent URL is never opened a second time.
+     */
+    private suspend fun startStalkerReplay(channel: LiveGuideChannel, programme: XtreamProgram): TvReplayPair {
+        val contentId = channel.contentId
+        val io = LiveTvReplayIo(channel)
+        val result = stalkerStarter.start(
+            sourceType = LiveTvData.sourceTypeOf(contentId),
+            programmeTitle = programme.title,
+            mint = { LiveTvData.stalkerArchiveLink(contentId, programme.startMs) },
+            resolve = { url -> io.resolveSingleUse(url) },
+        )
+        return when (result) {
+            TvStalkerStart.Ignore -> TvReplayPair(TvNoReplay, TvReplayStep(null, null))
+            is TvStalkerStart.Notice -> TvReplayPair(TvNoReplay, TvReplayStep(null, result.text, canRetry = result.canRetry))
+            is TvStalkerStart.Play -> {
+                val title = TvReplayPolicy.title(channel.name, programme.title)
+                val launch = PlayerLaunch(
+                    profileId = ProfileRepository.activeProfileId,
+                    title = title,
+                    sourceUrl = result.source.url,
+                    sourceHeaders = result.source.headers,
+                    streamTitle = title,
+                    streamType = "live",
+                    providerName = io.providerName(),
+                    providerAddonId = "xtream",
+                    logo = channel.logo,
+                    contentType = "live",
+                    videoId = contentId,
+                    parentMetaId = contentId,
+                    parentMetaType = "tv",
+                    liveReplay = LiveReplayLaunch(programme.title, programme.startMs, programme.endMs),
+                )
+                // The link is spent by this one open: the session never re-opens it (no reconnect, retry or lane change).
+                val session = TvPlayerSession(launch).bindSingleUseLink(true)
+                TvReplayPair(TvStalkerReplay(openFence, result.ticket), TvReplayStep(session, null))
+            }
+        }
+    }
+}
+
+/** No supervision: the replay ended before a session existed. */
+private object TvNoReplay : TvReplaySupervisor {
+    override suspend fun supervise(session: TvPlayerSession): TvReplayStep? = null
 }
 
 data class TvWindowProgrammes(val programmes: List<XtreamProgram>, val fromHistory: Boolean)

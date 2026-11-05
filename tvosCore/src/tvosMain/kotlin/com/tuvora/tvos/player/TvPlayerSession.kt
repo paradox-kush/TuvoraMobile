@@ -180,7 +180,7 @@ class TvPlayerSession(
     private fun applyLinkReconnectPolicy(b: NuvioPlayerBridge) {
         b.applyStreamLavfOptions(
             LiveLinkReconnectPolicy.mpvStreamLavfOptions(
-                LiveLinkReconnectPolicy.modeFor(singleUseLink && liveChannel && launch.liveReplay == null),
+                TvSingleUseLinkPolicy.reconnectMode(singleUseLink && liveChannel),
             ),
         )
     }
@@ -500,6 +500,8 @@ class TvPlayerSession(
 
     fun retry() {
         if (closed) return
+        // The player's own Retry re-opens the loaded URL; a spent link needs a fresh mint, which only the guide's Retry runs.
+        if (!TvSingleUseLinkPolicy.allowsPlayerRetry(singleUseLink)) return
         vodRetryFailure = null
         _state.value = _state.value.copy(errorMessage = null, isLoading = true)
         if (!isLive && vodReresolve != null) {
@@ -917,7 +919,8 @@ class TvPlayerSession(
 
     /** Handles a reported error; true means this poll is done (state already updated).*/
     private fun handleFailure(lane: PlaybackLane, error: String): Boolean {
-        val next = PlaybackLanePolicy.escalation(lane, escalated)
+        // A spent link (Stalker create_link) is never answered by opening the same URL on the other engine.
+        val next = PlaybackLanePolicy.escalation(lane, escalated)?.takeIf { TvSingleUseLinkPolicy.allowsLaneEscalation(singleUseLink) }
         if (next == null) {
             if (isLive) {
                 // A live error is a stream that ended: same bounded reconnect ladder as a freeze.
