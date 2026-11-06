@@ -91,6 +91,28 @@ class SearchIptvRefreshTest {
         assertEquals(SearchEmptyStateReason.NoResults, SearchRepository.uiState.value.emptyStateReason)
     }
 
+    @Test
+    fun `F85 a zero-hit IPTV answer marks the lane answered`() = runBlocking {
+        iptv.rowsFor = { emptyList() }
+        SearchRepository.search(query = "kapil", addons = emptyList())
+
+        withContext(Dispatchers.Default) {
+            withTimeout(5_000) { SearchRepository.uiState.first { !it.isLoading && it.iptvAnswered } }
+        }
+        assertEquals(emptyList(), SearchRepository.uiState.value.sections.map { it.key }, "no rows")
+    }
+
+    @Test
+    fun `F85 a throwing IPTV provider is not an answer`() = runBlocking {
+        iptv.rowsFor = { error("provider down") }
+        SearchRepository.search(query = "kapil", addons = emptyList())
+
+        withContext(Dispatchers.Default) {
+            withTimeout(5_000) { SearchRepository.uiState.first { !it.isLoading && it.emptyStateReason != null } }
+        }
+        assertFalse(SearchRepository.uiState.value.iptvAnswered, "a failure must not read as zero hits")
+    }
+
     private fun iptvItems(): List<String> =
         SearchRepository.uiState.value.sections.filter { it.key.startsWith("xtream_") }.flatMap { s -> s.items.map { it.name } }
 

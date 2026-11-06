@@ -107,6 +107,9 @@ object XtreamClient : IptvClient {
                 catchUpDays = (o["tv_archive_duration"].asIntOrNull() ?: 0).coerceAtLeast(0),
                 streamUrl = streamUrl(a, "live", id, "ts")
             )
+        }.let { rows ->
+            // B179: provider divider rows ("BG: #### Bulgaria Channels") are not streams.
+            ChannelSeparatorPolicy.withoutSeparators(rows, { it.name }, { it.epgChannelId }, { it.hasArchive })
         }
     }
 

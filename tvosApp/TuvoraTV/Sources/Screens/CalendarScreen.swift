@@ -133,7 +133,7 @@ struct CalendarScreen: View {
                     }
                 case .empty:
                     NuvioEmptyState(icon: "md_calendar_month", title: "Nothing on the horizon",
-                                    subtitle: "Shows in your library and the ones you are watching land here when a new episode is dated. Tap the bell on any show to make sure.")
+                                    subtitle: "Shows in your library and the ones you are watching land here when a new episode is dated. Press and hold + on a show to turn on its reminder.")
                 case .failed, .failedTimedOut:
                     NuvioStateMessage(title: "Couldn't load the calendar",
                                       message: screen.body == .failedTimedOut

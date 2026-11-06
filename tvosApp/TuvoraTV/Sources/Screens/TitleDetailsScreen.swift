@@ -154,23 +154,29 @@ struct TitleDetailsScreen: View {
             HStack(spacing: dp(12)) {
                 PlayPill(title: playLabel(meta)) { openSources(meta: meta, video: isSeries ? resumeEpisode(meta) : nil) }
                     .prefersDefaultFocus(true, in: namespace)
-                CircleIconButton(icon: saved ? "md_check_circle" : "library_add_plus") {
+                CircleIconButton(icon: saved ? "md_check_circle" : "library_add_plus", identifier: "title.save") {
                     Task { try? await TvTitle.shared.toggleSaved(meta: meta); saved = TvTitle.shared.isSaved(meta: meta) }
+                }
+                // The new-episode reminder lives in the + button's long-press menu (the app's secondary-action
+                // pattern: .contextMenu), not as its own button.
+                .contextMenu {
+                    if TvCalendar.shared.canBell(contentId: calendarId(meta), type: meta.type) {
+                        Button {
+                            TvCalendar.shared.toggleBell(contentId: calendarId(meta), type: meta.type)
+                        } label: {
+                            if bellOn { Label(L("Remind me of new episodes"), systemImage: "checkmark") }
+                            else { Text(L("Remind me of new episodes")) }
+                        }
+                    }
+                }
+                .task {
+                    TvCalendar.shared.start()
+                    for await next in TvCalendar.shared.state {
+                        bellOn = TvCalendar.shared.isBellOn(state: next, contentId: calendarId(meta), type: meta.type)
+                    }
                 }
                 CircleIconButton(icon: watched ? "md_check_circle" : "md_bookmark_border", filledWhite: watched) {
                     Task { try? await TvTitle.shared.toggleWatched(meta: meta); watched = TvTitle.shared.isWatched(meta: meta) }
-                }
-                if TvCalendar.shared.canBell(contentId: calendarId(meta), type: meta.type) {
-                    CircleIconButton(icon: bellOn ? "md_notifications_active" : "md_notifications", filledWhite: bellOn) {
-                        TvCalendar.shared.toggleBell(contentId: calendarId(meta), type: meta.type)
-                    }
-                    .accessibilityLabel(L(bellOn ? "Reminders on" : "Remind me of new episodes"))
-                    .task {
-                        TvCalendar.shared.start()
-                        for await next in TvCalendar.shared.state {
-                            bellOn = TvCalendar.shared.isBellOn(state: next, contentId: calendarId(meta), type: meta.type)
-                        }
-                    }
                 }
             }
             .scrollClipDisabled()
@@ -355,6 +361,7 @@ struct PlayPill: View {
 struct CircleIconButton: View {
     let icon: String
     var filledWhite = false   // NuvioTV: watched-selected circle is white
+    var identifier: String? = nil
     let action: () -> Void
     @Environment(\.nuvio) private var colors
     @FocusState private var focused: Bool
@@ -370,6 +377,7 @@ struct CircleIconButton: View {
         .buttonStyle(PlainNoChromeButtonStyle())
         .focused($focused)
         .reportsFocus(focused)
+        .accessibilityIdentifier(identifier ?? "")
     }
 }
 

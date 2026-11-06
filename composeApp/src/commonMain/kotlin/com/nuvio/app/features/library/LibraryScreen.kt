@@ -115,6 +115,7 @@ fun LibraryScreen(
     onPreviewClick: ((MetaPreview) -> Unit)? = null,
     onPreviewLongClick: ((MetaPreview) -> Unit)? = null,
     onDownloadsClick: (() -> Unit)? = null,
+    onRecordingsClick: (() -> Unit)? = null,
     onCalendarClick: (() -> Unit)? = null,
     disintegrationRequest: DisintegrationRequest<String>? = null,
 ) {
@@ -377,6 +378,9 @@ fun LibraryScreen(
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
+                                }
+                                if (onRecordingsClick != null) {
+                                    LibraryRecordingsButton(onClick = onRecordingsClick)
                                 }
                                 if (onDownloadsClick != null) {
                                     LibraryDownloadsButton(onClick = onDownloadsClick)

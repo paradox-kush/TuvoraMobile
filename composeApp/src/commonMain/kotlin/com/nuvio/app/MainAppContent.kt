@@ -413,6 +413,7 @@ internal fun MainAppContent(
     val continueWatchingSettingsTitle = stringResource(Res.string.compose_settings_page_continue_watching)
     val debridSettingsTitle = stringResource(Res.string.compose_settings_page_debrid)
     val downloadsTitle = stringResource(Res.string.compose_settings_root_downloads_title)
+    val recordingsTitle = stringResource(Res.string.recordings_title)
     val addonsSettingsTitle = stringResource(Res.string.compose_settings_page_addons)
     val pluginsSettingsTitle = stringResource(Res.string.compose_settings_page_plugins)
     val accountSettingsTitle = stringResource(Res.string.compose_settings_page_account)
@@ -1128,6 +1129,28 @@ internal fun MainAppContent(
             navController.navigate(PlayerRoute(launchId = launchId, title = playerLaunch.title))
         }
 
+        // A finished recording is a local file: it plays straight from disk (no server in between), like a download.
+        // contentType "recording" keeps it out of Continue Watching (see shouldTreatAsInProgressForContinueWatching).
+        fun openRecording(recording: com.nuvio.app.core.contracts.RecordingPlayback) {
+            val playerLaunch = PlayerLaunch(
+                profileId = activePlaybackProfileId,
+                title = recording.title,
+                sourceUrl = recording.fileUri,
+                streamTitle = recording.title,
+                streamSubtitle = listOfNotNull(recording.subtitle, recording.channelName).joinToString(" · "),
+                providerName = recording.channelName,
+                contentType = "recording",
+                parentMetaId = "recording:${recording.recordingId}",
+                parentMetaType = "recording",
+            )
+            if (externalPlaybackReady) {
+                coroutineScope.launch { openExternalPlayback(playerLaunch) }
+                return
+            }
+            val launchId = PlayerLaunchStore.put(playerLaunch)
+            navController.navigate(PlayerRoute(launchId = launchId, title = playerLaunch.title))
+        }
+
         fun openExternalStreamUrl(url: String): Boolean {
             val opened = runCatching {
                 uriHandler.openUri(url)
@@ -1738,6 +1761,10 @@ internal fun MainAppContent(
                                     }
                                 },
                                 onDownloadsClick = { navController.navigate(DownloadsRoute(downloadsTitle)) },
+                                // Recordings sit beside Downloads in Library; hidden when this build has none.
+                                onRecordingsClick = if (com.nuvio.app.core.contracts.RecordingsContentAccess.current() != null) {
+                                    { navController.navigate(RecordingsRoute(recordingsTitle)) }
+                                } else null,
                                 onCalendarClick = { navController.navigate(CalendarRoute()) },
                                 onContinueWatchingClick = onContinueWatchingClick,
                                 onContinueWatchingLongPress = onContinueWatchingLongPress,
@@ -1943,6 +1970,7 @@ internal fun MainAppContent(
                         onBack = onBack,
                         // UX36: the guide's long-press menu favourites through the same path as the hub.
                         onFavoriteChannel = ::toggleLiveChannelFavorite,
+                        onOpenRecordings = { navController.navigate(RecordingsRoute(recordingsTitle)) },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -1988,6 +2016,13 @@ internal fun MainAppContent(
                         navController = navController,
                         useNativeNavigation = useNativeNavigation,
                         onOpenDownload = ::openDownloadedItem,
+                    )
+                }
+                entry<RecordingsRoute> { route ->
+                    RecordingsDestination(
+                        route = route,
+                        navController = navController,
+                        onPlay = ::openRecording,
                     )
                 }
                 entry<CalendarRoute> { route ->

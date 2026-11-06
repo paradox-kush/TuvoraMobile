@@ -174,7 +174,17 @@ struct MainShell: View {
         }
         .task { await theme.observe() }
         .task { TopShelfPublisher.start() }
-        .onReceive(DeepLinkCenter.shared.$openSetupCode) { open in if open { destination = .settings } }
+        .onReceive(DeepLinkCenter.shared.$openSetupCode) { open in
+            guard open else { return }
+            contentFocus.expectContentFocus()
+            destination = .settings
+        }
+        .onReceive(DeepLinkCenter.shared.$openIptvTab) { open in
+            guard open else { return }
+            DeepLinkCenter.shared.openIptvTab = false
+            contentFocus.expectContentFocus()
+            destination = .iptv
+        }
         .onReceive(DeepLinkCenter.shared.$partyCode) { code in if code != nil { destination = .settings } }
         // Watch party news (joins, leaves, the party ending, what someone did to playback) as the shell's toast.
         .task { for await text in TvParty.shared.messages { playback.notify(text) } }

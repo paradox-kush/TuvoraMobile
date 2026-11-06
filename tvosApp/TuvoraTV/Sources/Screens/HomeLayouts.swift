@@ -472,11 +472,9 @@ private struct HomeRowsStates: View {
                     }
                     .padding(.leading, dp(48))
                 }
-            } else if rows.sections.isEmpty && !hasContinueWatching && !hasCollections {
-                let hint = TvHome.shared.emptyHomeHint()
-                NuvioStateMessage(title: StoreCopy.emptyHomeTitle(hint),
-                                  message: rows.errorMessage ?? StoreCopy.emptyHomeMessage(hint))
-                    .frame(height: dp(200))
+            } else {
+                EmptyHomeState(candidate: rows.sections.isEmpty && !hasContinueWatching && !hasCollections, errorMessage: rows.errorMessage,
+                                failedRows: TvHome.shared.showsPartialFailure(state: rows))
             }
         }
     }
