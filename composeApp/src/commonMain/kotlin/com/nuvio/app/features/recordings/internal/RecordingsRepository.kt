@@ -260,6 +260,19 @@ class RecordingsRepository(
         for (name in names) deletePartial(files.pathFor(name))
     }
 
+    /**
+     * A LIVE schedule that is leaving (cancelled, its series stopped) may own footage an earlier attempt recorded
+     * before the stream dropped; the row was removed while the retry waited, so nothing names it. That footage is a
+     * recording the user already has: it is finished as DONE (the same as pressing Stop) instead of deleted.
+     * True = kept (the schedule is gone and the row exists); false = nothing recorded, the caller deletes the dir.
+     */
+    private suspend fun keepLiveFootageOf(schedule: RecordingSchedule): Boolean {
+        if (schedule.mode != CaptureMode.LIVE) return false
+        val footage = settleLive(files.pathFor(RecordingLiveLayout.dirNameFor(schedule.id))) ?: return false
+        finishLiveRow(schedule, null, footage, null, clock())
+        return true
+    }
+
     /** A live recording's whole directory goes, and the capturer forgets its link budget. */
     private suspend fun deleteLiveDir(dirName: String, recordingId: String) {
         files.deleteTree(files.pathFor(dirName))
@@ -361,7 +374,7 @@ class RecordingsRepository(
             if (!hadRule && waiting.isEmpty()) return@locked
             waiting.forEach { id ->
                 alarms.disarm(id); ledger.forget(id)
-                doc.scheduleValues.firstOrNull { it.id == id }?.let { deletePartialsOf(it) }
+                doc.scheduleValues.firstOrNull { it.id == id }?.let { if (!keepLiveFootageOf(it)) deletePartialsOf(it) }
             }
             edit(
                 schedules = { list -> list.filterNot { it.id in waiting } },
@@ -380,7 +393,7 @@ class RecordingsRepository(
             alarms.disarm(scheduleId)
             val leaving = doc.scheduleValues.firstOrNull { it.id == scheduleId }
             if (leaving != null) {
-                deletePartialsOf(leaving)
+                if (!keepLiveFootageOf(leaving)) deletePartialsOf(leaving)
                 edit(schedules = { list -> list.filterNot { it.id == scheduleId } })
                 ledger.forget(scheduleId)
                 commit()
