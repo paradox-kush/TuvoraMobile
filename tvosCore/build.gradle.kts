@@ -259,7 +259,7 @@ kotlin {
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/party"))
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/calendar"))
             // Tests a Compose-side helper (CalendarHomeSection.kt) that tvosCore excludes: Apple TV draws the Calendar in SwiftUI.
-            kotlin.exclude("**/calendar/internal/CalendarTitleTypeForTest.kt")
+            kotlin.exclude("**/CalendarTitleTypeForTest.kt") // relative to the calendar srcDir above
         }
         commonTest.dependencies {
             implementation("io.ktor:ktor-client-mock:${libs.versions.ktor.get()}")
