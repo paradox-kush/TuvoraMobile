@@ -367,7 +367,13 @@ data class XtreamProgram(
      * Per-programme `has_archive`: true/false = the panel spoke, null = it said nothing (every
      * get_short_epg row). Feeds [XtreamCatchUp.actionFor]'s positive override.
      */
-    val hasArchive: Boolean? = null
+    val hasArchive: Boolean? = null,
+    /**
+     * The portal's own EPG programme id (Stalker `get_epg_info` row `id`): what a Stalker archive
+     * `create_link` names (`auto /media/<id>.mpg`). Null for every other provider and for rows stored
+     * before it was kept.
+     */
+    val programmeId: String? = null,
 )
 
 data class XtreamAccountInfo(

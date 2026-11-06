@@ -57,7 +57,7 @@ internal fun LazyListScope.xtreamSettingsContent(
         val knownInfo by PlaylistAccountInfoStore.shared.known.collectAsStateWithLifecycle()
         LaunchedEffect(managed.keys, state.accounts) {
             // One panel question per managed playlist per freshness window — enough for "N days left".
-            state.accounts.filter { it.id in managed }.forEach { PlaylistAccountInfoStore.shared.infoFor(it) }
+            PlaylistAccountInfoStore.shared.refreshManaged(state.accounts, managed.keys)
         }
 
         // The guide mirror indexes every region it can find, but a household uses a fraction of

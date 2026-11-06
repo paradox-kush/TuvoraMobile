@@ -63,6 +63,8 @@ class CatchUpPlaybackTest {
     @Test
     fun `an m3u8 replay is seekable`() {
         assertTrue(CatchUpPlayback.isSeekable("http://p.tv/timeshift/u/p/60/2026-08-15:18-30/12.m3u8"))
+        // ...but a single-use link answers only its first open, so a scrub (a new Range request) would fail it.
+        assertFalse(CatchUpPlayback.isSeekable("http://p.tv/timeshift/u/p/60/2026-08-15:18-30/12.m3u8", singleUse = true))
         assertTrue(CatchUpPlayback.isSeekable("http://p.tv/streaming/timeshift.php?stream=12&extension=m3u8"))
     }
 

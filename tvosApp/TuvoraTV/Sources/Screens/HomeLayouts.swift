@@ -157,6 +157,7 @@ struct ClassicHomeView: View {
                     if !continueWatching.isEmpty {
                         ContinueWatchingRow(items: continueWatching, style: cwStyle, size: cwStyle.classicSize, header: .classic, onOpen: onOpenCw)
                     }
+                    CalendarHomeSection(onOpen: onOpen)
                     HomeRowsStates(rows: rows, hasContinueWatching: !continueWatching.isEmpty, hasCollections: entries.contains { $0.collection != nil })
                     if rows != nil {
                         ForEach(entries, id: \.key) { entry in
@@ -335,6 +336,7 @@ struct GridHomeView: View {
                         if !continueWatching.isEmpty {
                             ContinueWatchingRow(items: continueWatching, style: cwStyle, size: cwStyle.gridSize, header: .grid, onOpen: onOpenCw)
                         }
+                        CalendarHomeSection(onOpen: onOpen)
                         HomeRowsStates(rows: rows, hasContinueWatching: !continueWatching.isEmpty, hasCollections: entries.contains { $0.collection != nil })
                         if rows != nil {
                             ForEach(entries, id: \.key) { entry in
@@ -470,11 +472,9 @@ private struct HomeRowsStates: View {
                     }
                     .padding(.leading, dp(48))
                 }
-            } else if rows.sections.isEmpty && !hasContinueWatching && !hasCollections {
-                let hint = TvHome.shared.emptyHomeHint()
-                NuvioStateMessage(title: StoreCopy.emptyHomeTitle(hint),
-                                  message: rows.errorMessage ?? StoreCopy.emptyHomeMessage(hint))
-                    .frame(height: dp(200))
+            } else {
+                EmptyHomeState(candidate: rows.sections.isEmpty && !hasContinueWatching && !hasCollections, errorMessage: rows.errorMessage,
+                                failedRows: TvHome.shared.showsPartialFailure(state: rows))
             }
         }
     }

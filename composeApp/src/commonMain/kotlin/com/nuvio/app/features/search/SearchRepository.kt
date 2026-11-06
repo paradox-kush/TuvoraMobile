@@ -80,7 +80,11 @@ object SearchRepository {
     private var lastRequestKey: IptvSearchRefreshPolicy.RequestKey? = null
 
     // UX15: the IPTV lane runs beside the add-on run, so a settings change can replace just it.
-    private class IptvLane(val rows: Deferred<List<HomeCatalogSection>>)
+    private class IptvLane(val rows: Deferred<List<HomeCatalogSection>>, private val failure: IptvFailure) {
+        /** True when the provider threw: the empty list it then yields is a failure, not "zero hits". */
+        val failed: Boolean get() = failure.failed
+    }
+    private class IptvFailure { @Volatile var failed = false }
     private class AddonRunResult(
         val sections: List<HomeCatalogSection>,
         val firstFailure: String?,
@@ -234,19 +238,33 @@ object SearchRepository {
                 resultChannel.close()
             }
             val results = arrayOfNulls<IndexedSearchResult>(loaders.size)
+            // UX180: the IPTV lane reports through the same channel, so the single consumer below
+            // publishes its rows the moment they are ready instead of waiting for the slowest add-on.
+            val iptvWatcher = if (iptvLane != null) {
+                launch {
+                    resultChannel.trySend(
+                        IndexedSearchResult(index = IPTV_RESULT_INDEX, iptvRows = awaitCurrentIptvRows()),
+                    )
+                }
+            } else {
+                null
+            }
+            var iptvRowsReady: List<HomeCatalogSection>? = null
 
             try {
                 for (result in resultChannel) {
-                    results[result.index] = result
-                    val sections = results.orderedSections()
-                    if (sections.isNotEmpty()) {
-                        _uiState.value = SearchUiState(
-                            isLoading = true,
-                            sections = sections,
-                        )
+                    if (result.index == IPTV_RESULT_INDEX) {
+                        iptvRowsReady = result.iptvRows
+                    } else {
+                        results[result.index] = result
                     }
+                    // A cancelled run must not overwrite the newer search's state.
+                    if (generation != searchGeneration) continue
+                    SearchInterimPolicy.interim(results.orderedSections(), iptvRowsReady)
+                        ?.let { _uiState.value = it }
                 }
             } finally {
+                iptvWatcher?.cancel()
                 closeChannelJob.cancel()
                 resultChannel.close()
             }
@@ -261,11 +279,15 @@ object SearchRepository {
             val xtreamSections = awaitCurrentIptvRows()
             if (generation != searchGeneration) return@launch
             completedAddonRun = addonRun
-            _uiState.value = settledState(addonRun, xtreamSections)
+            _uiState.value = settledState(addonRun, xtreamSections, iptvAnswered = iptvLaneAnswered())
         }
     }
 
-    private fun settledState(addonRun: AddonRunResult, xtreamSections: List<HomeCatalogSection>): SearchUiState {
+    private fun settledState(
+        addonRun: AddonRunResult,
+        xtreamSections: List<HomeCatalogSection>,
+        iptvAnswered: Boolean,
+    ): SearchUiState {
         val sections = addonRun.sections + xtreamSections
         return SearchUiState(
             isLoading = sections.isEmpty() && addonRun.hasPendingAddonManifests,
@@ -277,12 +299,14 @@ object SearchRepository {
                 else -> SearchEmptyStateReason.NoResults
             },
             errorMessage = if (addonRun.allAddonsFailed && xtreamSections.isEmpty()) addonRun.firstFailure else null,
+            iptvAnswered = iptvAnswered,
         )
     }
 
     /** Starts the IPTV half of a search; a newer lane replaces (and cancels) this one. */
     private fun startIptvLane(query: String): IptvLane {
         iptvLane?.rows?.cancel()
+        val failure = IptvFailure()
         val lane = IptvLane(
             scope.async {
                 try {
@@ -290,9 +314,11 @@ object SearchRepository {
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Throwable) {
+                    failure.failed = true
                     emptyList()
                 }
             },
+            failure,
         )
         iptvLane = lane
         return lane
@@ -304,6 +330,9 @@ object SearchRepository {
         iptvLane?.rows?.cancel()
         iptvLane = null
     }
+
+    /** F85: the current lane finished without throwing (call after [awaitCurrentIptvRows]). */
+    private fun iptvLaneAnswered(): Boolean = iptvLane?.let { !it.failed } == true
 
     /** The current lane's rows — following a lane that a settings change swapped in meanwhile. */
     private suspend fun awaitCurrentIptvRows(): List<HomeCatalogSection> {
@@ -340,7 +369,7 @@ object SearchRepository {
             }
             if (iptvLane !== lane || generation != searchGeneration) return@launch
             val addonRun = completedAddonRun ?: return@launch
-            _uiState.value = settledState(addonRun, rows)
+            _uiState.value = settledState(addonRun, rows, iptvAnswered = !lane.failed)
         }
     }
 
@@ -779,7 +808,12 @@ private data class IndexedSearchResult(
     val index: Int,
     val section: HomeCatalogSection? = null,
     val error: Throwable? = null,
+    /** Only on the [IPTV_RESULT_INDEX] event: the IPTV lane's rows. */
+    val iptvRows: List<HomeCatalogSection>? = null,
 )
+
+/** Marks the IPTV lane's own event in the add-on result channel. */
+private const val IPTV_RESULT_INDEX = -1
 
 private fun Array<IndexedSearchResult?>.orderedSections(): List<HomeCatalogSection> =
     mapNotNull { result -> result?.section }

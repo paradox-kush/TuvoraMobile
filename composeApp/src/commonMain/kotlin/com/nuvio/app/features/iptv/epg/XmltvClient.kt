@@ -229,7 +229,12 @@ object XmltvClient {
         } else {
             emptyMap()
         }
-        val replay = XmltvGuideReplay(lineup, picked, rules, TraktPlatformClock.nowEpochMs(), catchUpDaysBySid = catchUpDays)
+        // A guide id the viewer picked by hand has no auto-assignment, so it would keep only the default six hours.
+        val manual = if (catchUpDays.isEmpty()) emptyList() else runCatching {
+            val entityBySid = lineup.associate { it.streamId to com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(acc.id, it.name, it.epgId) }
+            XmltvIngestWindow.manualAssignments(entityBySid, com.nuvio.app.features.iptv.overlay.IptvOverlayStore.epgOverridePicks(acc.id))
+        }.getOrDefault(emptyList())
+        val replay = XmltvGuideReplay(lineup, picked, rules, TraktPlatformClock.nowEpochMs(), catchUpDaysBySid = catchUpDays, manualAssignments = manual)
         fun feedLine(line: String) { replay.feed(line); replay.feed("\n") }
         try {
             if (source.kind == EpgSourceKind.XTREAM_DERIVED) {

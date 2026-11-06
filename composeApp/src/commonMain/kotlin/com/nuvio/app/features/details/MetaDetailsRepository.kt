@@ -605,44 +605,37 @@ object MetaDetailsRepository {
         )
     }
 
-   
-    fun findEmbeddedStreams(videoId: String): List<com.nuvio.app.features.streams.StreamItem> =
+
+    /**
+     * Streams embedded in the series meta for [videoId]. Pass [parentMetaId] so the lookup reads that
+     * title's meta (the details screen's, or one fetched by [ensureMetaForStreams]) rather than
+     * whatever the details screen happened to publish last (B165: Continue Watching never opens it).
+     */
+    fun findEmbeddedStreams(videoId: String, parentMetaId: String? = null): List<com.nuvio.app.features.streams.StreamItem> =
         com.nuvio.app.features.addons.AddonSourcePolicy.embeddedStreamsForBuild(
-            streams = findEmbeddedStreamsUnfiltered(videoId),
+            streams = EmbeddedStreamLookup.streamsFor(
+                meta = EmbeddedStreamLookup.pickMeta(
+                    current = _uiState.value.meta,
+                    cached = cachedMetaByRequestKey.values.map { it.baseMeta },
+                    parentMetaId = parentMetaId,
+                ),
+                videoId = videoId,
+            ),
             streamSourcesEnabled = com.nuvio.app.core.build.AppFeaturePolicy.addonStreamSourcesEnabled,
             isIptv = com.nuvio.app.core.contracts.OwnSourcePolicy::isOwnProviderId,
         )
 
-    private fun findEmbeddedStreamsUnfiltered(videoId: String): List<com.nuvio.app.features.streams.StreamItem> {
-        val meta = _uiState.value.meta ?: return emptyList()
-        val videosWithStreams = meta.videos.filter { it.streams.isNotEmpty() }
-        if (videosWithStreams.isEmpty()) return emptyList()
-
-        val directMatch = videosWithStreams.firstOrNull { it.id == videoId }
-        if (directMatch != null) return directMatch.streams
-
-        val parts = videoId.split(":")
-        if (parts.size >= 3) {
-            val season = parts[parts.size - 2].toIntOrNull()
-            val episode = parts[parts.size - 1].toIntOrNull()
-            if (season != null && episode != null) {
-                val episodeMatch = videosWithStreams.firstOrNull { it.season == season && it.episode == episode }
-                if (episodeMatch != null) return episodeMatch.streams
-            }
-        }
-
-        val prefixMatch = videosWithStreams.firstOrNull { it.id.startsWith("$videoId:") }
-        if (prefixMatch != null) return prefixMatch.streams
-
-        if (videoId == meta.id && videosWithStreams.size == 1) {
-            return videosWithStreams.first().streams
-        }
-
-        if (videoId == meta.id && videosWithStreams.isNotEmpty()) {
-            return videosWithStreams.flatMap { it.streams }
-        }
-
-        return emptyList()
+    /**
+     * Loads (or reuses) the series meta for a stream list that did not come through the details screen
+     * (Continue Watching). Native sources (IPTV) build theirs locally; everything else goes through
+     * [fetch]. Null means it could not be loaded; the result is cached for [findEmbeddedStreams].
+     */
+    suspend fun ensureMetaForStreams(type: String, id: String): MetaDetails? {
+        peek(type, id)?.let { return it }
+        if (!MetaSourceAccess.current().handlesId(id)) return fetch(type, id)
+        val requestKey = "$type:$id"
+        return withContext(Dispatchers.Default) { MetaSourceAccess.current().buildNativeMeta(id) }
+            ?.also { cachedMetaByRequestKey[requestKey] = CachedMetaEntry(baseMeta = it) }
     }
 
     // --- Xtream IPTV short-circuit (bypasses addons; native detail for VOD/series) ---

@@ -3,6 +3,8 @@ package com.tuvora.tvos.screens
 import com.nuvio.app.core.contracts.LivePlaybackAccess
 import com.nuvio.app.features.iptv.CatchUpDialectWalk
 import com.nuvio.app.features.iptv.CatchUpPlayback
+import com.nuvio.app.features.iptv.M3uReplayWalk
+import com.nuvio.app.features.iptv.ReplayOpenFence
 import com.nuvio.app.features.iptv.XtreamProgram
 import com.nuvio.app.features.livetv.GuideWindowSource
 import com.nuvio.app.features.livetv.LiveGuideChannel
@@ -15,79 +17,18 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** What a replay start or a walk step produced: a session to show, or the viewer-facing reason there is none. */
-data class TvReplayStep(val session: TvPlayerSession?, val notice: String?)
+data class TvReplayStep(
+    val session: TvPlayerSession?,
+    val notice: String?,
+    /** The open or the link hung or failed: Swift offers Retry (the same programme again), not "no recording". */
+    val canRetry: Boolean = false,
+    /** [session] is the live channel the replay ended on: Swift swaps it in and shows [notice] over it. */
+    val rejoinsLive: Boolean = false,
+)
 
-/**
- * One programme replay, run through the shared catch-up path exactly as the phone's LiveTvScreen
- * does: [LiveTvData.catchUpRequest] → [CatchUpDialectWalk] picks the URL shape → [LiveTvData.catchUpSource]
- * resolves it like a live link → a [PlayerLaunch] carrying [LiveReplayLaunch] (live identity, replay
- * bounds, seekable). [supervise] follows each attempt: proof pins the dialect, failure walks to the
- * next shape (TvReplayPolicy).
- */
-class TvReplay internal constructor(
-    private val walk: CatchUpDialectWalk,
-    private val channel: LiveGuideChannel,
-    private val programme: XtreamProgram,
-) {
-    private var attempt: CatchUpDialectWalk.Attempt? = null
-
-    internal suspend fun begin(): TvReplayStep {
-        val request = LiveTvData.catchUpRequest(channel.contentId, programme.startMs, programme.endMs)
-        val step = request?.let(walk::begin)
-        if (step !is CatchUpDialectWalk.Step.Next) return TvReplayStep(null, TvReplayPolicy.noRecordingText(programme.title))
-        return open(step.attempt)
-    }
-
-    /**
-     * Waits for [session]'s outcome. Returns null when it played (walk pinned) or the viewer left
-     * (nothing to decide after [TIMEOUT_MS]); otherwise the next attempt or the notice that ends it.
-     */
-    suspend fun supervise(session: TvPlayerSession): TvReplayStep? {
-        val current = attempt ?: return null
-        val verdict = withTimeoutOrNull(TIMEOUT_MS) {
-            session.state.first {
-                TvReplayPolicy.verdict(it.isPlaying, it.positionMs, it.isEnded, it.errorMessage) != TvReplayVerdict.Pending
-            }.let { TvReplayPolicy.verdict(it.isPlaying, it.positionMs, it.isEnded, it.errorMessage) }
-        } ?: return null
-        val error = session.state.value.errorMessage
-        return when (verdict) {
-            TvReplayVerdict.Proven -> { walk.onSuccess(current.token); null }
-            TvReplayVerdict.SessionLimit -> TvReplayStep(null, TvReplayPolicy.SESSION_LIMIT_TEXT)
-            else -> when (val step = walk.onFailure(current.token, CatchUpPlayback.failureKind(error))) {
-                is CatchUpDialectWalk.Step.Next -> { session.close(); open(step.attempt) }
-                CatchUpDialectWalk.Step.Stale -> null
-                else -> TvReplayStep(null, TvReplayPolicy.noRecordingText(programme.title))
-            }
-        }
-    }
-
-    private suspend fun open(next: CatchUpDialectWalk.Attempt): TvReplayStep {
-        attempt = next
-        val source = LiveTvData.catchUpSource(channel.contentId, next.url)
-        val title = TvReplayPolicy.title(channel.name, programme.title)
-        val launch = PlayerLaunch(
-            profileId = ProfileRepository.activeProfileId,
-            title = title,
-            sourceUrl = source.url,
-            sourceHeaders = source.headers,
-            streamTitle = title,
-            streamType = "live",
-            providerName = LivePlaybackAccess.current().accountNameFor(channel.contentId) ?: "IPTV",
-            providerAddonId = "xtream",
-            logo = channel.logo,
-            contentType = "live",
-            videoId = channel.contentId,
-            parentMetaId = channel.contentId,
-            parentMetaType = "tv",
-            liveReplay = LiveReplayLaunch(programme.title, programme.startMs, programme.endMs),
-        )
-        return TvReplayStep(TvPlayerSession(launch), null)
-    }
-
-    private companion object {
-        /** An attempt that neither plays nor fails in this long is left to the player's own error UI. */
-        const val TIMEOUT_MS = 45_000L
-    }
+/** What Swift loops on while a replay runs: the next session to show, or the notice that ends it, or null when done. */
+interface TvReplaySupervisor {
+    suspend fun supervise(session: TvPlayerSession): TvReplayStep?
 }
 
 /**
@@ -98,7 +39,12 @@ class TvReplay internal constructor(
 object TvCatchUp {
     private val walk by lazy { CatchUpDialectWalk(LiveTvData.winnerMemory()) }
 
-    fun supportsCatchUp(contentId: String): Boolean = LiveTvData.supportsCatchUp(contentId)
+    /**
+     * Whether the guide may offer replay on this playlist's channels: an Xtream panel, or a URL/file M3U
+     * playlist (which channels actually have catch-up is each channel's own `hasArchive`).
+     */
+    fun supportsCatchUp(contentId: String): Boolean =
+        LiveTvData.supportsCatchUp(contentId) || LiveTvData.isM3uPlaylist(contentId)
 
     /** Pulls the FOCUSED channel's guide table (never a page of rows: the 2 MB → 40 MB lesson). */
     suspend fun ensureHistory(contentId: String) = LiveTvData.ensureHistory(contentId)
@@ -120,13 +66,78 @@ object TvCatchUp {
     suspend fun description(contentId: String, programme: XtreamProgram): String =
         LiveTvData.programmeDescription(contentId, programme.startMs)?.takeIf { it.isNotBlank() } ?: programme.description
 
+    /** M3U playlists build replays from their own catch-up attributes (shared M3uReplayWalk), not the Xtream dialects. */
+    private val m3uWalk by lazy { M3uReplayWalk(LiveTvData.winnerStore()) }
+
+    /** Opens run detached under a deadline: only the latest may publish a session (shared ReplayOpenFence). */
+    private val openFence = ReplayOpenFence()
+
+    /** The viewer chose something else or left: an open still in flight publishes nothing. */
+    fun cancelOpens() { openFence.next() }
+
+    /** A Stalker portal's replays: one minted single-use link each (no walk), one mint at a time. */
+    private val stalkerStarter by lazy { TvStalkerReplayStarter(openFence) }
+
     suspend fun startReplay(channel: LiveGuideChannel, programme: XtreamProgram): TvReplayPair {
-        val replay = TvReplay(walk, channel, programme)
-        return TvReplayPair(replay, replay.begin())
+        if (LiveTvData.isStalkerPortal(channel.contentId)) return startStalkerReplay(channel, programme)
+        val ticket = openFence.next()
+        if (LiveTvData.isM3uPlaylist(channel.contentId)) {
+            val replay = TvReplay(m3uWalk, openFence, ticket, channel, programme)
+            return TvReplayPair(replay, replay.beginM3u(m3uWalk))
+        }
+        val replay = TvReplay(walk, openFence, ticket, channel, programme)
+        return TvReplayPair(replay, replay.beginXtream(walk))
     }
+
+    /**
+     * A Stalker portal's replay: mint ONE `create_link` for the programme (its portal id; none = the no-recording
+     * notice), open ONE session on it flagged single-use, and follow it with [TvStalkerReplay]. Retry from Swift
+     * calls this again, which is a fresh mint; the spent URL is never opened a second time.
+     */
+    private suspend fun startStalkerReplay(channel: LiveGuideChannel, programme: XtreamProgram): TvReplayPair {
+        val contentId = channel.contentId
+        val io = LiveTvReplayIo(channel)
+        val result = stalkerStarter.start(
+            sourceType = LiveTvData.sourceTypeOf(contentId),
+            programmeTitle = programme.title,
+            mint = { LiveTvData.stalkerArchiveLink(contentId, programme.startMs) },
+            resolve = { url -> io.resolveSingleUse(url) },
+        )
+        return when (result) {
+            TvStalkerStart.Ignore -> TvReplayPair(TvNoReplay, TvReplayStep(null, null))
+            is TvStalkerStart.Notice -> TvReplayPair(TvNoReplay, TvReplayStep(null, result.text, canRetry = result.canRetry))
+            is TvStalkerStart.Play -> {
+                val title = TvReplayPolicy.title(channel.name, programme.title)
+                val launch = PlayerLaunch(
+                    profileId = ProfileRepository.activeProfileId,
+                    title = title,
+                    sourceUrl = result.source.url,
+                    sourceHeaders = result.source.headers,
+                    streamTitle = title,
+                    streamType = "live",
+                    providerName = io.providerName(),
+                    providerAddonId = "xtream",
+                    logo = channel.logo,
+                    contentType = "live",
+                    videoId = contentId,
+                    parentMetaId = contentId,
+                    parentMetaType = "tv",
+                    liveReplay = LiveReplayLaunch(programme.title, programme.startMs, programme.endMs),
+                )
+                // The link is spent by this one open: the session never re-opens it (no reconnect, retry or lane change).
+                val session = TvPlayerSession(launch).bindSingleUseLink(true)
+                TvReplayPair(TvStalkerReplay(openFence, result.ticket), TvReplayStep(session, null))
+            }
+        }
+    }
+}
+
+/** No supervision: the replay ended before a session existed. */
+private object TvNoReplay : TvReplaySupervisor {
+    override suspend fun supervise(session: TvPlayerSession): TvReplayStep? = null
 }
 
 data class TvWindowProgrammes(val programmes: List<XtreamProgram>, val fromHistory: Boolean)
 
 /** A started replay and its first step. */
-data class TvReplayPair(val replay: TvReplay, val first: TvReplayStep)
+data class TvReplayPair(val replay: TvReplaySupervisor, val first: TvReplayStep)

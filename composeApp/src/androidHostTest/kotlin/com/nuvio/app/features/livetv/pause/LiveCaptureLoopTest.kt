@@ -47,6 +47,9 @@ class LiveCaptureLoopTest {
         *Array(halfSeconds + 1) { k -> Ts.media(pcrBase = k * 45_000L, rai = true, pusi = true, tag = 0x20 + k % 20) },
     )
 
+    /** Set to make the call factory throw a non-Exception Throwable on its next open (the loop's own catch-all). */
+    private val explodeOnNextOpen = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private fun start(retention: LiveRetention, keepMs: Long = 6_000L): Pair<LiveCaptureLoop, CopyOnWriteArrayList<LiveCaptureEvent>> {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest) =
@@ -54,7 +57,10 @@ class LiveCaptureLoopTest {
         }
         server.start()
         val env = LiveCaptureEnv(
-            callFactoryFor = { _, _ -> OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).build() },
+            callFactoryFor = { _, _ ->
+                if (explodeOnNextOpen.get()) throw LinkageError("unexpected failure inside the capture")
+                OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).build()
+            },
             freeBytes = { freeBytes.get() },
             reconnectDelayMs = { 5L },
             minPollMs = 20L,
@@ -110,7 +116,38 @@ class LiveCaptureLoopTest {
         assertTrue(pieces().isNotEmpty(), "stop keeps what was recorded")
         loop.dispose()
         withTimeout(5_000) { loop.cleanup!!.join() }
-        assertFalse(dir.exists(), "dispose is what deletes")
+        assertTrue(dir.exists(), "a recording is never deleted by dispose")
+        assertTrue(pieces().isNotEmpty(), "dispose keeps the recorded pieces")
+    }
+
+    @Test
+    fun `keep all dispose while recording keeps the files and ends the playlist`() = runBlocking {
+        val (loop, seen) = start(LiveRetention.KeepAll)
+        seen.await { it is LiveCaptureEvent.Buffered && it.bufferedMs >= 8_000 }
+        loop.dispose()
+        withTimeout(5_000) { loop.cleanup!!.join() }
+        assertTrue(dir.exists(), "dispose must not delete a recording")
+        assertTrue(pieces().isNotEmpty(), "the recorded pieces stay")
+        assertTrue("#EXT-X-ENDLIST" in playlist(), "an abandoned recording is still a finished, playable one")
+    }
+
+    @Test
+    fun `trim dispose still deletes the directory`() = runBlocking {
+        val (loop, seen) = start(LiveRetention.Trim(LivePausePolicy.MIN_KEEP_MS), keepMs = LivePausePolicy.MIN_KEEP_MS)
+        seen.await { it is LiveCaptureEvent.Buffered }
+        loop.dispose()
+        withTimeout(5_000) { loop.cleanup!!.join() }
+        assertFalse(dir.exists(), "live pause is a scratch buffer: dispose deletes it")
+    }
+
+    @Test
+    fun `an unexpected failure mid-recording still ends the playlist and keeps the files`() = runBlocking {
+        val (_, seen) = start(LiveRetention.KeepAll)
+        seen.await { it is LiveCaptureEvent.Buffered && it.bufferedMs >= 8_000 }
+        explodeOnNextOpen.set(true)   // the body ends, the loop reopens, and the open blows up
+        seen.await { it is LiveCaptureEvent.Failed }
+        withTimeout(5_000) { while ("#EXT-X-ENDLIST" !in playlist()) delay(20) }
+        assertTrue(pieces().isNotEmpty(), "what was recorded stays")
     }
 
     @Test

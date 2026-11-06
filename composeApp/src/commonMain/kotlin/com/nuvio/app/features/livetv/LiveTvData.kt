@@ -9,7 +9,6 @@ import com.nuvio.app.features.iptv.CatchUpWinnerStore
 import com.nuvio.app.features.iptv.IptvClient
 import com.nuvio.app.features.iptv.IptvPanelGuard
 import com.nuvio.app.features.iptv.CatchUpNextProgramme
-import com.nuvio.app.features.iptv.M3uCatchUpInfo
 import com.nuvio.app.features.iptv.M3uReplayContinuation
 import com.nuvio.app.features.iptv.M3uReplayWalk
 import com.nuvio.app.features.iptv.XtreamCatchUp
@@ -30,6 +29,7 @@ import com.nuvio.app.features.iptv.allowsCategory
 import com.nuvio.app.features.iptv.overlay.IptvHiddenItemsPolicy
 import com.nuvio.app.features.iptv.XtreamSearchIndex
 import com.nuvio.app.features.iptv.resolveLivePlaybackUrl
+import com.nuvio.app.features.player.LiveLinkReconnectPolicy
 import com.nuvio.app.features.trakt.TraktPlatformClock
 import kotlinx.coroutines.flow.StateFlow
 
@@ -118,12 +118,12 @@ object LiveTvData {
             ?: XtreamItemRegistry.liveStreamUrlForAsync(contentId, forceMint)
             ?: return null
         val dnsProvider = XtreamItemRegistry.dnsProviderFor(contentId)
-        val playback = resolveLivePlaybackUrl(immediate, dnsProvider)
-        return LiveChannelSource(
-            url = playback.url,
-            headers = playback.headers,
-            singleUseLink = sourceTypeOf(contentId) == com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER,
+        val singleUse = sourceTypeOf(contentId) == com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER
+        val playback = resolveLivePlaybackUrl(
+            immediate, dnsProvider,
+            followRedirects = LiveLinkReconnectPolicy.allowsRedirectProbe(LiveLinkReconnectPolicy.modeFor(singleUse)),
         )
+        return LiveChannelSource(url = playback.url, headers = playback.headers, singleUseLink = singleUse)
     }
 
     /**
@@ -335,18 +335,15 @@ object LiveTvData {
     /** Stored programmes overlapping a guide window — the only source of PAST rows. */
     suspend fun historyProgrammes(contentId: String, fromMs: Long, toMs: Long): List<XtreamProgram> {
         val (account, streamId) = accountFor(contentId) ?: return emptyList()
-        // An M3U catch-up channel's past is its XMLTV guide (kept up to catchup-days); an M3U channel without
-        // catch-up has no history and keeps the now-and-next ladder it always had.
-        if (account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_M3U_FILE) {
-            if (m3uCatchUpOf(account, streamId) == null) return emptyList()
-            return runCatching { XmltvClient.storedWindow(account, streamId, fromMs, toMs) }.getOrDefault(emptyList())
+        // An M3U channel's past is its own XMLTV guide on disk (6 h for every channel, the whole archive for a
+        // catch-up one); without catch-up the past shows but has nothing to replay. See [GuideHistorySource].
+        val isM3u = account.sourceType == SOURCE_TYPE_M3U_URL || account.sourceType == SOURCE_TYPE_M3U_FILE
+        return when (GuideHistorySource.forChannel(isM3u, hasCatchUp = false)) {
+            GuideHistorySource.Source.STORED_XMLTV ->
+                runCatching { XmltvClient.storedWindow(account, streamId, fromMs, toMs) }.getOrDefault(emptyList())
+            GuideHistorySource.Source.CATCHUP_TABLE -> CatchUpEpgRepository.window(account, streamId, fromMs, toMs)
         }
-        return CatchUpEpgRepository.window(account, streamId, fromMs, toMs)
     }
-
-    /** The channel's own catch-up from the content database; null for a channel without (or a missing row). */
-    private suspend fun m3uCatchUpOf(account: XtreamAccount, streamId: Int): M3uCatchUpInfo? =
-        runCatching { IptvContentDb.channelRow(account.id, streamId)?.catchUp }.getOrNull()
 
     /** The whole synopsis for the programme sheet — truncated everywhere else. */
     suspend fun programmeDescription(contentId: String, startMs: Long): String? {
@@ -386,10 +383,32 @@ object LiveTvData {
      * Panels 302-redirect catch-up to token-bearing edge hosts, so the resolution has to behave
      * exactly like the live one rather than handing the raw URL to the engine.
      */
-    suspend fun catchUpSource(contentId: String, url: String): LiveChannelSource {
+    suspend fun catchUpSource(contentId: String, url: String, singleUse: Boolean = false): LiveChannelSource {
         val dnsProvider = XtreamItemRegistry.dnsProviderFor(contentId)
-        val playback = resolveLivePlaybackUrl(url, dnsProvider)
-        return LiveChannelSource(url = playback.url, headers = playback.headers)
+        val playback = resolveLivePlaybackUrl(
+            url, dnsProvider,
+            followRedirects = LiveLinkReconnectPolicy.allowsRedirectProbe(LiveLinkReconnectPolicy.modeFor(singleUse)),
+        )
+        return LiveChannelSource(url = playback.url, headers = playback.headers, singleUseLink = singleUse)
+    }
+
+    /** Whether [contentId] belongs to a Stalker portal (its replays are minted per programme, never walked). */
+    fun isStalkerPortal(contentId: String): Boolean = sourceTypeOf(contentId) == com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER
+
+    /**
+     * One fresh archive create_link for the programme starting at [startMs] on [contentId]'s channel: the portal's
+     * own EPG programme id is read from the stored guide, then minted. Null = no programme id (nothing to ask the
+     * portal for). Every call mints a NEW single-use link: this is also what Retry runs.
+     */
+    suspend fun stalkerArchiveLink(contentId: String, startMs: Long): com.nuvio.app.features.iptv.stalker.StalkerArchiveAnswer? {
+        val (account, streamId) = accountFor(contentId) ?: return null
+        // A failed guide read THROWS (the replay's bounded mint turns it into Failed + Retry); only a guide that
+        // loaded and has no such programme is "no recording".
+        CatchUpEpgRepository.ensureStalkerGuide(account)
+        val programmeId = CatchUpEpgRepository.windowOrThrow(account, streamId, startMs, startMs + 1L)
+            .firstOrNull { it.startMs == startMs }?.programmeId
+            ?: return null
+        return com.nuvio.app.features.iptv.stalker.StalkerClient.createArchiveLink(account, programmeId)
     }
 
     /** The learned-winner memory the walks are constructed with (Xtream dialects and M3U link forms share it). */

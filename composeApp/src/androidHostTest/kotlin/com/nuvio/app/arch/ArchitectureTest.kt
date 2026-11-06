@@ -30,7 +30,7 @@ class ArchitectureTest {
     // --- fork-side definition (upstream absence, not directory naming) ---
     private val forkPaths = listOf(
         "/features/radar/", "/features/iptv/", "/features/epg/", "/features/livetv/", "/features/dev/", "/features/recordings/",
-        "/features/announcements/",
+        "/features/announcements/", "/features/calendar/",
         "/core/analytics/", "/core/diag/", "/core/memory/", "/core/rec/",
     )
     private val forkFiles = listOf("ImmersivePlaybackGate.kt")
@@ -44,7 +44,7 @@ class ArchitectureTest {
 
     // fork FEATURE refs (R2b) + fork-only core SUBSYSTEM refs (R2d — rec+memory get ports;
     // analytics+diag are DELIBERATELY EXEMPT: cross-cutting telemetry, accepted as thin diff).
-    private val forkRef = Regex("""\bcom\.nuvio\.app\.features\.(radar|iptv|epg|livetv|dev|announcements|recordings)\.""")
+    private val forkRef = Regex("""\bcom\.nuvio\.app\.features\.(radar|iptv|epg|livetv|dev|announcements|calendar|recordings)\.""")
     private val forkCoreRef = Regex("""\bcom\.nuvio\.app\.core\.(rec|memory)\.""")
 
     // Strip block + WHOLE-LINE // comments only. A naive //.* eats the // in "https://…" literals and
@@ -124,7 +124,8 @@ class ArchitectureTest {
         val declaredOn = Regex("""\b\w*[lL]oading\w*\s*:\s*Boolean\s*=\s*true\b""")
         val mainSourceSet = Regex("""/composeApp/src/[A-Za-z]*Main/""")
         val violations = files
-            .filter { (p, _) -> ("/features/iptv/" in p || "/features/livetv/" in p) && mainSourceSet.containsMatchIn(p) }
+            // The Calendar adopted BoundedLoad (its refresh is LoadSurface.CALENDAR), so R7 covers it too.
+            .filter { (p, _) -> ("/features/iptv/" in p || "/features/livetv/" in p || "/features/calendar/" in p) && mainSourceSet.containsMatchIn(p) }
             .filterNot { (p, _) -> p.endsWith("/features/iptv/BoundedLoad.kt") }
             .flatMap { (p, text) ->
                 stripComments(text).lines().withIndex()

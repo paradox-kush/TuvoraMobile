@@ -36,8 +36,9 @@ object LiveLinkReconnectPolicy {
         "reconnect=0,reconnect_streamed=0,reconnect_on_network_error=0"
 
     /**
-     * A live Stalker channel is single-use. A replay is not marked here: it is opened from the archive
-     * URL the catch-up walk built, never from `create_link`.
+     * A live Stalker channel is single-use. A replay is not marked here (this overload keeps the walked
+     * Xtream/M3U replay reusable); a Stalker archive replay is minted by `create_link` and flagged through
+     * [modeFor] (singleUseLink = true).
      */
     fun modeFor(isStalkerSource: Boolean, isLive: Boolean, isCatchUp: Boolean = false): Mode =
         if (isStalkerSource && isLive && !isCatchUp) Mode.SINGLE_USE else Mode.ENGINE_RECONNECT
@@ -51,13 +52,33 @@ object LiveLinkReconnectPolicy {
         Mode.SINGLE_USE -> SINGLE_USE_LAVF_OPTIONS
     }
 
-    /** Media3 lane: OkHttp `retryOnConnectionFailure` and the load-error retries. */
-    fun allowsTransportRetry(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
-
     /**
-     * Whether a failed engine may hand the SAME URL to the other engine (Android's auto engine
-     * switch, Apple TV's lane escalation). A spent single-use link would only 401 again there; its
-     * recovery is a fresh mint, and once that is exhausted, the error.
+     * May the surface answer a first-engine failure by opening the SAME url on the other engine (Exo -> libmpv)?
+     * Never for a single-use link: the first open spent it, so the second engine would be handed a dead token
+     * (and a second request on the provider's session cap). The app mints a fresh link instead.
+     * Also Apple TV's lane escalation (AVPlayer -> libmpv) and Android's auto engine switch.
      */
     fun allowsEngineFailover(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
+
+    /**
+     * May the link go through the on-disk media cache (a caching data source can re-request ranges of the URL)?
+     * Never for a single-use link: it is read once, front to back, by the engine alone.
+     */
+    fun allowsMediaCache(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
+
+    /**
+     * May the app GET the URL itself to learn where it redirects (the DoH redirect-follow before an IP rewrite)?
+     * Never for a single-use link: that GET is a real request and spends the token before the player opens it.
+     * The host is rewritten as it stands, with no redirect walk.
+     */
+    fun allowsRedirectProbe(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
+
+    /**
+     * May the same Media3 player be rebuilt with other decoders and re-open the URL after a decoder failure?
+     * Never for a single-use link: the rebuild is a second open of a spent token. Same rule as an engine failover.
+     */
+    fun allowsDecoderFallback(mode: Mode): Boolean = allowsEngineFailover(mode)
+
+    /** Media3 lane: OkHttp `retryOnConnectionFailure` and the load-error retries. */
+    fun allowsTransportRetry(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
 }

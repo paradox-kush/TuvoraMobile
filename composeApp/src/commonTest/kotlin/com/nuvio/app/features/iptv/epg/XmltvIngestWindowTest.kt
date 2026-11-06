@@ -1,6 +1,7 @@
 package com.nuvio.app.features.iptv.epg
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -126,5 +127,38 @@ class XmltvCatchUpHistoryWindowTest {
             replay.finish(rows::add)
             assertTrue(rows.map { it.title } == listOf("Replayable 2d"), "only the catch-up channel keeps its past: ${rows.map { it.title }}")
         } finally { replay.dispose() }
+    }
+
+    @Test
+    fun `a guide id picked by hand keeps its channel's archive depth`() {
+        val nowMs = parseXmltvTime("20261010120000 +0000")!!
+        // The channel's own tvg-id matches nothing in the guide; the viewer picked "custom" for it.
+        val xml = "<tv><channel id=\"custom\"><display-name>Custom Feed</display-name></channel>" +
+            "<programme channel=\"custom\" start=\"20261008120000 +0000\" stop=\"20261008130000 +0000\"><title>Two days ago</title></programme></tv>"
+        fun run(manual: List<Pair<Int, String>>): List<String> {
+            val replay = XmltvGuideReplay(
+                listOf(com.nuvio.app.features.epg.GuideChannelMatcher.LineupChannel(1, "Zzz Qqq", "no-such-id")),
+                setOf("custom"), com.nuvio.app.features.epg.ChannelNameCleaner.Rules.DEFAULT, nowMs,
+                catchUpDaysBySid = mapOf(1 to 3), manualAssignments = manual,
+            )
+            try {
+                replay.feed(xml)
+                val rows = mutableListOf<XmltvProgramme>()
+                replay.finish(rows::add)
+                return rows.map { it.title }
+            } finally { replay.dispose() }
+        }
+        assertEquals(listOf("Two days ago"), run(listOf(1 to "custom")), "the picked guide keeps the channel's three days")
+        assertEquals(emptyList(), run(emptyList()), "without the pick it falls back to six hours")
+    }
+
+    @Test
+    fun `manual picks join the lineup through the entity id and span profiles`() {
+        val picks = listOf("e1" to "guideA", "e1" to "guideB", "e9" to "elsewhere")
+        assertEquals(
+            listOf(1 to "guideA", 1 to "guideB"),
+            XmltvIngestWindow.manualAssignments(mapOf(1 to "e1", 2 to "e2"), picks),
+        )
+        assertEquals(emptyList(), XmltvIngestWindow.manualAssignments(mapOf(1 to "e1"), emptyList()))
     }
 }

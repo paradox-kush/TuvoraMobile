@@ -44,21 +44,26 @@ struct HomeScreen: View {
     }()
     init() { _ = Self.applySmokePrefs }
 
+    /// Simulator hook `-smokeEmptyHome` (DEBUG): shows Home as a fresh install with no sources does, whatever the
+    /// simulator profile already holds (EmptyHomeFocusTests, B193). Never compiled into a release build.
+    private static let emptyRows = HomeUiState(isLoading: false, heroItems: [], sections: [], errorMessage: nil, failedRowCount: 0)
+    private static var smokeEmptyHome: Bool { EmptyHomeSmoke.enabled }
+
     var body: some View {
         layoutBody
         .task {
             TvHome.shared.start()
-            for await next in TvHome.shared.rows { rows = next; ContentFocusActivity.contentChanged(); if hero == nil, let first = next.heroItems.first ?? next.sections.first?.items.first { hero = HeroContent(preview: first) } }
+            for await next in TvHome.shared.rows { rows = Self.smokeEmptyHome ? Self.emptyRows : next; ContentFocusActivity.contentChanged(); if hero == nil, !Self.smokeEmptyHome, let first = next.heroItems.first ?? next.sections.first?.items.first { hero = HeroContent(preview: first) } }
         }
         // Media-server rows: re-pulled when Home appears (never a timer); the contributor's own TTL makes a quick return free.
         .task { TvMediaServers.shared.refreshHomeRows() }
         // What failed on an earlier load (an add-on manifest, a catalog row) is fetched again when Home appears;
         // only the failures, and no request at all when nothing failed.
         .task { TvHome.shared.retryFailed() }
-        .task { for await next in TvHome.shared.continueWatching { continueWatching = next; ContentFocusActivity.contentChanged() } }
+        .task { for await next in TvHome.shared.continueWatching { continueWatching = Self.smokeEmptyHome ? [] : next; ContentFocusActivity.contentChanged() } }
         .task {
             TvCollections.shared.start()
-            for await next in TvCollections.shared.entries { entries = next; ContentFocusActivity.contentChanged(); smokeOpenFolder() }
+            for await next in TvCollections.shared.entries { entries = Self.smokeEmptyHome ? [] : next; ContentFocusActivity.contentChanged(); smokeOpenFolder() }
         }
         .task(id: pendingHero) {
             // Hero changes are debounced 450 ms (ModernHomeHero), so fast scrolling doesn't strobe.
@@ -127,8 +132,11 @@ struct HomeScreen: View {
                     ContinueWatchingRow(items: continueWatching, style: cwStyle, size: cwStyle.modernSize, header: .modern,
                                         onFocus: focusCw, onOpen: open)
                 }
+                // Calendar: bell reminders card + the opt-in Coming up row (shared Calendar via TvCalendar).
+                CalendarHomeSection(onOpen: { details = PreviewBox(preview: $0) })
                 if let rows {
-                    if TvHome.shared.showsPartialFailure(state: rows) {
+                    // When nothing at all is shown, the empty state below carries the one Retry (never two cards).
+                    if TvHome.shared.showsPartialFailure(state: rows) && !(entries.isEmpty && !(cwEnabled && !continueWatching.isEmpty) && rows.sections.isEmpty) {
                         NuvioStateMessage(title: "Some rows didn’t load",
                                           message: "Tuvora tries again each time you come back to Home.",
                                           retry: { TvHome.shared.retryFailed() })
@@ -145,12 +153,8 @@ struct HomeScreen: View {
                                           onFocus: { pendingHero = HeroContent(collection: collection, folder: $0) }) { openFolder = $0 }
                         }
                     }
-                    if entries.isEmpty && !rows.isLoading && continueWatching.isEmpty {
-                        let hint = TvHome.shared.emptyHomeHint()
-                        NuvioStateMessage(title: StoreCopy.emptyHomeTitle(hint),
-                                          message: rows.errorMessage ?? StoreCopy.emptyHomeMessage(hint))
-                            .frame(height: dp(200))
-                    }
+                    EmptyHomeState(candidate: entries.isEmpty && !(cwEnabled && !continueWatching.isEmpty) && rows.sections.isEmpty && !rows.isLoading,
+                                   errorMessage: rows.errorMessage, failedRows: TvHome.shared.showsPartialFailure(state: rows))
                 }
             }
             .padding(.bottom, dp(48))

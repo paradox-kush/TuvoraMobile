@@ -26,6 +26,10 @@ import com.nuvio.app.features.announcements.api.AnnouncementsFeature
 import com.nuvio.app.features.recordings.api.LocalRecordings
 import com.nuvio.app.features.recordings.api.RecordingsAccess
 import com.nuvio.app.features.recordings.api.installPlatformRecordings
+import com.nuvio.app.core.contracts.CalendarScreenContentAccess
+import com.nuvio.app.core.contracts.DetailsCalendarBellAccess
+import com.nuvio.app.core.contracts.HomeCalendarSectionAccess
+import com.nuvio.app.features.calendar.api.CalendarUiSlots
 
 /**
  * THE one firewall exception (rules doc Rule 1 / R2b): the only non-fork file allowed to name fork
@@ -70,6 +74,10 @@ fun registerFeatureContributions() {
     HomeAnnouncementsSectionAccess.register(AnnouncementsFeature.homeSection())
     // Recordings: the platform builds its repository once and publishes it (receivers and the service read it there).
     installPlatformRecordings()
+    // Calendar + reminders: the Home section (reminders card, opt-in Coming up row), the bell on details, the page.
+    HomeCalendarSectionAccess.register(CalendarUiSlots.homeSection())
+    DetailsCalendarBellAccess.register(CalendarUiSlots.detailsBell())
+    CalendarScreenContentAccess.register(CalendarUiSlots.screen())
     FeatureRegistry.markInitialized()
 }
 

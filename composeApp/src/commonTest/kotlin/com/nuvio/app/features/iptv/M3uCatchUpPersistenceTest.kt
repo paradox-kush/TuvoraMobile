@@ -69,10 +69,16 @@ class M3uCatchUpPersistenceTest {
     }
 
     @Test
-    fun `the gate refuses an m3u channel without catch-up and a stalker portal`() {
+    fun `the gate refuses an m3u channel without catch-up and a stalker portal's table fetch`() {
         assertFalse(CatchUpEpgRepository.supportsCatchUp(account(SOURCE_TYPE_M3U_URL), null))
         assertFalse(CatchUpEpgRepository.supportsCatchUp(account(SOURCE_TYPE_M3U_FILE), null))
-        assertFalse(CatchUpEpgRepository.supportsCatchUp(account(SOURCE_TYPE_STALKER), info))
+        assertFalse(CatchUpEpgRepository.supportsCatchUp(account(SOURCE_TYPE_STALKER)), "no Xtream per-channel table on a portal")
+    }
+
+    @Test
+    fun `a stalker portal's archive is replayable in the guide`() {
+        // The portal builds the archive link from its own programme id (create_link type=tv_archive).
+        assertTrue(CatchUpEpgRepository.supportsCatchUp(account(SOURCE_TYPE_STALKER), null))
     }
 
     @Test

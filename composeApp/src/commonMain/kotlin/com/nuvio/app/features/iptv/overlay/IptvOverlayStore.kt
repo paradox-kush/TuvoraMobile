@@ -189,6 +189,16 @@ internal object IptvOverlayStore {
         }
     }
 
+    /** Every (entity id, guide id) pick ANY profile on this device made for a playlist (guide ids are what the ingest keeps). */
+    suspend fun epgOverridePicks(playlistId: String): List<Pair<String, String>> = mutex.withLock {
+        connection().prepare("SELECT entity_id, guide_id FROM epg_override WHERE playlist_id = ? AND deleted = 0 AND guide_id IS NOT NULL").use { st ->
+            st.bindText(1, playlistId)
+            val out = ArrayList<Pair<String, String>>()
+            while (st.step()) out.add(st.getText(0) to st.getText(1))
+            out
+        }
+    }
+
     /**
      * Every guide id ANY profile on this device picked for a playlist — the ingest keeps those
      * channels' programmes (the guide store is shared across profiles; the pick is per profile).

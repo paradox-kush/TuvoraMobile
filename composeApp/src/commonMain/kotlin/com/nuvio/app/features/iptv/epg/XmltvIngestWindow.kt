@@ -55,6 +55,21 @@ internal object XmltvIngestWindow {
         return out
     }
 
+    /**
+     * The (stream id, guide id) pairs the viewer fixed BY HAND. A channel whose guide id was picked in the
+     * EPG picker is not an auto-match, so [backMsByGuide] never saw it and it kept [BACK_MS] (six hours)
+     * however many days its playlist's catch-up covers. [entityBySid] names each lineup channel's durable
+     * entity id; [overrides] are (entity id, guide id) picks, from any profile (the guide store is shared).
+     */
+    fun manualAssignments(entityBySid: Map<Int, String>, overrides: Collection<Pair<String, String>>): List<Pair<Int, String>> {
+        if (overrides.isEmpty()) return emptyList()
+        val guideByEntity = HashMap<String, MutableList<String>>()
+        for ((entity, guide) in overrides) guideByEntity.getOrPut(entity) { mutableListOf() }.add(guide)
+        val out = ArrayList<Pair<Int, String>>()
+        for ((sid, entity) in entityBySid) guideByEntity[entity]?.forEach { out.add(sid to it) }
+        return out
+    }
+
     /** Oldest instant worth keeping. */
     fun windowStartMs(nowMs: Long, backMs: Long = BACK_MS): Long = nowMs - backMs
 

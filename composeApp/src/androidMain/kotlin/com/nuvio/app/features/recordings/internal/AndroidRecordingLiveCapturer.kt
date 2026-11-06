@@ -39,7 +39,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  *    attempt ends by publishing `<job.dir>/index.m3u8`, one ended EVENT playlist over every attempt
  *    ([RecordingLivePlaylist]) with a discontinuity between attempts. Pieces are never deleted here.
  *  - The stop time is WALL clock; the time left becomes a delay, then `stop()` (ENDLIST, files kept).
- *    `dispose()` is never called: it deletes the directory, which only the user's Delete may do.
+ *    `dispose()` is never called: for KeepAll it also keeps the files (ENDLIST), so `stop()` is the one way a capture
+ *    ends here; the directory is removed only by the user's Delete / Retry (`RecordingFiles.deleteTree`).
  *  - Cancellation stops the loop and publishes the footage under [NonCancellable] BEFORE rethrowing, so the
  *    repository can keep it (the user stopped it) or retry it (the system tore it down).
  *  - A single-use provider (Stalker) mints a link for every open through a SESSION-BOUND minter: it does not ask

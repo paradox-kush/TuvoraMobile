@@ -25,6 +25,8 @@ junit = "4.13.2"
 kotlin = "2.4.10"
 kotlinx-coroutines = "1.10.2"
 kotlinx-serialization = "1.10.0"
+# Calendar (features/calendar): dates and time zones in common code. 0.7.x uses kotlin.time.Instant.
+kotlinx-datetime = "0.7.1"
 atomicfu = "0.32.1"
 kmpalette = "4.0.0-beta02"
 ktor = "3.5.2"
@@ -76,6 +78,7 @@ coil-network-cache-control = { module = "io.coil-kt.coil3:coil-network-cache-con
 coil-svg = { module = "io.coil-kt.coil3:coil-svg", version.ref = "coil" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 kotlinx-atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfu" }
 kmpalette-core = { module = "com.materialkolor.palette:core", version.ref = "kmpalette" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }

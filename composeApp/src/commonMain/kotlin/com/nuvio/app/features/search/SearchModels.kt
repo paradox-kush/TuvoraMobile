@@ -16,6 +16,8 @@ data class SearchUiState(
     val sections: List<HomeCatalogSection> = emptyList(),
     val emptyStateReason: SearchEmptyStateReason? = null,
     val errorMessage: String? = null,
+    /** F85: the IPTV lane answered for this search (even with zero rows). A failed lane is not an answer. */
+    val iptvAnswered: Boolean = false,
 )
 
 enum class DiscoverEmptyStateReason {

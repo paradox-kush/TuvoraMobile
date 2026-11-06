@@ -139,4 +139,21 @@ class PlaylistServerFailoverTest {
         val m3u = acc.copy(id = "m3u", sourceType = SOURCE_TYPE_M3U_URL, baseUrl = "http://main.test/list.m3u", backupUrls = listOf("http://b1.test/list.m3u"))
         assertEquals("http://main.test/live/1.ts", PlaylistServerFailover.rebaseStreamUrl(m3u, "http://main.test/live/1.ts"))
     }
+
+    @Test
+    fun `an inspection asks the active server only and writes no failover state`() = runBlocking {
+        val tried = mutableListOf<String>()
+        PlaylistServerFailover.run(acc, attempt = fakeRequest(tried, mapOf("http://main.test" to HttpStatusException(503, "HTTP 503"))))
+        assertEquals(1, PlaylistServerFailover.activeIndex(acc))
+        val before = store.read(PlaylistServerFailover.profileId(), acc.id)
+        tried.clear()
+        assertFailsWith<HttpStatusException> {
+            com.nuvio.app.core.sources.DeviceSources.inspecting {
+                PlaylistServerFailover.run(acc, attempt = fakeRequest(tried, mapOf("http://b1.test" to HttpStatusException(503, "HTTP 503"))))
+            }
+        }
+        assertEquals(listOf("http://b1.test"), tried, "the active server alone: no race, no backup probe, no walk to main or b2")
+        assertEquals(before, store.read(PlaylistServerFailover.profileId(), acc.id), "no new active server, no stats")
+        assertEquals(null, PlaylistServerFailover.lastFailedServerUrl(acc), "no failure recorded for the error card")
+    }
 }

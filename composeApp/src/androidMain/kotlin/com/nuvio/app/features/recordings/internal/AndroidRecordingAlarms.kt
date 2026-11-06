@@ -69,7 +69,15 @@ internal class AndroidRecordingAlarms(private val context: Context) : RecordingA
         fun exactAlarmSettingsIntent(context: Context): Intent? =
             if (Build.VERSION.SDK_INT >= 31) {
                 Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             } else null
     }
+}
+
+/**
+ * Which context opens the exact-alarm settings and with what flags. From a foreground Activity the screen joins
+ * the app's own task, so Back returns to Tuvora; only without an Activity (application context) is NEW_TASK
+ * required, and Back then falls to the launcher.
+ */
+internal object ExactAlarmSettingsLaunch {
+    fun needsNewTask(hasForegroundActivity: Boolean): Boolean = !hasForegroundActivity
 }

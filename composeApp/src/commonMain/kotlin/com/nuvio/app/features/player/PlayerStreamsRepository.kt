@@ -15,6 +15,7 @@ import com.nuvio.app.features.plugins.PluginRepository
 import com.nuvio.app.features.plugins.PluginsUiState
 import com.nuvio.app.features.plugins.pluginContentId
 import com.nuvio.app.features.servers.ServerStreams
+import com.nuvio.app.features.servers.loadBounded
 import com.nuvio.app.features.streams.AddonStreamGroup
 import com.nuvio.app.features.streams.InstalledStreamAddonTarget
 import com.nuvio.app.features.streams.IptvMatchSourceLane
@@ -26,7 +27,10 @@ import com.nuvio.app.features.streams.StreamLoadCompletion
 import com.nuvio.app.features.streams.StreamParser
 import com.nuvio.app.features.streams.StreamsUiState
 import com.nuvio.app.features.streams.asDirectSourceGroup
-import com.nuvio.app.features.streams.runCatchingUnlessCancelled
+import com.nuvio.app.features.streams.SourceLaneGuard
+import com.nuvio.app.features.streams.laneFailureMessage
+import com.nuvio.app.features.streams.registerDirectIptv
+import com.nuvio.app.features.streams.resolveAddonGroup
 import com.nuvio.app.features.streams.sortedForGroupedDisplay
 import com.nuvio.app.features.streams.streamAddonInstanceId
 import com.nuvio.app.features.streams.supportsStream
@@ -43,6 +47,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
@@ -256,14 +261,15 @@ object PlayerStreamsRepository {
             val job = scope.launch {
                 val needsRegistration = isStalkerSource || streamProvider.needsStreamRegistration(videoId)
                 val rebuilt = if (needsRegistration) {
-                    runCatchingUnlessCancelled {
+                    registerDirectIptv {
                         MetaDetailsRepository.ensureXtreamStreamRegistered(
                             videoId,
                             forceFresh = isStalkerSource,
                             forceMint = forceMintIptv && isStalkerSource,
                         )
-                    }.getOrDefault(false)
+                    }
                 } else true
+                ensureActive()
                 val directStreams = if (rebuilt) streamProvider.directStreamItems(videoId) else emptyList()
                 val stream = directStreams.firstOrNull()
                 stateFlow.value = if (stream != null) {
@@ -463,7 +469,7 @@ object PlayerStreamsRepository {
                     )
 
                     val displayName = addon.addonName
-                    val group = runCatchingUnlessCancelled {
+                    val group = resolveAddonGroup(displayName, addon.addonId) {
                         val payload = fetchAddonResponseText(
                             url = url,
                             forceRefresh = forceRefresh,
@@ -474,15 +480,7 @@ object PlayerStreamsRepository {
                             addonId = addon.addonId,
                             addonLogo = addon.manifest.logoUrl,
                         )
-                    }.fold(
-                        onSuccess = { streams ->
-                            AddonStreamGroup(displayName, addon.addonId, streams, isLoading = false)
-                        },
-                        onFailure = { err ->
-                            log.w(err) { "Failed: ${displayName}" }
-                            AddonStreamGroup(displayName, addon.addonId, emptyList(), isLoading = false, error = err.message)
-                        },
-                    )
+                    }
                     publishCompletion(StreamLoadCompletion.Addon(group))
                 }
             }
@@ -497,14 +495,15 @@ object PlayerStreamsRepository {
             }
 
             serverSources.forEach { source ->
-                launch { publishCompletion(StreamLoadCompletion.Addon(source.load())) }
+                launch { publishCompletion(StreamLoadCompletion.Addon(source.loadBounded())) }
             }
 
             pluginProviderGroups.forEach { providerGroup ->
                 val includeScraperNameInSubtitle = false
                 providerGroup.scrapers.forEach { scraper ->
                     nonIptvLoads += launch {
-                        val completion = PluginRepository.executeScraper(
+                        val completion = SourceLaneGuard.run(deadlineMs = null) {
+                            PluginRepository.executeScraper(
                             scraper = scraper,
                             tmdbId = pluginContentId(
                                 videoId = videoId,
@@ -514,7 +513,8 @@ object PlayerStreamsRepository {
                             mediaType = type,
                             season = season,
                             episode = episode,
-                        ).fold(
+                        ).getOrThrow()
+                        }.fold(
                             onSuccess = { results ->
                                 StreamLoadCompletion.PluginScraper(
                                     addonId = providerGroup.addonId,
@@ -534,7 +534,7 @@ object PlayerStreamsRepository {
                                 StreamLoadCompletion.PluginScraper(
                                     addonId = providerGroup.addonId,
                                     streams = emptyList(),
-                                    error = error.message ?: getString(Res.string.streams_failed_to_load_scraper, scraper.name),
+                                    error = error.laneFailureMessage() ?: getString(Res.string.streams_failed_to_load_scraper, scraper.name),
                                 )
                             },
                         )

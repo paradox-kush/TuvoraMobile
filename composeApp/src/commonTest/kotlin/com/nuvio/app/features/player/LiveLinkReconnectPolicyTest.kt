@@ -58,4 +58,28 @@ class LiveLinkReconnectPolicyTest {
             LiveLinkReconnectPolicy.modeFor(isStalkerSource = true, isLive = true, isCatchUp = true),
         )
     }
+
+    @Test
+    fun `a single-use link is never failed over to the other engine or cached`() {
+        val spent = LiveLinkReconnectPolicy.modeFor(singleUseLink = true)
+        assertFalse(LiveLinkReconnectPolicy.allowsEngineFailover(spent), "the same spent url would be opened again")
+        assertFalse(LiveLinkReconnectPolicy.allowsMediaCache(spent), "no caching data source re-requests a spent url")
+    }
+
+    @Test
+    fun `a reusable link keeps the engine failover and the cache`() {
+        val reusable = LiveLinkReconnectPolicy.modeFor(singleUseLink = false)
+        assertTrue(LiveLinkReconnectPolicy.allowsEngineFailover(reusable))
+        assertTrue(LiveLinkReconnectPolicy.allowsMediaCache(reusable))
+    }
+
+    @Test
+    fun `a single-use link is not GET-probed for redirects and not rebuilt after a decoder failure`() {
+        val spent = LiveLinkReconnectPolicy.modeFor(singleUseLink = true)
+        assertFalse(LiveLinkReconnectPolicy.allowsRedirectProbe(spent), "the probe GET spends the token")
+        assertFalse(LiveLinkReconnectPolicy.allowsDecoderFallback(spent), "the rebuild re-opens the spent url")
+        val reusable = LiveLinkReconnectPolicy.modeFor(singleUseLink = false)
+        assertTrue(LiveLinkReconnectPolicy.allowsRedirectProbe(reusable))
+        assertTrue(LiveLinkReconnectPolicy.allowsDecoderFallback(reusable))
+    }
 }

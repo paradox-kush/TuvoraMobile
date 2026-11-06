@@ -4,6 +4,7 @@ import com.nuvio.app.features.common.lifecycle.EffectScope
 import com.nuvio.app.features.iptv.BoundedLoad
 import com.nuvio.app.features.iptv.LoadOutcome
 import com.nuvio.app.features.iptv.LoadSurface
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -13,6 +14,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.ContinuationInterceptor
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * Live pause / rewind for ONE player instance (multiview-ready: nothing here is global, everything is keyed by
@@ -73,6 +78,10 @@ class LivePauseController(
     // engine lands near it or [SEEK_HOLD_MS] passes, so a stale playhead can neither undo a step nor fake "caught up".
     private var pendingSeek: Long? = null
     private var pendingSeekAtMs = 0L
+    // How far in front of the playhead the engine's window ends while the viewer is live (a read-ahead lead, not a
+    // delay): part of "caught up" ([LiveCaughtUp]). Sampled until the first pause of a source, per source.
+    private var liveLeadMs = 0L
+    private var sampleLead = true
 
     /** True when the pause button drives this controller (otherwise the caller keeps the plain pause). */
     val handlesPlayPause: Boolean get() = !disposed && activeMechanism() != LivePauseMechanism.UNAVAILABLE
@@ -104,6 +113,8 @@ class LivePauseController(
         this.bitrateBps = bitrateBps
         // A new source is a new player: the old engine is gone, [attachEngine] brings the next one.
         this.engine = null
+        liveLeadMs = 0L
+        sampleLead = true
         _surface.value = LivePauseSurface.Live
         _state.value = LivePauseState.Off
     }
@@ -128,6 +139,9 @@ class LivePauseController(
             rePauseArmed = false
             onPause()
             return
+        }
+        if (sampleLead && isPlaying && _state.value is LivePauseState.Off && _surface.value is LivePauseSurface.Live && caps.engineBackBuffer) {
+            engine?.liveWindow()?.let { liveLeadMs = LiveCaughtUp.noteLead(liveLeadMs, it.behindLiveMs) }
         }
         val current = _state.value as? LivePauseState.Shifted ?: return
         when (mechanism) {
@@ -156,7 +170,7 @@ class LivePauseController(
                         return
                     }
                 }
-                if (!wantPaused && isPlaying && window.behindLiveMs <= config.edgeSlackMs) {
+                if (!wantPaused && isPlaying && LiveCaughtUp.isCaughtUp(window.behindLiveMs, config.edgeSlackMs, liveLeadMs)) {
                     finishSession()   // caught up with the live edge on its own
                     return
                 }
@@ -194,6 +208,8 @@ class LivePauseController(
         endSession()
         channel = null
         contentId = null
+        liveLeadMs = 0L
+        sampleLead = true
         _surface.value = LivePauseSurface.Live
         _state.value = LivePauseState.Off
     }
@@ -211,6 +227,7 @@ class LivePauseController(
             }
             return
         }
+        sampleLead = false
         when (val m = activeMechanism()) {
             LivePauseMechanism.UNAVAILABLE -> engine?.pause()
             LivePauseMechanism.PROVIDER_CATCHUP -> {
@@ -350,7 +367,7 @@ class LivePauseController(
             instanceId = instanceId,
             firstLink = live,
             singleUseLink = singleUse,
-            minter = minter,
+            minter = sessionMinter(mine),
             keepMs = config.keepMs,
             bitrateBps = bitrateBps,
             lowMemoryTier = config.lowMemoryTier,
@@ -395,6 +412,24 @@ class LivePauseController(
                 }
             }
         }
+    }
+
+    /**
+     * The minter a capture of session [mine] gets. [minter] resolves "the channel on screen", so a mint that
+     * straddles a zap is wrong whichever channel it answers for: it would put the new channel's link into the old
+     * buffer, or spend a single-use link of a session that is over. The session is checked on the controller's
+     * dispatcher before the provider is asked and again before the link is handed over; a stale one is dropped.
+     */
+    private fun sessionMinter(mine: Int) = LiveLinkMinter {
+        val home: CoroutineContext = scope.coroutineContext[ContinuationInterceptor] ?: EmptyCoroutineContext
+        withContext(home) { ensureSession(mine) }
+        val minted = minter.mint()
+        withContext(home) { ensureSession(mine) }
+        minted
+    }
+
+    private fun ensureSession(mine: Int) {
+        if (mine != generation || disposed) throw CancellationException("live pause session $mine ended")
     }
 
     private fun onCaptureEvent(forGeneration: Int, event: LiveCaptureEvent, ready: CompletableDeferred<LiveCaptureEvent.Ready>) {

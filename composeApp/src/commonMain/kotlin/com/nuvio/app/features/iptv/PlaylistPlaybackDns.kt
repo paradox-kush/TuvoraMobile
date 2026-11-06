@@ -22,4 +22,9 @@ data class LivePlaybackResolution(
  *
  * iOS/common: a no-op that returns the url unchanged (MPVKit has no per-app DNS hook wired yet).
  */
-expect suspend fun resolveLivePlaybackUrl(url: String, dnsProvider: String?): LivePlaybackResolution
+expect suspend fun resolveLivePlaybackUrl(
+    url: String,
+    dnsProvider: String?,
+    /** False for a single-use link: no GET to walk its redirects (that GET spends the token); the host is rewritten as is. */
+    followRedirects: Boolean = true,
+): LivePlaybackResolution
