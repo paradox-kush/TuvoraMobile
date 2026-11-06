@@ -645,4 +645,36 @@ class LivePauseControllerTest {
         r.controller.onSnapshot(150_000, isPlaying = false)
         assertEquals(150_000, assertIs<LivePauseState.Shifted>(r.controller.state.value).positionMs)
     }
+
+    // --- late events after a zap (pins the generation guard) -------------------------------------
+
+    @Test
+    fun `a zap while the start job is suspended never opens the old capture`() = runTest {
+        val r = rig(); r.openLive()
+        r.controller.onPause()
+        advanceTimeBy(500); runCurrent()   // inside captureStartDelayMs: the start job is suspended
+        r.openLive(id = "c2")
+        assertEquals(LivePauseSurface.Live, r.controller.surface.value)
+        assertEquals(LivePauseState.Off, r.controller.state.value)
+        advanceTimeBy(5_000); runCurrent()
+        assertEquals(0, r.capture!!.requests.size, "the superseded start never reaches the capture port")
+        assertEquals(LivePauseSurface.Live, r.controller.surface.value)
+        assertEquals(LivePauseState.Off, r.controller.state.value)
+    }
+
+    @Test
+    fun `ready and buffered events of the old session after a zap change nothing`() = runTest {
+        val r = rig(); r.openLive()
+        r.controller.onPause()
+        advanceTimeBy(1_500); runCurrent()
+        val old = r.capture!!.handles.single()
+        r.openLive(id = "c2")
+        assertEquals(LivePauseSurface.Live, r.controller.surface.value)
+        old.emit(LiveCaptureEvent.Ready("file:///old/index.m3u8", 2_000)); runCurrent()
+        old.emit(LiveCaptureEvent.Buffered(60_000, full = false)); runCurrent()
+        old.emit(LiveCaptureEvent.Failed(LivePauseFailure.STALLED)); runCurrent()
+        assertEquals(LivePauseSurface.Live, r.controller.surface.value, "a dead session never resurrects a Local surface")
+        assertEquals(LivePauseState.Off, r.controller.state.value)
+        assertTrue(old.disposed >= 1)
+    }
 }
