@@ -4,6 +4,8 @@ import co.touchlab.kermit.Logger
 import com.nuvio.app.core.contracts.PlaybackResumeOfferRegistry
 import com.nuvio.app.core.contracts.PlaybackSessionReporterRegistry
 import com.nuvio.app.core.contracts.PlaybackSessionState
+import com.nuvio.app.features.livetv.pause.LiveLink
+import com.nuvio.app.features.livetv.pause.LivePauseView
 import com.nuvio.app.features.player.LivePlaybackRejoinPolicy
 import com.nuvio.app.features.player.MpvStartPosition
 import com.nuvio.app.features.player.NuvioPlayerBridge
@@ -113,6 +115,11 @@ data class TvPlayerState(
      * Continue at hh:mm?" Swift shows it for a few seconds; [TvPlayerSession.acceptServerResume] takes it.
      */
     val serverResumeOfferMs: Long? = null,
+    /**
+     * Live only: pause / rewind (libmpv's demuxer cache). [LivePauseView.Kind.Unavailable] for VOD and for an engine
+     * that cannot hold the past, so the chrome keeps its plain LIVE badge there.
+     */
+    val livePause: LivePauseView = LivePauseView.Unavailable,
     /** A continuing M3U replay's title once the playhead moved into the next programme (null = [TvPlayerSession.title]). */
     val replayTitle: String? = null,
     /** A continuing replay's seek bar: the programme's start in the player's timeline, and its length ([TvReplayBar]). */
@@ -350,6 +357,26 @@ class TvPlayerSession(
     )
     val state: StateFlow<TvPlayerState> = _state.asStateFlow()
 
+    /**
+     * Live pause / rewind for this channel (null for VOD and replays). Its view rides [TvPlayerState.livePause]; the
+     * play intent goes through here so the live freeze watch never reads a pause as a dead channel.
+     */
+    private val livePause: TvLivePause? = if (isLive) TvLivePause(
+        scope = scope,
+        bridge = { bridge },
+        playIntent = { play ->
+            wantsToPlay = play
+            if (play) bridge?.play() else bridge?.pause()
+        },
+        // Go live without a buffer to fall back on: the ordinary reconnect (fresh link for a spent one), playing.
+        retune = {
+            wantsToPlay = true
+            reconnectLive()
+        },
+        mint = { liveReresolve?.invoke() },
+        onView = { view -> _state.value = _state.value.copy(livePause = view) },
+    ) else null
+
     val title: String get() = launch.title
 
     /** A continuing replay entered its next programme: the player shows [title] from here ([TvPlayerState.replayTitle]). */
@@ -436,6 +463,7 @@ class TvPlayerSession(
         vodRetry.cancel()
         if (closed) return
         closed = true
+        livePause?.dispose()
         detach()
         ServerPlayback.stop(serverPlaybackUrl)
         onClosed()
@@ -461,7 +489,23 @@ class TvPlayerSession(
     fun togglePlayPause() {
         if (closed) return
         if (party.toggle()) { reportAfterToggle(); return }
+        livePause?.takeIf { it.handles }?.let { it.togglePlayPause(_state.value.isPlaying); return }
         if (_state.value.isPlaying) pause() else play()
+    }
+
+    /**
+     * Live pause / rewind: one clickpad-edge press, [deltaMs] through the window the engine holds (negative = back).
+     * Opens the shift from live, scrubs inside it, and goes live when stepping into its edge ([LivePauseScrub]).
+     */
+    fun liveStep(deltaMs: Long) {
+        if (closed || !isLive) return
+        livePause?.step(deltaMs, wasPlaying = wantsToPlay)
+    }
+
+    /** The "−1:05 · LIVE" chip: leave the time shift for the live edge. */
+    fun goLive() {
+        if (closed || !isLive) return
+        livePause?.goLive()
     }
     fun play() { if (!closed) { if (vodDeadlineFailed) { retry(); return }; if (party.setPlaying(true)) reportAfterToggle() else { wantsToPlay = true; bridge?.play(); reportAfterToggle() } } }
     fun pause() { if (party.setPlaying(false)) reportAfterToggle() else { wantsToPlay = false; bridge?.pause(); reportAfterToggle() } }
@@ -527,6 +571,7 @@ class TvPlayerSession(
 
     fun retry() {
         if (closed) return
+        if (_state.value.livePause.kind == LivePauseView.Kind.Failed) { livePause?.retry(); return }
         // The player's own Retry re-opens the loaded URL; a spent link needs a fresh mint, which only the guide's Retry runs.
         if (!TvSingleUseLinkPolicy.allowsPlayerRetry(singleUseLink)) return
         vodRetryFailure = null
@@ -898,6 +943,7 @@ class TvPlayerSession(
         )
         created.updateNowPlayingMetadata(title = launch.title, subtitle = subtitle, artworkUrl = launch.poster ?: launch.background)
         if (!wantsToPlay) created.pause()
+        announceLiveSource(created)
         return created
     }
 
@@ -950,6 +996,7 @@ class TvPlayerSession(
             scheduleSeekSave()
         }
         updateStartOverOffer(b)
+        livePause?.onSnapshot(snapshot.positionMs, snapshot.isPlaying)
         _state.value = _state.value.copy(
             skipSegment = skip.segment?.takeIf { skip.autoSkipToMs == null },
             speed = snapshot.playbackSpeed,
@@ -1083,6 +1130,7 @@ class TvPlayerSession(
             startOption = null,
         )
         restorePlayIntent(b)
+        announceLiveSource(b)
     }
 
     /** Re-opens a stable (Xtream / M3U) live address on the current engine. */
@@ -1090,6 +1138,17 @@ class TvPlayerSession(
         val b = bridge ?: return
         b.retry()
         restorePlayIntent(b)
+        announceLiveSource(b)
+    }
+
+    /**
+     * A live source was just handed to [b]: whatever the pause buffer held belonged to the previous one, and the
+     * engine that plays this one is what decides whether a time shift exists (libmpv with the live-cache bridge).
+     */
+    private fun announceLiveSource(b: NuvioPlayerBridge) {
+        val pause = livePause ?: return
+        pause.sourceOpened(sessionVideoId, LiveLink(activeSourceUrl, activeSourceHeaders), spentLinkAfterOpen)
+        pause.attach(b)
     }
 
     /**

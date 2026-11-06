@@ -61,6 +61,8 @@ actual fun PlatformPlayerSurface(
     playWhenReady: Boolean,
     initialPositionMs: Long?,
     initialPositionRequestKey: String?,
+    // Accepted for signature parity; the iOS engine has no local-window start yet.
+    @Suppress("UNUSED_PARAMETER") startAtLiveWindowStart: Boolean,
     resizeMode: PlayerResizeMode,
     videoZoom: VideoZoom,
     playbackEngine: AndroidPlaybackEngine?,
@@ -160,6 +162,7 @@ private fun PlatformPlayerSurfaceInner(
     }
 
     val controller = remember(bridge) {
+        val liveCache = BridgeLiveCache(bridge)
         object : PlayerEngineController, PlayerSystemControlSource {
             override val keepsPlaybackInBackground: Boolean
                 get() = bridge.getKeepsPlaybackInBackground()
@@ -219,6 +222,16 @@ private fun PlatformPlayerSurfaceInner(
             override fun setPlaybackSpeed(speed: Float) {
                 bridge.setPlaybackSpeed(speed)
             }
+
+            // Live pause / rewind: libmpv's own demuxer cache is the buffer. Writes are queued by the Swift bridge
+            // off the main thread; the window is read from its observed shadow, never from mpv.
+            override val supportsLiveBackBuffer: Boolean get() = liveCache.supported
+
+            override fun setLiveCacheBudget(maxBytes: Long, maxBackBytes: Long, cacheSecs: Long) {
+                liveCache.setBudget(maxBytes, maxBackBytes, cacheSecs)
+            }
+
+            override fun liveSeekWindow(): LiveSeekWindow? = liveCache.window()
 
             override fun setMuted(muted: Boolean) {
                 bridge.setMuted(muted)

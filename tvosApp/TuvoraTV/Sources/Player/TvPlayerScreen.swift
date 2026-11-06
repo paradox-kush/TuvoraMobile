@@ -339,7 +339,9 @@ struct TvPlayerScreen: View {
         TvPlayerRemoteContext(
             controlsVisible: controlsVisible || scrubMs != nil, panelOpen: panel != nil, overlayOpen: overlay != nil,
             isLive: isLive, isPlaying: state?.isPlaying ?? false, hasError: state?.errorMessage != nil,
-            scrubbing: scrubMs != nil, canZap: playback.zapper != nil, actionButtonUp: skipVisible || startOverVisible
+            scrubbing: scrubMs != nil, canZap: playback.zapper != nil, actionButtonUp: skipVisible || startOverVisible,
+            livePauseAvailable: state.map { $0.livePause.kind != .unavailable } ?? false,
+            livePauseFailed: state?.livePause.kind == .failed
         )
     }
 
@@ -366,6 +368,8 @@ struct TvPlayerScreen: View {
         case .hideControls: hideControls()
         case .zapPrevious: zap(-1)
         case .zapNext: zap(1)
+        case .liveStepBack: liveStep(-LivePauseScrub.shared.STEP_MS)
+        case .liveStepForward: liveStep(LivePauseScrub.shared.STEP_MS)
         case .openTracks: withAnimation(NuvioTokens.Motion.overlay) { panel = .subtitles }
         case .closePanel: withAnimation { panel = nil }; bumpControls()
         case .closeOverlay: withAnimation { overlay = nil }; bumpControls()
@@ -409,6 +413,13 @@ struct TvPlayerScreen: View {
             session.pause()
         }
         scrubMs = session.clampBar(barMs: target.int64Value)   // a replay of an airing programme stops short of live
+        bumpControls()
+    }
+
+    /// Live pause / rewind: a clickpad edge steps through the window the engine holds (LivePauseScrub decides what
+    /// that means from live or from a time shift; nothing happens when there is no past to step into).
+    private func liveStep(_ deltaMs: Int64) {
+        session.liveStep(deltaMs: deltaMs)
         bumpControls()
     }
 
@@ -554,11 +565,7 @@ private struct PlayerChrome: View {
                 Text(ui: subtitle).font(NuvioType.titleMedium).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
             }
             if state.isLive {
-                HStack(spacing: dp(6)) {
-                    Image("md_play_arrow").renderingMode(.template).resizable().frame(width: dp(24), height: dp(24))
-                    Text("LIVE").font(NuvioType.inter(16, .bold))
-                }
-                .foregroundStyle(colors.primary)
+                LiveStatus(session: session, view: state.livePause, onActivity: onActivity)
             } else {
                 SeekBar(positionMs: scrubMs ?? state.barPositionMs, bufferedMs: state.bufferedMs, durationMs: state.barDurationMs,
                         scrubbing: scrubMs != nil, onSeek: { session.seekBy(offsetMs: $0); onActivity() },
@@ -584,6 +591,156 @@ private struct PlayerChrome: View {
             }
             .focusSection()
         }
+    }
+}
+
+/// The live row of the chrome: the plain LIVE badge, or the pause / rewind controls. Every state that asks the
+/// viewer to act (the scrub bar, the "−1:05 · LIVE" chip, Retry, Go live) is a focusable that visibly highlights.
+private struct LiveStatus: View {
+    let session: TvPlayerSession
+    let view: LivePauseView
+    let onActivity: () -> Void
+    @Environment(\.nuvio) private var colors
+    @State private var preparingExpired = false
+    /// While time-shifted the scrub bar owns the clickpad edges, so every further press steps again (a press over
+    /// the chrome otherwise belongs to the focus engine and would only move between the buttons).
+    @FocusState private var scrubFocused: Bool
+    /// Whether this time shift already took focus for its scrub bar (reset when the shift ends).
+    @State private var scrubFocusGrabbed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: dp(10)) {
+            switch view.kind {
+            case .shifted:
+                if view.showsScrubBar {
+                    LiveScrubBar(view: view, focused: $scrubFocused) { session.liveStep(deltaMs: $0); onActivity() }
+                }
+                LivePillButton(title: view.chipText, filled: true, id: "player.live.chip") { session.goLive(); onActivity() }
+            case .preparing:
+                if preparingExpired {
+                    failureRow(text: "The pause buffer took too long to start")
+                } else {
+                    HStack(spacing: dp(10)) {
+                        ProgressView()
+                        Text("Starting pause buffer…").font(NuvioType.bodyMedium).foregroundStyle(.white.opacity(0.9))
+                    }
+                    // The wait ends at its own deadline even if the work never answers (BoundedLoad's backstop).
+                    .task(id: view.preparingDeadlineEpochMs) {
+                        preparingExpired = false
+                        let wait = Double(view.preparingDeadlineEpochMs) / 1000 - Date().timeIntervalSince1970
+                        try? await Task.sleep(nanoseconds: UInt64(max(0, wait) * 1_000_000_000))
+                        if !Task.isCancelled { preparingExpired = true }
+                    }
+                }
+            case .failed:
+                failureRow(text: view.failureText ?? "")
+            case .live, .unavailable:
+                badge
+            @unknown default:
+                badge
+            }
+        }
+        .onAppear { grabScrubFocusOnce() }
+        .onChange(of: view.showsScrubBar) { _, _ in grabScrubFocusOnce() }
+        .onChange(of: view.kind) { _, kind in
+            if kind != .shifted { scrubFocusGrabbed = false }   // the next shift grabs again
+            else { grabScrubFocusOnce() }
+        }
+    }
+
+    /// Takes focus once per time shift: when the shift starts, or when its scrub bar first gets a window to draw.
+    /// The bar's visibility follows the engine's window width, which can flicker while the cache moves; re-grabbing
+    /// on each flicker pulled focus back from Go live or Retry while the viewer was moving to them.
+    private func grabScrubFocusOnce() {
+        guard view.kind == .shifted, view.showsScrubBar, !scrubFocusGrabbed else { return }
+        scrubFocusGrabbed = true
+        DispatchQueue.main.async { scrubFocused = true }
+    }
+
+    private var badge: some View {
+        HStack(spacing: dp(6)) {
+            Image("md_play_arrow").renderingMode(.template).resizable().frame(width: dp(24), height: dp(24))
+            Text(view.chipText).font(NuvioType.inter(16, .bold))
+        }
+        .foregroundStyle(colors.primary)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(view.chipText)
+        .accessibilityIdentifier("player.live.badge")
+    }
+
+    private func failureRow(text: String) -> some View {
+        HStack(spacing: dp(16)) {
+            Text(text).font(NuvioType.bodyMedium).foregroundStyle(.white.opacity(0.9))
+            if view.kind == .failed {
+                LivePillButton(title: "Retry", filled: false, id: "player.live.retry") { session.retry(); onActivity() }
+            }
+            LivePillButton(title: "Go live", filled: true, id: "player.live.golive") { session.goLive(); onActivity() }
+        }
+    }
+}
+
+/// The rewind window as a bar: how far back it reaches on the left, LIVE on the right, the playhead in between.
+/// Focusable like the VOD seek bar (thicker and brighter when focused); the clickpad edges step through it.
+private struct LiveScrubBar: View {
+    let view: LivePauseView
+    var focused: FocusState<Bool>.Binding
+    let onStep: (Int64) -> Void
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        let height = focused.wrappedValue ? dp(12) : dp(8)
+        VStack(alignment: .leading, spacing: dp(6)) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: dp(3)).fill(Color.white.opacity(focused.wrappedValue ? 0.45 : 0.3))
+                    RoundedRectangle(cornerRadius: dp(3)).fill(colors.secondary).frame(width: geo.size.width * CGFloat(view.progress))
+                }
+                .frame(height: height)
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+            .frame(height: dp(16))
+            HStack {
+                Text(view.reachText)
+                Spacer()
+                Text("LIVE")
+            }
+            .font(NuvioType.bodyMedium).foregroundStyle(.white.opacity(0.68)).monospacedDigit()
+        }
+        .focusable()
+        .focused(focused)
+        .onMoveCommand { direction in
+            if direction == .left { onStep(-LivePauseScrub.shared.STEP_MS) }
+            else if direction == .right { onStep(LivePauseScrub.shared.STEP_MS) }
+        }
+        .animation(NuvioTokens.Motion.fast, value: focused.wrappedValue)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(view.reachText + " " + String(format: "%.0f", view.progress * 100))
+        .accessibilityIdentifier("player.live.scrub")
+    }
+}
+
+/// A capsule button of the live row: focused = white fill + black text, like the chrome's circle buttons.
+private struct LivePillButton: View {
+    let title: String
+    let filled: Bool
+    let id: String
+    let action: () -> Void
+    @Environment(\.nuvio) private var colors
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(NuvioType.inter(16, .bold))
+                .foregroundStyle(focused ? Color.black : (filled ? colors.primary : Color.white))
+                .padding(.horizontal, dp(18)).padding(.vertical, dp(8))
+                .background(Capsule().fill(focused ? Color.white : Color.clear))
+                .navigationGlass(in: Capsule())
+                .scaleEffect(focused ? 1.08 : 1)
+                .animation(NuvioTokens.Motion.fast, value: focused)
+        }
+        .buttonStyle(PlainNoChromeButtonStyle())
+        .focused($focused)
+        .accessibilityIdentifier(id)
     }
 }
 

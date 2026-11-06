@@ -2632,6 +2632,15 @@
     <string name="compose_livetv_guide_earlier">Earlier</string>
     <string name="compose_livetv_guide_later">Later</string>
     <string name="compose_livetv_live_badge">LIVE</string>
+    <string name="compose_livetv_pause_preparing">Starting pause buffer…</string>
+    <string name="compose_livetv_pause_retry">Retry</string>
+    <string name="compose_livetv_pause_go_live">Go live</string>
+    <string name="compose_livetv_pause_failed_no_space">Not enough free space to pause live TV</string>
+    <string name="compose_livetv_pause_failed_provider_refused">The provider refused the pause buffer</string>
+    <string name="compose_livetv_pause_failed_stalled">The stream stopped while buffering</string>
+    <string name="compose_livetv_pause_failed_sequence_reset">The provider keeps restarting this stream</string>
+    <string name="compose_livetv_pause_failed_unsupported">This stream can't be paused</string>
+    <string name="compose_livetv_pause_failed_timed_out">The pause buffer took too long to start</string>
     <string name="compose_livetv_no_epg">No EPG</string>
     <string name="compose_livetv_no_programme_info">No programme information</string>
     <string name="compose_livetv_play_pause">Play/pause</string>

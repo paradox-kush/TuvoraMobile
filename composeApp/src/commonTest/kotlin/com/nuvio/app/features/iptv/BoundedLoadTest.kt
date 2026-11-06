@@ -96,6 +96,13 @@ class BoundedLoadTest {
     }
 
     @Test
+    fun `live pause surface has its 20 second deadline and reports every outcome`() {
+        assertEquals("live_pause", LoadSurface.LIVE_PAUSE.key)
+        assertEquals(20_000L, LoadSurface.LIVE_PAUSE.stallMs)
+        assertTrue(LoadSurface.LIVE_PAUSE.reportsEveryOutcome)
+    }
+
+    @Test
     fun `a loading status past its deadline reads as a timed-out failure`() {
         val loading = BoundedLoad.begin(LoadSurface.HUB_ROW, nowMs = 1_000)
 

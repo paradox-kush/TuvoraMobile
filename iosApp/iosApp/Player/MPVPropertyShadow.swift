@@ -119,6 +119,22 @@ struct MPVTrackShadow: Equatable {
     }
 }
 
+/// One seekable stretch of the demuxer cache, in seconds.
+struct MPVSeekableRange: Equatable {
+    var start: Double
+    var end: Double
+}
+
+extension Array where Element == MPVSeekableRange {
+    /// The hand-over format the Kotlin side parses (MpvLiveCache.parseRanges): `start,end;start,end`.
+    /// Plain "." decimals whatever the device locale, no scientific notation, unusable ranges dropped.
+    var bridgeText: String {
+        filter { $0.start.isFinite && $0.end.isFinite && $0.end > $0.start }
+            .map { String(format: "%.3f,%.3f", locale: Locale(identifier: "en_US_POSIX"), $0.start, $0.end) }
+            .joined(separator: ";")
+    }
+}
+
 /// The observed mpv state, as plain values. Defaults equal what the old synchronous reads returned
 /// when a property was unavailable (0, false, nil), so a `.none` event resets a field to its default.
 struct MPVPlaybackProperties: Equatable {
@@ -147,6 +163,9 @@ struct MPVPlaybackProperties: Equatable {
     var subtitleText: String?
     var subtitleCodec: String?
     var tracks: [MPVTrackShadow] = []
+    /// `demuxer-cache-state.seekable-ranges` in mpv's time-pos seconds: the stretches a seek lands in without
+    /// a network read. Observed only once a live back buffer is in use (observeLiveCache); empty before.
+    var seekableRanges: [MPVSeekableRange] = []
 
     /// Sticky, like the old 250ms-poll cache: the measured rate wins, then the container's
     /// declared rate, else the last good value (30 before any). Feeds PiP sample durations.
@@ -248,6 +267,18 @@ final class MPVPropertyShadow {
         lock.lock()
         properties.tracks = tracks
         lock.unlock()
+    }
+
+    func setSeekableRanges(_ ranges: [MPVSeekableRange]) {
+        lock.lock()
+        properties.seekableRanges = ranges
+        lock.unlock()
+    }
+
+    var seekableRangesText: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return properties.seekableRanges.bridgeText
     }
 
     var snapshot: MPVPlaybackProperties {

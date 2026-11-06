@@ -178,6 +178,25 @@ internal fun NuvioPlayerBridge.applyStreamLavfOptions(options: String): Boolean 
     (this as? NuvioPlayerLinkReconnectBridge)?.let { it.setStreamLavfOptions(options); true } ?: false
 
 /**
+ * Optional capability of an mpv-backed [NuvioPlayerBridge]: live pause / rewind through mpv's own demuxer cache
+ * (see [BridgeLiveCache]). Hand-mirrored in Swift (iPhone `MPVPlayerBridgeImpl`, Apple TV `MPVPlayerBridgeImpl`),
+ * which Gradle cannot check, so it is one write and one read:
+ *
+ *  - [applyLiveCacheProperties] sets mpv properties (`names[i]` = `values[i]`) on the mpv queue, never Main, and
+ *    starts observing `demuxer-cache-state` with the first call (a node conversion per change, so players that never
+ *    pause pay nothing).
+ *  - [getSeekableRanges] is the observed `seekable-ranges` as `start,end;start,end` in mpv time-pos seconds
+ *    ([MpvLiveCache.parseRanges]); `""` when none. It reads a lock-guarded copy, never mpv.
+ *
+ * A separate interface (checked with `as?`) so a bridge without it - the Apple TV AVPlayer lane, which plays no live -
+ * keeps compiling and reports no back buffer.
+ */
+interface NuvioPlayerLiveCacheBridge {
+    fun applyLiveCacheProperties(names: List<String>, values: List<String>)
+    fun getSeekableRanges(): String
+}
+
+/**
  * Registry for the player bridge factory.
  * Swift calls [registerFactory] during app startup before Compose is initialized.
  */

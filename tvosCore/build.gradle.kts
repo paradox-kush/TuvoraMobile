@@ -44,6 +44,9 @@ val tvosExcludedCommon = listOf(
     "com/nuvio/app/core/rec/RecShelfTracking.kt", "com/nuvio/app/features/auth/AccountSessionPrompts.kt",
     "com/nuvio/app/features/library/TrackingMembershipRemovalConfirmation.kt",
     "com/nuvio/app/features/livetv/LiveTvOrientation.kt",
+    // Live pause: the Compose composition binding (remember/DisposableEffect around PlayerEngineController).
+    // Apple TV drives LivePauseController from its own SwiftUI player; the controller and ports compile here.
+    "com/nuvio/app/features/livetv/pause/LivePauseBinding.kt",
     // Calendar: the Compose slots and their string helpers; Apple TV draws the Calendar in SwiftUI (TvCalendar facade).
     "com/nuvio/app/features/calendar/api/CalendarUiSlots.kt", "com/nuvio/app/features/calendar/internal/CalendarUiText.kt",
     // Phone/desktop long-press channel menu (sheet + toast); Apple TV has its own SwiftUI context menu.

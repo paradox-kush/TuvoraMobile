@@ -65,6 +65,27 @@ interface PlayerEngineController {
     suspend fun getMediaInfo(): PlayerMediaInfo = getStreamInfo().toMediaInfo()
     /** Chapters of the loaded file; empty if not supported by the engine. */
     suspend fun getChapters(): List<PlayerChapter> = emptyList()
+
+    /**
+     * True when this engine can hold a live stream's past in memory ([setLiveCacheBudget] +
+     * [liveSeekWindow] do something). Default false: an engine without the hooks keeps the plain
+     * pause it always had.
+     */
+    val supportsLiveBackBuffer: Boolean get() = false
+
+    /**
+     * Sizes the engine's own demuxer cache for a live stream: [maxBytes] ahead of the playhead,
+     * [maxBackBytes] behind it, [cacheSecs] of read-ahead. A pause of N seconds needs the forward cache
+     * (and its seconds limit) raised, a rewind needs the back buffer. Applies to the CURRENT stream.
+     * Must be safe to call from the UI thread (engines queue it off-thread). Default: no-op.
+     */
+    fun setLiveCacheBudget(maxBytes: Long, maxBackBytes: Long, cacheSecs: Long) {}
+
+    /**
+     * What the engine can seek within right now on a live stream, or null when it cannot say. Must not
+     * block (read an observed shadow, never ask the engine). Default: null.
+     */
+    fun liveSeekWindow(): LiveSeekWindow? = null
 }
 
 internal fun sanitizePlaybackHeaders(headers: Map<String, String>?): Map<String, String> {
@@ -134,6 +155,12 @@ expect fun PlatformPlayerSurface(
     playWhenReady: Boolean = true,
     initialPositionMs: Long? = null,
     initialPositionRequestKey: String? = null,
+    /**
+     * The source is a LOCAL growing HLS playlist (live pause buffer): prepare paused and park at the START
+     * of its window, instead of joining the live edge as a live source normally does. Engines that cannot
+     * honour it may ignore it (the screen then starts at the engine's own default).
+     */
+    startAtLiveWindowStart: Boolean = false,
     resizeMode: PlayerResizeMode = PlayerResizeMode.Fit,
     /** F36 manual zoom on top of [resizeMode] — see [VideoZoomPolicy] for how each engine applies it. */
     videoZoom: VideoZoom = VideoZoom.IDENTITY,
