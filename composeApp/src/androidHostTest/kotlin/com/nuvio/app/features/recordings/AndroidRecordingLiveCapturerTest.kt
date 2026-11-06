@@ -1,6 +1,8 @@
 package com.nuvio.app.features.recordings
 
 import com.nuvio.app.features.livetv.pause.LiveCaptureEnv
+import com.nuvio.app.features.livetv.pause.LiveCaptureEvent
+import com.nuvio.app.features.livetv.pause.LiveCaptureHandle
 import com.nuvio.app.features.livetv.pause.LiveCaptureReconnect
 import com.nuvio.app.features.livetv.pause.Ts
 import com.nuvio.app.features.recordings.api.LiveCaptureJob
@@ -29,6 +31,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -70,6 +75,19 @@ class AndroidRecordingLiveCapturerTest {
 
     private fun capturer(resolver: RecordingLinkResolver = RecordingLinkResolver { ch, _ -> RecordingLiveLink(ch.liveUrl, ch.headers) }) =
         AndroidRecordingLiveCapturer(env(), resolver, isOnline = { online }, spaceCheckMs = 50L)
+
+    /** A writer whose stop() does nothing and whose event stream never ends: the wedged-cancel case. */
+    private class WedgedHandle : LiveCaptureHandle {
+        var stops = 0
+        override val events: Flow<LiveCaptureEvent> = flow { awaitCancellation() }
+        override fun stop() { stops++ }
+        override fun dispose() {}
+    }
+
+    private fun wedgedCapturer(handle: WedgedHandle) = AndroidRecordingLiveCapturer(
+        env(), { ch, _ -> RecordingLiveLink(ch.liveUrl, ch.headers) }, isOnline = { online }, spaceCheckMs = 50L,
+        stopGraceMs = 300L, startLoop = { _, _, _ -> handle },
+    )
 
     private fun url(path: String) = server.url(path).toString()
 
@@ -276,6 +294,67 @@ class AndroidRecordingLiveCapturerTest {
         assertTrue("p0/seg1.ts" in text && "p2/seg0.ts" in text && "p1/" !in text, text)
         assertTrue("#EXT-X-ENDLIST" in text)
         assertFalse(File(dir, "p1").exists(), "an empty attempt is cleaned up")
+    }
+
+    @Test
+    fun `a writer that ignores stop after the disk fills does not hold the slot open`() = runBlocking {
+        val earlier = File(dir, "p0").also { it.mkdirs() }
+        File(earlier, "seg0.ts").writeBytes(ByteArray(2_000))
+        File(earlier, "index.m3u8").writeText("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:6.000,\nseg0.ts\n")
+        freeBytes.set(1_000L)   // under the recording floor from the first check
+        val handle = WedgedHandle()
+        val started = System.currentTimeMillis()
+        val outcome = withTimeout(5_000) { wedgedCapturer(handle).capture(job(60_000)) { _, _ -> } }
+        val took = System.currentTimeMillis() - started
+        assertTrue(took < 3_000, "it gave up on the writer after the grace, not at the slot end: $took ms")
+        assertTrue(handle.stops >= 1)
+        val failed = assertNotNull(outcome as? LiveCaptureOutcome.Failed, "$outcome")
+        assertEquals(RecordingProblem.NO_SPACE, failed.problem)
+        assertEquals(2_000L, failed.bytesKept, "the footage is settled so the row can finish as DONE")
+        assertTrue("#EXT-X-ENDLIST" in playlist())
+    }
+
+    @Test
+    fun `a writer that ignores stop at the slot end with nothing recorded fails promptly`() = runBlocking {
+        val handle = WedgedHandle()
+        val started = System.currentTimeMillis()
+        val outcome = withTimeout(5_000) { wedgedCapturer(handle).capture(job(100)) { _, _ -> } }
+        assertTrue(System.currentTimeMillis() - started < 3_000)
+        val failed = assertNotNull(outcome as? LiveCaptureOutcome.Failed, "$outcome")
+        assertEquals(0L, failed.bytesKept)
+    }
+
+    @Test
+    fun `settle keeps the pieces of an attempt that died before its first playlist and makes them playable`() = runBlocking {
+        val d = File(dir, "p0").also { it.mkdirs() }
+        File(d, "seg0.ts").writeBytes(ByteArray(1_000))
+        File(d, "seg1.ts").writeBytes(ByteArray(1_500))
+        File(d, "seg2.ts.part").writeBytes(ByteArray(10))
+        val footage = assertNotNull(capturer().settle(dir.path), "the pieces were recorded, they are footage")
+        assertEquals(2_500L, footage.bytes)
+        assertTrue(File(d, "seg0.ts").isFile && File(d, "seg1.ts").isFile, "pieces are never deleted")
+        val text = playlist()
+        assertTrue(text.indexOf("p0/seg0.ts") in 0 until text.indexOf("p0/seg1.ts"), text)
+        assertTrue("#EXT-X-ENDLIST" in text, text)
+        assertEquals(2, footage.durationMs / 2_000L, "approximate durations: the target piece length per piece")
+    }
+
+    @Test
+    fun `settle orders rebuilt pieces by sequence not by name`() = runBlocking {
+        val d = File(dir, "p0").also { it.mkdirs() }
+        listOf("seg10.ts", "seg2.ts", "seg9.ts").forEach { File(d, it).writeBytes(ByteArray(100)) }
+        capturer().settle(dir.path)
+        val text = playlist()
+        assertTrue(text.indexOf("seg2.ts") < text.indexOf("seg9.ts") && text.indexOf("seg9.ts") < text.indexOf("seg10.ts"), text)
+    }
+
+    @Test
+    fun `settle removes an attempt that holds only unfinished writes`() = runBlocking {
+        val d = File(dir, "p0").also { it.mkdirs() }
+        File(d, "seg0.ts.part").writeBytes(ByteArray(10))
+        File(d, "index.m3u8.tmp").writeText("x")
+        assertNull(capturer().settle(dir.path))
+        assertFalse(d.exists())
     }
 
     @Test

@@ -386,6 +386,67 @@ class RecordingsLiveRepositoryTest {
         rig.repo.cancel("L")
         assertTrue(rig.repo.state.value.schedules.isEmpty())
         assertTrue(dirOf() in rig.files.deletedTrees)
+        assertTrue(rig.repo.state.value.recordings.isEmpty(), "nothing was recorded: no row is left behind")
+    }
+
+    /** Attempt 1 recorded 40 minutes then the stream dropped: the row is gone, the footage stays, a retry is armed. */
+    private suspend fun dropAfterFortyMinutes(rig: LiveRig) {
+        rig.files.sizes["${dirOf()}/p0/seg0.ts"] = 40_000_000L
+        rig.capturer.settleResult = LiveFootage(40_000_000L, 40 * MIN)
+        rig.capturer.onCapture = { _, _ -> LiveCaptureOutcome.Failed(RecordingProblem.STALLED, offline = false, bytesKept = 40_000_000L, durationKeptMs = 40 * MIN) }
+        assertTrue(rig.repo.fire("L", NOW) is FireResult.Retrying)
+        assertTrue(rig.repo.state.value.recordings.isEmpty(), "while a retry waits the row is gone")
+    }
+
+    @Test
+    fun `cancelling a retrying live schedule keeps the footage the dropped attempt recorded as a finished recording`() = runTest {
+        val rig = rigWith(onAir())
+        dropAfterFortyMinutes(rig)
+        rig.repo.cancel("L")
+        assertTrue(rig.files.deletedTrees.isEmpty(), "40 minutes of footage must survive Cancel")
+        assertEquals(40_000_000L, rig.files.treeSizeOf(dirOf()))
+        assertTrue(rig.repo.state.value.schedules.isEmpty())
+        assertNull(rig.alarms.armed["L"])
+        val row = rig.repo.state.value.recordings.single()
+        assertEquals(RecordingStatus.DONE, row.status)
+        assertEquals(40_000_000L, row.sizeBytes)
+        assertEquals(40 * MIN, row.durationMs)
+        assertEquals(RecordingLiveLayout.fileNameFor("L"), row.fileName)
+        assertNull(row.retrySource)
+    }
+
+    @Test
+    fun `removing a series rule keeps the footage of a retrying live airing`() = runTest {
+        val rig = LiveRig()
+        rig.files.texts["recordings.json"] = RecordingsCodec.encode(
+            RecordingsDocument(
+                schedules = listOf(StoredRow.of(onAir().copy(seriesRuleId = "r1"))),
+                series = listOf(StoredRow.of(rule("r1"))),
+            ),
+        )
+        val fresh = rig
+        dropAfterFortyMinutes(fresh)
+        fresh.repo.removeSeriesRule("r1")
+        assertTrue(fresh.files.deletedTrees.isEmpty())
+        assertTrue(fresh.repo.state.value.series.isEmpty())
+        assertTrue(fresh.repo.state.value.schedules.isEmpty())
+        val row = fresh.repo.state.value.recordings.single()
+        assertEquals(RecordingStatus.DONE, row.status)
+        assertEquals(40_000_000L, row.sizeBytes)
+    }
+
+    @Test
+    fun `removing a series rule still deletes the empty directory of a retrying airing with no footage`() = runTest {
+        val rig = LiveRig()
+        rig.files.texts["recordings.json"] = RecordingsCodec.encode(
+            RecordingsDocument(
+                schedules = listOf(StoredRow.of(onAir(attempts = 1, nextTry = NOW + 30_000L).copy(seriesRuleId = "r1"))),
+                series = listOf(StoredRow.of(rule("r1"))),
+            ),
+        )
+        rig.repo.removeSeriesRule("r1")
+        assertTrue(dirOf() in rig.files.deletedTrees)
+        assertTrue(rig.repo.state.value.recordings.isEmpty())
     }
 
     @Test
