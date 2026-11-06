@@ -158,7 +158,8 @@ internal class AndroidRecordingSaver(
                             // Sniff before a byte is written or the size is judged: a playlist is not the recording.
                             if (!resumed) {
                                 val src = body.source()
-                                src.request(DownloadSniff.PEEK_BYTES.toLong())
+                                // A body cut short inside the peek still reaches the read loop below with what arrived.
+                                try { src.request(DownloadSniff.PEEK_BYTES.toLong()) } catch (_: IOException) { }
                                 val head = src.buffer.snapshot(minOf(DownloadSniff.PEEK_BYTES.toLong(), src.buffer.size).toInt()).toByteArray()
                                 if (DownloadSniff.isHlsPlaylist(resp.header("Content-Type"), head)) return@coroutineScope Attempt.Hls
                             }
