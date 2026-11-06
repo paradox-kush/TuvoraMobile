@@ -31,7 +31,14 @@ class LocalRecordingsDefaultTest {
         // Identity is all that is compared, so a stub that fails if anything calls it is enough.
         val registered = Proxy.newProxyInstance(
             RecordingsPort::class.java.classLoader, arrayOf<Class<*>>(RecordingsPort::class.java),
-        ) { _, method, _ -> error("unexpected call to ${method.name}") } as RecordingsPort
+        ) { proxy, method, args ->
+            when (method.name) {
+                "toString" -> "RegisteredRecordingsPort"
+                "hashCode" -> System.identityHashCode(proxy)
+                "equals" -> proxy === args?.firstOrNull()
+                else -> error("unexpected call to ${method.name}")
+            }
+        } as RecordingsPort
         RecordingsAccess.register(registered)
 
         val frameClock = BroadcastFrameClock()
