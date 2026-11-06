@@ -22,17 +22,29 @@ internal object MpvLiveCache {
     data class Range(val startSec: Double, val endSec: Double)
 
     /**
-     * The stretch the playhead is in (the newest one when it is outside all of them - the live one), in
-     * milliseconds on mpv's time-pos clock; null when nothing is seekable or the position is unknown.
+     * The ONE continuous stretch the playhead is in, in milliseconds on mpv's time-pos clock; null when nothing is
+     * seekable or the position is unknown. A timeline discontinuity (a looping source, a splice) leaves several
+     * ranges hours apart on mpv's clock; spanning them would make a window the playhead is not in, so:
+     *  - a range holding the playhead wins (the one ending latest if several do);
+     *  - otherwise the range ending latest before the playhead (the stretch it just left);
+     *  - otherwise (the playhead is before everything) the range starting nearest after it.
+     * The window is never wider than [keepMs] behind its end, the back buffer a live pause promises.
      */
-    fun window(ranges: List<Range>, positionMs: Long): com.nuvio.app.features.player.LiveSeekWindow? {
+    fun window(
+        ranges: List<Range>,
+        positionMs: Long,
+        keepMs: Long = DEFAULT_KEEP_MS,
+    ): com.nuvio.app.features.player.LiveSeekWindow? {
         val valid = ranges.filter { it.startSec.isFinite() && it.endSec.isFinite() && it.endSec > it.startSec }
         if (valid.isEmpty() || positionMs <= 0L) return null
         val pos = positionMs / 1000.0
-        val range = valid.firstOrNull { pos >= it.startSec - EDGE_TOLERANCE_SEC && pos <= it.endSec + EDGE_TOLERANCE_SEC }
-            ?: valid.last()
-        val start = (range.startSec * 1000.0).toLong()
+        val range = valid
+            .filter { pos >= it.startSec - EDGE_TOLERANCE_SEC && pos <= it.endSec + EDGE_TOLERANCE_SEC }
+            .maxByOrNull { it.endSec }
+            ?: valid.filter { it.endSec < pos }.maxByOrNull { it.endSec }
+            ?: valid.minByOrNull { it.startSec }!!
         val end = (range.endSec * 1000.0).toLong()
+        val start = maxOf((range.startSec * 1000.0).toLong(), end - keepMs.coerceAtLeast(0L))
         return com.nuvio.app.features.player.LiveSeekWindow(start, end, positionMs.coerceIn(start, end))
     }
 
@@ -51,6 +63,7 @@ internal object MpvLiveCache {
         }
     }
 
+    const val DEFAULT_KEEP_MS = 10 * 60_000L
     private const val EDGE_TOLERANCE_SEC = 0.5
     private const val MAX_CACHE_SECS = 1_000_000_000L
 }
