@@ -51,7 +51,8 @@ internal class LiveCaptureEnv(
  * What differs between users is only [retention]: live pause trims the front ([LiveRetention.Trim], rewind
  * playlist); a recording keeps everything ([LiveRetention.KeepAll], EVENT playlist) and ends as Failed(NO_SPACE)
  * with its files kept when the disk has no room. [stop] ends the playlist with ENDLIST and keeps the files;
- * [dispose] cancels and deletes them.
+ * [dispose] cancels and, for [LiveRetention.Trim] only, deletes them (a KeepAll recording keeps its files,
+ * finished with ENDLIST).
  *
  * Adapted from homelessbrian/NuvioPlusIPTV (GPL-3.0), LiveTvTimeshift.kt, with its defects fixed (see
  * [AndroidLivePauseCapture] for the list).
@@ -88,9 +89,11 @@ internal class LiveCaptureLoop(
             try {
                 run.run()
             } catch (e: CancellationException) {
-                if (stopping.get()) run.finishKeepingBuffer()
+                // A stop, or the disposal of a recording (its files stay), ends the playlist so a player reaches the end.
+                if (stopping.get() || (disposed.get() && retention.keepsEverything)) run.finishKeepingBuffer()
                 throw e
             } catch (t: Throwable) {
+                run.finishKeepingBuffer()   // any failure ends what is on disk; a viewer must not stall on a growing playlist
                 channel.trySend(LiveCaptureEvent.Failed(LivePauseFailure.PROVIDER_REFUSED))
             } finally {
                 channel.close()
@@ -110,9 +113,10 @@ internal class LiveCaptureLoop(
         val running = job
         running?.cancel()
         // Delete only after the writer has stopped, or a late write would recreate the directory's contents.
+        // A recording ([LiveRetention.KeepAll]) is the user's data: dispose ends the writer and keeps the files.
         cleanup = env.housekeeping.launch {
             running?.join()
-            dir.deleteRecursively()
+            if (retention.mayTrim) dir.deleteRecursively()
         }
         channel.close()
         scope.coroutineContext.job.cancel()
