@@ -28,7 +28,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import platform.Foundation.NSDate
 import platform.Foundation.NSData
-import platform.Foundation.NSFileHandle
+import platform.Foundation.NSDataReadingMappedIfSafe
+import platform.Foundation.dataWithContentsOfFile
+import platform.Foundation.subdataWithRange
+import platform.Foundation.NSMakeRange
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSHomeDirectory
 import platform.Foundation.NSNumber
@@ -425,11 +428,11 @@ internal class IosRecordingSaver(
         }
     }
 
+    /** The first bytes of a file, mapped (never the whole file read into memory). */
     private fun headOfFile(path: String): ByteArray {
-        val handle = NSFileHandle.fileHandleForReadingAtPath(path) ?: return ByteArray(0)
-        val data = handle.readDataOfLength(DownloadSniff.PEEK_BYTES.convert())
-        handle.closeFile()
-        return data.toByteArray()
+        val data = NSData.dataWithContentsOfFile(path, NSDataReadingMappedIfSafe, null) ?: return ByteArray(0)
+        val n = minOf(data.length, DownloadSniff.PEEK_BYTES.convert())
+        return data.subdataWithRange(NSMakeRange(0u, n)).toByteArray()
     }
 
     private fun NSData.toByteArray(): ByteArray {
