@@ -10,6 +10,16 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class CalendarTitleType { SERIES, MOVIE }
 
+/**
+ * The map from the app's content type to what the Calendar can follow; null = it cannot. Pure and Compose-free, so
+ * tvosCore (which compiles the calendar tests but not the Compose files) has it.
+ */
+internal fun calendarTitleTypeFor(type: String): CalendarTitleType? = when (type.lowercase()) {
+    "series", "tv", "show", "anime" -> CalendarTitleType.SERIES
+    "movie" -> CalendarTitleType.MOVIE
+    else -> null
+}
+
 @Serializable
 data class CalendarIds(
     val imdb: String? = null,

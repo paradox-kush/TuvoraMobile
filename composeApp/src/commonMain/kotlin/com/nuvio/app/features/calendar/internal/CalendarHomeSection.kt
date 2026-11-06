@@ -247,13 +247,6 @@ private fun ComingUpRow(items: List<CalendarComingUpItem>, games: List<CalendarC
     }
 }
 
-/** The map from the app's content type to what the Calendar can follow; null = it cannot. */
-internal fun calendarTitleTypeFor(type: String): CalendarTitleType? = when (type.lowercase()) {
-    "series", "tv", "show", "anime" -> CalendarTitleType.SERIES
-    "movie" -> CalendarTitleType.MOVIE
-    else -> null
-}
-
 /** The reminder switch on show / film details (a row in the + menu). Off → on adds the title to the Calendar. */
 internal class CalendarDetailsBellImpl(private val repository: () -> CalendarRepository) : DetailsCalendarBell {
     @Composable
