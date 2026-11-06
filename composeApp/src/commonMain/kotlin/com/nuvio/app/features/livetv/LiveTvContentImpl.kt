@@ -14,6 +14,7 @@ internal object LiveTvContentImpl : LiveTvContent {
         initialReplay: LiveReplayLaunch?,
         onBack: () -> Unit,
         onFavoriteChannel: (String) -> Unit,
+        onOpenRecordings: () -> Unit,
         modifier: Modifier,
     ) {
         LiveTvScreen(
@@ -23,6 +24,7 @@ internal object LiveTvContentImpl : LiveTvContent {
             initialReplay = initialReplay,
             onBack = onBack,
             onFavoriteChannel = onFavoriteChannel,
+            onOpenRecordings = onOpenRecordings,
             modifier = modifier,
         )
     }

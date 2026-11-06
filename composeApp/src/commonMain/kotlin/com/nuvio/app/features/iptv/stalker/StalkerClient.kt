@@ -20,6 +20,8 @@ import com.nuvio.app.features.iptv.content.IptvEpisodeRow
 import com.nuvio.app.features.iptv.content.IptvSeriesRow
 import com.nuvio.app.features.iptv.content.IptvStreamRow
 import com.nuvio.app.features.trakt.TraktPlatformClock
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -89,11 +91,17 @@ object StalkerClient : IptvClient {
 
     // B02: the series dialect each portal answered with this session (StalkerSeriesDialect), and the
     // genuine-Ministra series tree: seasons keyed accountId:seriesId, episodes accountId:seasonId.
-    // Guarded by [ministraMutex] (plain maps: this object is shared across coroutines on iOS too).
+    // [seriesDialects] and [seriesAbsentIds] are guarded by [verdictLock] — ONE non-suspending lock, because
+    // they are also cleared from sessionFor (under sessionsMutex) and from tests; plain collections on
+    // Kotlin/Native must never be mutated under two different mutexes. The season/episode maps below stay
+    // under [ministraMutex].
+    private val verdictLock = SynchronizedObject()
     private val seriesDialects = mutableMapOf<String, StalkerSeriesDialect.Dialect>()
     private val ministraSeasons = mutableMapOf<String, List<StalkerSeriesDialect.Node>>()
     private val ministraEpisodes = mutableMapOf<String, List<MinistraEpisode>>()
     private val ministraMutex = Mutex()
+    // UX147/UX164: playlists whose series probe ended with positive evidence of "no series section".
+    private val seriesAbsentIds = mutableSetOf<String>()
 
     /** Test seam: lets a test drive the whole client against a fake portal (StalkerRequestCountTest). */
     internal var sessionFactory: (XtreamAccount) -> StalkerSession = { StalkerSession(it) }
@@ -103,7 +111,7 @@ object StalkerClient : IptvClient {
         rowCache.clear()
         linkFlags.clear()
         seasonCache.clear()
-        seriesDialects.clear()
+        synchronized(verdictLock) { seriesDialects.clear(); seriesAbsentIds.clear() }
         ministraSeasons.clear()
         ministraEpisodes.clear()
     }
@@ -127,7 +135,7 @@ object StalkerClient : IptvClient {
             linkFlags.keys.removeAll { it.startsWith("${acc.id}:") }
             epgUnsupported.remove(acc.id)
             seasonCache.keys.removeAll { it.startsWith("${acc.id}:") }
-            seriesDialects.remove(acc.id)
+            synchronized(verdictLock) { seriesDialects.remove(acc.id); seriesAbsentIds.remove(acc.id) }
             ministraSeasons.keys.removeAll { it.startsWith("${acc.id}:") }
             ministraEpisodes.keys.removeAll { it.startsWith("${acc.id}:") }
             Entry(fp).also { sessions[acc.id] = it }
@@ -199,27 +207,53 @@ object StalkerClient : IptvClient {
         val xc = categories(acc, "series", "get_categories")
         if (xc.getOrNull()?.isNotEmpty() == true) {
             rememberDialect(acc, StalkerSeriesDialect.Dialect.XC)
+            setSeriesAbsent(acc, false)
             return xc
         }
         val failure = xc.exceptionOrNull()
         if (failure is kotlinx.coroutines.CancellationException) throw failure
+        val emptySection = (failure as? StalkerSessionUnavailableException)?.emptySection == true
         // An unavailable series module is capability evidence; a network/auth failure is not.
-        if (!StalkerSeriesDialect.allowsVodFallback(failure != null, (failure as? StalkerSessionUnavailableException)?.emptySection == true)) return xc
+        if (!StalkerSeriesDialect.allowsVodFallback(failure != null, emptySection)) return xc
         val vod = categories(acc, "vod", "get_categories")
-        return when (StalkerSeriesDialect.decide(false, vod.getOrNull()?.isNotEmpty() == true)) {
-            StalkerSeriesDialect.Dialect.MINISTRA -> {
-                rememberDialect(acc, StalkerSeriesDialect.Dialect.MINISTRA)
-                vod
-            }
-            else -> xc
+        val ministra = StalkerSeriesDialect.decide(false, vod.getOrNull()?.isNotEmpty() == true) ==
+            StalkerSeriesDialect.Dialect.MINISTRA
+        // UX147: "no series" is only claimed on positive evidence (see StalkerCapabilities); a failed vod
+        // probe proves nothing, and unknown keeps the Series tab.
+        setSeriesAbsent(
+            acc,
+            vod.isSuccess && StalkerCapabilities.seriesAbsent(
+                modulesSeriesDisabled = runCatchingCancellable { sessionFor(acc).seriesModuleDisabled }.getOrNull(),
+                xcEmptySection = emptySection,
+                xcAnsweredEmpty = failure == null,
+                xcFailedOtherwise = false,
+                vodFallbackHasSeries = ministra,
+            ),
+        )
+        return if (ministra) {
+            rememberDialect(acc, StalkerSeriesDialect.Dialect.MINISTRA)
+            vod
+        } else {
+            xc
         }
     }
 
+    /** True once this session's series probe positively found the portal has no series section (UX147). */
+    fun seriesAbsent(acc: XtreamAccount): Boolean = synchronized(verdictLock) { acc.id in seriesAbsentIds }
+
+    /** F9: a refreshed playlist re-asks — forget the verdict so the Series tab is judged again. */
+    fun forgetSeriesVerdict(accountId: String) = synchronized(verdictLock) { seriesAbsentIds -= accountId; Unit }
+
+    private fun setSeriesAbsent(acc: XtreamAccount, absent: Boolean) = synchronized(verdictLock) {
+        if (absent) seriesAbsentIds += acc.id else seriesAbsentIds -= acc.id
+        Unit
+    }
+
     private suspend fun knownDialect(acc: XtreamAccount): StalkerSeriesDialect.Dialect? =
-        ministraMutex.withLock { seriesDialects[acc.id] }
+        synchronized(verdictLock) { seriesDialects[acc.id] }
 
     private suspend fun rememberDialect(acc: XtreamAccount, dialect: StalkerSeriesDialect.Dialect) =
-        ministraMutex.withLock { seriesDialects[acc.id] = dialect }
+        synchronized(verdictLock) { seriesDialects[acc.id] = dialect }
 
     /** The portal's series dialect, learned once per session through [seriesCategories]. */
     private suspend fun seriesDialect(acc: XtreamAccount): StalkerSeriesDialect.Dialect =
@@ -230,7 +264,10 @@ object StalkerClient : IptvClient {
 
     override suspend fun liveChannels(acc: XtreamAccount, categoryId: String?): Result<List<XtreamChannel>> = runCatching {
         if (!ensureLineup(acc)) return@runCatching emptyOrUnavailable(acc)
-        IptvContentDb.channelsFor(acc.id, categoryId).map { it.toChannel(acc) }
+        // B179: divider rows stay stored (saved ids resolve) but are not listed.
+        com.nuvio.app.features.iptv.ChannelSeparatorPolicy.withoutSeparators(
+            IptvContentDb.channelsFor(acc.id, categoryId).map { it.toChannel(acc) }, { it.name }, { it.epgChannelId }, { it.hasArchive },
+        )
     }
 
     /** Windowed lineup read for the hub (item 5). Ensures the mirror, then a paged indexed read. */

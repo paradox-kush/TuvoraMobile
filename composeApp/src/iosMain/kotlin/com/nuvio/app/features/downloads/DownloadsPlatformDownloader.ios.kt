@@ -94,9 +94,12 @@ internal actual object DownloadsPlatformDownloader {
                     tempPath = tempPath,
                     handle = handle,
                     onProgress = onProgress,
+                    strict = request.strictResume,
                 )
 
-                if (attemptedRangeRequest && result.statusCode == 416) {
+                // 416: the partial is longer than the file. A strict resume's 206 that starts somewhere else
+                // would splice another byte stream into it. Either way: start over from zero.
+                if (attemptedRangeRequest && (result.statusCode == 416 || result.rangeMismatch)) {
                     removePathIfExists(tempPath)
                     resumeFromBytes = 0L
                     attemptedRangeRequest = false
@@ -107,6 +110,7 @@ internal actual object DownloadsPlatformDownloader {
                         tempPath = tempPath,
                         handle = handle,
                         onProgress = onProgress,
+                        strict = request.strictResume,
                     )
                 }
 
@@ -215,6 +219,11 @@ private class IosDownloadsTaskHandle(
         job.cancel()
     }
 
+    /** After [cancel]: returns when the download coroutine is over, so no file is still being moved. */
+    override suspend fun awaitStopped() {
+        job.join()
+    }
+
     fun cancelNativeTask() {
         task?.cancel()
         session?.invalidateAndCancel()
@@ -227,10 +236,13 @@ private data class IosDownloadResult(
     val statusCode: Int,
     val contentRange: String?,
     val contentLength: Long?,
+    /** A strict resume got a 206 that does not start at the partial's end; the response was cancelled unread. */
+    val rangeMismatch: Boolean = false,
 )
 
 @OptIn(ExperimentalForeignApi::class)
 private class IosDownloadDelegate(
+    private val strict: StrictResume?,
     private val attemptedRangeRequest: Boolean,
     private val resumeFromBytes: Long,
     private val tempPath: String,
@@ -266,8 +278,22 @@ private class IosDownloadDelegate(
         )
         result = nextResult
 
+        if (strict != null && attemptedRangeRequest &&
+            !ResumeResponseCheck.startsWhereAsked(statusCode, nextResult.contentRange, resumeFromBytes)
+        ) {
+            result = nextResult.copy(rangeMismatch = true)
+            completionHandler(0L) // NSURLSessionResponseCancel: never write these bytes
+            return
+        }
+
         if (statusCode in 200..299) {
             val isPartialResume = attemptedRangeRequest && statusCode == 206 && resumeFromBytes > 0L
+            if (!isPartialResume) {
+                strict?.onValidators?.invoke(
+                    httpResponse?.valueForHTTPHeaderField("ETag"),
+                    httpResponse?.valueForHTTPHeaderField("Last-Modified"),
+                )
+            }
             startingBytesForResponse = if (isPartialResume) resumeFromBytes else 0L
             bytesWrittenForResponse = 0L
             totalBytesForResponse = resolveTotalBytes(
@@ -326,6 +352,12 @@ private class IosDownloadDelegate(
         didCompleteWithError: NSError?,
     ) {
         closeOutputFile()
+
+        result?.takeIf { it.rangeMismatch }?.let {
+            // We cancelled this response ourselves; the caller restarts from zero.
+            completion.complete(it)
+            return
+        }
 
         if (didCompleteWithError != null) {
             completion.completeExceptionally(
@@ -420,6 +452,7 @@ private suspend fun performDownloadRequest(
     tempPath: String,
     handle: IosDownloadsTaskHandle,
     onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+    strict: StrictResume? = null,
 ): IosDownloadResult {
     val url = NSURL(string = request.sourceUrl)
     val nativeRequest = NSMutableURLRequest(
@@ -436,9 +469,12 @@ private suspend fun performDownloadRequest(
     }
     if (rangeStart != null && rangeStart > 0L) {
         nativeRequest.setValue("bytes=$rangeStart-", forHTTPHeaderField = "Range")
+        // The server sends the range only if the file is still the one the partial came from.
+        strict?.validator?.let { nativeRequest.setValue(it, forHTTPHeaderField = "If-Range") }
     }
 
     val delegate = IosDownloadDelegate(
+        strict = strict,
         attemptedRangeRequest = rangeStart != null && rangeStart > 0L,
         resumeFromBytes = resumeFromBytes,
         tempPath = tempPath,

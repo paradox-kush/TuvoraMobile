@@ -26,6 +26,7 @@ class RouteAnalyticsNameTest {
         assertEquals("live_tv", analyticsNameOf(LiveTvRoute(launchId = 1L)))
         assertEquals("stream", analyticsNameOf(StreamRoute(launchId = 1L)))
         assertEquals("catalog", analyticsNameOf(CatalogRoute(launchId = 1L)))
+        assertEquals("recordings", analyticsNameOf(RecordingsRoute()))
     }
 
     /** Matches NuvioTV's existing `detail` / `player` / `stream` vocabulary. */
@@ -67,6 +68,7 @@ class RouteAnalyticsNameTest {
             MetaScreenSettingsRoute(),
             ContinueWatchingSettingsRoute(),
             DownloadsRoute(),
+            RecordingsRoute(),
             DownloadShowRoute("s", "t"),
             AddonsSettingsRoute(),
             PluginsSettingsRoute(),

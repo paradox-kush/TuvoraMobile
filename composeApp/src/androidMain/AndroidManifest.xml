@@ -5,12 +5,41 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Recordings: the service runs as mediaPlayback (owner decision); alarms are exact only if the user allows SCHEDULE_EXACT_ALARM (never USE_EXACT_ALARM). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- Package visibility (API 30+): lets resolveActivity() see the system screen that allows exact alarms. -->
+    <queries>
+        <intent>
+            <action android:name="android.settings.REQUEST_SCHEDULE_EXACT_ALARM" />
+        </intent>
+    </queries>
 
     <application>
         <service
             android:name="com.nuvio.app.features.downloads.DownloadsTransferJobService"
             android:permission="android.permission.BIND_JOB_SERVICE"
             android:exported="false" />
+        <service
+            android:name="com.nuvio.app.features.recordings.internal.RecordingService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+        <receiver
+            android:name="com.nuvio.app.features.recordings.internal.RecordingAlarmReceiver"
+            android:exported="false" />
+        <!-- System broadcasts reach a non-exported receiver (the sender is the system). Re-arms alarms only: it must never start the mediaPlayback service (Android 15 forbids that from BOOT_COMPLETED). -->
+        <receiver
+            android:name="com.nuvio.app.features.recordings.internal.RecordingSystemReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"

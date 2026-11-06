@@ -355,6 +355,19 @@ fun SearchScreen(
             } else {
                 val normalizedQuery = query.trim()
                 val isWaitingForSearch = normalizedQuery.isNotBlank() && lastRequestedQuery != normalizedQuery
+                // F85: Live / Movies / Series chips narrow the IPTV rows already fetched (no new request). They stay up when
+                // the IPTV lane answered for this search even with zero rows, so the filters aren't lost.
+                val searchBody = IptvSearchScopePolicy.bodyOf(
+                    loadingOrPending = isWaitingForSearch || uiState.isLoading || addonManifestsLoading,
+                    noRows = uiState.sections.isEmpty(),
+                    errorWithNoRows = uiState.sections.isEmpty() &&
+                        uiState.emptyStateReason != null && uiState.emptyStateReason != SearchEmptyStateReason.NoResults,
+                )
+                val showScopeChips = IptvSearchScopePolicy.chipsVisible(
+                    body = searchBody,
+                    hasIptvRows = IptvSearchScopePolicy.hasIptvRows(uiState.sections) { it.key },
+                    iptvAnswered = uiState.iptvAnswered,
+                )
                 when {
                     isWaitingForSearch -> {
                         items(2) {
@@ -373,6 +386,15 @@ fun SearchScreen(
                     }
 
                     uiState.sections.isEmpty() -> {
+                        if (showScopeChips) {
+                            item(key = "search_iptv_scope_chips") {
+                                IptvSearchScopeChips(
+                                    selected = iptvScopes,
+                                    onToggle = { iptvScopes = IptvSearchScopePolicy.toggle(iptvScopes, it) },
+                                    modifier = Modifier.padding(horizontal = homeSectionPadding, vertical = 4.dp),
+                                )
+                            }
+                        }
                         item {
                             SearchEmptyStateCard(
                                 reason = uiState.emptyStateReason,
@@ -398,8 +420,6 @@ fun SearchScreen(
                     }
 
                     else -> {
-                        // F85: Live / Movies / Series chips narrow the IPTV rows already fetched (no new request).
-                        val showScopeChips = IptvSearchScopePolicy.hasIptvRows(uiState.sections) { it.key }
                         val visibleSections = IptvSearchScopePolicy.filter(uiState.sections, iptvScopes) { it.key }
                         if (showScopeChips) {
                             item(key = "search_iptv_scope_chips") {
@@ -410,7 +430,7 @@ fun SearchScreen(
                                 )
                             }
                         }
-                        if (visibleSections.isEmpty() && !uiState.isLoading) {
+                        if (IptvSearchScopePolicy.showEmptyNote(iptvScopes, uiState.sections, uiState.iptvAnswered, uiState.isLoading) { it.key }) {
                             item(key = "search_iptv_scope_empty") {
                                 Text(
                                     text = stringResource(Res.string.compose_search_iptv_scope_empty),

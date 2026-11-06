@@ -66,6 +66,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.nuvio.app.core.ui.NuvioModalBottomSheet
+import com.nuvio.app.core.ui.NuvioSheetActionButton
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.nuvio
@@ -117,6 +118,10 @@ import com.nuvio.app.features.player.PlayerPreferencePolicy
 import com.nuvio.app.features.player.PictureChoice
 import com.nuvio.app.features.player.PersistedPlayerTrackPreference
 import com.nuvio.app.features.trakt.TraktPlatformClock
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import nuvio.composeapp.generated.resources.Res
@@ -134,6 +139,7 @@ import nuvio.composeapp.generated.resources.compose_livetv_catchup_no_scrub
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_session_limit
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_start_over
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_watch_live
+import nuvio.composeapp.generated.resources.compose_livetv_catchup_watch
 import nuvio.composeapp.generated.resources.compose_livetv_error_tap_retry
 import nuvio.composeapp.generated.resources.compose_livetv_exit_fullscreen
 import nuvio.composeapp.generated.resources.compose_livetv_fullscreen
@@ -162,6 +168,8 @@ fun LiveTvScreen(
     /** Set when the launch replays one programme (a Sports Centre replay): the screen begins the
      *  catch-up walk from these bounds instead of tuning the channel live. */
     initialReplay: LiveReplayLaunch? = null,
+    /** The programme sheet's "View recordings" (navigates to the Recordings page). */
+    onOpenRecordings: () -> Unit = {},
 ) {
     val colors = MaterialTheme.nuvio.colors
 
@@ -208,6 +216,20 @@ fun LiveTvScreen(
     val playbackStartRecorded = remember(currentContentId) { mutableStateOf(false) }
 
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // Recordings: null where this build has none, and every recording affordance below then stays out of the way.
+    val recordings = com.nuvio.app.features.recordings.api.LocalRecordings.current
+    val recordingController = remember(recordings) {
+        recordings?.let { ProgrammeRecordingController(it, scope, TraktPlatformClock::nowEpochMs) }
+    }
+    // The REC badge set is derived ONCE here (channel -> start times); a guide cell does a set lookup, never a state collect.
+    val recordedStarts by remember(recordings) {
+        recordings?.state
+            ?.map(com.nuvio.app.features.recordings.api.RecordingGuideKeys::startsByChannel)
+            ?.distinctUntilChanged()
+            ?: flowOf(emptyMap())
+    }.collectAsStateWithLifecycle(emptyMap())
+    // Series rules pick up airings the stored guide gained (local reads only, once per visit).
+    LaunchedEffect(recordingController) { recordingController?.refreshSeriesRules() }
     var channels by remember { mutableStateOf<List<LiveGuideChannel>>(emptyList()) }
     // F01: the guide's channel search. It narrows only what the grid lists; zapping keeps the full lineup.
     var guideQuery by remember { mutableStateOf("") }
@@ -587,7 +609,7 @@ fun LiveTvScreen(
             XtreamCatchUp.ProgrammeAction.REPLAY -> startCatchUp(channel, programme)
             // Airing on an archive channel: "restart this" and "join it live" are both reasonable
             // and neither is obviously default, so this is the ONE state that gets two buttons.
-            XtreamCatchUp.ProgrammeAction.START_OVER -> sheetTarget = ProgrammeSheetTarget(channel, programme)
+            XtreamCatchUp.ProgrammeAction.START_OVER -> sheetTarget = ProgrammeSheetTarget(channel, programme, action)
             else -> Unit
         }
     }
@@ -1184,6 +1206,11 @@ fun LiveTvScreen(
                     onLongPressChannel = { ch -> channelMenu = ch },
                     onProgrammeAction = ::onProgrammeAction,
                     onTravel = { guideAnchorMs = it },
+                    recordedStarts = recordedStarts,
+                    // Press-and-hold any programme: its sheet (Record, Record series, plus Start over / Watch where they apply).
+                    onProgrammeLongPress = if (recordingController != null) {
+                        { ch, programme, action -> sheetTarget = ProgrammeSheetTarget(ch, programme, action) }
+                    } else null,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
             }
@@ -1215,6 +1242,23 @@ fun LiveTvScreen(
                     sheetTarget = null
                     switchTo(target.channel)
                 },
+                recordSection = if (recordings != null && recordingController != null) {
+                    { description ->
+                        ProgrammeRecordSection(
+                            channel = target.channel,
+                            programme = target.programme,
+                            description = description,
+                            shownProgrammes = programmes[target.channel.contentId].orEmpty(),
+                            nowMs = nowMs,
+                            port = recordings,
+                            controller = recordingController,
+                            onViewRecordings = {
+                                sheetTarget = null
+                                onOpenRecordings()
+                            },
+                        )
+                    }
+                } else null,
             )
         }
     }
@@ -1513,6 +1557,8 @@ private const val STREAM_INFO_SETTLE_MS = 2500L
 private data class ProgrammeSheetTarget(
     val channel: LiveGuideChannel,
     val programme: XtreamProgram,
+    /** What the cell would do on a tap: decides which watch buttons the sheet shows beside Record. */
+    val action: XtreamCatchUp.ProgrammeAction,
 )
 
 /**
@@ -1675,6 +1721,8 @@ private fun ProgrammeSheet(
     onDismiss: () -> Unit,
     onStartOver: () -> Unit,
     onWatchLive: () -> Unit,
+    /** The Record / Record series part (null where recordings do not exist); gets the full synopsis. */
+    recordSection: (@Composable (description: String) -> Unit)? = null,
 ) {
     val colors = MaterialTheme.nuvio.colors
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1727,64 +1775,47 @@ private fun ProgrammeSheet(
                 )
             }
             Spacer(Modifier.height(NuvioTokens.Space.s4))
-            Row(horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8)) {
-                SheetActionButton(
-                    icon = Icons.Filled.Replay,
-                    label = stringResource(Res.string.compose_livetv_catchup_start_over),
+            when (target.action) {
+                // Airing now on an archive channel: the one state with two answers.
+                XtreamCatchUp.ProgrammeAction.START_OVER -> Row(horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8)) {
+                    NuvioSheetActionButton(
+                        icon = Icons.Filled.Replay,
+                        label = stringResource(Res.string.compose_livetv_catchup_start_over),
+                        background = colors.accent,
+                        contentColor = colors.onAccent,
+                        onClick = onStartOver,
+                        modifier = Modifier.weight(1f),
+                    )
+                    NuvioSheetActionButton(
+                        icon = Icons.Filled.PlayArrow,
+                        label = stringResource(Res.string.compose_livetv_catchup_watch_live),
+                        background = Color.Transparent,
+                        contentColor = colors.textPrimary,
+                        border = colors.borderSubtle,
+                        onClick = onWatchLive,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                // Finished and replayable (opened by press-and-hold): the same one-press play the tap gives.
+                XtreamCatchUp.ProgrammeAction.REPLAY -> NuvioSheetActionButton(
+                    icon = Icons.Filled.PlayArrow,
+                    label = stringResource(Res.string.compose_livetv_catchup_watch),
                     background = colors.accent,
                     contentColor = colors.onAccent,
                     onClick = onStartOver,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                SheetActionButton(
+                XtreamCatchUp.ProgrammeAction.PLAY_LIVE -> NuvioSheetActionButton(
                     icon = Icons.Filled.PlayArrow,
                     label = stringResource(Res.string.compose_livetv_catchup_watch_live),
-                    background = Color.Transparent,
-                    contentColor = colors.textPrimary,
-                    border = colors.borderSubtle,
+                    background = colors.accent,
+                    contentColor = colors.onAccent,
                     onClick = onWatchLive,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                 )
+                XtreamCatchUp.ProgrammeAction.NONE -> Unit
             }
+            recordSection?.invoke(fullDescription)
         }
-    }
-}
-
-@Composable
-private fun SheetActionButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    background: Color,
-    contentColor: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    border: Color? = null,
-) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(NuvioTokens.Radius.button))
-            .then(
-                if (border != null) {
-                    Modifier.border(NuvioTokens.Border.thin, border, RoundedCornerShape(NuvioTokens.Radius.button))
-                } else {
-                    Modifier
-                },
-            )
-            .background(background)
-            .clickable(onClick = onClick)
-            .padding(vertical = NuvioTokens.Space.s12),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(imageVector = icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(NuvioTokens.Space.s6))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = contentColor,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
