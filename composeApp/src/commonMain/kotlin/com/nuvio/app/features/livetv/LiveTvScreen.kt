@@ -814,6 +814,7 @@ fun LiveTvScreen(
                     programmeTitle = nowNext.now?.title ?: currentTitle,
                     startMs = startMs,
                     endMs = endMs,
+                    nowMs = TraktPlatformClock.nowEpochMs(),
                 )
                 if (session == null) {
                     catchUpNotice = CatchUpNotice.NO_RECORDING
