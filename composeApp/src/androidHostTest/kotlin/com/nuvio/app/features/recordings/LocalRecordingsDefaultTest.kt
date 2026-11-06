@@ -14,12 +14,17 @@ import kotlin.test.assertSame
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * iOS never wraps its UI in `installFeatures` (only Android's MainActivity and the desktop window do), so a screen
  * there reads [LocalRecordings] with nothing provided. With a null default every recording affordance (Record, Record
  * series, REC badge, the Recordings page) stayed hidden on iPhone. The default must be the registered port.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class LocalRecordingsDefaultTest {
     @Test
     fun `a composition nobody wrapped in installFeatures reads the registered port`() = runBlocking {
