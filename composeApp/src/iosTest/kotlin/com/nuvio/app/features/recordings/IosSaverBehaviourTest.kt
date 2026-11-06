@@ -1,5 +1,6 @@
 package com.nuvio.app.features.recordings
 
+import com.nuvio.app.features.recordings.api.KnownSizeDecision
 import com.nuvio.app.features.recordings.api.RecordingProblem
 import com.nuvio.app.features.recordings.api.SaveOutcome
 import kotlin.test.AfterTest
@@ -109,6 +110,47 @@ class IosSaverBehaviourTest {
         assertEquals(RecordingProblem.NO_SPACE, failed.problem)
         assertEquals(listOf(a), started, "B must not start once the disk is full")
         assertTrue((handle?.cancels ?: 0) >= 1, "the running download was stopped")
+    }
+
+    @Test
+    fun running_out_of_space_after_bytes_were_written_keeps_them_as_the_recording() = runBlocking<Unit> {
+        val scope = CoroutineScope(Dispatchers.Default)
+        val saver = rig.saver(fakeDownloader { _, cb ->
+            rig.put(workPart, "0123456789")
+            val ticker = scope.launch {
+                delay(30); cb.onProgress(0, null)
+                delay(30); cb.onProgress(17L * 1024 * 1024, null)
+            }
+            FakeHandle(onCancel = { ticker.cancel() })
+        })
+        val out = withTimeout(20_000) { saver.save(rig.request(a, spaceCheck = { RecordingProblem.NO_SPACE }), {}) }
+        scope.coroutineContext[Job]?.cancel()
+        val done = assertIs<SaveOutcome.Done>(out)
+        assertEquals(RecordingProblem.NO_SPACE, done.stoppedFor)
+        assertEquals(10L, done.bytes)
+        assertEquals("0123456789", rig.read(target), "kept under the final name")
+        assertFalse(rig.exists(part)); assertFalse(rig.exists("$part.meta"))
+    }
+
+    @Test
+    fun a_declared_size_that_will_not_fit_is_refused_and_nothing_is_kept() = runBlocking<Unit> {
+        val scope = CoroutineScope(Dispatchers.Default)
+        var seen: Pair<Long, Long>? = null
+        val saver = rig.saver(fakeDownloader { _, cb ->
+            rig.put(workPart, "01")
+            val ticker = scope.launch { delay(30); cb.onProgress(2, 9_000L) }
+            FakeHandle(onCancel = { ticker.cancel() })
+        })
+        val out = withTimeout(20_000) {
+            saver.save(rig.request(a, b, onKnownTotal = { t, d -> seen = t to d; KnownSizeDecision.Refuse(t - d, 5L) }), {})
+        }
+        scope.coroutineContext[Job]?.cancel()
+        assertEquals(9_000L to 0L, seen)
+        val failed = assertIs<SaveOutcome.Failed>(out)
+        assertEquals(RecordingProblem.NO_SPACE, failed.problem)
+        assertEquals(9_000L, failed.needBytes)
+        assertEquals(5L, failed.freeBytes)
+        assertFalse(rig.exists(target), "a refusal keeps no recording")
     }
 
     // ---- early end -------------------------------------------------------------------------------
