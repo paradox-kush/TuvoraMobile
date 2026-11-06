@@ -314,7 +314,8 @@ class CalendarRepository(
     /** Records how the run ended; when the screen gave up waiting, the landed result replaces its "timed out". */
     private suspend fun finish(profileId: Int, outcome: CalendarRunOutcome) {
         synchronized(jobLock) { lastFinishedAtMs = clock() }
-        if (owner != profileId) return
+        // Kept with the snapshot: after a restart a title still in failure back-off must show Failed, not all quiet.
+        withOwner(profileId) { data = data.copy(lastOutcome = outcome) } ?: return
         val current = _state.value.status
         val landed = if (current is LoadStatus.Failed && current.timedOut) {
             when (outcome) {
@@ -326,6 +327,7 @@ class CalendarRepository(
             current
         }
         publish(status = landed, lastOutcome = outcome)
+        save(profileId)
     }
 
     // ---- viewer actions ----
@@ -392,7 +394,8 @@ class CalendarRepository(
             watched = null
         }
         synchronized(jobLock) { lastFinishedAtMs = null }
-        publish(status = LoadStatus.Idle, remaining = 0, lastOutcome = null, resetOutcome = true)
+        // The profile's stored last outcome comes back with it (null for a profile that never ran).
+        publish(status = LoadStatus.Idle, remaining = 0, resetOutcome = true)
     }
 
     /** Runs [block] under the lock only while [profileId] still owns the data; null otherwise. */
@@ -420,7 +423,7 @@ class CalendarRepository(
                 loaded = owner != null,
                 status = status ?: previous.status,
                 remaining = remaining ?: previous.remaining,
-                lastOutcome = if (resetOutcome) null else lastOutcome ?: previous.lastOutcome,
+                lastOutcome = if (resetOutcome) data.lastOutcome else lastOutcome ?: previous.lastOutcome,
                 seenReminders = data.seenReminders.keys,
                 watched = watched,
                 zone = resolveCalendarZone(settings.zoneOverride, deviceZone()),

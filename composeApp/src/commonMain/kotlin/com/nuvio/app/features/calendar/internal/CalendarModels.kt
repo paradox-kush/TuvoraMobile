@@ -203,6 +203,8 @@ data class CalendarSnapshot(
     /** Reminder episode keys already shown, with when; pruned after [CALENDAR_SEEN_KEEP_MS]. */
     val seenReminders: Map<String, Long> = emptyMap(),
     val updatedAtMs: Long = 0L,
+    /** How the last refresh ended, kept so a title still in failure back-off shows Failed again after a restart. */
+    val lastOutcome: CalendarRunOutcome? = null,
 ) {
     companion object {
         const val CURRENT_VERSION = 1

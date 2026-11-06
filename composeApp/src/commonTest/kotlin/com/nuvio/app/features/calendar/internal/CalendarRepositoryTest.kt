@@ -281,6 +281,33 @@ class CalendarRepositoryTest {
         assertEquals(LoadStatus.Failed(timedOut = false), repository.state.value.status, "no all-quiet page over a failure")
     }
 
+    @Test fun theFailedRunSurvivesARestartAndAsksNothing() = runTest {
+        val repository = bellOneShowWhileTheNetworkIsDown()
+        assertEquals(LoadStatus.Failed(timedOut = false), repository.state.value.status, "the only fetch failed")
+        val calls = remote.calls.size
+        assertTrue(calls > 0)
+
+        // A restart: a NEW repository over the same stored data, with the failing title still in back-off.
+        advanceTimeBy(30_000L)
+        val restarted = repository()
+        restarted.requestRefresh(CalendarRefreshReason.CALENDAR_OPENED)
+        settle()
+        assertEquals(calls, remote.calls.size, "the failed title is backing off: nothing is asked after the restart")
+        assertEquals(LoadStatus.Failed(timedOut = false), restarted.state.value.status, "the Failed banner survives the restart")
+    }
+
+    @Test fun aSnapshotStoredBeforeTheOutcomeWasKeptStillDecodes() {
+        val old = """{"version":1,"titles":[],"traktCalendarFetchedAtMs":5,"updatedAtMs":7}"""
+        val snapshot = calendarJson.decodeFromString(CalendarSnapshot.serializer(), old)
+        assertEquals(null, snapshot.lastOutcome, "no stored outcome means none")
+        assertEquals(5L, snapshot.traktCalendarFetchedAtMs)
+        val round = calendarJson.decodeFromString(
+            CalendarSnapshot.serializer(),
+            calendarJson.encodeToString(CalendarSnapshot.serializer(), CalendarSnapshot(lastOutcome = CalendarRunOutcome.FAILED)),
+        )
+        assertEquals(CalendarRunOutcome.FAILED, round.lastOutcome, "the outcome round-trips")
+    }
+
     @Test fun retryAsksTheBackedOffFailedTitleAndTheCalendarLoads() = runTest {
         val repository = bellOneShowWhileTheNetworkIsDown()
         advanceTimeBy(30_000L)

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.BasicAlertDialog
@@ -190,7 +191,14 @@ fun DialogOption(
                     tokens.colors.textPrimary.copy(alpha = tokens.opacity.subtle)
                 },
             )
-            .selectable(selected = selected, enabled = enabled, role = role, onClick = onClick)
+            .then(
+                // A switch row is a toggle (checked state, "double tap to toggle"), not a one-of-many selection.
+                if (role == Role.Switch) {
+                    Modifier.toggleable(value = selected, enabled = enabled, role = role, onValueChange = { onClick() })
+                } else {
+                    Modifier.selectable(selected = selected, enabled = enabled, role = role, onClick = onClick)
+                },
+            )
             .padding(horizontal = NuvioTokens.Space.s14, vertical = NuvioTokens.Space.s12),
         horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12),
         verticalAlignment = Alignment.CenterVertically,
