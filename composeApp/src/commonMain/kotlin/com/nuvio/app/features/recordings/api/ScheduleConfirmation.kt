@@ -26,6 +26,8 @@ data class ScheduleConfirmation(
     val clashTitles: List<String> = emptyList(),
     val offerExactAlarmSettings: Boolean = false,
     val count: Int = 1,
+    /** Space is tight for the estimated size: add "May stop early if space runs out." */
+    val spaceTight: Boolean = false,
 )
 
 /** Picks the truthful confirmation for a scheduling result. Pure. */
@@ -35,9 +37,11 @@ object ScheduleConfirmationPolicy {
         is ScheduleResult.Scheduled -> {
             val clashes = result.clashes.map { it.title }.distinct()
             when (result.arm) {
-                ArmKind.EXACT -> ScheduleConfirmation(ConfirmationKind.SET, clashes)
-                ArmKind.INEXACT -> ScheduleConfirmation(ConfirmationKind.MAY_START_LATE, clashes, offerExactAlarmSettings = takeExactPromptTurn())
-                ArmKind.NONE -> ScheduleConfirmation(ConfirmationKind.SAVES_ON_NEXT_OPEN, clashes)
+                ArmKind.EXACT -> ScheduleConfirmation(ConfirmationKind.SET, clashes, spaceTight = result.spaceTight)
+                ArmKind.INEXACT -> ScheduleConfirmation(
+                    ConfirmationKind.MAY_START_LATE, clashes, offerExactAlarmSettings = takeExactPromptTurn(), spaceTight = result.spaceTight,
+                )
+                ArmKind.NONE -> ScheduleConfirmation(ConfirmationKind.SAVES_ON_NEXT_OPEN, clashes, spaceTight = result.spaceTight)
             }
         }
         is ScheduleResult.Duplicate -> ScheduleConfirmation(ConfirmationKind.ALREADY_SCHEDULED)

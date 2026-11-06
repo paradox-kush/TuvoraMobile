@@ -2775,6 +2775,8 @@
     <string name="recordings_action_failed">That didn’t work. Try again.</string>
     <string name="recordings_file_missing">The file for this recording is gone from this device.</string>
     <string name="recordings_problem_no_space">There wasn’t enough free space on this device. Free some up, then retry.</string>
+    <string name="recordings_problem_no_space_known">Needs about %1$s but only %2$s is free. Free some space, then retry.</string>
+    <string name="recordings_problem_no_space_cut_short">Stopped, storage almost full. Kept what was saved.</string>
     <string name="recordings_problem_no_catch_up">Your provider doesn’t keep a catch-up copy of this channel or programme, so there was nothing to save.</string>
     <string name="recordings_problem_provider_refused">Your provider turned the download down. It may have a connection limit, or its archive may not include this programme.</string>
     <string name="recordings_problem_network">The connection dropped before the save finished. Retry when you’re back online.</string>
@@ -2799,6 +2801,7 @@
     <string name="recordings_unavailable_bad_times">Can’t record this one: the guide has no start and end time for it.</string>
     <string name="recordings_already_saved">Already recorded. You’ll find it in Recordings.</string>
     <string name="recordings_confirm_set">Recording set.</string>
+    <string name="recordings_confirm_space_tight">May stop early if space runs out.</string>
     <string name="recordings_confirm_late">Recording set, but your phone may start it a little late. If Android can’t start it in the background, it saves the next time you open Tuvora. Allow exact alarms and it will be on time.</string>
     <string name="recordings_confirm_next_open">Saves the next time you open Tuvora after the show ends. Keep Tuvora open until the save finishes.</string>
     <string name="recordings_confirm_already">Already scheduled.</string>

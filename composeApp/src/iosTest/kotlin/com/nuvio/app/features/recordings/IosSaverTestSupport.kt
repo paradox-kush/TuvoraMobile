@@ -2,6 +2,7 @@ package com.nuvio.app.features.recordings
 
 import com.nuvio.app.features.downloads.DownloadPlatformRequest
 import com.nuvio.app.features.downloads.DownloadsTaskHandle
+import com.nuvio.app.features.recordings.api.KnownSizeDecision
 import com.nuvio.app.features.recordings.api.RecordingProblem
 import com.nuvio.app.features.recordings.api.SaveRequest
 import com.nuvio.app.features.recordings.internal.DownloaderStart
@@ -52,9 +53,10 @@ internal class SaverRig(downloadsDir: String? = null) {
         resumeFrom: Long = 0,
         estimated: Long = 0,
         spaceCheck: (suspend (Long) -> RecordingProblem?)? = null,
+        onKnownTotal: (suspend (Long, Long) -> KnownSizeDecision)? = null,
     ) = SaveRequest(
         candidates = urls.toList(), headers = emptyMap(), targetPath = files.pathFor(name),
-        resumeFromBytes = resumeFrom, estimatedBytes = estimated, spaceCheck = spaceCheck,
+        resumeFromBytes = resumeFrom, estimatedBytes = estimated, spaceCheck = spaceCheck, onKnownTotal = onKnownTotal,
     )
 }
 

@@ -7,6 +7,7 @@ import com.nuvio.app.features.downloads.DownloadsPlatformDownloader
 import com.nuvio.app.features.downloads.DownloadsTaskHandle
 import com.nuvio.app.features.downloads.StrictResume
 import com.nuvio.app.features.recordings.api.ArmKind
+import com.nuvio.app.features.recordings.api.KnownSizeDecision
 import com.nuvio.app.features.recordings.api.RecordingAlarms
 import com.nuvio.app.features.recordings.api.RecordingCapabilities
 import com.nuvio.app.features.recordings.api.RecordingFiles
@@ -267,6 +268,15 @@ internal class IosRecordingSaver(
             if (failed.problem == RecordingProblem.NO_SPACE) break
         }
         val last = best ?: SaveOutcome.Failed(RecordingProblem.NO_CATCH_UP, offline = false, writtenBytes = 0, rangeSupported = false)
+        // Out of space part-way (not a refusal of a KNOWN size, which carries needBytes): keep what was
+        // written as a playable truncated file under the final name instead of a partial to be cleaned up.
+        if (last.problem == RecordingProblem.NO_SPACE && last.needBytes == null && files.sizeOf(part) > 0L) {
+            if (fm.fileExistsAtPath(req.targetPath)) fm.removeItemAtPath(req.targetPath, null)
+            if (fm.moveItemAtPath(part, req.targetPath, null)) {
+                staging.discard(part) // the sidecar
+                return SaveOutcome.Done(files.sizeOf(req.targetPath), stoppedFor = RecordingProblem.NO_SPACE)
+            }
+        }
         // Report the bytes that are really in the partial now, never a partial a later link replaced or removed.
         return last.copy(writtenBytes = files.sizeOf(part))
     }
@@ -301,7 +311,7 @@ internal class IosRecordingSaver(
         }
 
         try {
-            val outcome = runDownload(item, strict, req, progress) { declaredTotal = it }
+            val outcome = runDownload(item, strict, req, progress, onDiskBytes = if (resumed) sizeOfFile(workPart) else 0L) { declaredTotal = it }
             if (outcome is SaveOutcome.Done) {
                 val size = sizeOfFile(finishedPath)
                 val cut = size <= 0L ||
@@ -327,14 +337,16 @@ internal class IosRecordingSaver(
         strict: StrictResume,
         req: SaveRequest,
         progress: (Long) -> Unit,
+        onDiskBytes: Long,
         onTotal: (Long) -> Unit,
     ): SaveOutcome = coroutineScope {
         val result = CompletableDeferred<SaveOutcome>()
         val ticks = Channel<Long>(Channel.CONFLATED)
         var succeeded = false
+        var knownTotal: Long? = null
         val handle = start(
             DownloadPlatformRequest(item, strict),
-            { downloaded, total -> total?.let(onTotal); progress(downloaded); ticks.trySend(downloaded) },
+            { downloaded, total -> total?.let { knownTotal = it; onTotal(it) }; progress(downloaded); ticks.trySend(downloaded) },
             { _, _ -> succeeded = true; result.complete(SaveOutcome.Done(0L)) },
             { _ ->
                 // The downloader reports a message, not a class: a failure is NETWORK (retried, bounded by the schedule policy).
@@ -345,7 +357,23 @@ internal class IosRecordingSaver(
         val spaceCheck = req.spaceCheck
         val checker = launch {
             var last = -1L
+            var knownChecked = req.onKnownTotal == null
             for (downloaded in ticks) {
+                // The downloader reports the declared total with its first progress; refuse as soon as it is known.
+                val total = knownTotal
+                if (!knownChecked && total != null) {
+                    knownChecked = true
+                    val verdict = req.onKnownTotal?.invoke(total, onDiskBytes)
+                    if (verdict is KnownSizeDecision.Refuse) {
+                        handle.cancel()
+                        result.complete(
+                            SaveOutcome.Failed(
+                                RecordingProblem.NO_SPACE, offline = false, writtenBytes = 0, rangeSupported = true,
+                                needBytes = verdict.needBytes, freeBytes = verdict.freeBytes,
+                            ),
+                        )
+                    }
+                }
                 if (last < 0) last = downloaded
                 if (spaceCheck != null && downloaded - last >= SPACE_CHECK_BYTES) {
                     last = downloaded
