@@ -52,11 +52,13 @@ internal class SaverRig(downloadsDir: String? = null) {
         name: String = "show.ts",
         resumeFrom: Long = 0,
         estimated: Long = 0,
+        programmeMs: Long = 0,
         spaceCheck: (suspend (Long) -> RecordingProblem?)? = null,
         onKnownTotal: (suspend (Long, Long) -> KnownSizeDecision)? = null,
     ) = SaveRequest(
         candidates = urls.toList(), headers = emptyMap(), targetPath = files.pathFor(name),
         resumeFromBytes = resumeFrom, estimatedBytes = estimated, spaceCheck = spaceCheck, onKnownTotal = onKnownTotal,
+        programmeMs = programmeMs,
     )
 }
 

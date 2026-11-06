@@ -16,6 +16,9 @@ import com.nuvio.app.features.recordings.api.RecordingSaver
 import com.nuvio.app.features.recordings.api.SaveOutcome
 import com.nuvio.app.features.recordings.api.SaveRequest
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.convert
+import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.NonCancellable
@@ -24,6 +27,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import platform.Foundation.NSDate
+import platform.Foundation.NSData
+import platform.Foundation.NSFileHandle
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSHomeDirectory
 import platform.Foundation.NSNumber
@@ -33,6 +38,7 @@ import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.stringWithContentsOfFile
 import platform.Foundation.timeIntervalSince1970
 import platform.Foundation.writeToFile
+import platform.posix.memcpy
 
 /** iPhone/iPad capabilities. One constant, so wave 4 (live capture) flips it in one place. */
 internal object IosRecordingCapabilities {
@@ -248,6 +254,10 @@ internal class IosRecordingSaver(
         // The repository asked for a fresh start: whatever an earlier attempt left is not wanted.
         if (req.resumeFromBytes <= 0L) staging.discard(part)
         var best: SaveOutcome.Failed? = null
+        // The downloader reports a message, not an HTTP class, so a refused link reads as NETWORK here; what
+        // separates "HLS only" from a bad connection is whether anything was written and whether we are online.
+        var sawHls = false
+        var progressed = false
         for (url in req.candidates) {
             val outcome = downloadOne(url, req, workName, part, progress)
             if (outcome is SaveOutcome.Done) {
@@ -262,10 +272,16 @@ internal class IosRecordingSaver(
                 return SaveOutcome.Done(files.sizeOf(req.targetPath))
             }
             val failed = outcome as SaveOutcome.Failed
+            if (failed.problem == RecordingProblem.UNSUPPORTED_FORMAT) { sawHls = true; continue }
+            if (failed.writtenBytes > 0L || failed.offline) progressed = true
             if (best == null || failed.writtenBytes >= best.writtenBytes) best = failed
             if (failed.offline) break
             // Out of space: no other link will help.
             if (failed.problem == RecordingProblem.NO_SPACE) break
+        }
+        // Every link that answered was a playlist (the rest were refusals): HLS only, never retried.
+        if (sawHls && !progressed && best?.problem != RecordingProblem.NO_SPACE) {
+            return SaveOutcome.Failed(RecordingProblem.UNSUPPORTED_FORMAT, offline = false, writtenBytes = files.sizeOf(part), rangeSupported = false)
         }
         val last = best ?: SaveOutcome.Failed(RecordingProblem.NO_CATCH_UP, offline = false, writtenBytes = 0, rangeSupported = false)
         // Out of space part-way (not a refusal of a KNOWN size, which carries needBytes): keep what was
@@ -314,6 +330,15 @@ internal class IosRecordingSaver(
             val outcome = runDownload(item, strict, req, progress, onDiskBytes = if (resumed) sizeOfFile(workPart) else 0L) { declaredTotal = it }
             if (outcome is SaveOutcome.Done) {
                 val size = sizeOfFile(finishedPath)
+                // The adapter does not expose the response type, so the finished file's first bytes tell a
+                // playlist (or a few KiB of anything, for a long programme) from a recording; it is deleted.
+                val verdict = RecordingSanityGuard.verdict(req.programmeMs, size, headOfFile(finishedPath))
+                val isPlaylist = DownloadSniff.isHlsPlaylist(null, headOfFile(finishedPath))
+                if (verdict != null || isPlaylist) {
+                    fm.removeItemAtPath(finishedPath, null)
+                    val problem = if (isPlaylist) RecordingProblem.UNSUPPORTED_FORMAT else verdict!!
+                    return SaveOutcome.Failed(problem, offline = false, writtenBytes = 0, rangeSupported = false)
+                }
                 val cut = size <= 0L ||
                     (declaredTotal?.let { size < it } == true) ||
                     RecordingCompletenessPolicy.endedTooEarly(size, declaredTotal, req.estimatedBytes)
@@ -398,6 +423,22 @@ internal class IosRecordingSaver(
                 withContext(NonCancellable) { withTimeoutOrNull(stopWaitMs) { handle.awaitStopped() } }
             }
         }
+    }
+
+    private fun headOfFile(path: String): ByteArray {
+        val handle = NSFileHandle.fileHandleForReadingAtPath(path) ?: return ByteArray(0)
+        val data = handle.readDataOfLength(DownloadSniff.PEEK_BYTES.convert())
+        handle.closeFile()
+        return data.toByteArray()
+    }
+
+    private fun NSData.toByteArray(): ByteArray {
+        val len = length.toInt()
+        if (len == 0) return ByteArray(0)
+        val src = bytes ?: return ByteArray(0)
+        val out = ByteArray(len)
+        out.usePinned { pinned -> memcpy(pinned.addressOf(0), src, len.convert()) }
+        return out
     }
 
     private fun sizeOfFile(path: String): Long {
