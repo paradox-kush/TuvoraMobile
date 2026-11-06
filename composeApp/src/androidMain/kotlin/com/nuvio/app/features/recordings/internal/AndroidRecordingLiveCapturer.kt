@@ -6,6 +6,7 @@ import com.nuvio.app.features.livetv.pause.LiveCaptureLoop
 import com.nuvio.app.features.livetv.pause.LiveCaptureReconnect
 import com.nuvio.app.features.livetv.pause.LiveCaptureRequest
 import com.nuvio.app.features.livetv.pause.LiveLink
+import com.nuvio.app.features.livetv.pause.LocalHlsPlaylist
 import com.nuvio.app.features.livetv.pause.LiveLinkMinter
 import com.nuvio.app.features.livetv.pause.LivePauseFailure
 import com.nuvio.app.features.livetv.pause.LivePausePolicy
@@ -227,8 +228,15 @@ internal class AndroidRecordingLiveCapturer(
     private fun settleBlocking(root: File): LiveFootage? {
         if (!root.isDirectory) return null
         val parts = partDirs(root)
+        // An attempt that wrote pieces but died before its first playlist (process death) is rebuilt from the piece
+        // names; only an attempt holding nothing but unfinished writes (.part / .tmp) is removed.
+        for (d in parts) {
+            if (File(d, RecordingLiveLayout.PLAYLIST).isFile) continue
+            if (!rebuildPlaylist(d) && d.listFiles().orEmpty().none { it.isFile && !it.name.endsWith(".part") && !it.name.endsWith(".tmp") }) {
+                d.deleteRecursively()
+            }
+        }
         val playable = readParts(root)
-        parts.filter { d -> playable.none { it.dir == d.name } }.forEach { it.deleteRecursively() }
         val target = File(root, RecordingLiveLayout.PLAYLIST)
         val combined = RecordingLivePlaylist.combine(playable)
         if (combined == null) {
@@ -242,7 +250,37 @@ internal class AndroidRecordingLiveCapturer(
         return LiveFootage(sizeOfFiles(root, combined.files), combined.durationMs)
     }
 
+    /**
+     * Writes an ended playlist for [dir] from its piece files (`seg<N>.ts` / `seg<N>.m4s`, in sequence order). The real
+     * durations died with the process, so every piece is given the target piece length and the playlist says so.
+     * False when the directory holds no piece.
+     */
+    private fun rebuildPlaylist(dir: File): Boolean {
+        val pieces = dir.listFiles().orEmpty()
+            .filter { it.isFile && it.length() > 0L }
+            .mapNotNull { f -> PIECE_NAME.matchEntire(f.name)?.let { it.groupValues[1].toLong() to f } }
+            .sortedBy { it.first }
+            .map { it.second }
+        if (pieces.isEmpty()) return false
+        val pieceMs = env.targetPieceMs
+        val init = File(dir, "init.mp4").takeIf { f -> f.isFile && pieces.any { it.extension == "m4s" } }
+        val text = buildString {
+            append("#EXTM3U\n#EXT-X-VERSION:").append(if (init != null) 6 else 3).append('\n')
+            append("#EXT-X-TARGETDURATION:").append(maxOf(1L, (pieceMs + 999L) / 1000L)).append('\n')
+            append("#EXT-X-MEDIA-SEQUENCE:0\n")
+            append("# tuvora: rebuilt after an interruption; piece durations are approximate\n")
+            if (init != null) append("#EXT-X-MAP:URI=\"").append(init.name).append("\"\n")
+            for (f in pieces) append("#EXTINF:").append(LocalHlsPlaylist.formatSeconds(pieceMs)).append(",\n").append(f.name).append('\n')
+            append("#EXT-X-ENDLIST\n")
+        }
+        val temp = File(dir, "${RecordingLiveLayout.PLAYLIST}.tmp")
+        temp.writeText(text)
+        if (!temp.renameTo(File(dir, RecordingLiveLayout.PLAYLIST))) throw IOException("cannot publish a rebuilt attempt playlist")
+        return true
+    }
+
     private companion object {
+        val PIECE_NAME = Regex("seg(\\d+)\\.(?:ts|m4s)")
         const val STOP_GRACE_MS = 10_000L
         const val SPACE_CHECK_MS = 5_000L
         val PART_NAME = Regex("p(\\d+)")

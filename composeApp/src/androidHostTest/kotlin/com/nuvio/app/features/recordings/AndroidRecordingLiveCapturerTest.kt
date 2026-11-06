@@ -279,6 +279,39 @@ class AndroidRecordingLiveCapturerTest {
     }
 
     @Test
+    fun `settle keeps the pieces of an attempt that died before its first playlist and makes them playable`() = runBlocking {
+        val d = File(dir, "p0").also { it.mkdirs() }
+        File(d, "seg0.ts").writeBytes(ByteArray(1_000))
+        File(d, "seg1.ts").writeBytes(ByteArray(1_500))
+        File(d, "seg2.ts.part").writeBytes(ByteArray(10))
+        val footage = assertNotNull(capturer().settle(dir.path), "the pieces were recorded, they are footage")
+        assertEquals(2_500L, footage.bytes)
+        assertTrue(File(d, "seg0.ts").isFile && File(d, "seg1.ts").isFile, "pieces are never deleted")
+        val text = playlist()
+        assertTrue(text.indexOf("p0/seg0.ts") in 0 until text.indexOf("p0/seg1.ts"), text)
+        assertTrue("#EXT-X-ENDLIST" in text, text)
+        assertEquals(2, footage.durationMs / 2_000L, "approximate durations: the target piece length per piece")
+    }
+
+    @Test
+    fun `settle orders rebuilt pieces by sequence not by name`() = runBlocking {
+        val d = File(dir, "p0").also { it.mkdirs() }
+        listOf("seg10.ts", "seg2.ts", "seg9.ts").forEach { File(d, it).writeBytes(ByteArray(100)) }
+        capturer().settle(dir.path)
+        val text = playlist()
+        assertTrue(text.indexOf("seg2.ts") < text.indexOf("seg9.ts") && text.indexOf("seg9.ts") < text.indexOf("seg10.ts"), text)
+    }
+
+    @Test
+    fun `settle removes an attempt that holds only unfinished writes`() = runBlocking {
+        val d = File(dir, "p0").also { it.mkdirs() }
+        File(d, "seg0.ts.part").writeBytes(ByteArray(10))
+        File(d, "index.m3u8.tmp").writeText("x")
+        assertNull(capturer().settle(dir.path))
+        assertFalse(d.exists())
+    }
+
+    @Test
     fun `settle on an empty or missing directory is null`() = runBlocking {
         assertNull(capturer().settle(dir.path))
         dir.mkdirs()
