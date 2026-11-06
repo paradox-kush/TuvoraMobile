@@ -329,4 +329,24 @@ class RecordingSchedulePolicyTest {
         assertNull(P.modeFor(channel(), NOW - 10 * MIN, NOW + 50 * MIN, NOW, caps))
         assertEquals(CaptureMode.CATCH_UP, P.modeFor(channel(catchUp = xtream(3)), NOW + HOUR, NOW + 2 * HOUR, NOW, caps))
     }
+
+    @Test
+    fun `a live capture whose fire time has passed starts now`() {
+        val onAir = schedule(mode = CaptureMode.LIVE, start = NOW - 10 * MIN, end = NOW + 50 * MIN)
+        assertTrue(P.startsNow(onAir, NOW))
+    }
+
+    @Test
+    fun `a live capture firing within a minute starts now but one further out does not`() {
+        val soon = schedule(mode = CaptureMode.LIVE, start = NOW + 2 * MIN + 59_000L, end = NOW + HOUR) // pre-roll 2 min -> fires in 59 s
+        assertTrue(P.startsNow(soon, NOW))
+        val later = schedule(mode = CaptureMode.LIVE, start = NOW + 2 * MIN + 61_000L, end = NOW + HOUR)
+        assertFalse(P.startsNow(later, NOW))
+        assertFalse(P.startsNow(schedule(mode = CaptureMode.LIVE, start = NOW + 2 * HOUR), NOW))
+    }
+
+    @Test
+    fun `a catch-up save never starts now`() {
+        assertFalse(P.startsNow(schedule(mode = CaptureMode.CATCH_UP, start = NOW - 2 * HOUR, end = NOW - HOUR), NOW))
+    }
 }

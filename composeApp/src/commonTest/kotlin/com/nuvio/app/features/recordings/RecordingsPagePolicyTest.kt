@@ -133,4 +133,27 @@ class RecordingsPagePolicyTest {
         val ids = RecordingSection.entries.flatMap { RecordingsPagePolicy.build(state(listOf(s), listOf(r)), emptyMap()).rows(it) }.map { it.id }
         assertEquals(ids.size, ids.toSet().size)
     }
+
+    @Test
+    fun `a live recording ended before the show did was stopped by the user`() {
+        val r = recording("a", ended = NOW - DAY + 20 * MIN)
+        val row = RecordingsPagePolicy.build(state(recordings = listOf(r)), emptyMap()).rows(RecordingSection.DONE).single()
+        assertTrue(row.stoppedByUser)
+    }
+
+    @Test
+    fun `a live recording that ran to the end of the show was not stopped by the user`() {
+        val r = recording("a", ended = NOW - DAY + HOUR + 5 * MIN)
+        assertFalse(RecordingsPagePolicy.build(state(recordings = listOf(r)), emptyMap()).rows(RecordingSection.DONE).single().stoppedByUser)
+    }
+
+    @Test
+    fun `a cut-short or catch-up or unfinished-time row is never called stopped by the user`() {
+        val cut = recording("c", ended = NOW - DAY + 20 * MIN, problem = RecordingProblem.NO_SPACE)
+        val catchUp = recording("d", ended = NOW - DAY + 20 * MIN, mode = CaptureMode.CATCH_UP)
+        val unknown = recording("e", ended = null)
+        val rows = RecordingsPagePolicy.build(state(recordings = listOf(cut, catchUp, unknown)), emptyMap()).rows(RecordingSection.DONE)
+        assertEquals(3, rows.size)
+        rows.forEach { assertFalse(it.stoppedByUser, it.id) }
+    }
 }

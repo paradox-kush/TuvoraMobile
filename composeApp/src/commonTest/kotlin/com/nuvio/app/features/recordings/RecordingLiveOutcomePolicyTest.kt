@@ -44,4 +44,12 @@ class RecordingLiveOutcomePolicyTest {
         assertFalse(P.endedEarly(nowMs = 1_000_000L, stopAtMs = 1_000_000L + 2_000L), "within the tolerance is the end")
         assertFalse(P.endedEarly(nowMs = 1_000_000L, stopAtMs = 900_000L))
     }
+
+    @Test
+    fun `a live capture stops when free space reaches the recording floor and not before`() {
+        val floor = com.nuvio.app.features.recordings.internal.RecordingSpacePolicy.MIN_FREE_BYTES
+        assertTrue(P.spaceExhausted(floor))
+        assertTrue(P.spaceExhausted(floor - 1))
+        assertFalse(P.spaceExhausted(floor + 1))
+    }
 }

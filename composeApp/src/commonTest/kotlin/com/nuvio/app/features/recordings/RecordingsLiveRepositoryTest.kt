@@ -407,22 +407,65 @@ class RecordingsLiveRepositoryTest {
     }
 
     @Test
-    fun `not enough room for the slot refuses before any byte`() = runTest {
+    fun `an estimate larger than the free space never blocks a live start when the floor is clear`() = runTest {
         val live = onAir()
         val rig = rigWith(live)
         val need = RecordingSpacePolicy.estimateBytes(RecordingSchedulePolicy.liveStopAtMs(live) - NOW)
-        rig.files.free = RecordingSpacePolicy.MIN_FREE_BYTES + need - 1
-        assertEquals(FireResult.Failed(RecordingProblem.NO_SPACE), rig.repo.fire("L", NOW))
-        assertTrue(rig.capturer.jobs.isEmpty())
-        assertEquals(RecordingStatus.FAILED, rig.repo.state.value.recordings.single().status)
+        rig.files.free = RecordingSpacePolicy.MIN_FREE_BYTES + 10L * 1024 * 1024
+        assertTrue(rig.files.free - RecordingSpacePolicy.MIN_FREE_BYTES < need, "the estimate does not fit")
+        assertEquals(FireResult.Saved, rig.repo.fire("L", NOW))
+        assertEquals(1, rig.capturer.jobs.size, "it started")
     }
 
     @Test
-    fun `exactly enough room starts`() = runTest {
-        val live = onAir()
-        val rig = rigWith(live)
-        rig.files.free = RecordingSpacePolicy.MIN_FREE_BYTES + RecordingSpacePolicy.estimateBytes(RecordingSchedulePolicy.liveStopAtMs(live) - NOW)
-        assertEquals(FireResult.Saved, rig.repo.fire("L", NOW))
+    fun `at or below the floor a live start is refused before any byte`() = runTest {
+        for (free in listOf(RecordingSpacePolicy.MIN_FREE_BYTES, RecordingSpacePolicy.MIN_FREE_BYTES - 1)) {
+            val rig = rigWith(onAir())
+            rig.files.free = free
+            assertEquals(FireResult.Failed(RecordingProblem.NO_SPACE), rig.repo.fire("L", NOW), "free=$free")
+            assertTrue(rig.capturer.jobs.isEmpty())
+            val row = rig.repo.state.value.recordings.single()
+            assertEquals(RecordingStatus.FAILED, row.status)
+            assertEquals(RecordingProblem.NO_SPACE, row.problem)
+        }
+    }
+
+    @Test
+    fun `a live recording on a tight disk schedules with the may-stop-early notice and starts now`() = runTest {
+        val rig = LiveRig()
+        rig.files.free = RecordingSpacePolicy.MIN_FREE_BYTES + 10L * 1024 * 1024
+        val res = rig.repo.scheduleProgramme(channel(), "Show", null, null, NOW - 10 * MIN, NOW + 50 * MIN, NOW)
+        val scheduled = assertNotNull(res as? ScheduleResult.Scheduled)
+        assertTrue(scheduled.spaceTight)
+        assertTrue(scheduled.startsNow)
+    }
+
+    @Test
+    fun `a live programme in the future does not start now`() = runTest {
+        val rig = LiveRig()
+        val res = rig.repo.scheduleProgramme(channel(), "Show", null, null, NOW + HOUR, NOW + 2 * HOUR, NOW)
+        val scheduled = assertNotNull(res as? ScheduleResult.Scheduled)
+        assertEquals(CaptureMode.LIVE, scheduled.schedule.mode)
+        assertEquals(false, scheduled.startsNow)
+        assertEquals(false, scheduled.spaceTight)
+    }
+
+    @Test
+    fun `a user stop of a live capture leaves a row the page calls stopped by the user`() = runTest {
+        val rig = rigWith(onAir())
+        val started = CompletableDeferred<Unit>()
+        rig.capturer.onCapture = { _, progress -> progress(5_000_000L, 1L); started.complete(Unit); awaitCancellation() }
+        rig.capturer.settleResult = LiveFootage(9_000_000L, 120_000L)
+        val fire = async { rig.repo.fire("L", NOW) }
+        started.await()
+        rig.wall = NOW + 20 * MIN
+        rig.repo.cancel("L")
+        assertEquals(FireResult.Saved, fire.await())
+        val row = rig.repo.state.value.recordings.single()
+        assertEquals(RecordingStatus.DONE, row.status)
+        assertNull(row.problem)
+        val page = com.nuvio.app.features.recordings.api.RecordingsPagePolicy.build(rig.repo.state.value, emptyMap())
+        assertTrue(page.rows(com.nuvio.app.features.recordings.api.RecordingSection.DONE).single().stoppedByUser)
     }
 
     @Test

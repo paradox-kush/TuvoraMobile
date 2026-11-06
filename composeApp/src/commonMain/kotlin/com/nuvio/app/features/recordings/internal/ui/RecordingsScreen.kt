@@ -220,6 +220,14 @@ private fun RecordingRowCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = if (row.status == RecordingStatus.FAILED) colors.danger else colors.textMuted,
                     )
+                    if (showsProblem(row) && row.status != RecordingStatus.CANCELLED) {
+                        // The whole reason, wrapped: never cut mid-word.
+                        Text(
+                            text = recordingProblemText(row),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (row.status == RecordingStatus.FAILED) colors.danger else colors.textSecondary,
+                        )
+                    }
                 }
                 if (row.status == RecordingStatus.DONE && canPlay) {
                     IconButton(onClick = onPlay) {

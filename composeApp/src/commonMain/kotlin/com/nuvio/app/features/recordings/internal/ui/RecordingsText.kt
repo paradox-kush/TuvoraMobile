@@ -14,6 +14,8 @@ import nuvio.composeapp.generated.resources.recordings_problem_missed
 import nuvio.composeapp.generated.resources.recordings_problem_network
 import nuvio.composeapp.generated.resources.recordings_problem_no_catch_up
 import nuvio.composeapp.generated.resources.recordings_problem_no_space
+import nuvio.composeapp.generated.resources.recordings_problem_no_space_cut_short
+import nuvio.composeapp.generated.resources.recordings_problem_no_space_known
 import nuvio.composeapp.generated.resources.recordings_problem_provider_refused
 import nuvio.composeapp.generated.resources.recordings_problem_stalled
 import nuvio.composeapp.generated.resources.recordings_problem_unknown
@@ -21,6 +23,7 @@ import nuvio.composeapp.generated.resources.recordings_problem_unsupported_forma
 import nuvio.composeapp.generated.resources.recordings_status_cancelled
 import nuvio.composeapp.generated.resources.recordings_status_done
 import nuvio.composeapp.generated.resources.recordings_status_done_partial
+import nuvio.composeapp.generated.resources.recordings_status_done_stopped
 import nuvio.composeapp.generated.resources.recordings_status_failed
 import nuvio.composeapp.generated.resources.recordings_status_recording
 import nuvio.composeapp.generated.resources.recordings_status_retrying
@@ -42,6 +45,42 @@ internal fun recordingProblemRes(problem: RecordingProblem?): StringResource = w
     RecordingProblem.UNKNOWN, null -> Res.string.recordings_problem_unknown
 }
 
+/** Which sentence explains a row's problem. Pure, so the choice is tested without a screen. */
+internal enum class ProblemTextKind { CUT_SHORT, NO_SPACE_KNOWN, GENERIC }
+
+internal fun problemTextKind(status: RecordingStatus, problem: RecordingProblem?, needBytes: Long?, freeBytes: Long?): ProblemTextKind = when {
+    problem == RecordingProblem.NO_SPACE && status == RecordingStatus.DONE -> ProblemTextKind.CUT_SHORT
+    problem == RecordingProblem.NO_SPACE && needBytes != null && freeBytes != null -> ProblemTextKind.NO_SPACE_KNOWN
+    else -> ProblemTextKind.GENERIC
+}
+
+/** Which line a DONE row shows. Pure. */
+internal enum class DoneLineKind { SAVED, CUT_SHORT, STOPPED }
+
+internal fun doneLineKind(problem: RecordingProblem?, stoppedByUser: Boolean): DoneLineKind =
+    when {
+        problem != null -> DoneLineKind.CUT_SHORT
+        stoppedByUser -> DoneLineKind.STOPPED
+        else -> DoneLineKind.SAVED
+    }
+
+/** A Failed or Cancelled row, or a Done row that was cut short, explains itself in full on the row and in the sheet. */
+internal fun showsProblem(row: RecordingRow): Boolean =
+    row.status == RecordingStatus.FAILED || row.status == RecordingStatus.CANCELLED ||
+        (row.status == RecordingStatus.DONE && row.problem != null)
+
+/** The full plain-words reason, with the need/free numbers when the size was known. */
+@Composable
+internal fun recordingProblemText(row: RecordingRow): String =
+    when (problemTextKind(row.status, row.problem, row.problemNeedBytes, row.problemFreeBytes)) {
+        ProblemTextKind.CUT_SHORT -> stringResource(Res.string.recordings_problem_no_space_cut_short)
+        ProblemTextKind.NO_SPACE_KNOWN -> stringResource(
+            Res.string.recordings_problem_no_space_known,
+            formatRecordingBytes(row.problemNeedBytes ?: 0L), formatRecordingBytes(row.problemFreeBytes ?: 0L),
+        )
+        ProblemTextKind.GENERIC -> stringResource(recordingProblemRes(row.problem))
+    }
+
 /** "News · S01E02", or just the title. */
 internal fun recordingHeadline(row: RecordingRow): String =
     if (row.episode.isNullOrBlank()) row.title else "${row.title} · ${row.episode}"
@@ -57,7 +96,11 @@ internal fun recordingStatusLine(row: RecordingRow): String = when (row.status) 
     RecordingStatus.RECORDING -> stringResource(Res.string.recordings_status_recording, formatRecordingBytes(row.sizeBytes))
     // A DONE row that carries a problem was cut short (storage filled up, the stream was lost): say so.
     RecordingStatus.DONE -> stringResource(
-        if (row.problem != null) Res.string.recordings_status_done_partial else Res.string.recordings_status_done,
+        when (doneLineKind(row.problem, row.stoppedByUser)) {
+            DoneLineKind.CUT_SHORT -> Res.string.recordings_status_done_partial
+            DoneLineKind.STOPPED -> Res.string.recordings_status_done_stopped
+            DoneLineKind.SAVED -> Res.string.recordings_status_done
+        },
         formatRecordingBytes(row.sizeBytes),
     )
     RecordingStatus.FAILED -> stringResource(Res.string.recordings_status_failed)

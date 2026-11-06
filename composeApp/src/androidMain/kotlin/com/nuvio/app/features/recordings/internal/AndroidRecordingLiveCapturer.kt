@@ -56,6 +56,8 @@ internal class AndroidRecordingLiveCapturer(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     /** After the stop time (or a cancel) how long to wait for the loop to wind down before giving up on it. */
     private val stopGraceMs: Long = STOP_GRACE_MS,
+    /** How often free space is compared with the recording floor while a capture runs. */
+    private val spaceCheckMs: Long = SPACE_CHECK_MS,
 ) : RecordingLiveCapturer {
 
     /** One attempt's life: closed when its slot is over, cancelled or failed. A mint checks it on both sides of the provider call. */
@@ -125,6 +127,18 @@ internal class AndroidRecordingLiveCapturer(
                         }
                     }
                 }
+                val spaceWatch = launch {
+                    // The shared loop keeps its own, smaller reserve; a recording honours the recording floor too.
+                    while (true) {
+                        delay(spaceCheckMs)
+                        if (RecordingLiveOutcomePolicy.spaceExhausted(env.freeBytes(partDir))) {
+                            failure = LivePauseFailure.NO_SPACE
+                            session.open = false
+                            handle.stop()
+                            break
+                        }
+                    }
+                }
                 val timer = launch {
                     delay((req.stopAtMs - wallMs()).coerceAtLeast(0L))
                     stoppedAtSlotEnd = true
@@ -136,6 +150,7 @@ internal class AndroidRecordingLiveCapturer(
                 }
                 collector.join()
                 timer.cancel()
+                spaceWatch.cancel()
             }
         } catch (e: Throwable) {
             // Cancelled, or something broke: either way the loop stops and what was recorded is published first.
@@ -229,6 +244,7 @@ internal class AndroidRecordingLiveCapturer(
 
     private companion object {
         const val STOP_GRACE_MS = 10_000L
+        const val SPACE_CHECK_MS = 5_000L
         val PART_NAME = Regex("p(\\d+)")
     }
 }

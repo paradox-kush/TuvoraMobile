@@ -69,7 +69,7 @@ class AndroidRecordingLiveCapturerTest {
     )
 
     private fun capturer(resolver: RecordingLinkResolver = RecordingLinkResolver { ch, _ -> RecordingLiveLink(ch.liveUrl, ch.headers) }) =
-        AndroidRecordingLiveCapturer(env(), resolver, isOnline = { online })
+        AndroidRecordingLiveCapturer(env(), resolver, isOnline = { online }, spaceCheckMs = 50L)
 
     private fun url(path: String) = server.url(path).toString()
 
@@ -159,6 +159,18 @@ class AndroidRecordingLiveCapturerTest {
     fun `a full disk keeps what was recorded and finishes the playlist`() = runBlocking {
         serve { slowTs() }
         val outcome = capturer().capture(job(20_000)) { bytes, _ -> if (bytes > 0) freeBytes.set(10L * 1024 * 1024) }
+        val failed = assertNotNull(outcome as? LiveCaptureOutcome.Failed, "$outcome")
+        assertEquals(RecordingProblem.NO_SPACE, failed.problem)
+        assertTrue(failed.bytesKept > 0 && failed.durationKeptMs > 0, "$failed")
+        assertTrue("#EXT-X-ENDLIST" in playlist())
+        assertTrue(pieceFiles().isNotEmpty())
+    }
+
+    @Test
+    fun `free space falling to the 500 MB floor mid-capture stops the capture and keeps the footage`() = runBlocking {
+        serve { slowTs() }
+        // 400 MB is above the live loop's own 300 MB reserve, so only the recording floor can end this capture.
+        val outcome = capturer().capture(job(20_000)) { bytes, _ -> if (bytes > 0) freeBytes.set(400L * 1024 * 1024) }
         val failed = assertNotNull(outcome as? LiveCaptureOutcome.Failed, "$outcome")
         assertEquals(RecordingProblem.NO_SPACE, failed.problem)
         assertTrue(failed.bytesKept > 0 && failed.durationKeptMs > 0, "$failed")

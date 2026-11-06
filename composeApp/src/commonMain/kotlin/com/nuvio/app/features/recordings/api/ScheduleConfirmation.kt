@@ -20,6 +20,9 @@ enum class ConfirmationKind {
      * (Late-start risk wins: an inexact alarm still says [MAY_START_LATE].)
      */
     LIVE_SET,
+
+    /** A LIVE recording whose capture starts now (fire time passed or within a minute): "Recording now. Stop anytime from Recordings." */
+    RECORDING_NOW,
 }
 
 /**
@@ -32,6 +35,8 @@ data class ScheduleConfirmation(
     val clashTitles: List<String> = emptyList(),
     val offerExactAlarmSettings: Boolean = false,
     val count: Int = 1,
+    /** Space is tight for the estimated size: add "May stop early if space runs out." */
+    val spaceTight: Boolean = false,
 )
 
 /** Picks the truthful confirmation for a scheduling result. Pure. */
@@ -41,11 +46,19 @@ object ScheduleConfirmationPolicy {
         is ScheduleResult.Scheduled -> {
             val clashes = result.clashes.map { it.title }.distinct()
             when (result.arm) {
-                ArmKind.EXACT -> ScheduleConfirmation(
-                    if (result.schedule.mode == CaptureMode.LIVE) ConfirmationKind.LIVE_SET else ConfirmationKind.SET, clashes,
-                )
-                ArmKind.INEXACT -> ScheduleConfirmation(ConfirmationKind.MAY_START_LATE, clashes, offerExactAlarmSettings = takeExactPromptTurn())
-                ArmKind.NONE -> ScheduleConfirmation(ConfirmationKind.SAVES_ON_NEXT_OPEN, clashes)
+                ArmKind.EXACT, ArmKind.INEXACT -> when {
+                    // A live capture that starts now never "may start late": the alarm is a few seconds out, not a wake-up for later.
+                    result.startsNow && result.schedule.mode == CaptureMode.LIVE ->
+                        ScheduleConfirmation(ConfirmationKind.RECORDING_NOW, clashes, spaceTight = result.spaceTight)
+                    result.arm == ArmKind.INEXACT -> ScheduleConfirmation(
+                        ConfirmationKind.MAY_START_LATE, clashes, offerExactAlarmSettings = takeExactPromptTurn(), spaceTight = result.spaceTight,
+                    )
+                    else -> ScheduleConfirmation(
+                        if (result.schedule.mode == CaptureMode.LIVE) ConfirmationKind.LIVE_SET else ConfirmationKind.SET,
+                        clashes, spaceTight = result.spaceTight,
+                    )
+                }
+                ArmKind.NONE -> ScheduleConfirmation(ConfirmationKind.SAVES_ON_NEXT_OPEN, clashes, spaceTight = result.spaceTight)
             }
         }
         is ScheduleResult.Duplicate -> ScheduleConfirmation(ConfirmationKind.ALREADY_SCHEDULED)

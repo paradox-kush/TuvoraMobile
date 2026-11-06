@@ -37,6 +37,7 @@ object RecordingSchedulePolicy {
     const val DEFAULT_PRE_MS = 2L * 60_000
     const val DEFAULT_POST_MS = 5L * 60_000
     const val CATCH_UP_SAVE_DELAY_MS = 10L * 60_000
+    const val START_NOW_WINDOW_MS = 60_000L
     const val RETRY_MS = 30L * 60_000
 
     /** A live capture that failed inside its slot is tried again soon: waiting 30 min would miss it. */
@@ -69,6 +70,10 @@ object RecordingSchedulePolicy {
         s.mode == CaptureMode.CATCH_UP -> s.programmeEndMs + s.postMs + CATCH_UP_SAVE_DELAY_MS
         else -> s.programmeStartMs - s.preMs
     }
+
+    /** A LIVE capture that begins now: its fire time has passed or is within [START_NOW_WINDOW_MS]. */
+    fun startsNow(s: RecordingSchedule, nowMs: Long): Boolean =
+        s.mode == CaptureMode.LIVE && fireTimeMs(s) <= nowMs + START_NOW_WINDOW_MS
 
     fun liveStopAtMs(s: RecordingSchedule): Long = s.programmeEndMs + s.postMs
 

@@ -4,6 +4,7 @@ import com.nuvio.app.features.recordings.api.CaptureMode
 import com.nuvio.app.features.recordings.api.Recording
 import com.nuvio.app.features.recordings.api.RecordingCatchUp
 import com.nuvio.app.features.recordings.api.RecordingChannel
+import com.nuvio.app.features.recordings.api.RecordingProblem
 import com.nuvio.app.features.recordings.api.RecordingSchedule
 import com.nuvio.app.features.recordings.api.RecordingStatus
 import com.nuvio.app.features.recordings.api.SeriesRule
@@ -59,11 +60,14 @@ internal fun recording(
     title: String = "Show",
     episode: String? = null,
     description: String? = null,
+    ended: Long? = null,
+    mode: CaptureMode = CaptureMode.LIVE,
+    problem: RecordingProblem? = null,
 ) = Recording(
     id = id, scheduleId = null, channelKey = channelKey, channelName = "Channel", title = title,
     episode = episode, description = description, programmeStartMs = start, programmeEndMs = start + HOUR,
-    startedAtMs = start, endedAtMs = null, status = status, mode = CaptureMode.LIVE, sizeBytes = size,
-    fileName = "$id.ts", seriesRuleId = seriesRuleId,
+    startedAtMs = start, endedAtMs = ended, status = status, mode = mode, sizeBytes = size,
+    fileName = "$id.ts", seriesRuleId = seriesRuleId, problem = problem,
 )
 
 internal fun rule(id: String = "r1", title: String = "Show", keepLast: Int = 0, ch: RecordingChannel = channel()) =

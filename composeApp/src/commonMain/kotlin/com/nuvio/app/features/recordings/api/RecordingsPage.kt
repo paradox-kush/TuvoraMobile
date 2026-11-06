@@ -28,6 +28,11 @@ data class RecordingRow(
     val canRetry: Boolean,
     /** A scheduled row that already failed once and waits for its next try. */
     val retryPending: Boolean,
+    /** NO_SPACE on a known size: what it needed and what was free (both or neither). */
+    val problemNeedBytes: Long? = null,
+    val problemFreeBytes: Long? = null,
+    /** A live recording the user stopped before the show ended: "Stopped, saved N MB". */
+    val stoppedByUser: Boolean = false,
 )
 
 data class RecordingsPageModel(val sections: Map<RecordingSection, List<RecordingRow>>) {
@@ -66,7 +71,9 @@ object RecordingsPagePolicy {
             programmeStartMs = r.programmeStartMs, programmeEndMs = r.programmeEndMs, sizeBytes = size, status = r.status,
             mode = r.mode, problem = r.problem, description = r.description, scheduleId = r.scheduleId, recordingId = r.id,
             canRetry = (r.status == RecordingStatus.FAILED || r.status == RecordingStatus.CANCELLED) && r.retrySource != null,
-            retryPending = false,
+            retryPending = false, problemNeedBytes = r.problemNeedBytes, problemFreeBytes = r.problemFreeBytes,
+            stoppedByUser = r.mode == CaptureMode.LIVE && r.status == RecordingStatus.DONE && r.problem == null &&
+                r.endedAtMs != null && r.endedAtMs < r.programmeEndMs,
         )
 
         val recording = state.recordings.filter { it.status == RecordingStatus.RECORDING }

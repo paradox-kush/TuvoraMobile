@@ -123,4 +123,43 @@ class ScheduleConfirmationPolicyTest {
         val catchUpOnly = ScheduleConfirmationPolicy.forSeries(listOf(s), RecordingCapabilities.ANDROID, exactAllowed = true) { true }
         assertEquals(ConfirmationKind.SET, catchUpOnly.kind)
     }
+
+    @Test
+    fun `space tight is carried to the confirmation on every arm`() {
+        for (arm in ArmKind.entries) {
+            val c = ScheduleConfirmationPolicy.forResult(ScheduleResult.Scheduled(s, arm, emptyList(), spaceTight = true)) { false }
+            assertTrue(c.spaceTight, "arm $arm")
+        }
+        assertFalse(ScheduleConfirmationPolicy.forResult(scheduled(ArmKind.EXACT)) { false }.spaceTight)
+    }
+
+    @Test
+    fun `a live recording that starts now says recording now on both exact and inexact alarms and offers no exact alarm`() {
+        for (arm in listOf(ArmKind.EXACT, ArmKind.INEXACT)) {
+            var asked = 0
+            val c = ScheduleConfirmationPolicy.forResult(ScheduleResult.Scheduled(live, arm, emptyList(), startsNow = true)) { asked++; true }
+            assertEquals(ConfirmationKind.RECORDING_NOW, c.kind, "arm $arm")
+            assertFalse(c.offerExactAlarmSettings, "arm $arm")
+            assertEquals(0, asked, "the once-only prompt turn is not spent")
+        }
+    }
+
+    @Test
+    fun `a future live recording with an inexact alarm still offers exact alarms`() {
+        val c = ScheduleConfirmationPolicy.forResult(ScheduleResult.Scheduled(live, ArmKind.INEXACT, emptyList(), startsNow = false)) { true }
+        assertEquals(ConfirmationKind.MAY_START_LATE, c.kind)
+        assertTrue(c.offerExactAlarmSettings)
+    }
+
+    @Test
+    fun `recording now still carries the space notice and clashes`() {
+        val other = schedule(id = "o", title = "Other show")
+        val c = confirmNowWith(listOf(other))
+        assertEquals(ConfirmationKind.RECORDING_NOW, c.kind)
+        assertTrue(c.spaceTight)
+        assertEquals(listOf("Other show"), c.clashTitles)
+    }
+
+    private fun confirmNowWith(clashes: List<com.nuvio.app.features.recordings.api.RecordingSchedule>) =
+        ScheduleConfirmationPolicy.forResult(ScheduleResult.Scheduled(live, ArmKind.EXACT, clashes, spaceTight = true, startsNow = true)) { false }
 }

@@ -23,5 +23,8 @@ internal object RecordingLiveOutcomePolicy {
             if (online) Mapped(RecordingProblem.STALLED, false) else Mapped(RecordingProblem.NETWORK, true)
     }
 
+    /** Free space at or below the recording floor ends a live capture (the footage is kept): same rule as a start. */
+    fun spaceExhausted(freeBytes: Long): Boolean = freeBytes <= RecordingSpacePolicy.MIN_FREE_BYTES
+
     fun endedEarly(nowMs: Long, stopAtMs: Long): Boolean = stopAtMs - nowMs > END_TOLERANCE_MS
 }
