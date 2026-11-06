@@ -39,6 +39,7 @@ import nuvio.composeapp.generated.resources.recordings_already_saved
 import nuvio.composeapp.generated.resources.recordings_confirm_already
 import nuvio.composeapp.generated.resources.recordings_confirm_cannot
 import nuvio.composeapp.generated.resources.recordings_confirm_clash
+import nuvio.composeapp.generated.resources.recordings_confirm_space_tight
 import nuvio.composeapp.generated.resources.recordings_confirm_late
 import nuvio.composeapp.generated.resources.recordings_confirm_next_open
 import nuvio.composeapp.generated.resources.recordings_confirm_series_nothing
@@ -162,6 +163,7 @@ private fun ConfirmationBlock(c: ScheduleConfirmation, controller: ProgrammeReco
             ConfirmationKind.SERIES_NOTHING_YET -> stringResource(Res.string.recordings_confirm_series_nothing)
         },
     )
+    if (c.spaceTight) Note(stringResource(Res.string.recordings_confirm_space_tight), warn = true)
     if (c.clashTitles.isNotEmpty()) {
         Note(stringResource(Res.string.recordings_confirm_clash, c.clashTitles.joinToString(", ")), warn = true)
     }

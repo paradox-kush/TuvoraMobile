@@ -63,7 +63,7 @@ internal fun RecordingDetailsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var confirmingDelete by remember(row.id) { mutableStateOf(false) }
     val actions = RecordingActionsPolicy.actionsFor(row, fileAvailable)
-    val failedLike = row.status == RecordingStatus.FAILED || row.status == RecordingStatus.CANCELLED
+    val failedLike = showsProblem(row)
 
     NuvioModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -106,7 +106,7 @@ internal fun RecordingDetailsSheet(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = stringResource(recordingProblemRes(row.problem)),
+                    text = recordingProblemText(row),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textPrimary,
                 )
