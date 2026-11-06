@@ -51,6 +51,9 @@ object CatchUpSaveLinks {
         return !path.endsWith(".m3u8") && "extension=m3u8" !in query
     }
 
+    /** An Xtream `timeshift.php` link with no `extension=` parameter: the panel picks the format (often an HLS VOD playlist). */
+    fun isUnknownFormat(url: String): Boolean = false
+
     /** Why [candidates] cannot be saved, or null when at least one link can: no catch-up at all, or HLS only. */
     fun problemFor(candidates: List<String>): RecordingProblem? = when {
         candidates.isEmpty() -> RecordingProblem.NO_CATCH_UP
