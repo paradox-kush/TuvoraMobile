@@ -98,7 +98,7 @@ class TvPlaylistDetailsSession(private val accountId: String) {
             nowEpochSec = TraktPlatformClock.nowEpochMs() / 1000,
             addressLine = ServerFailoverPolicy.backupLabel(active[account.id] ?: 0) ?: PlaylistAddress.hostOnly(account.baseUrl),
             allowEdit = false,
-            panelCheckFailed = live.hasPanel && !live.loading && live.info == null,
+            panelCheckFailed = live.hasPanel && !live.loading && !live.inspectionSkipped && live.info == null,
         )
         return TvDetailsState(
             name = model.name,
@@ -106,10 +106,10 @@ class TvPlaylistDetailsSession(private val accountId: String) {
             ribbon = TvPlaylistDetailsPolicy.ribbon(model.managedBy, PlaylistAddress.isoDate(model.serviceUpdatedAt)),
             managedBy = model.managedBy,
             providerName = model.providerName,
-            expiryLine = TvPlaylistDetailsPolicy.expiryLine(model.expiry, loading = live.loading),
+            expiryLine = TvPlaylistDetailsPolicy.expiryLine(model.expiry, loading = live.loading, inspectionSkipped = live.inspectionSkipped),
             expiryBar = TvPlaylistDetailsPolicy.expiryBar(model.expiry),
             connectionsLine = TvPlaylistDetailsPolicy.connectionsLine(model.connections),
-            statusLine = TvPlaylistDetailsPolicy.statusLine(model.statusText, live.loading, live.hasPanel),
+            statusLine = TvPlaylistDetailsPolicy.statusLine(model.statusText, live.loading, live.hasPanel, live.inspectionSkipped),
             counts = TvPlaylistDetailsPolicy.countLines(model.counts),
             lockedNote = if (model.lockedServerLogin) "Managed by ${model.providerName ?: "your provider"}. Detach to manage them yourself." else null,
             enabled = model.enabled,
@@ -151,6 +151,6 @@ object TvPlaylistRows {
         val map = ManagedInfoRepository.forProfile(ProfileRepository.activeProfileId)
         val managed = XtreamRepository.uiState.value.accounts.filter { it.id in map }
         if (managed.isEmpty()) return
-        scope.launch { managed.forEach { PlaylistAccountInfoStore.shared.infoFor(it) } }
+        scope.launch { PlaylistAccountInfoStore.shared.refreshManaged(managed, map.keys) }
     }
 }

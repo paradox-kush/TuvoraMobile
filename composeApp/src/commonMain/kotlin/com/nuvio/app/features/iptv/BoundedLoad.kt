@@ -52,6 +52,12 @@ enum class LoadSurface(val key: String, val stallMs: Long, val reportsEveryOutco
      * STALL deadline fed by import progress; past it the screen stops waiting (the rebuild keeps going behind it).
      */
     PLAYLIST_REFRESH("playlist_refresh", 90_000L, reportsEveryOutcome = true),
+    /**
+     * The Calendar's refresh (features/calendar). A STALL deadline restarted by each title fetched, so a big slate
+     * behind the rate limiter keeps going while it makes progress; past it the screen shows Failed + Retry and the
+     * titles still being fetched land in the background. Only failures are reported.
+     */
+    CALENDAR("calendar", 30_000L, reportsEveryOutcome = false),
 }
 
 sealed interface LoadStatus {

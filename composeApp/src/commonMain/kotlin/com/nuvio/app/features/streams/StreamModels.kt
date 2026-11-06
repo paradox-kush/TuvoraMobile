@@ -340,6 +340,8 @@ data class StreamsUiState(
     val groups: List<AddonStreamGroup> = emptyList(),
     val activeAddonIds: Set<String> = emptySet(),
     val selectedFilter: String? = null,
+    /** True once a filter was chosen for this load (user tap or the preferred-source default); see [PreferredFilterPolicy]. */
+    val filterTouched: Boolean = false,
     val isAnyLoading: Boolean = false,
     val emptyStateReason: StreamsEmptyStateReason? = null,
     val autoPlayStream: StreamItem? = null,
@@ -348,6 +350,9 @@ data class StreamsUiState(
     val showDirectAutoPlayOverlay: Boolean = false,
     val overlayMessage: String? = null,
 ) {
+    fun withSelectedFilter(addonId: String?): StreamsUiState =
+        copy(selectedFilter = addonId, filterTouched = true)
+
     val filteredGroups: List<AddonStreamGroup>
         get() = if (selectedFilter == null) groups
                 else groups.filter { it.addonId == selectedFilter }

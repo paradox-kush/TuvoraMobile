@@ -44,6 +44,8 @@ val tvosExcludedCommon = listOf(
     "com/nuvio/app/core/rec/RecShelfTracking.kt", "com/nuvio/app/features/auth/AccountSessionPrompts.kt",
     "com/nuvio/app/features/library/TrackingMembershipRemovalConfirmation.kt",
     "com/nuvio/app/features/livetv/LiveTvOrientation.kt",
+    // Calendar: the Compose slots and their string helpers; Apple TV draws the Calendar in SwiftUI (TvCalendar facade).
+    "com/nuvio/app/features/calendar/api/CalendarUiSlots.kt", "com/nuvio/app/features/calendar/internal/CalendarUiText.kt",
     // Phone/desktop long-press channel menu (sheet + toast); Apple TV has its own SwiftUI context menu.
     "com/nuvio/app/features/iptv/IptvLiveChannelMenu.kt",
     // Phone/desktop shell hook for setup links and the empty-screen button; it opens the Add Playlist page
@@ -230,6 +232,7 @@ kotlin {
                 implementation(libs.compose.runtime)
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.serialization.json)
+                implementation(libs.kotlinx.datetime)
                 implementation(libs.kotlinx.atomicfu)
                 implementation(libs.kermit)
                 implementation(libs.supabase.postgrest)
@@ -254,6 +257,7 @@ kotlin {
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/iptv/overlay/customgroup"))
             // Watch party: the shared rules Apple TV's party screen and player sync run on.
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/party"))
+            kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/calendar"))
         }
         commonTest.dependencies {
             implementation("io.ktor:ktor-client-mock:${libs.versions.ktor.get()}")

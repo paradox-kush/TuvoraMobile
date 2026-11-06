@@ -1,0 +1,141 @@
+package com.nuvio.app.features.streams
+
+import co.touchlab.kermit.Logger
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
+import nuvio.composeapp.generated.resources.Res
+import nuvio.composeapp.generated.resources.streams_source_interrupted
+import nuvio.composeapp.generated.resources.streams_source_timed_out
+import org.jetbrains.compose.resources.getString
+
+/** A provider lane ran past its deadline and was ended with a Failed outcome. */
+internal class SourceLaneTimeoutException(val deadlineMs: Long) :
+    Exception("Source did not answer within ${deadlineMs / 1000}s")
+
+/** A provider threw a CancellationException of its own (stale scope, epoch change, inner timeout) while the list was still wanted. */
+internal class SourceLaneInterruptedException(cause: Throwable) :
+    Exception(cause.message ?: "Source request was interrupted", cause)
+
+/**
+ * One provider's lane in a title's merged source list (add-on, plugin scraper, media server, IPTV
+ * playlist). Every lane MUST end in a published group — Loaded, Empty or Failed — because the
+ * aggregators count completions (`repeat(totalTasks) { receive() }`) and settle the whole list
+ * only when every lane has reported.
+ *
+ * What it fixes: `runCatchingUnlessCancelled` re-throws every [CancellationException]. Add-on,
+ * IPTV-match and plugin lanes use it, and their providers throw cancellations that are not the
+ * caller leaving (`fetchAddonResponseText`'s "Source choices changed", an inner `withTimeout`).
+ * Re-thrown, the child ended quietly, the completion was never sent and the collector waited
+ * forever (B226 family). The media-server lane ([com.nuvio.app.features.servers.ServerStreamSource.load])
+ * already turned a foreign cancellation into a Failed group, so for servers this adds only the deadline.
+ *
+ * Rule: only the CALLER's cancellation propagates; everything else becomes a failure value.
+ * A [deadlineMs] of null bounds nothing and only converts foreign cancellation — used by plugin
+ * scrapers, whose runtime owns a 60 s budget that starts after its TMDB lookup, its 10-slot queue
+ * and the search-pause wait, none of which a lane deadline may cut.
+ */
+internal object SourceLaneGuard {
+    /** Matches the 60 s whole-call HTTP limit; legitimately slow media-server lookups (15-20 s) fit inside it. */
+    const val LANE_DEADLINE_MS = 60_000L
+
+    /**
+     * Safety net for IPTV/source-match lanes, measured from when the lane starts. They deliberately
+     * outwait add-ons and plugins (B63), so they end when the other lanes settle - but plugin lanes
+     * have no deadline of their own (the runtime owns it) and a paused plugin search can park them
+     * (PlayerStreamsRepository.stopSourcesLoading), so the IPTV chip needs a bound that cannot depend on
+     * them. Above the longest legitimate plugin scraper (120 s on TV).
+     */
+    const val IPTV_SAFETY_DEADLINE_MS = 150_000L
+
+    private class Held<T>(val value: T)
+
+    suspend fun <T> run(deadlineMs: Long? = LANE_DEADLINE_MS, block: suspend () -> T): Result<T> {
+        val caller = currentCoroutineContext()
+        return try {
+            if (deadlineMs == null) {
+                Result.success(block())
+            } else {
+                // withTimeoutOrNull swallows only OUR timeout; an inner TimeoutCancellationException
+                // propagates and is reported as the provider's own interruption, not as this deadline.
+                val held = withTimeoutOrNull(deadlineMs) { Held(block()) }
+                if (held == null) {
+                    caller.ensureActive()
+                    Result.failure(SourceLaneTimeoutException(deadlineMs))
+                } else {
+                    Result.success(held.value)
+                }
+            }
+        } catch (error: CancellationException) {
+            caller.ensureActive() // the caller left: propagate
+            Result.failure(SourceLaneInterruptedException(error))
+        } catch (error: Throwable) {
+            Result.failure(error)
+        }
+    }
+}
+
+/**
+ * User-facing text for a lane failure. A deadline and a provider-side interruption (a device-source
+ * setting changed mid-load, a stale server scope, an inner timeout) get localized text; raw
+ * CancellationException messages such as "Source choices changed" are never shown to the user.
+ */
+internal suspend fun Throwable.laneFailureMessage(): String? = when (this) {
+    is SourceLaneTimeoutException -> localized(Res.string.streams_source_timed_out, "This source did not answer in time.")
+    is SourceLaneInterruptedException ->
+        if (cause is TimeoutCancellationException) {
+            localized(Res.string.streams_source_timed_out, "This source did not answer in time.")
+        } else localized(
+            Res.string.streams_source_interrupted,
+            "Your source settings changed while this was loading. Reopen the title to try again.",
+        )
+    else -> message
+}
+
+/** A missing resource environment must never kill a lane's report, so fall back to the English text. */
+private suspend fun localized(resource: org.jetbrains.compose.resources.StringResource, fallback: String): String =
+    try {
+        getString(resource)
+    } catch (error: CancellationException) {
+        currentCoroutineContext().ensureActive() // only the caller leaving propagates
+        fallback
+    } catch (error: Throwable) {
+        fallback
+    }
+
+private val addonLog = Logger.withTag("AddonLane")
+
+/** An add-on's lane: Loaded, or Failed with a user-facing reason; never an unfinished lane. */
+internal suspend fun resolveAddonGroup(
+    addonName: String,
+    addonId: String,
+    load: suspend () -> List<StreamItem>,
+): AddonStreamGroup =
+    SourceLaneGuard.run { load() }.fold(
+        onSuccess = { streams -> AddonStreamGroup(addonName = addonName, addonId = addonId, streams = streams, isLoading = false) },
+        onFailure = { err ->
+            addonLog.w(err) { "Failed to fetch streams from $addonName" }
+            AddonStreamGroup(
+                addonName = addonName,
+                addonId = addonId,
+                streams = emptyList(),
+                isLoading = false,
+                error = err.laneFailureMessage(),
+            )
+        },
+    )
+
+private val directIptvLog = Logger.withTag("DirectIptvLane")
+
+/**
+ * The direct IPTV/Stalker registration path (a namespaced id resolves to one stream after the screen
+ * is already `isAnyLoading = true`). A provider-side cancellation or a hang must end as "not
+ * registered" so the caller shows its empty state; it used to end the coroutine silently and leave the
+ * screen loading forever. Only the caller's own cancellation propagates.
+ */
+internal suspend fun registerDirectIptv(register: suspend () -> Boolean): Boolean =
+    SourceLaneGuard.run { register() }
+        .onFailure { directIptvLog.w(it) { "Direct IPTV registration failed" } }
+        .getOrDefault(false)

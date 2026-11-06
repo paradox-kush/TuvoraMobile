@@ -43,7 +43,20 @@ object IptvLoadFailurePolicy {
 
         /** The portal answered and said no. [Failure.portalText] carries the reason and remedy. */
         REFUSED,
+
+        /**
+         * UX164: the portal ANSWERED that it has nothing for this section (a provider with no series).
+         * That is a fact about the provider, not a failure: the card says so plainly, offers no Retry
+         * (asking again gets the same answer) and shows no breadcrumb or exception name.
+         */
+        SECTION_UNAVAILABLE,
     }
+
+    /** Whether the hub card should offer Retry for [kind] — a plain "this provider has none" does not. */
+    fun offersRetry(kind: Kind): Boolean = kind != Kind.SECTION_UNAVAILABLE
+
+    /** Whether the support breadcrumb ([Failure.detail]) belongs on the card for [kind]. */
+    fun showsBreadcrumb(kind: Kind): Boolean = kind != Kind.SECTION_UNAVAILABLE
 
     /**
      * [status] is set only for [Kind.BLOCKED_BY_PROVIDER] (the code to show); [portalText] only for
@@ -57,8 +70,13 @@ object IptvLoadFailurePolicy {
         val detail: String = UNKNOWN_REASON,
     )
 
-    /** [host] is the playlist's panel origin, appended to [Failure.detail] so support knows which. */
-    fun classify(error: Throwable?, host: String? = null): Failure {
+    /**
+     * [host] is the playlist's panel origin, appended to [Failure.detail] so support knows which.
+     * [forSeriesSection]: the failed load was the SERIES category list. Only there is a portal's
+     * "nothing for this section" answer read as "this provider has no series" (UX164) — the same reply
+     * on Live, Movies, a single category or the playlist form stays a refusal with the portal's text.
+     */
+    fun classify(error: Throwable?, host: String? = null, forSeriesSection: Boolean = false): Failure {
         val detail = detailOf(error, host)
         return when {
             error is HttpStatusException && error.status in BLOCKING_STATUSES ->
@@ -68,7 +86,8 @@ object IptvLoadFailurePolicy {
             // the MAC") is the single most useful sentence this whole path can produce.
             error is StalkerPortalRefusedException -> refusal(error, detail)
             error is StalkerAuthException -> refusal(error, detail)
-            error is StalkerSessionUnavailableException -> refusal(error, detail)
+            error is StalkerSessionUnavailableException ->
+                if (error.emptySection && forSeriesSection) Failure(Kind.SECTION_UNAVAILABLE, detail = host?.takeIf { it.isNotBlank() }.orEmpty()) else refusal(error, detail)
 
             else -> Failure(Kind.UNREACHABLE, detail = detail)
         }

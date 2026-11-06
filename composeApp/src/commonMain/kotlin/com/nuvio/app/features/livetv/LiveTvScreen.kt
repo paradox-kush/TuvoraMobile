@@ -748,8 +748,15 @@ fun LiveTvScreen(
     }
     ApplyLiveOrientation(orientationMode)
 
-    val nowNext = remember(programmes[currentContentId], nowMs) {
-        nowNextOf(programmes[currentContentId], nowMs)
+    val replayShown = catchUp
+    val nowNext = remember(programmes[currentContentId], nowMs, replayShown?.startMs, replayShown?.endMs) {
+        if (replayShown != null) {
+            GuideNowNextPolicy.selectForReplay(
+                programmes[currentContentId].orEmpty(), replayShown.startMs, replayShown.endMs, replayShown.programmeTitle,
+            )
+        } else {
+            nowNextOf(programmes[currentContentId], nowMs)
+        }
     }
 
     androidx.compose.foundation.layout.BoxWithConstraints(
@@ -946,6 +953,9 @@ fun LiveTvScreen(
                                         // Same reset as a re-resolve: the old stream's snapshot must not "prove" the new link.
                                         controller = null
                                         snapshot = PlayerPlaybackSnapshot()
+                                        // A new link gets its own startup deadline: a stalled restart must end, not spin.
+                                        startupBudget.reset()
+                                        replayStartupFailed = false
                                         catchUp = running.copy(
                                             attempt = begun.attempt,
                                             streamStartMs = action.atMs,

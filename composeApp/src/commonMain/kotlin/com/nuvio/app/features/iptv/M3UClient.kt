@@ -190,7 +190,8 @@ object M3UClient : IptvClient {
                 is M3uIngestRow.Channel -> {
                     rememberCategory(IptvContentKind.LIVE.slug, mapped.categoryId, entry.group)
                     channels.add(mapped.row)
-                    liveCount++
+                    // B179: stored, but not counted — the count is what the lists will show.
+                    if (!ChannelSeparatorPolicy.isSeparator(mapped.row.name, mapped.row.tvgId, mapped.row.hasArchive)) liveCount++
                 }
                 is M3uIngestRow.Movie -> {
                     rememberCategory(IptvContentKind.VOD.slug, mapped.categoryId, entry.group)
@@ -257,7 +258,8 @@ object M3UClient : IptvClient {
 
     override suspend fun liveChannels(acc: XtreamAccount, categoryId: String?): Result<List<XtreamChannel>> = runCatching {
         ensureIngested(acc)
-        IptvContentDb.channelsFor(acc.id, categoryId).map { it.toChannel() }
+        // B179: divider rows stay stored (saved ids resolve) but are not listed.
+        ChannelSeparatorPolicy.withoutSeparators(IptvContentDb.channelsFor(acc.id, categoryId).map { it.toChannel() }, { it.name }, { it.epgChannelId }, { it.hasArchive })
     }
 
     override suspend fun vodMovies(acc: XtreamAccount, categoryId: String?): Result<List<XtreamMovie>> = runCatching {

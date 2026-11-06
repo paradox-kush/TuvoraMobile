@@ -46,6 +46,42 @@ internal fun <T> mergePagedWindow(existing: List<T>, more: List<T>, hasMore: Boo
     return (existing + fresh) to (hasMore && fresh.isNotEmpty())
 }
 
+/**
+ * One fetched window: [items] as shown (divider rows already dropped), [hasMore] judged on the RAW page,
+ * and [consumed] = how many RAW rows the window covered. Paging indexes the provider's rows, so the next
+ * window must start at the raw count — NOT at the shown count, which drifts below it once rows are hidden.
+ */
+internal data class RawWindow<T>(val items: List<T>, val hasMore: Boolean, val consumed: Int)
+
+/** A category's paging position: rows shown so far, whether more exist, and the raw offset the next window starts at. */
+internal data class PagedState<T>(val items: List<T>, val hasMore: Boolean, val rawOffset: Int)
+
+/**
+ * Loads the next window(s). A window whose rows were ALL hidden adds nothing, and the row only asks for
+ * more when its item count changes — so such a window must not end the load: keep going (bounded by
+ * [maxEmptyWindows], and by the raw offset always advancing) until something new shows or the provider
+ * runs out. [fetch] returns null when the fetch failed/timed out: stop with what we have.
+ */
+internal suspend fun <T> advancePaged(
+    start: PagedState<T>,
+    maxEmptyWindows: Int = 20,
+    id: (T) -> String,
+    fetch: suspend (rawOffset: Int) -> RawWindow<T>?,
+): PagedState<T> {
+    var state = start
+    var empties = 0
+    while (state.hasMore) {
+        val window = fetch(state.rawOffset) ?: return state
+        val (items, _) = mergePagedWindow(state.items, window.items, window.hasMore, id)
+        // No raw progress means a stuck/overlapping source: stop rather than loop.
+        val more = window.hasMore && window.consumed > 0
+        state = PagedState(items, more, state.rawOffset + window.consumed)
+        if (items.size > start.items.size || !more) return state
+        if (++empties >= maxEmptyWindows) return state
+    }
+    return state
+}
+
 object XtreamHubRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _uiState = MutableStateFlow(XtreamHubUiState())
@@ -91,6 +127,9 @@ object XtreamHubRepository {
             categoryJobs.remove(accountId).orEmpty().toList()
         }
         jobs.forEach { it.cancel() }
+        // F9: a refreshed catalogue re-asks whether the portal has series — the hidden tab must be able to come back.
+        com.nuvio.app.features.iptv.stalker.StalkerClient.forgetSeriesVerdict(accountId)
+        _uiState.update { it.copy(seriesUnavailableIds = it.seriesUnavailableIds - accountId) }
         if (_uiState.value.selectedAccountId == accountId) {
             _uiState.update { it.copy(catalogueGeneration = it.catalogueGeneration + 1L) }
         }
@@ -482,8 +521,9 @@ object XtreamHubRepository {
      * A fetched LIVE window of the hub, as the row cache keeps it: RAW (provider order, provider
      * names, nothing hidden, no pin marker). The channel overlay is applied when rows are shown
      * ([applyCategoryOverlay] -> IptvChannelQuickActionsPolicy.hubRow), so an un-pin, un-rename or
-     * un-hide made after the row loaded shows without a re-fetch (B108, K9). The raw window also
-     * keeps the next window's offset equal to the raw provider count the paging indexes.
+     * un-hide made after the row loaded shows without a re-fetch (B108, K9). Paging indexes the
+     * provider's RAW rows: [RawWindow.consumed] counts them, so rows hidden from the shown list (divider
+     * rows) never shift the next window's offset.
      * Records each card's canon-v1 identity on the way through; [entityIds] is parallel to
      * [previews] (same order/length).
      */
@@ -514,7 +554,7 @@ object XtreamHubRepository {
                     val previous = cache[accountId to section].orEmpty().associateBy { it.id }
                     val next = stored.map { (id, name) ->
                         val old = previous[id]
-                        XtreamHubCategory(id, name, items = old?.items ?: emptyList(), loaded = old?.loaded ?: false, hasMore = old?.hasMore ?: false)
+                        XtreamHubCategory(id, name, items = old?.items ?: emptyList(), loaded = old?.loaded ?: false, hasMore = old?.hasMore ?: false, rawOffset = old?.rawOffset ?: 0)
                     }
                     cache[accountId to section] = next
                     next
@@ -550,6 +590,13 @@ object XtreamHubRepository {
             }.getOrThrow()
         }
         if (catalogueEpoch(accountId) != epoch) return
+        var seriesAbsent = false
+        if (section == XtreamHubSection.SERIES && account.sourceType == SOURCE_TYPE_STALKER) {
+            // UX147: the series probe has settled; a portal with positive "no series" evidence loses the tab.
+            val absent = com.nuvio.app.features.iptv.stalker.StalkerClient.seriesAbsent(account)
+            seriesAbsent = absent
+            _uiState.update { it.copy(seriesUnavailableIds = XtreamHubSections.withSeriesAbsent(it.seriesUnavailableIds, accountId, absent)) }
+        }
         val fresh = outcome.valueOrNull() ?: run {
             // Failed fetch: keep any warm cache, but if there's none the section would otherwise spin
             // forever — surface an error so the user knows the portal is unreachable, not just slow.
@@ -561,6 +608,8 @@ object XtreamHubRepository {
                     (outcome as? LoadOutcome.Failed)?.error,
                     // The server that actually failed last (Step 0.3b) — with backups that is not always the main one.
                     host = IptvPanelGuard.panelOriginUrlOf(account, PlaylistServerFailover.lastFailedServerUrl(account) ?: account.baseUrl),
+                    // "No series" only when the whole probe agreed (a failed follow-up vod probe is a plain failure).
+                    forSeriesSection = section == XtreamHubSection.SERIES && seriesAbsent,
                 )
                 _uiState.update { it.copy(categoriesLoad = outcome.status, loadError = failure) }
             } else if (isCurrent(accountId, section)) {
@@ -649,10 +698,10 @@ object XtreamHubRepository {
                     val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }
                     val outcome = BoundedLoad.run(
                         surface = LoadSurface.HUB_ROW,
-                        isEmpty = { it.first.isEmpty() },
+                        isEmpty = { it.items.isEmpty() },
                         report = mapOf("source_type" to (account?.sourceType ?: "unknown"), "section" to section.name.lowercase()),
                     ) {
-                        if (account == null) emptyList<MetaPreview>() to false
+                        if (account == null) RawWindow(emptyList<MetaPreview>(), false, 0)
                         else fetchWindow(account, section, categoryId, offset = 0, prefetch = prefetch)
                     }
                     com.nuvio.app.core.diag.HubTrace.log("category", "fetched") {
@@ -665,13 +714,13 @@ object XtreamHubRepository {
                         // empty category and the row vanished for the session.
                         updateCategory(accountId, section, categoryId, epoch) { it.copy(loaded = false, load = outcome.status) }
                     } else {
-                        val (items, hasMore) = window
+                        val items = window.items
                         // Dedup the initial window by id BEFORE it becomes Lazy-list keys: a provider
                         // can return the same stream_id twice in one page, and a duplicate Compose `key`
                         // is a hard crash (a message-less SIGABRT on iOS, `Key … already used` on Android).
                         // Appended pages are already deduped by mergePagedWindow; the initial window was the gap.
                         updateCategory(accountId, section, categoryId, epoch) {
-                            it.copy(items = items.distinctBy { it.id }, loaded = true, load = outcome.status, hasMore = hasMore)
+                            it.copy(items = items.distinctBy { it.id }, loaded = true, load = outcome.status, hasMore = window.hasMore, rawOffset = window.consumed)
                         }
                         noteLoadedAndEvict(key)
                     }
@@ -722,15 +771,18 @@ object XtreamHubRepository {
         scope.launch {
             try {
                 val account = accountFor(accountId) ?: return@launch
-                val offset = cachedCategories(accountId, section)
-                    ?.firstOrNull { it.id == categoryId }?.items?.size ?: return@launch
-                val (more, hasMore) = BoundedLoad.run(LoadSurface.HUB_ROW) {
-                    fetchWindow(account, section, categoryId, offset)
-                }.valueOrNull() ?: return@launch
+                val current = cachedCategories(accountId, section)?.firstOrNull { it.id == categoryId } ?: return@launch
+                // Page on the RAW row count (rows hidden from the shown list still occupy provider offsets);
+                // a category that did not come from a paged window has no raw count, so its shown count stands.
+                val start = PagedState(current.items, current.hasMore, if (current.rawOffset > 0) current.rawOffset else current.items.size)
+                val next = advancePaged(start, id = { it.id }) { raw ->
+                    BoundedLoad.run(LoadSurface.HUB_ROW) { fetchWindow(account, section, categoryId, raw) }.valueOrNull()
+                }
                 if (catalogueEpoch(accountId) != epoch) return@launch
                 updateCategory(accountId, section, categoryId, epoch) { cat ->
-                    val (items, more2) = mergePagedWindow(cat.items, more, hasMore) { it.id }
-                    cat.copy(items = items, hasMore = more2)
+                    // Merge only what is new onto the CURRENT row (a poster update may have patched items meanwhile).
+                    val added = next.items.drop(start.items.size)
+                    cat.copy(items = mergePagedWindow(cat.items, added, next.hasMore) { it.id }.first, hasMore = next.hasMore, rawOffset = next.rawOffset)
                 }
             } finally {
                 synchronized(categoryLock) { if (catalogueEpoch(accountId) == epoch) inFlightCategories.remove(key) }
@@ -751,14 +803,19 @@ object XtreamHubRepository {
         categoryId: String,
         offset: Int,
         prefetch: Boolean = false,
-    ): Pair<List<MetaPreview>, Boolean> {
+    ): RawWindow<MetaPreview> {
         val accountId = account.id
         when (account.sourceType) {
             SOURCE_TYPE_XTREAM -> {
                 val kind = section.matchKind
                 if (XtreamMatchIndex.builtAt(accountId, kind) != null) {
                     val rows = XtreamMatchIndex.itemsFor(accountId, kind, categoryId, offset, PAGE_SIZE + 1)
-                    val page = rows.take(PAGE_SIZE)
+                    // B179: hasMore is judged on the RAW window; divider rows are dropped from what is shown
+                    // (the next window starts at the RAW rows consumed, see RawWindow, so hidden rows never shift it).
+                    val page = rows.take(PAGE_SIZE).let { raw ->
+                        if (section != XtreamHubSection.LIVE) raw
+                        else ChannelSeparatorPolicy.withoutSeparators(raw, { it.name }, { it.epgId }, { it.hasArchive })
+                    }
                     // Panels that ship no icons in the bulk list (or rows indexed before artwork
                     // was known) get filled lazily: ask get_vod_info per null row, in list order,
                     // while the user is on this window. Results land in the DB + patch in via
@@ -791,16 +848,16 @@ object XtreamHubRepository {
                         }
                         rawLiveWindow(entityIds, previews)
                     } else previews
-                    return shown to (rows.size > PAGE_SIZE)
+                    return RawWindow(shown, rows.size > PAGE_SIZE, rows.take(PAGE_SIZE).size)
                 }
                 // No index yet (first run): the old whole-category fetch — the build is warming.
                 // Keep only the first window of it: registering a 10k-item category (rows +
                 // registry + Compose state) was a first-launch heap spike, and the index that is
                 // building right now serves the full set with real paging once categories reload
                 // (eviction, section switch, or next visit).
-                if (offset > 0) return emptyList<MetaPreview>() to false
+                if (offset > 0) return RawWindow(emptyList(), false, 0)
                 val client = IptvClient.forAccount(account)
-                return when (section) {
+                return (when (section) {
                     XtreamHubSection.LIVE -> client.liveChannels(account, categoryId).getOrThrow().take(PAGE_SIZE).let { rows ->
                         XtreamItemRegistry.registerAll(rows.map { XtreamItemRegistry.resolvedChannel(accountId, it) })
                         val entityIds = rows.map {
@@ -816,22 +873,22 @@ object XtreamHubRepository {
                         XtreamItemRegistry.registerAll(rows.map { XtreamItemRegistry.resolvedSeries(accountId, it) })
                         rows.map { it.toMetaPreview(accountId) }
                     }
-                } to false
+                }).let { RawWindow(it, false, it.size) }
             }
             SOURCE_TYPE_STALKER -> {
                 if (section == XtreamHubSection.LIVE) {
                     val rows = com.nuvio.app.features.iptv.stalker.StalkerClient
                         .liveChannelsPage(account, categoryId, offset, PAGE_SIZE + 1)
-                    val page = rows.take(PAGE_SIZE)
+                    val page = ChannelSeparatorPolicy.withoutSeparators(rows.take(PAGE_SIZE), { it.name }, { it.epgChannelId }, { it.hasArchive })
                     XtreamItemRegistry.registerAll(page.map { XtreamItemRegistry.resolvedChannel(accountId, it) })
                     val entityIds = page.map {
                         com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(accountId, it.name, it.epgChannelId)
                     }
-                    return rawLiveWindow(entityIds, page.map { it.toMetaPreview(accountId) }) to (rows.size > PAGE_SIZE)
+                    return RawWindow(rawLiveWindow(entityIds, page.map { it.toMetaPreview(accountId) }), rows.size > PAGE_SIZE, rows.take(PAGE_SIZE).size)
                 }
-                if (offset > 0) return emptyList<MetaPreview>() to false
+                if (offset > 0) return RawWindow(emptyList(), false, 0)
                 val client = IptvClient.forAccount(account)
-                return when (section) {
+                return (when (section) {
                     XtreamHubSection.MOVIES -> client.vodMovies(account, categoryId).getOrThrow().let { rows ->
                         XtreamItemRegistry.registerAll(rows.map { XtreamItemRegistry.resolvedMovie(accountId, it) })
                         rows.map { it.toMetaPreview(accountId) }
@@ -840,29 +897,29 @@ object XtreamHubRepository {
                         XtreamItemRegistry.registerAll(rows.map { XtreamItemRegistry.resolvedSeries(accountId, it) })
                         rows.map { it.toMetaPreview(accountId) }
                     }
-                } to false
+                }).let { RawWindow(it, false, it.size) }
             }
             else -> {
                 // M3U: ensure the catalog, then a paged indexed read.
                 M3UClient.ensureIngested(account)
                 return when (section) {
                     XtreamHubSection.LIVE -> M3UClient.liveChannelsPage(account, categoryId, offset, PAGE_SIZE + 1).let { rows ->
-                        val page = rows.take(PAGE_SIZE)
+                        val page = ChannelSeparatorPolicy.withoutSeparators(rows.take(PAGE_SIZE), { it.name }, { it.epgChannelId }, { it.hasArchive })
                         XtreamItemRegistry.registerAll(page.map { XtreamItemRegistry.resolvedChannel(accountId, it) })
                         val entityIds = page.map {
                             com.nuvio.app.features.iptv.identity.IptvIdentity.entityId(accountId, it.name, it.epgChannelId)
                         }
-                        rawLiveWindow(entityIds, page.map { it.toMetaPreview(accountId) }) to (rows.size > PAGE_SIZE)
+                        RawWindow(rawLiveWindow(entityIds, page.map { it.toMetaPreview(accountId) }), rows.size > PAGE_SIZE, rows.take(PAGE_SIZE).size)
                     }
                     XtreamHubSection.MOVIES -> M3UClient.vodMoviesPage(account, categoryId, offset, PAGE_SIZE + 1).let { rows ->
                         val page = rows.take(PAGE_SIZE)
                         XtreamItemRegistry.registerAll(page.map { XtreamItemRegistry.resolvedMovie(accountId, it) })
-                        page.map { it.toMetaPreview(accountId) } to (rows.size > PAGE_SIZE)
+                        RawWindow(page.map { it.toMetaPreview(accountId) }, rows.size > PAGE_SIZE, page.size)
                     }
                     XtreamHubSection.SERIES -> M3UClient.seriesPage(account, categoryId, offset, PAGE_SIZE + 1).let { rows ->
                         val page = rows.take(PAGE_SIZE)
                         XtreamItemRegistry.registerAll(page.map { XtreamItemRegistry.resolvedSeries(accountId, it) })
-                        page.map { it.toMetaPreview(accountId) } to (rows.size > PAGE_SIZE)
+                        RawWindow(page.map { it.toMetaPreview(accountId) }, rows.size > PAGE_SIZE, page.size)
                     }
                 }
             }

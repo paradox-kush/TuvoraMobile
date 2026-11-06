@@ -9,6 +9,8 @@ import com.nuvio.app.features.player.MpvStartPosition
 import com.nuvio.app.features.player.NuvioPlayerBridge
 import com.nuvio.app.features.player.NuvioPlayerBridgeCreator
 import com.nuvio.app.features.player.PlayerLaunch
+import com.nuvio.app.features.player.StartDeadlineClock
+import com.nuvio.app.features.player.VodStartDeadlinePolicy
 import com.nuvio.app.features.player.PlayerPlaybackSnapshot
 import com.nuvio.app.features.player.PlayerSettingsRepository
 import com.nuvio.app.features.player.externalPlaybackSession
@@ -33,7 +35,10 @@ import com.nuvio.app.features.watchprogress.WatchProgressRepository
 import com.tuvora.tvos.party.TvParty
 import com.tuvora.tvos.party.TvPartyPlayerControls
 import com.tuvora.tvos.party.TvPartyPlayerLink
+import com.nuvio.app.core.diag.LogRedaction
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -108,7 +113,16 @@ data class TvPlayerState(
      * Continue at hh:mm?" Swift shows it for a few seconds; [TvPlayerSession.acceptServerResume] takes it.
      */
     val serverResumeOfferMs: Long? = null,
-)
+    /** A continuing M3U replay's title once the playhead moved into the next programme (null = [TvPlayerSession.title]). */
+    val replayTitle: String? = null,
+    /** A continuing replay's seek bar: the programme's start in the player's timeline, and its length ([TvReplayBar]). */
+    val replayOriginMs: Long = 0L,
+    val replaySpanMs: Long? = null,
+) {
+    /** What the seek bar shows: the programme for a replay, else the player's own position. */
+    val barPositionMs: Long get() = replaySpanMs?.let { com.tuvora.tvos.screens.TvReplayBar.position(positionMs, replayOriginMs, it) } ?: positionMs
+    val barDurationMs: Long get() = replaySpanMs ?: durationMs
+}
 
 /**
  * Engine controls the shared NuvioPlayerBridge doesn't carry. Apple TV's libmpv bridge implements this;
@@ -161,18 +175,28 @@ class TvPlayerSession(
     /** The live link is spent after its first open (Stalker create_link): no in-engine re-open. */
     private var singleUseLink = false
 
+    /** Whether a live reconnect can ask for a fresh link (tests; the factory must wire it). */
+    internal val remintsLiveLink: Boolean get() = liveReresolve != null
+
     /** Kept off the constructor for the same reason as [bindServer]. See [LiveLinkReconnectPolicy]. */
     internal fun bindSingleUseLink(singleUse: Boolean): TvPlayerSession {
         singleUseLink = singleUse
         return this
     }
 
+    /** The playing address is spent after its first open: a live Stalker channel (never a replay). */
+    private val spentLinkAfterOpen: Boolean get() = singleUseLink && liveChannel && launch.liveReplay == null
+
+    /** The live re-mint in flight, if any: one create_link at a time ([TvLiveRelinkPolicy]). */
+    private var remintJob: Job? = null
+
+    /** When a fresh live link was handed to the engine, until the engine stops reporting the old end. */
+    private var freshOpenedAtMs: Long? = null
+
     /** mpv `stream-lavf-o` before every live load; the AVPlayer lane does not adopt it and is unaffected. */
     private fun applyLinkReconnectPolicy(b: NuvioPlayerBridge) {
         b.applyStreamLavfOptions(
-            LiveLinkReconnectPolicy.mpvStreamLavfOptions(
-                LiveLinkReconnectPolicy.modeFor(singleUseLink && liveChannel && launch.liveReplay == null),
-            ),
+            LiveLinkReconnectPolicy.mpvStreamLavfOptions(LiveLinkReconnectPolicy.modeFor(spentLinkAfterOpen)),
         )
     }
 
@@ -201,7 +225,8 @@ class TvPlayerSession(
                 headers.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
                 launch.externalSubtitles.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
                 MpvStartPosition.loadOption(position, false))
-            if (paused) bridge?.pause()
+            // mpv keeps its pause flag across a loadfile: say the intent explicitly either way.
+            if (paused) bridge?.pause() else bridge?.play()
         },
         failed = {
             vodRetryFailure = "Could not reopen this source. Try again or choose another source."
@@ -262,7 +287,7 @@ class TvPlayerSession(
         override val partyStarted: Boolean get() = playbackStarted
         override val partyHasError: Boolean get() = _state.value.errorMessage != null
         override val partyWantsToPlay: Boolean get() = wantsToPlay
-        override fun partyPlay() { if (!closed) { wantsToPlay = true; bridge?.play() } }
+        override fun partyPlay() { if (!closed) { if (vodDeadlineFailed) retry() else { wantsToPlay = true; bridge?.play() } } }
         override fun partyPause() { wantsToPlay = false; bridge?.pause() }
         override fun partyAdoptPlaying(playing: Boolean) { wantsToPlay = playing }
         override fun partySeek(positionMs: Long) { if (!isLive) { bridge?.seekTo(positionMs.coerceAtLeast(0L)); scheduleSeekSave() } }
@@ -283,6 +308,13 @@ class TvPlayerSession(
 
     // Resume offer (ResumeLoadPolicy): when this engine load began, and whether a frame has shown.
     private var loadStartedAtMs = 0L
+    /**
+     * B214/B217: the viewer's active wait. Survives engine escalations, restarts on Retry/start-over,
+     * and does not count paused time or gaps with no polling (a re-resolve, the app being suspended).
+     */
+    private val vodClock = StartDeadlineClock()
+    /** The start deadline fired: the engine is parked and poll() must not overwrite the error. */
+    private var vodDeadlineFailed = false
     private var playbackStarted = false
     private var resumeTargetMs = launch.initialPositionMs
 
@@ -315,6 +347,29 @@ class TvPlayerSession(
     val state: StateFlow<TvPlayerState> = _state.asStateFlow()
 
     val title: String get() = launch.title
+
+    /** A continuing replay entered its next programme: the player shows [title] from here ([TvPlayerState.replayTitle]). */
+    private var replayProgramme: Pair<Long, Long>? = null
+
+    /** The seek bar spans one programme of a continuing replay: [originMs] is where it starts in the player's timeline. */
+    fun setReplayBar(originMs: Long, spanMs: Long, programmeStartMs: Long, programmeEndMs: Long) {
+        if (closed) return
+        replayProgramme = programmeStartMs to programmeEndMs
+        _state.value = _state.value.copy(replayOriginMs = originMs, replaySpanMs = spanMs)
+    }
+
+    /** A bar position held to what has aired (a replay of a programme still airing stops short of live). */
+    fun clampBar(barMs: Long): Long {
+        val (start, end) = replayProgramme ?: return barMs
+        return com.tuvora.tvos.screens.TvReplayBar.clampSeek(barMs, start, end, com.nuvio.app.features.trakt.TraktPlatformClock.nowEpochMs())
+    }
+
+    /** A seek to a position on the bar (see [TvPlayerState.barPositionMs]). */
+    fun seekToBar(barMs: Long) = seekTo(com.tuvora.tvos.screens.TvReplayBar.raw(clampBar(barMs), _state.value.replayOriginMs))
+
+    fun retitle(title: String) {
+        if (!closed) _state.value = _state.value.copy(replayTitle = title)
+    }
     val subtitle: String? get() = launch.episodeTitle ?: launch.streamTitle.takeIf { it != launch.title }
 
     /** The current engine's view controller. Changes when the session escalates; see [TvPlayerState.engineGeneration]. */
@@ -404,7 +459,7 @@ class TvPlayerSession(
         if (party.toggle()) { reportAfterToggle(); return }
         if (_state.value.isPlaying) pause() else play()
     }
-    fun play() { if (!closed) { if (party.setPlaying(true)) reportAfterToggle() else { wantsToPlay = true; bridge?.play(); reportAfterToggle() } } }
+    fun play() { if (!closed) { if (vodDeadlineFailed) { retry(); return }; if (party.setPlaying(true)) reportAfterToggle() else { wantsToPlay = true; bridge?.play(); reportAfterToggle() } } }
     fun pause() { if (party.setPlaying(false)) reportAfterToggle() else { wantsToPlay = false; bridge?.pause(); reportAfterToggle() } }
 
 
@@ -416,6 +471,7 @@ class TvPlayerSession(
 
     fun seekBy(offsetMs: Long) {
         if (isLive) return
+        if (replayProgramme != null) { seekToBar(_state.value.barPositionMs + offsetMs); return }
         if (party.seek(_state.value.positionMs + offsetMs)) return
         bridge?.seekBy(offsetMs)
         scheduleSeekSave()
@@ -468,6 +524,8 @@ class TvPlayerSession(
     fun retry() {
         if (closed) return
         vodRetryFailure = null
+        if (vodDeadlineFailed) { vodDeadlineFailed = false; wantsToPlay = true }
+        vodClock.reset(clock.elapsedNow().inWholeMilliseconds)
         _state.value = _state.value.copy(errorMessage = null, isLoading = true)
         if (!isLive && vodReresolve != null) {
             val position = if (snapshot.positionMs > 0) snapshot.positionMs else resumeTargetMs
@@ -476,9 +534,14 @@ class TvPlayerSession(
             // The viewer's Retry: a fresh, still bounded ladder, and a fresh link. Replaying the old
             // URL (bridge.retry) re-opened a spent Stalker create_link, and the monitor, still at
             // its cap, answered GiveUp on the first sample, so Retry could not recover the channel.
+            // The reconnect itself goes through the monitor (sampled now), so it counts as the
+            // ladder's first attempt and the next poll cannot mint a second link on top of it.
             monitor.onUserRetry()
-            reconnectLive()
-        } else bridge?.retry()
+            poll()
+        } else {
+            bridge?.retry()
+            bridge?.let { restorePlayIntent(it) }
+        }
     }
 
     // ---- Skip intro / recap / ending ---------------------------------------------------------
@@ -555,6 +618,33 @@ class TvPlayerSession(
         ) && _state.value.errorMessage == null
         val offerAt = if (offer) resumeTargetMs else null
         if (_state.value.startOverAtMs != offerAt) _state.value = _state.value.copy(startOverAtMs = offerAt)
+        enforceVodStartDeadline()
+    }
+
+    /** A VOD start that never shows a frame ends in a terminal error with Retry (the screen's own backstop). */
+    private fun enforceVodStartDeadline() {
+        val now = clock.elapsedNow().inWholeMilliseconds
+        vodClock.onAttempt("vod", now)
+        val suspended = !wantsToPlay
+        val action = VodStartDeadlinePolicy.decide(
+            elapsedMs = vodClock.tick(now, suspended),
+            started = playbackStarted,
+            isLive = isLive,
+            isTorrent = false,
+            suspended = suspended,
+            hasError = _state.value.errorMessage != null,
+            canFailover = false,
+        )
+        if (action == VodStartDeadlinePolicy.Action.Fail) {
+            log.w { "vod start deadline hit; failing with Retry" }
+            vodDeadlineFailed = true
+            // Park the engine so a late-completing open cannot play behind the error; retry() restarts it.
+            wantsToPlay = false
+            bridge?.pause()
+            _state.value = _state.value.copy(
+                errorMessage = VOD_START_FAILED_MESSAGE, isLoading = false, isPlaying = false,
+            )
+        }
     }
 
     /** NuvioTV "Start from beginning": drop the resume and play from 0:00 on the same engine. */
@@ -562,6 +652,7 @@ class TvPlayerSession(
         resumeTargetMs = 0L
         playbackStarted = false
         loadStartedAtMs = clock.elapsedNow().inWholeMilliseconds
+        vodClock.reset(loadStartedAtMs)
         _state.value = _state.value.copy(startOverAtMs = null, isLoading = true)
         bridge?.restartFromBeginning()
         bridge?.play()
@@ -806,8 +897,8 @@ class TvPlayerSession(
 
     private fun poll() {
         // The old engine still reports its previous failure while a replacement link is minted.
-        if (vodRetry.isResolving || vodRetryFailure != null) return
-        val b = bridge ?: return
+        if (vodRetry.isResolving || vodRetryFailure != null || vodDeadlineFailed) return
+        val b = bridge ?: run { enforceVodStartDeadline(); return }
         val error = b.getErrorMessage().takeIf { it.isNotBlank() }
         snapshot = PlayerPlaybackSnapshot(
             isLoading = b.getIsLoading(),
@@ -868,10 +959,17 @@ class TvPlayerSession(
         driveSessionReports()
         if (isLive) {
             // While the TV switches display mode the video is idled on purpose (displayModeSwitch).
-            if (!displayModeSwitching) when (monitor.sample(clock.elapsedNow().inWholeMilliseconds, snapshot, wantsToPlay)) {
+            val now = clock.elapsedNow().inWholeMilliseconds
+            val sinceFreshOpen = freshOpenedAtMs?.let { now - it }
+            if (!snapshot.isEnded) freshOpenedAtMs = null
+            // The previous link's end, still reported while the fresh one opens, is not a new outage.
+            val sampled = if (TvLiveRelinkPolicy.isStaleEnd(snapshot.isEnded, sinceFreshOpen)) {
+                snapshot.copy(isEnded = false, isLoading = true)
+            } else snapshot
+            if (!displayModeSwitching) when (monitor.sample(now, sampled, wantsToPlay)) {
                 TvLiveAction.None -> Unit
                 TvLiveAction.Reconnect -> { log.i { "live freeze: reconnecting" }; reconnectLive() }
-                TvLiveAction.GiveUp -> _state.value = _state.value.copy(errorMessage = "The channel stopped responding")
+                TvLiveAction.GiveUp -> _state.value = _state.value.copy(errorMessage = TvLiveRelinkPolicy.viewerMessage(null))
             }
         } else {
             val now = clock.elapsedNow().inWholeMilliseconds
@@ -884,14 +982,23 @@ class TvPlayerSession(
 
     /** Handles a reported error; true means this poll is done (state already updated).*/
     private fun handleFailure(lane: PlaybackLane, error: String): Boolean {
+        // A spent live link never moves to another engine: it would open the same dead URL there.
+        // The reconnect ladder below mints a fresh one, and every later open uses that.
         val next = PlaybackLanePolicy.escalation(lane, escalated)
+            ?.takeIf { !isLive || TvLiveRelinkPolicy.mayEscalateLane(spentLinkAfterOpen) }
         if (next == null) {
             if (isLive) {
                 // A live error is a stream that ended: same bounded reconnect ladder as a freeze.
                 val ended = snapshot.copy(isEnded = true, isPlaying = false, isLoading = false)
                 when (monitor.sample(clock.elapsedNow().inWholeMilliseconds, ended, wantsToPlay = true)) {
                     TvLiveAction.Reconnect -> reconnectLive()
-                    TvLiveAction.GiveUp -> _state.value = _state.value.copy(errorMessage = error, isLoading = false, isPlaying = false)
+                    TvLiveAction.GiveUp -> {
+                        // The engine's text carries the stream URL and play token: log it redacted, show plain words.
+                        if (_state.value.errorMessage == null) log.w { "live gave up: ${LogRedaction.text(error)}" }
+                        _state.value = _state.value.copy(
+                            errorMessage = TvLiveRelinkPolicy.viewerMessage(error), isLoading = false, isPlaying = false,
+                        )
+                    }
                     TvLiveAction.None -> _state.value = _state.value.copy(isLoading = true)
                 }
                 return true
@@ -913,21 +1020,77 @@ class TvPlayerSession(
         return true
     }
 
+    /**
+     * A reconnect the monitor scheduled (it owns the pacing). What it opens is [TvLiveRelinkPolicy]'s
+     * call: a fresh link from the re-resolver, the same stable address, or nothing — a spent Stalker
+     * link is never re-opened, by this engine or the next one.
+     */
     private fun reconnectLive() {
-        val reresolve = liveReresolve ?: run { bridge?.retry(); return }
-        scope.launch {
-            val fresh = runCatching { reresolve() }.getOrNull()
-            if (fresh == null) { bridge?.retry(); return@launch }
-            val headers = TvPlaybackHeaders.sanitize(fresh.headers)
-            bridge?.let(::applyLinkReconnectPolicy)
-            bridge?.loadFileWithAudio(
-                videoUrl = fresh.url,
-                audioUrl = null,
-                headersJson = headers.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
-                subtitlesJson = null,
-                startOption = null,
-            )
+        val spent = spentLinkAfterOpen
+        val step = TvLiveRelinkPolicy.onReconnect(spent, canRemint = liveReresolve != null, remintInFlight = remintJob?.isActive == true)
+        log.i { "live reconnect: $step (single-use=$spent)" }
+        when (step) {
+            TvLiveRelinkPolicy.Step.Replay -> replayLiveLink()
+            TvLiveRelinkPolicy.Step.Remint -> remint(spent)
+            TvLiveRelinkPolicy.Step.OpenFresh, TvLiveRelinkPolicy.Step.Skip -> Unit
         }
+    }
+
+    private fun remint(spent: Boolean) {
+        val reresolve = liveReresolve ?: return
+        remintJob = scope.launch {
+            val fresh = withTimeoutOrNull(TvLiveRelinkPolicy.REMINT_TIMEOUT_MS) {
+                try {
+                    reresolve()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    log.w { "live re-mint failed: ${error::class.simpleName}" }
+                    null
+                }
+            }
+            val step = TvLiveRelinkPolicy.afterRemint(spent, gotFresh = fresh != null)
+            log.i { "live re-mint: $step" }
+            when (step) {
+                TvLiveRelinkPolicy.Step.OpenFresh -> fresh?.let(::openFreshLiveLink)
+                TvLiveRelinkPolicy.Step.Replay -> replayLiveLink()
+                TvLiveRelinkPolicy.Step.Remint, TvLiveRelinkPolicy.Step.Skip -> Unit
+            }
+        }
+    }
+
+    /** Plays [fresh] on the current engine; any later engine open (a lane switch) uses it too. */
+    private fun openFreshLiveLink(fresh: TvResolvedSource) {
+        if (closed) return
+        activeSourceUrl = fresh.url
+        activeSourceHeaders = fresh.headers
+        val b = bridge ?: return
+        freshOpenedAtMs = clock.elapsedNow().inWholeMilliseconds
+        val headers = TvPlaybackHeaders.sanitize(fresh.headers)
+        applyLinkReconnectPolicy(b)
+        b.loadFileWithAudio(
+            videoUrl = fresh.url,
+            audioUrl = null,
+            headersJson = headers.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
+            subtitlesJson = null,
+            startOption = null,
+        )
+        restorePlayIntent(b)
+    }
+
+    /** Re-opens a stable (Xtream / M3U) live address on the current engine. */
+    private fun replayLiveLink() {
+        val b = bridge ?: return
+        b.retry()
+        restorePlayIntent(b)
+    }
+
+    /**
+     * mpv keeps its pause flag across a loadfile, and a live stream that ran dry ended paused
+     * (keep-open), so a reconnect would sit on its first frame. Restore the viewer's intent.
+     */
+    private fun restorePlayIntent(b: NuvioPlayerBridge) {
+        if (wantsToPlay) b.play() else b.pause()
     }
 
     private fun sessionState() = PlaybackSessionState(
@@ -1030,6 +1193,8 @@ class TvPlayerSession(
     }
 
     private companion object {
+        const val VOD_START_FAILED_MESSAGE =
+            "This stream didn't start. It may be slow, offline, or its video output failed to start. Check your connection and retry, or pick another source."
         /** Reports outlive the session scope (close cancels it right after the stop is queued). */
         val reportScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         const val TOGGLE_REPORT_DELAY_MS = 700L

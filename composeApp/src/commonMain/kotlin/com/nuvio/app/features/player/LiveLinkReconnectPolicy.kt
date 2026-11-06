@@ -53,4 +53,11 @@ object LiveLinkReconnectPolicy {
 
     /** Media3 lane: OkHttp `retryOnConnectionFailure` and the load-error retries. */
     fun allowsTransportRetry(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
+
+    /**
+     * Whether a failed engine may hand the SAME URL to the other engine (Android's auto engine
+     * switch, Apple TV's lane escalation). A spent single-use link would only 401 again there; its
+     * recovery is a fresh mint, and once that is exhausted, the error.
+     */
+    fun allowsEngineFailover(mode: Mode): Boolean = mode == Mode.ENGINE_RECONNECT
 }

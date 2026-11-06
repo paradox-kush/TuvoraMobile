@@ -1030,6 +1030,8 @@ internal object IptvContentDb {
         channels: List<IptvStreamRow>,
         categories: List<Pair<String, String>>, // (id, name), type = live
     ) = mutex.withLock {
+        // B179: every row is stored (a saved id must keep resolving); the count is what the lists will SHOW.
+        val shownCount = channels.count { !com.nuvio.app.features.iptv.ChannelSeparatorPolicy.isSeparator(it.name, it.tvgId, it.hasArchive) }
         val c = connection()
         c.execSQL("BEGIN IMMEDIATE")
         try {
@@ -1067,7 +1069,7 @@ internal object IptvContentDb {
             // Freshness marker LAST, inside the same transaction: present+fresh = lineup usable.
             // active_generation is written back explicitly — INSERT OR REPLACE would otherwise reset it.
             c.prepare("INSERT OR REPLACE INTO ingest_meta(playlist_id, built_at, live_count, vod_count, series_count, epg_url, active_generation) VALUES(?,?,?,0,0,NULL,?)").use { st ->
-                st.bindText(1, playlistId); st.bindLong(2, now()); st.bindLong(3, channels.size.toLong()); st.bindLong(4, gen)
+                st.bindText(1, playlistId); st.bindLong(2, now()); st.bindLong(3, shownCount.toLong()); st.bindLong(4, gen)
                 st.step()
             }
             c.execSQL("COMMIT")

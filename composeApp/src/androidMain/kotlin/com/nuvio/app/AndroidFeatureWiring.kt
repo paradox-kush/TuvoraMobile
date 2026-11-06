@@ -18,6 +18,9 @@ fun initializeAndroidProcessStorage(context: Context) {
     com.nuvio.app.features.iptv.PendingDeviceClaimStorage.initialize(context)
     // Recordings: alarm receivers and the foreground service run without an Activity, so the one repository is built per process, here.
     com.nuvio.app.features.recordings.api.RecordingsAndroid.install(context)
+    // Calendar snapshot + settings: process-scoped so a Home that settles before MainActivity's startup tasks
+    // never reads an empty store (and later saves over the real one).
+    com.nuvio.app.features.calendar.api.CalendarAndroid.initialize(context)
 }
 
 /**
