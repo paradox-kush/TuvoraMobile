@@ -42,10 +42,10 @@ class AndroidRecordingSaverTest {
         dir.deleteRecursively()
     }
 
-    private fun req(vararg paths: String, resume: Long = 0, headers: Map<String, String> = emptyMap(), estimated: Long = 0, check: (suspend (Long) -> RecordingProblem?)? = null, known: (suspend (Long, Long) -> KnownSizeDecision)? = null) =
+    private fun req(vararg paths: String, resume: Long = 0, programmeMs: Long = 0, headers: Map<String, String> = emptyMap(), estimated: Long = 0, check: (suspend (Long) -> RecordingProblem?)? = null, known: (suspend (Long, Long) -> KnownSizeDecision)? = null) =
         SaveRequest(
             candidates = paths.map { server.url(it).toString() }, headers = headers,
-            targetPath = File(dir, "show.ts").path, resumeFromBytes = resume, estimatedBytes = estimated, spaceCheck = check, onKnownTotal = known,
+            targetPath = File(dir, "show.ts").path, resumeFromBytes = resume, estimatedBytes = estimated, spaceCheck = check, onKnownTotal = known, programmeMs = programmeMs,
         )
 
     /** A `.part` left by an earlier try of [path]: its bytes plus the sidecar naming the link and validators it came from. */
@@ -57,6 +57,88 @@ class AndroidRecordingSaverTest {
 
     private fun saver() = AndroidRecordingSaver(isOnline = { online })
     private fun body(s: String) = MockResponse().setResponseCode(200).setBody(s)
+
+    private val playlist = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n#EXTINF:10,\nseg0.ts\n#EXT-X-ENDLIST\n"
+    private fun hls(contentType: String = "application/vnd.apple.mpegurl") =
+        MockResponse().setResponseCode(200).setHeader("Content-Type", contentType).setBody(playlist)
+
+    private fun assertNothingKept() {
+        assertTrue(!File(dir, "show.ts").exists(), "no recording file")
+        assertTrue(!File(dir, "show.ts.part").exists(), "no partial")
+        assertTrue(!File(dir, "show.ts.part.meta").exists(), "no sidecar")
+    }
+
+    @Test
+    fun `a 404 then an hls playlist is unsupported and nothing is kept`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(hls())
+        val got = saver().save(req("/a.ts", "/b.php")) { }
+        val failed = got as SaveOutcome.Failed
+        assertEquals(RecordingProblem.UNSUPPORTED_FORMAT, failed.problem)
+        assertEquals(false, failed.offline)
+        assertNothingKept()
+    }
+
+    @Test
+    fun `a text plain body that starts with extm3u is an hls playlist too`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("Content-Type", "text/plain").setBody(playlist))
+        val got = saver().save(req("/a.php")) { }
+        assertEquals(RecordingProblem.UNSUPPORTED_FORMAT, (got as SaveOutcome.Failed).problem)
+        assertNothingKept()
+    }
+
+    @Test
+    fun `a playlist with no content type at all is sniffed by its first bytes`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).removeHeader("Content-Type").setBody(playlist))
+        val got = saver().save(req("/a.php")) { }
+        assertEquals(RecordingProblem.UNSUPPORTED_FORMAT, (got as SaveOutcome.Failed).problem)
+        assertNothingKept()
+    }
+
+    @Test
+    fun `a playlist candidate is skipped and a later good file is saved`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(hls())
+        server.enqueue(body("0123456789"))
+        val got = saver().save(req("/a.ts", "/b.php", "/c.ts")) { }
+        assertEquals(SaveOutcome.Done(10), got)
+        assertEquals("0123456789", File(dir, "show.ts").readText())
+        assertTrue(!File(dir, "show.ts.part").exists())
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun `a playlist is rejected before the size check or any write`() = runBlocking {
+        server.enqueue(hls())
+        var asked = false
+        val got = saver().save(req("/a.php", known = { _, _ -> asked = true; KnownSizeDecision.Continue })) { }
+        assertEquals(RecordingProblem.UNSUPPORTED_FORMAT, (got as SaveOutcome.Failed).problem)
+        assertTrue(!asked)
+        assertNothingKept()
+    }
+
+    @Test
+    fun `a small non-hls body for a long programme is not a recording`() = runBlocking {
+        server.enqueue(body("<html>error page</html>"))
+        val got = saver().save(req("/a.ts", programmeMs = 30 * 60_000L)) { }
+        val failed = got as SaveOutcome.Failed
+        assertEquals(RecordingProblem.NETWORK, failed.problem)
+        assertNothingKept()
+    }
+
+    @Test
+    fun `a small body for a short programme is still saved`() = runBlocking {
+        server.enqueue(body("0123456789"))
+        assertEquals(SaveOutcome.Done(10), saver().save(req("/a.ts", programmeMs = 30_000L)) { })
+    }
+
+    @Test
+    fun `a transient failure next to a playlist keeps the failure retryable`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(hls())
+        val got = saver().save(req("/a.ts", "/b.php")) { }
+        assertEquals(RecordingProblem.NETWORK, (got as SaveOutcome.Failed).problem)
+    }
 
     @Test
     fun `a plain download is renamed to the target`() = runBlocking {

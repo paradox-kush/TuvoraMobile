@@ -34,6 +34,55 @@ class IosSaverBehaviourTest {
     @AfterTest
     fun tearDown() = rig.close()
 
+    // ---- an HLS playlist is not a recording ------------------------------------------------------
+
+    private val playlist = "#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:10,\nseg0.ts\n#EXT-X-ENDLIST\n"
+
+    @Test
+    fun a_playlist_that_the_downloader_finishes_is_unsupported_and_nothing_is_kept() = runBlocking<Unit> {
+        val saver = rig.saver(fakeDownloader { _, cb ->
+            rig.put(finished, playlist)
+            cb.onSuccess(finished, playlist.length.toLong())
+            FakeHandle()
+        })
+        val out = saver.save(rig.request(a), {})
+        assertEquals(RecordingProblem.UNSUPPORTED_FORMAT, assertIs<SaveOutcome.Failed>(out).problem)
+        assertFalse(rig.exists(target)); assertFalse(rig.exists(part)); assertFalse(rig.exists(finished)); assertFalse(rig.exists(workPart))
+    }
+
+    @Test
+    fun a_playlist_is_skipped_and_a_later_good_file_is_saved() = runBlocking<Unit> {
+        val saver = rig.saver(fakeDownloader { url, cb ->
+            if (url == a) { rig.put(finished, playlist); cb.onSuccess(finished, 10) }
+            else { rig.put(finished, "0123456789"); cb.onSuccess(finished, 10) }
+            FakeHandle()
+        })
+        val done = assertIs<SaveOutcome.Done>(saver.save(rig.request(a, b), {}))
+        assertEquals(10L, done.bytes)
+        assertEquals("0123456789", rig.read(target))
+    }
+
+    @Test
+    fun a_failure_then_a_playlist_is_unsupported() = runBlocking<Unit> {
+        val saver = rig.saver(fakeDownloader { url, cb ->
+            if (url == a) cb.onFailure("404") else { rig.put(finished, playlist); cb.onSuccess(finished, 10) }
+            FakeHandle()
+        })
+        val out = saver.save(rig.request(a, b), {})
+        assertEquals(RecordingProblem.UNSUPPORTED_FORMAT, assertIs<SaveOutcome.Failed>(out).problem)
+        assertFalse(rig.exists(target))
+    }
+
+    @Test
+    fun a_tiny_non_playlist_for_a_long_programme_is_not_done() = runBlocking<Unit> {
+        val saver = rig.saver(fakeDownloader { _, cb ->
+            rig.put(finished, "<html>error</html>"); cb.onSuccess(finished, 18); FakeHandle()
+        })
+        val out = saver.save(rig.request(a, programmeMs = 30 * 60_000L), {})
+        assertEquals(RecordingProblem.NETWORK, assertIs<SaveOutcome.Failed>(out).problem)
+        assertFalse(rig.exists(target)); assertFalse(rig.exists(part))
+    }
+
     // ---- candidates must not delete each other's partials -------------------------------------
 
     @Test

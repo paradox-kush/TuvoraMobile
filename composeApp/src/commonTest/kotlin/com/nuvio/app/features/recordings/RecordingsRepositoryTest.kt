@@ -403,6 +403,56 @@ class RecordingsRepositoryTest {
         assertEquals(false, b.spaceTight)
     }
 
+    private fun loadedRows(vararg recs: com.nuvio.app.features.recordings.api.Recording): List<com.nuvio.app.features.recordings.api.Recording> = run {
+        val rig = Rig()
+        rig.files.texts["recordings.json"] = stateText(recs = recs.toList())
+        kotlinx.coroutines.runBlocking { rig.repo.start(NOW) }
+        rig.repo.state.value.recordings
+    }
+
+    @Test
+    fun `a stored tiny Done save of a long programme shows as failed unsupported on the next load`() {
+        val hls = recording("h1", mode = CaptureMode.CATCH_UP, size = 1_024).copy(programmeEndMs = NOW - DAY + 30 * MIN)
+        val row = loadedRows(hls).single()
+        assertEquals(RecordingStatus.FAILED, row.status)
+        assertEquals(RecordingProblem.UNSUPPORTED_FORMAT, row.problem)
+        assertNull(row.retrySource, "never retried")
+    }
+
+    @Test
+    fun `the leftover check does not delete the file and settles once`() = runTest {
+        val rig = Rig()
+        rig.files.sizes["/rec/h1.ts"] = 1_024
+        rig.files.texts["recordings.json"] = stateText(recs = listOf(recording("h1", mode = CaptureMode.CATCH_UP, size = 1_024)))
+        rig.repo.start(NOW)
+        assertTrue(rig.files.deleted.isEmpty())
+        assertTrue(rig.saver.calls.isEmpty())
+        assertTrue(rig.alarms.armed.isEmpty())
+        assertEquals(RecordingStatus.FAILED, rig.repo.state.value.recordings.single().status)
+    }
+
+    @Test
+    fun `a tiny Done save of a short programme and a big Done save stay Done`() {
+        val short = recording("a", mode = CaptureMode.CATCH_UP, size = 1_024).copy(programmeEndMs = NOW - DAY + 30_000)
+        val big = recording("b", mode = CaptureMode.CATCH_UP, size = 200L * 1024 * 1024)
+        val rows = loadedRows(short, big)
+        assertEquals(listOf(RecordingStatus.DONE, RecordingStatus.DONE), rows.sortedBy { it.id }.map { it.status })
+    }
+
+    @Test
+    fun `a saver that found only HLS playlists fails the row as unsupported without a retry and is told the programme length`() = runTest {
+        val rig = Rig()
+        rig.files.texts["recordings.json"] = stateText(dueCatchUp())
+        rig.saver.next = { _, _ -> SaveOutcome.Failed(RecordingProblem.UNSUPPORTED_FORMAT, offline = false, writtenBytes = 0, rangeSupported = false) }
+        val res = rig.repo.fire("s1", NOW)
+        assertEquals(FireResult.Failed(RecordingProblem.UNSUPPORTED_FORMAT), res)
+        assertEquals(HOUR, rig.saver.calls.single().programmeMs)
+        assertTrue(rig.repo.state.value.schedules.isEmpty(), "no retry is armed")
+        val row = rig.repo.state.value.recordings.single()
+        assertEquals(RecordingStatus.FAILED, row.status)
+        assertEquals(RecordingProblem.UNSUPPORTED_FORMAT, row.problem)
+    }
+
     @Test
     fun `an HLS-only provider is UNSUPPORTED_FORMAT and is not retried`() = runTest {
         val rig = Rig()

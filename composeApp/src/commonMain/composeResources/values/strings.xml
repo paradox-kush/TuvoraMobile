@@ -2787,7 +2787,7 @@
     <string name="recordings_problem_stalled">The provider stopped sending data, so the save was given up on. Closing Tuvora mid-save can cause this too.</string>
     <string name="recordings_problem_missed">Tuvora couldn’t start this one before it ended.</string>
     <string name="recordings_problem_cancelled">You cancelled this recording.</string>
-    <string name="recordings_problem_unsupported_format">This provider only offers its archive as a stream (HLS), which Tuvora can’t save yet.</string>
+    <string name="recordings_problem_unsupported_format">This provider only offers HLS replay, which can’t be saved yet.</string>
     <string name="recordings_problem_unknown">Something went wrong and Tuvora doesn’t know what. Retrying might work.</string>
     <string name="recordings_problem_live_pending">Live recording isn’t available in this version yet.</string>
     <string name="recordings_action_record">Record</string>
