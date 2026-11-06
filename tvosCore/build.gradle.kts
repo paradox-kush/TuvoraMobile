@@ -258,6 +258,8 @@ kotlin {
             // Watch party: the shared rules Apple TV's party screen and player sync run on.
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/party"))
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/calendar"))
+            // Tests a Compose-side helper (CalendarHomeSection.kt) that tvosCore excludes: Apple TV draws the Calendar in SwiftUI.
+            kotlin.exclude("**/calendar/internal/CalendarTitleTypeForTest.kt")
         }
         commonTest.dependencies {
             implementation("io.ktor:ktor-client-mock:${libs.versions.ktor.get()}")
