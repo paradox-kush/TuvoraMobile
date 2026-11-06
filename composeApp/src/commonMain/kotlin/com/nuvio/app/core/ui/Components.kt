@@ -174,6 +174,8 @@ fun NuvioScreenHeader(
             verticalAlignment = Alignment.Bottom,
         ) {
             Row(
+                // Actions are measured first; a long title shrinks (ellipsis) instead of pushing them off a 360 dp screen.
+                modifier = Modifier.weight(1f, fill = false),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(tokens.spacing.controlGap),
             ) {
@@ -194,6 +196,8 @@ fun NuvioScreenHeader(
                     Text(
                         text = currentTitle,
                         style = MaterialTheme.typography.displayLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         color = tokens.colors.textPrimary,
                     )
                 }

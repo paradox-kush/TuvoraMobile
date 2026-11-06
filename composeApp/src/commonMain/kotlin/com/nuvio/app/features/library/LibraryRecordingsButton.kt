@@ -1,7 +1,7 @@
 package com.nuvio.app.features.library
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.FiberManualRecord
+import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -15,7 +15,7 @@ import org.jetbrains.compose.resources.stringResource
 internal fun LibraryRecordingsButton(onClick: () -> Unit) {
     IconButton(onClick = onClick) {
         Icon(
-            imageVector = Icons.Rounded.FiberManualRecord,
+            imageVector = Icons.Rounded.VideoLibrary,
             contentDescription = stringResource(Res.string.recordings_title),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
