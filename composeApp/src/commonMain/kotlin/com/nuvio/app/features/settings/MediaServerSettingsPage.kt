@@ -46,6 +46,10 @@ import nuvio.composeapp.generated.resources.action_cancel
 import nuvio.composeapp.generated.resources.servers_catalog_metadata
 import nuvio.composeapp.generated.resources.servers_catalog_metadata_description
 import nuvio.composeapp.generated.resources.servers_enabled
+import nuvio.composeapp.generated.resources.servers_managed_failed_generic
+import nuvio.composeapp.generated.resources.servers_managed_failed_none
+import nuvio.composeapp.generated.resources.servers_managed_failed_slow
+import nuvio.composeapp.generated.resources.servers_managed_preparing
 import nuvio.composeapp.generated.resources.servers_enabled_description
 import nuvio.composeapp.generated.resources.servers_import_watch_state
 import nuvio.composeapp.generated.resources.servers_import_watch_state_description
@@ -102,6 +106,7 @@ private fun MediaServerSettingsBody(
     val tokens = MaterialTheme.nuvio
     val scope = rememberCoroutineScope()
     var refreshing by remember(connection.id) { mutableStateOf(false) }
+    val managedNotice by com.nuvio.app.features.servers.ManagedAddonBridge.notice.collectAsStateWithLifecycle()
     var signIn by remember { mutableStateOf<ServerSignInRequest?>(null) }
     var confirmRemove by remember { mutableStateOf(false) }
     val rowPadding = if (isTablet) 20.dp else 16.dp
@@ -235,7 +240,7 @@ private fun MediaServerSettingsBody(
             SettingsGroupDivider(isTablet = isTablet)
             SettingsNavigationRow(
                 title = stringResource(if (connection.managedBridgeId == null) Res.string.servers_sign_in_again else Res.string.servers_managed_reconnect),
-                description = null,
+                description = managedNotice?.takeIf { connection.managedBridgeId != null }?.let { stringResource(managedNoticeText(it)) },
                 icon = Icons.Rounded.Lock,
                 isTablet = isTablet,
                 onClick = {
@@ -309,5 +314,14 @@ internal fun ServerConnection.status(failure: ServerFailure?): Pair<String, Colo
             stringResource(Res.string.servers_status_cert_changed) to colors.danger
         failure == ServerFailure.UNREACHABLE -> stringResource(Res.string.servers_status_unreachable) to colors.warning
         else -> null
+    }
+}
+
+private fun managedNoticeText(notice: com.nuvio.app.features.servers.ManagedBridgeNotice) = when (notice) {
+    com.nuvio.app.features.servers.ManagedBridgeNotice.Preparing -> Res.string.servers_managed_preparing
+    is com.nuvio.app.features.servers.ManagedBridgeNotice.Failed -> when (notice.code) {
+        "provisioning_timeout" -> Res.string.servers_managed_failed_slow
+        "no_supported_addons", "no_playback_addons" -> Res.string.servers_managed_failed_none
+        else -> Res.string.servers_managed_failed_generic
     }
 }

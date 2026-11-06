@@ -25,6 +25,10 @@ internal object ManagedAddonBridge {
     private val json = Json { ignoreUnknownKeys = true }
 
     private val mutex = kotlinx.coroutines.sync.Mutex()
+    private val _notice = kotlinx.coroutines.flow.MutableStateFlow<ManagedBridgeNotice?>(null)
+    /** Why the managed connection is not usable right now; null when fine or when there is none. */
+    val notice: kotlinx.coroutines.flow.StateFlow<ManagedBridgeNotice?> = _notice
+    private fun setNotice(value: ManagedBridgeNotice?) { _notice.value = value }
     suspend fun refresh(profileId: Int, force: Boolean = false) = mutex.withLock { refreshLocked(profileId, force) }
 
     private suspend fun refreshLocked(profileId: Int, force: Boolean) {
@@ -36,10 +40,15 @@ internal object ManagedAddonBridge {
                 .decodeAs<kotlinx.serialization.json.JsonElement>()
             if (ProfileRepository.activeProfileId != profileId || hostedAccessTokenOrNull() != bearer) return
             val status = raw as? JsonObject
-            if (status == null || raw == JsonNull || status["state"]?.jsonPrimitive?.content != "ready") {
-                ServerRepository.forgetManaged()
-                return
+            when (val decision = ManagedBridgePolicy.decide(status.takeIf { raw != JsonNull })) {
+                ManagedBridgeDecision.Forget -> { setNotice(null); ServerRepository.forgetManaged(); return }
+                // The bridge is rebuilding or gave up. Keep the connection the user already has: deleting it
+                // here is what turned every bridge hiccup into a silent "no sources".
+                ManagedBridgeDecision.Preparing -> { setNotice(ManagedBridgeNotice.Preparing); return }
+                is ManagedBridgeDecision.Failed -> { setNotice(ManagedBridgeNotice.Failed(decision.code)); return }
+                ManagedBridgeDecision.Ready -> Unit
             }
+            if (status == null) return
             val id = status["id"]?.jsonPrimitive?.content ?: return
             if (!ManagedBridgePolicy.validId(id)) return
             val details = status["result"] as? JsonObject ?: return
@@ -55,22 +64,56 @@ internal object ManagedAddonBridge {
                 buildJsonObject { put("action", "exchange"); put("device_id", SyncClientIdentity.currentClientId()); put("force", force) }.toString(),
                 followRedirects = false, maxResponseBodyBytes = 32768,
             )
-            if (response.status != 200 || response.url.isNotBlank() && !response.url.startsWith("$ORIGIN/")) return
+            if (response.url.isNotBlank() && !response.url.startsWith("$ORIGIN/")) return
+            if (response.status != 200) {
+                setNotice(ManagedBridgePolicy.exchangeFailure(response.status, response.body))
+                return
+            }
             if (ProfileRepository.activeProfileId != profileId || hostedAccessTokenOrNull() != bearer) return
             val body = json.parseToJsonElement(response.body) as? JsonObject ?: return
             fun field(name: String) = body[name]?.jsonPrimitive?.content.orEmpty()
             if (field("id") != id || !ManagedBridgePolicy.validAddress(id, field("address"))) return
             val expires = Instant.parse(field("expires_at")).toEpochMilliseconds()
+            setNotice(null)
             ServerRepository.connectManaged(ServerSignIn(field("address"), "Connected addons", field("server_id"), field("user_id"), field("user_name"), field("access_token")), id, expires, status["revision"]!!.jsonPrimitive.content.toLong())
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             // Old backends/temporarily unavailable pilot: ordinary servers still sync. No URL/token logs.
             co.touchlab.kermit.Logger.withTag("ManagedAddonBridge").w { "Managed connection refresh: ${e::class.simpleName}" }
+            setNotice(ManagedBridgeNotice.Failed("unreachable"))
         }
     }
 }
 
+internal sealed interface ManagedBridgeDecision {
+    data object Ready : ManagedBridgeDecision
+    data object Preparing : ManagedBridgeDecision
+    data object Forget : ManagedBridgeDecision
+    data class Failed(val code: String?) : ManagedBridgeDecision
+}
+
+internal sealed interface ManagedBridgeNotice {
+    data object Preparing : ManagedBridgeNotice
+    data class Failed(val code: String?) : ManagedBridgeNotice
+}
+
 internal object ManagedBridgePolicy {
+    /** Only a missing or disconnected connection is forgotten; a pending, working or failed one is kept and explained. */
+    fun decide(status: JsonObject?): ManagedBridgeDecision = when (status?.get("state")?.jsonPrimitive?.content) {
+        "ready" -> ManagedBridgeDecision.Ready
+        "pending", "working" -> ManagedBridgeDecision.Preparing
+        "failed" -> ManagedBridgeDecision.Failed((status["result"] as? JsonObject)?.get("error")?.jsonPrimitive?.content)
+        else -> ManagedBridgeDecision.Forget
+    }
+
+    fun exchangeFailure(status: Int, body: String): ManagedBridgeNotice {
+        val code = runCatching { (kotlinx.serialization.json.Json.parseToJsonElement(body) as? JsonObject)?.get("error")?.jsonPrimitive?.content }.getOrNull()
+        return when {
+            code == "connection_reprovisioning" || code == "connection_not_ready" || code == "connection_changed" || status == 410 -> ManagedBridgeNotice.Preparing
+            else -> ManagedBridgeNotice.Failed(code ?: "http_$status")
+        }
+    }
+
     fun validId(value: String): Boolean = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").matches(value)
     fun validAddress(id: String, address: String): Boolean = validId(id) && address == "https://addon.thekush.dev/jellyfin/$id"
 }
