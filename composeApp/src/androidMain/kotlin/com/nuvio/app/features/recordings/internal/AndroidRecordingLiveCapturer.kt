@@ -2,6 +2,7 @@ package com.nuvio.app.features.recordings.internal
 
 import com.nuvio.app.features.livetv.pause.LiveCaptureEnv
 import com.nuvio.app.features.livetv.pause.LiveCaptureEvent
+import com.nuvio.app.features.livetv.pause.LiveCaptureHandle
 import com.nuvio.app.features.livetv.pause.LiveCaptureLoop
 import com.nuvio.app.features.livetv.pause.LiveCaptureReconnect
 import com.nuvio.app.features.livetv.pause.LiveCaptureRequest
@@ -59,6 +60,10 @@ internal class AndroidRecordingLiveCapturer(
     private val stopGraceMs: Long = STOP_GRACE_MS,
     /** How often free space is compared with the recording floor while a capture runs. */
     private val spaceCheckMs: Long = SPACE_CHECK_MS,
+    /** Starts the writer for one attempt in [LiveRetention.KeepAll]; tests substitute one that never winds down. */
+    private val startLoop: (LiveCaptureEnv, LiveCaptureRequest, File) -> LiveCaptureHandle = { e, r, d ->
+        LiveCaptureLoop(e, r, d, LiveRetention.KeepAll).begin()
+    },
 ) : RecordingLiveCapturer {
 
     /** One attempt's life: closed when its slot is over, cancelled or failed. A mint checks it on both sides of the provider call. */
@@ -114,7 +119,7 @@ internal class AndroidRecordingLiveCapturer(
             reconnect = reconnect,
         )
 
-        val handle = LiveCaptureLoop(env, request, partDir, LiveRetention.KeepAll).begin()
+        val handle = startLoop(env, request, partDir)
         var failure: LivePauseFailure? = null
         var stoppedAtSlotEnd = false
         try {
@@ -136,6 +141,9 @@ internal class AndroidRecordingLiveCapturer(
                             failure = LivePauseFailure.NO_SPACE
                             session.open = false
                             handle.stop()
+                            // A writer that ignores stop() must not hold the slot open until its end: give up on it.
+                            delay(stopGraceMs)
+                            collector.cancel()
                             break
                         }
                     }
