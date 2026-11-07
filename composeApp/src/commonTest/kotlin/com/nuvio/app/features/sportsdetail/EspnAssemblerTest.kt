@@ -177,6 +177,18 @@ class EspnAssemblerTest {
         assertTrue(mlb.items.isNotEmpty())
     }
 
+    @Test fun `leaders come from the per-game summary so they follow the live game`() {
+        val b = assertNotNull(block<LeadersBlock>(BlockType.LEADERS, "basketball", SportsFixtures.espn_nba_event, SportsFixtures.espn_nba_summary))
+        assertEquals(setOf("home", "away"), b.items.map { it.side }.toSet())
+        assertTrue(b.items.any { it.category == "Points" && it.athlete == "Nickeil Alexander-Walker" && it.value == "28" && it.side == "home" })
+        val nfl = assertNotNull(block<LeadersBlock>(BlockType.LEADERS, "football", SportsFixtures.espn_nfl_event, SportsFixtures.espn_nfl_summary))
+        assertTrue(nfl.items.all { it.side != null })
+    }
+
+    @Test fun `baseball has no summary leaders so it falls back to the scoreboard snapshot`() {
+        assertNotNull(block<LeadersBlock>(BlockType.LEADERS, "baseball", SportsFixtures.espn_mlb_event, SportsFixtures.espn_mlb_summary))
+    }
+
     // ---- timeline ---------------------------------------------------------------------------------------------
 
     @Test fun `NBA timeline is the last five scoring plays in chronological order`() {

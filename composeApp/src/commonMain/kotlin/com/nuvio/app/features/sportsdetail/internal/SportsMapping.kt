@@ -56,6 +56,8 @@ internal data class CommonPaths(
 internal class BlockSpec(val raw: JsonObject) {
     val from: String? get() = str("from")
     val path: String? get() = str("path")
+    /** Optional second source for a block: `{"fallback": {"from": ..., "path": ...}}` inherits the other keys. */
+    fun fallback(): BlockSpec? = (raw["fallback"] as? JsonObject)?.let { fb -> BlockSpec(JsonObject(raw.filterKeys { it != "fallback" } + fb)) }
     fun str(key: String): String? = (raw[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
     fun int(key: String): Int? = (raw[key] as? JsonPrimitive)?.content?.toIntOrNull()
     fun strings(key: String): List<String> = (raw[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }.orEmpty()
@@ -86,6 +88,10 @@ internal data class SportsMapping(
     /** Optional per-block source order override: block id -> ["tsdb","espn"]. */
     val chain: Map<String, List<String>>,
 ) {
+    /** The manual ESPN-event pin for a TheSportsDB event: the raw numeric id (what the backend validates), else the legacy "tsdb:" key. */
+    fun eventOverride(tsdbEventId: String?): String? =
+        tsdbEventId?.let { eventOverrides[it] ?: eventOverrides["tsdb:$it"] }
+
     fun leagueByTsdb(id: String): LeagueEntry? = leagues.firstOrNull { it.tsdb == id }
 
     /** Remote kill switches: ESPN as a whole, per sport (matches the league's sport OR its profile), per league. */
@@ -328,6 +334,7 @@ internal class SportsMappingStore(
         private set
 
     init {
+        rejectedEtag = runCatching { storage.loadRejectedEtag() }.getOrNull()
         val stored = runCatching { storage.load() }.getOrNull()
         if (stored != null) {
             val parsed = SportsMappingParser.parse(stored.json)
@@ -342,13 +349,18 @@ internal class SportsMappingStore(
         val parsed = SportsMappingParser.parse(json)
         val candidate = when (parsed) {
             is SportsMappingParser.ParseResult.Ok -> parsed.mapping
-            is SportsMappingParser.ParseResult.Invalid -> { rejectedEtag = etag; return AdoptResult.Rejected(parsed.reason) }
+            is SportsMappingParser.ParseResult.Invalid -> { remember(etag); return AdoptResult.Rejected(parsed.reason) }
         }
-        SportsMappingValidator.validate(candidate)?.let { rejectedEtag = etag; return AdoptResult.Rejected(it) }
+        SportsMappingValidator.validate(candidate)?.let { remember(etag); return AdoptResult.Rejected(it) }
         current = candidate
         this.etag = etag
-        rejectedEtag = null
+        if (rejectedEtag != null) remember(null)
         runCatching { storage.save(StoredMapping(json, etag)) }
         return AdoptResult.Adopted(candidate.version)
+    }
+
+    private fun remember(rejected: String?) {
+        rejectedEtag = rejected
+        runCatching { storage.saveRejectedEtag(rejected) }
     }
 }

@@ -47,6 +47,8 @@ internal class GameDetailSession(
     private var espnEventId: String? = ref.espnEventId
     private var espnEventStartMs: Long? = null
     private var tsdbAsOf: Long? = null
+    /** ESPN failed recently: skip it until then (the backend may be perfectly healthy). */
+    private var espnBackoffUntilMs = 0L
     private var espnAsOf: Long? = null
 
     // Negative cache + telemetry de-dup.
@@ -98,7 +100,7 @@ internal class GameDetailSession(
                 is SourceResult.Ok -> {
                     tsdbDetail = r.value
                     tsdbAsOf = nowMs()
-                    tsdbBlocks.clear()
+                    // Replace per block: a block the backend omitted (a failed sub-call) keeps its last good value.
                     r.value.blocks.forEach { b -> blockTypeOf(b)?.let { tsdbBlocks[it] = b } }
                 }
                 is SourceResult.Empty -> tsdbDetail = null
@@ -114,11 +116,13 @@ internal class GameDetailSession(
         //    re-fetch whole-day scoreboards every tick.
         val needResolve = espnBase == null && !isMissed("espn|match")
         val needScoreboardRefresh = espnBase != null && !summaryEndpoint && fetchSummary
-        if (espnOn && (needResolve || needScoreboardRefresh)) {
+        val espnCallable = espnOn && nowMs() >= espnBackoffUntilMs
+        if (espnCallable && (needResolve || needScoreboardRefresh)) {
             val t0 = nowMs()
             val failure = resolveEspnEvent(mapping, league!!, ::miss)
             durations["espn"] = nowMs() - t0
             espnEventFailed = failure
+            if (failure != null) espnBackoffUntilMs = nowMs() + ESPN_BACKOFF_MS
             if (failure == null && espnBase != null) { espnAsOf = nowMs(); espnEventRoot = espnSummary?.let { EspnLiveOverlay.apply(espnBase!!, it) } ?: espnBase }
             when {
                 failure != null -> note("match", "espn", outcomeOf(failure))
@@ -142,12 +146,12 @@ internal class GameDetailSession(
         // 4. Live tick = the per-game summary only (carries score + clock + everything the blocks need).
         val wantsSummary = espnOn && espnEventId != null && espnBase != null && summaryEndpoint && profile != null && provisional != null &&
             (provisional != GameState.UPCOMING || "lineup" in profile.blocks) && provisional != GameState.POSTPONED
-        if (wantsSummary && (fetchEvent || fetchSummary || espnSummary == null) && !isMissed("espn|summary")) {
+        if (wantsSummary && espnCallable && (fetchEvent || fetchSummary || espnSummary == null) && !isMissed("espn|summary")) {
             val t0 = nowMs()
             when (val r = espn!!.summary(league!!.espn!!, espnEventId!!)) {
                 is SourceResult.Ok -> { espnSummary = r.value; espnEventRoot = EspnLiveOverlay.apply(espnBase!!, r.value); espnAsOf = nowMs() }
                 is SourceResult.Empty, is SourceResult.Disabled -> miss("espn|summary")
-                is SourceResult.Failed -> espnSummaryFailed = r
+                is SourceResult.Failed -> { espnSummaryFailed = r; espnBackoffUntilMs = nowMs() + ESPN_BACKOFF_MS }
             }
             durations["espn"] = (durations["espn"] ?: 0L) + (nowMs() - t0)
         }
@@ -233,7 +237,7 @@ internal class GameDetailSession(
     /** Finds (or matches) the ESPN event on a scoreboard. Returns a Failed when ESPN could not be asked; null otherwise. */
     private suspend fun resolveEspnEvent(mapping: SportsMapping, league: LeagueEntry, miss: (String) -> Unit): SourceResult.Failed? {
         val path = league.espn ?: return null
-        val known = espnEventId ?: mapping.eventOverrides["tsdb:${ref.tsdbEventId}"]
+        val known = espnEventId ?: mapping.eventOverride(ref.tsdbEventId)
         val anchor = espnEventStartMs ?: ref.startsAtMs
         val windowMs = mapping.match.dateWindowHours * 3_600_000L
         val dates = listOfNotNull(
@@ -289,6 +293,7 @@ internal class GameDetailSession(
 
     private companion object {
         const val NEGATIVE_TTL_MS = 5L * 60 * 1000
+        const val ESPN_BACKOFF_MS = 30_000L
         val UPCOMING_BLOCKS = setOf(BlockType.BROADCAST, BlockType.FORM, BlockType.LINEUP, BlockType.RESULTS, BlockType.NEXT, BlockType.STANDINGS, BlockType.HIGHLIGHTS)
     }
 }
