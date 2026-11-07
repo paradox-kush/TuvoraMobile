@@ -32,11 +32,24 @@ struct TuvoraTVApp: App {
         #endif
         // PostHog with crash autocapture, the iPhone app's scrubbing and its consent switch.
         TuvoraTelemetry.start()
-        // Telemetry v2: support code and hardware profile on every event (the code is made once per install).
-        TvTelemetryBootstrap.registerSuperProperties()
+        // Telemetry v2: the Kotlin service and its crash hook come up before any other shared code runs.
+        IosTelemetry.shared.start()
+        // Lets shared Kotlin capture without linking PostHog; only the telemetry service calls these.
         AnalyticsSink.shared.register { event, properties in
             PostHogSDK.shared.capture(event, properties: properties)
         }
+        AnalyticsSink.shared.registerTimed { event, properties, atEpochMs in
+            PostHogSDK.shared.capture(event, properties: properties,
+                                      timestamp: Date(timeIntervalSince1970: TimeInterval(atEpochMs.int64Value) / 1000.0))
+        }
+        AnalyticsSink.shared.registerSuperProperties { properties in
+            PostHogSDK.shared.register(properties as [String: Any])
+        }
+        AnalyticsSink.shared.registerFlush { PostHogSDK.shared.flush() }
+        // The HDR / Dolby Vision half of the hardware profile (the model and RAM come from the shared Kotlin).
+        TvTelemetryBootstrap.registerSuperProperties()
+        IosTelemetry.shared.onSdkReady()
+        Task.detached(priority: .utility) { try? await IosTelemetry.shared.sendPendingCrash() }
         MemoryPressureObserver.shared.start()
         TvAppGraph.shared.start()
         PlayerEngines.register()
@@ -47,8 +60,20 @@ struct TuvoraTVApp: App {
         #endif
     }
 
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some Scene {
-        WindowGroup { RootView() }
+        WindowGroup {
+            RootView()
+                // session_health goes out when the app leaves the foreground.
+                .onChange(of: scenePhase) { _, phase in
+                    switch phase {
+                    case .active: IosTelemetry.shared.onForeground()
+                    case .background: IosTelemetry.shared.onBackground()
+                    default: break
+                    }
+                }
+        }
     }
 }
 

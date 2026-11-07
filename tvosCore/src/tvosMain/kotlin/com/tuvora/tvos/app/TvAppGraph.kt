@@ -1,14 +1,11 @@
 package com.tuvora.tvos.app
 
-import com.nuvio.app.core.analytics.AnalyticsSink
 import com.nuvio.app.core.analytics.Breadcrumbs
 import com.nuvio.app.core.contracts.MemoryPortAccess
 import com.nuvio.app.core.contracts.MemoryTierPolicy
 import com.nuvio.app.core.journal.StartupJournal
 import com.nuvio.app.features.common.lifecycle.FeatureRegistry
 import com.nuvio.app.registerLogicFeatureContributions
-import kotlin.experimental.ExperimentalNativeApi
-import kotlin.native.setUnhandledExceptionHook
 import platform.Foundation.NSProcessInfo
 
 /**
@@ -24,7 +21,6 @@ object TvAppGraph {
         if (started) return
         started = true
         if (!FeatureRegistry.isInitialized) {
-            installUnhandledExceptionReporter()
             // The same logic-port list every platform registers (FeatureContributions.kt). The Compose UI
             // slots in FeatureWiring.kt have no Apple TV role.
             registerLogicFeatureContributions()
@@ -36,34 +32,10 @@ object TvAppGraph {
             MemoryTierPolicy.iosTier(NSProcessInfo.processInfo.physicalMemory.toLong()),
         )
         StartupJournal.markUiLaunchStarted()
-        // A crash record left by the previous run goes out now (consent permitting), once.
-        com.tuvora.tvos.telemetry.TvTelemetry.sendPendingCrash()
         TvAppLifecycle.start()
         com.tuvora.tvos.screens.TvDeviceSources.start()
     }
 
     /** SwiftUI calls this on every screen change; the first call also marks the launch interactive. */
     fun screenChanged(name: String) = Breadcrumbs.screenChanged(name)
-
-    /** Kotlin exceptions that escape to the top reach PostHog before the process ends (iOS parity). */
-    @OptIn(ExperimentalNativeApi::class)
-    private fun installUnhandledExceptionReporter() {
-        var previous: ((Throwable) -> Unit)? = null
-        previous = setUnhandledExceptionHook { throwable ->
-            // First, synchronously: the shared crash record (pending_crash.json) that the next launch sends
-            // with its stack. PostHog's own capture below is best effort and may not flush before exit.
-            com.tuvora.tvos.telemetry.TvCrashFiles.writeSynchronously(throwable)
-            runCatching {
-                AnalyticsSink.capture(
-                    "app_uncaught_exception_tvos",
-                    mapOf(
-                        "exception" to (throwable::class.qualifiedName ?: throwable::class.simpleName ?: "Throwable"),
-                        "message" to (throwable.message ?: ""),
-                        "stack" to throwable.stackTraceToString().take(4000),
-                    ),
-                )
-            }
-            previous?.invoke(throwable)
-        }
-    }
 }

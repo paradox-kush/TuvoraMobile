@@ -48,4 +48,10 @@ class TvStorageTierPolicyTest {
         // tvOS posts a warning at 512 KB of user defaults and terminates the app at 1 MB.
         assertTrue(TvStorageTierPolicy.DURABLE_BUDGET_BYTES <= 400_000)
     }
+
+    @Test
+    fun `support code and the reports consent survive a cache purge`() {
+        assertEquals(StorageTier.Durable, TvStorageTierPolicy.tierFor("tuvora.support_code"))
+        assertEquals(StorageTier.Durable, TvStorageTierPolicy.tierFor("sentry_enabled"))
+    }
 }

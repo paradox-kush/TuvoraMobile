@@ -119,37 +119,15 @@ struct ReportSendDialog: View {
     }
 }
 
-/// What this Apple TV is, registered as PostHog super properties so every event, crash and report can be grouped by it.
-/// No serial number, MAC address, IP, account name or installed-app list.
-enum TvHardwareProfile {
-    /// The Apple TV model identifier ("AppleTV14,1"); a simulator reports the model it is imitating.
-    static func modelIdentifier() -> String {
-        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] { return simulated }
-        var info = utsname()
-        uname(&info)
-        return withUnsafePointer(to: &info.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: Int(_SYS_NAMELEN)) { String(cString: $0) }
-        }
-    }
-
-    static func properties() -> [String: Any] {
+/// The HDR half of the hardware profile, registered as PostHog super properties (the shared Kotlin registers model,
+/// RAM, cores and OS). Display capability needs AVFoundation, so it is the one part Swift owns.
+enum TvTelemetryBootstrap {
+    static func registerSuperProperties() {
         let hdr = AVPlayer.availableHDRModes
-        return [
-            "hw_model": modelIdentifier(),
-            "hw_ram_mb": Int(ProcessInfo.processInfo.physicalMemory / 1_048_576),
+        PostHogSDK.shared.register([
             "hw_hdr10": hdr.contains(.hdr10),
             "hw_hlg": hdr.contains(.hlg),
             "hw_dolby_vision": hdr.contains(.dolbyVision),
-            "hw_os": ProcessInfo.processInfo.operatingSystemVersionString,
-        ]
-    }
-}
-
-enum TvTelemetryBootstrap {
-    /// After TuvoraTelemetry.start(): the support code and hardware profile ride every event from here on.
-    static func registerSuperProperties() {
-        var props = TvHardwareProfile.properties()
-        props["support_code"] = TvTelemetry.shared.supportCode
-        PostHogSDK.shared.register(props)
+        ])
     }
 }
