@@ -49,8 +49,7 @@ class GameDetailUiPolicyTest {
         assertTrue(GameDetailUiPolicy.isEmpty(LinescoreBlock(listOf("Q1"), emptyList())))
         assertTrue(GameDetailUiPolicy.isEmpty(TimelineBlock(emptyList())))
         assertTrue(GameDetailUiPolicy.isEmpty(LeadersBlock(emptyList())))
-        assertTrue(GameDetailUiPolicy.isEmpty(BroadcastBlock(emptyMap())))
-        assertTrue(GameDetailUiPolicy.isEmpty(BroadcastBlock(mapOf("US" to emptyList()))))
+        assertTrue(GameDetailUiPolicy.isEmpty(BroadcastBlock(mapOf("US" to listOf("ESPN")))), "broadcast is never shown")
         assertTrue(GameDetailUiPolicy.isEmpty(FormBlock(emptyList(), emptyList())))
         assertTrue(GameDetailUiPolicy.isEmpty(SituationBlock(" ")))
         assertTrue(GameDetailUiPolicy.isEmpty(HighlightsBlock("")))
@@ -59,7 +58,6 @@ class GameDetailUiPolicyTest {
     @Test fun `non-empty blocks show`() {
         assertFalse(GameDetailUiPolicy.isEmpty(StatsBlock(listOf(StatRow("Fouls", "1", "2")))))
         assertFalse(GameDetailUiPolicy.isEmpty(LeadersBlock(listOf(LeaderItem("Points", "A", "30")))))
-        assertFalse(GameDetailUiPolicy.isEmpty(BroadcastBlock(mapOf("US" to listOf("ESPN")))))
         assertFalse(GameDetailUiPolicy.isEmpty(WinProbabilityBlock(0)))
         assertFalse(GameDetailUiPolicy.isEmpty(FormBlock(listOf("W"), emptyList())))
     }
@@ -71,7 +69,7 @@ class GameDetailUiPolicyTest {
 
     @Test fun `wide layout puts score blocks left and detail blocks right`() {
         assertTrue(GameDetailUiPolicy.isPrimaryColumn(LinescoreBlock(listOf("Q1"), listOf(listOf("1")))))
-        assertTrue(GameDetailUiPolicy.isPrimaryColumn(BroadcastBlock(mapOf("US" to listOf("ESPN")))))
+        assertTrue(GameDetailUiPolicy.isPrimaryColumn(FormBlock(listOf("W"), emptyList())))
         assertFalse(GameDetailUiPolicy.isPrimaryColumn(StatsBlock(listOf(StatRow("a", "1", "2")))))
         assertFalse(GameDetailUiPolicy.isPrimaryColumn(TimelineBlock(emptyList())))
     }
@@ -126,23 +124,4 @@ class GameDetailUiPolicyTest {
         assertNull(GameDetailUiPolicy.teamTag("home", EventHeader("Grand Prix")))
     }
 
-    @Test fun `broadcast puts the viewer's region first and caps the rest`() {
-        val by = linkedMapOf(
-            "Canada" to listOf("SN"), "Croatia" to listOf("DAZN"), "France" to listOf("beIN"), "Germany" to listOf("SD"),
-            "United States" to listOf("ESPN+"), "United Kingdom" to listOf("TNT"),
-        )
-        val us = GameDetailUiPolicy.splitBroadcast(by, "US")
-        assertEquals("United States", us.first.first().first)
-        assertEquals(3, us.first.size)
-        assertEquals(3, us.second.size)
-        assertEquals(6, (us.first + us.second).map { it.first }.toSet().size)
-        assertEquals("United Kingdom", GameDetailUiPolicy.splitBroadcast(by, "GB").first.first().first)
-        // ESPN keys its US list as "US"
-        assertEquals("US", GameDetailUiPolicy.splitBroadcast(mapOf("US" to listOf("USA Net"), "Spain" to listOf("DAZN")), "US").first.first().first)
-        // unknown region: first three alphabetical, rest behind More
-        val none = GameDetailUiPolicy.splitBroadcast(by, null)
-        assertEquals(listOf("Canada", "Croatia", "France"), none.first.map { it.first })
-        assertEquals(3, none.second.size)
-        assertEquals(0, GameDetailUiPolicy.splitBroadcast(mapOf("Canada" to listOf("SN")), "CA").second.size)
-    }
 }

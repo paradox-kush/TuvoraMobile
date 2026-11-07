@@ -74,25 +74,6 @@ internal object GameDetailUiPolicy {
         return s.short?.takeIf { it.isNotBlank() } ?: s.name
     }
 
-    private val COUNTRY_NAMES = mapOf(
-        "US" to "United States", "GB" to "United Kingdom", "UK" to "United Kingdom", "CA" to "Canada", "AU" to "Australia",
-        "NZ" to "New Zealand", "IE" to "Ireland", "DE" to "Germany", "FR" to "France", "ES" to "Spain", "IT" to "Italy",
-        "NL" to "Netherlands", "BE" to "Belgium", "PT" to "Portugal", "SE" to "Sweden", "NO" to "Norway", "DK" to "Denmark",
-        "FI" to "Finland", "PL" to "Poland", "CH" to "Switzerland", "AT" to "Austria", "IN" to "India", "BR" to "Brazil",
-        "MX" to "Mexico", "AR" to "Argentina", "ZA" to "South Africa", "JP" to "Japan", "KR" to "South Korea",
-    )
-    private const val BROADCAST_SHOWN = 3
-
-    /** (shown, more): the viewer's region first (matched by country name or ESPN's "US" key), then A-Z; at most 3 shown. */
-    fun splitBroadcast(byRegion: Map<String, List<String>>, regionCode: String?): Pair<List<Pair<String, List<String>>>, List<Pair<String, List<String>>>> {
-        val entries = byRegion.filterValues { it.isNotEmpty() }.toList()
-        val code = regionCode?.uppercase()
-        val mine = code?.let { COUNTRY_NAMES[it] }
-        val (home, others) = entries.partition { (k, _) -> code != null && (k.equals(code, ignoreCase = true) || (mine != null && k.equals(mine, ignoreCase = true))) }
-        val ordered = home + others.sortedBy { it.first.lowercase() }
-        return ordered.take(BROADCAST_SHOWN) to ordered.drop(BROADCAST_SHOWN)
-    }
-
     fun isWide(widthDp: Int): Boolean = widthDp >= WIDE_MIN_DP
 
     /** "Updated 40s ago" once even the freshest source fetch is older than 20 s; null while fresh. */
@@ -115,7 +96,7 @@ internal object GameDetailUiPolicy {
         is LinescoreBlock -> b.rows.isEmpty() || b.columns.isEmpty()
         is TimelineBlock -> b.items.isEmpty()
         is LeadersBlock -> b.items.isEmpty()
-        is BroadcastBlock -> b.byRegion.values.all { it.isEmpty() }
+        is BroadcastBlock -> true   // owner decision: the broadcast block is never shown
         is FormBlock -> b.home.isEmpty() && b.away.isEmpty()
         is SituationBlock -> b.line.isBlank()
         is HighlightsBlock -> b.url.isBlank()

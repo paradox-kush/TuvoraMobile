@@ -25,7 +25,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.text.intl.Locale
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +39,6 @@ import com.nuvio.app.core.ui.NuvioPrimaryButton
 import com.nuvio.app.core.ui.NuvioSurfaceCard
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.nuvio
-import com.nuvio.app.features.sportsdetail.api.BroadcastBlock
 import com.nuvio.app.features.sportsdetail.api.EventHeader
 import com.nuvio.app.features.sportsdetail.api.FormBlock
 import com.nuvio.app.features.sportsdetail.api.GameBlock
@@ -265,21 +263,6 @@ internal fun BlockContent(block: GameBlock, detail: GameDetail) {
                 Row(Modifier.fillMaxWidth().padding(vertical = NuvioTokens.Space.s4), verticalAlignment = Alignment.CenterVertically) {
                     Text(ls.rowLabels.getOrNull(i).orEmpty(), modifier = Modifier.width(56.dp), maxLines = 1, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textPrimary)
                     row.forEach { Text(it, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textPrimary) }
-                }
-            }
-        }
-        is BroadcastBlock -> BlockCard("Broadcast") {
-            var showMore by remember { mutableStateOf(false) }
-            val (shown, more) = GameDetailUiPolicy.splitBroadcast(block.byRegion, Locale.current.region)
-            (if (showMore) shown + more else shown).forEach { (region, channels) ->
-                Row(Modifier.fillMaxWidth().padding(vertical = NuvioTokens.Space.s2)) {
-                    Text(region, modifier = Modifier.width(96.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textMuted)
-                    Text(channels.joinToString(", "), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textPrimary)
-                }
-            }
-            if (more.isNotEmpty()) {
-                TextButton(onClick = { showMore = !showMore }, contentPadding = PaddingValues(0.dp)) {
-                    Text(if (showMore) "Fewer regions" else "More regions (${more.size})")
                 }
             }
         }
