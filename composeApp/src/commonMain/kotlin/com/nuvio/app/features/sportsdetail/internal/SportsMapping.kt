@@ -49,7 +49,7 @@ internal data class TeamPaths(val name: String, val short: String?, val badge: S
 
 internal data class CommonPaths(
     val event: String?, val id: String?, val state: String, val detail: String?, val clock: String?, val period: String?,
-    val home: String, val away: String, val team: TeamPaths, val broadcast: String?, val venue: String?,
+    val home: String, val away: String, val team: TeamPaths, val venue: String?,
 )
 
 /** One block's path spec, kept as the raw JSON object so remote mappings may add keys without a client release. */
@@ -109,7 +109,7 @@ internal data class SportsMapping(
 
     /** Source order for [type]: the mapping's override, else the default (TheSportsDB first where it has data). */
     fun chainFor(type: BlockType): List<String> = chain[type.id]?.takeIf { it.isNotEmpty() } ?: when (type) {
-        BlockType.BROADCAST, BlockType.STATS, BlockType.TIMELINE, BlockType.LINEUP, BlockType.STANDINGS,
+        BlockType.STATS, BlockType.TIMELINE, BlockType.LINEUP, BlockType.STANDINGS,
         BlockType.FORM, BlockType.RESULTS, BlockType.NEXT -> listOf("tsdb", "espn")
         BlockType.HIGHLIGHTS -> listOf("tsdb")
         else -> listOf("espn")
@@ -206,7 +206,7 @@ internal object SportsMappingParser {
                     short = team["short"].s(), badge = team["badge"].s(), score = team["score"].s(),
                     record = team["record"].s(), form = team["form"].s(),
                 ),
-                broadcast = cm["broadcast"].s(), venue = cm["venue"].s(),
+                venue = cm["venue"].s(),
             ),
             profiles = profiles,
             chain = r["chain"].obj()?.mapNotNull { (k, v) -> (v as? JsonArray)?.let { a -> k to a.mapNotNull { it.s() } } }?.toMap().orEmpty(),

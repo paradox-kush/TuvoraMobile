@@ -102,7 +102,7 @@ internal class GameDetailSession(
         if (tsdb != null && ref.tsdbEventId != null && !tsdbDisabled && (fetchSummary || tsdbAnswer == null)) {
             val t0 = nowMs()
             backendCalls++
-            val r = tsdb.detail(ref.tsdbEventId, ref.leagueId, null)
+            val r = tsdb.detail(ref.tsdbEventId, ref.leagueId, backendBlocks(mapping, profile))
             durations["tsdb"] = nowMs() - t0
             tsdbAnswer = r
             when (r) {
@@ -197,10 +197,11 @@ internal class GameDetailSession(
         sources["header"] = primary
         // Profiles list the screen's blocks, but some (winProbability) only appear as a path spec: those join at the end.
         val order = profile?.let { p -> p.blocks + p.specs.keys.filter { it !in p.blocks && BlockType.byId(it) != null } }
-            ?: listOf("broadcast", "stats", "timeline", "highlights")
+            ?: listOf("stats", "timeline", "highlights")
         for (id in order) {
             val type = BlockType.byId(id) ?: continue
-            if (type == BlockType.WATCH || !visible(type, state)) continue
+            // Owner decision: no broadcast block. A mapping or backend that still lists/sends one is simply ignored.
+            if (type == BlockType.WATCH || type == BlockType.BROADCAST || !visible(type, state)) continue
             for (source in mapping.chainFor(type)) {
                 val block: GameBlock? = when (source) {
                     "tsdb" -> if (tsdbD != null) tsdbBlocks[type].also { note(type.id, "tsdb", if (it == null) "empty" else "loaded") } else null
@@ -234,6 +235,13 @@ internal class GameDetailSession(
         )
     }
 
+    /** The block ids worth asking the backend for: what the profile shows and the chain lets TheSportsDB supply (never broadcast/watch). */
+    private fun backendBlocks(mapping: SportsMapping, profile: ProfileSpec?): Set<String>? {
+        val ids = profile?.blocks.orEmpty().mapNotNull { BlockType.byId(it) }
+            .filter { it != BlockType.BROADCAST && it != BlockType.WATCH && "tsdb" in mapping.chainFor(it) }.map { it.id }
+        return ids.takeIf { it.isNotEmpty() }?.toSet()
+    }
+
     private fun mergeFreshEspn(primary: EspnHeader, espn: EspnHeader, aliases: Map<String, String>): EspnHeader? {
         fun side(p: Side, e: Side) = p.copy(score = e.score ?: p.score, short = p.short ?: e.short)
         val header: Header = when (val p = primary.header) {
@@ -257,7 +265,7 @@ internal class GameDetailSession(
         GameState.LIVE -> true
         GameState.FINAL -> type != BlockType.SITUATION && type != BlockType.WIN_PROBABILITY
         GameState.UPCOMING -> type in UPCOMING_BLOCKS
-        GameState.POSTPONED -> type == BlockType.BROADCAST
+        GameState.POSTPONED -> false
     }
 
     /** Finds (or matches) the ESPN event on a scoreboard. Returns a Failed when ESPN could not be asked; null otherwise. */
@@ -322,7 +330,7 @@ internal class GameDetailSession(
         val debugLog = Logger.withTag("SportsDetail")
         const val NEGATIVE_TTL_MS = 5L * 60 * 1000
         const val ESPN_BACKOFF_MS = 30_000L
-        val UPCOMING_BLOCKS = setOf(BlockType.BROADCAST, BlockType.FORM, BlockType.LINEUP, BlockType.RESULTS, BlockType.NEXT, BlockType.STANDINGS, BlockType.HIGHLIGHTS)
+        val UPCOMING_BLOCKS = setOf(BlockType.FORM, BlockType.LINEUP, BlockType.RESULTS, BlockType.NEXT, BlockType.STANDINGS, BlockType.HIGHLIGHTS)
     }
 }
 
