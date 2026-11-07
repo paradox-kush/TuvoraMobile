@@ -31,8 +31,11 @@ data class Side(
 @Serializable
 data class LiveInfo(
     val clock: String? = null,
+    /** "2nd" for quarters/periods; null where the clock already says it (soccer "45'+2'"). */
     val periodLabel: String? = null,
     val detail: String? = null,
+    /** The current period number, when known (used to hide periods that have not started). */
+    val period: Int? = null,
 )
 
 @Serializable

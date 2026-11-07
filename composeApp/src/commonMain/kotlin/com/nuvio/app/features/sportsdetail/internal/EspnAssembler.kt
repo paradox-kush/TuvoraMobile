@@ -90,8 +90,9 @@ internal class EspnAssembler(private val m: SportsMapping) {
             state = state,
             live = LiveInfo(
                 clock = SportsPath.text(event, c.clock)?.takeIf { it.isNotBlank() },
-                periodLabel = if (state == GameState.LIVE && period != null && label != null) "$label$period" else null,
+                periodLabel = if (state == GameState.LIVE && period != null && (label == "Q" || label == "P")) ordinal(period, if (label == "Q") 4 else 3) else null,
                 detail = SportsPath.text(event, c.detail)?.takeIf { it.isNotBlank() },
+                period = if (state == GameState.LIVE) period else null,
             ),
             startsAt = Iso.normalize(SportsPath.text(event, "date")),
             venue = SportsPath.text(event, c.venue),
@@ -171,6 +172,12 @@ internal class EspnAssembler(private val m: SportsMapping) {
         val comps = SportsPath.read(event, profile.spec(BlockType.RESULTS)?.path ?: "competitions[*]")
         val pick = comps.firstOrNull { SportsPath.text(it, "status.type.state") != "post" } ?: comps.lastOrNull()
         return SportsPath.text(pick, profile.spec(BlockType.RESULTS)?.str("session"))
+    }
+
+    private fun ordinal(n: Int, regulation: Int): String = when {
+        n > regulation -> if (n == regulation + 1) "OT" else "${n - regulation}OT"
+        n == 1 -> "1st"; n == 2 -> "2nd"; n == 3 -> "3rd"
+        else -> "${n}th"
     }
 
     private fun formLetters(s: String): List<String> = s.uppercase().filter { it == 'W' || it == 'D' || it == 'L' }.map { it.toString() }

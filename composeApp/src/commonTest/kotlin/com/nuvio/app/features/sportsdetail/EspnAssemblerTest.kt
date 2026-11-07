@@ -50,6 +50,13 @@ class EspnAssemblerTest {
         assertEquals("State Farm Arena", h.venue)
     }
 
+    @Test fun `a live hockey header carries the ordinal period and the period number`() {
+        val live = SportsFixtures.espn_nhl_event.replace("\"state\":\"post\"", "\"state\":\"in\"").replace("\"period\":3", "\"period\":2")
+        val h = assertNotNull(asm.header("hockey", ev(live)))
+        assertEquals("2nd", h.live?.periodLabel)
+        assertEquals(2, h.live?.period)
+    }
+
     @Test fun `EPL header carries form and soccer clock`() {
         val h = assertNotNull(asm.header("soccer", ev(SportsFixtures.espn_epl_event)))
         val t = assertIs<TeamsHeader>(h.header)
