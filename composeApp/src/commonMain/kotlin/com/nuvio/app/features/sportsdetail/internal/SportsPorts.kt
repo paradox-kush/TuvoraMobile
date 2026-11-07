@@ -1,7 +1,7 @@
 package com.nuvio.app.features.sportsdetail.internal
 
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
+import com.nuvio.app.features.sportsdetail.api.GameDetail
 
 /** Outcome of asking one source for one payload. A failure is never an [Empty]. */
 internal sealed interface SourceResult<out T> {
@@ -10,6 +10,8 @@ internal sealed interface SourceResult<out T> {
     data object Empty : SourceResult<Nothing>
     /** Transport/HTTP/parse failure or deadline. NOT safe to remember as "no data". */
     data class Failed(val timedOut: Boolean) : SourceResult<Nothing>
+    /** The backend kill switch is on for this source: behave as if the source were not configured. */
+    data object Disabled : SourceResult<Nothing>
 }
 
 internal data class HttpReply(val status: Int, val body: String?, val etag: String?)
@@ -19,27 +21,33 @@ internal interface SportsHttp {
     suspend fun get(url: String, headers: Map<String, String> = emptyMap(), deadlineMs: Long): HttpReply
 }
 
-internal enum class TsdbLookup(val path: String) {
-    TV("event_tv"), STATS("event_stats"), TIMELINE("event_timeline"), HIGHLIGHTS("event_highlights"),
-}
-
 /** ESPN, called from the device only. */
 internal interface EspnSource {
     suspend fun scoreboard(espnPath: String, yyyymmdd: String): SourceResult<JsonElement>
     suspend fun summary(espnPath: String, eventId: String): SourceResult<JsonElement>
 }
 
-/** TheSportsDB through our backend (cached there). Rows come back as `{"lookup":[...]}`. */
+/**
+ * TheSportsDB through our backend's `game-detail` function, which already returns the NORMALISED [GameDetail]
+ * (header + the TheSportsDB-sourced blocks). [blocks] limits the work to named block types (a fast poll asks
+ * for stats,timeline only); null = all the sport's blocks.
+ */
 internal interface TsdbSource {
-    suspend fun event(idEvent: String): SourceResult<JsonObject>
-    suspend fun lookup(idEvent: String, kind: TsdbLookup): SourceResult<JsonObject>
+    suspend fun detail(eventId: String, leagueId: String?, blocks: Set<String>?): SourceResult<GameDetail>
 }
 
-/** Single-sourced endpoint constants. The backend lane (`gd-backend`) owns the server side of these. */
-internal object SportsDetailEndpoints {
-    /** Remote mapping (ETag-polled). TODO(gd-backend): confirm the final path when the endpoint lands. */
-    const val MAPPING_URL: String = "https://api.tuvora.co/sports/mapping/v1.json"
+/**
+ * Backend function URLs, derived from ONE base (the Supabase project URL) so there is a single place to change.
+ * `GET {base}/functions/v1/game-detail?event_id=&league_id=&blocks=` and `GET {base}/functions/v1/sports-mapping`.
+ */
+internal class SportsDetailEndpoints(functionsBase: String) {
+    val gameDetailUrl: String = "${functionsBase.trimEnd('/')}/$GAME_DETAIL_FUNCTION"
+    val mappingUrl: String = "${functionsBase.trimEnd('/')}/$MAPPING_FUNCTION"
 
-    /** TheSportsDB v2-shaped passthrough/cache on our backend: `{base}/lookup/event/{id}`, `/lookup/event_tv/{id}`, ... */
-    const val TSDB_BASE: String = "https://api.tuvora.co/sports/tsdb"
+    companion object {
+        const val GAME_DETAIL_FUNCTION = "game-detail"
+        const val MAPPING_FUNCTION = "sports-mapping"
+
+        fun fromSupabaseUrl(supabaseUrl: String) = SportsDetailEndpoints(supabaseUrl.trim().trimEnd('/') + "/functions/v1")
+    }
 }

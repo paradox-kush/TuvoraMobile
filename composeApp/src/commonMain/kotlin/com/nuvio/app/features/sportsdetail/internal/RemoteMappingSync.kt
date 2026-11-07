@@ -7,7 +7,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 internal class RemoteMappingSync(
     private val store: SportsMappingStore,
     private val http: SportsHttp,
-    private val url: String = SportsDetailEndpoints.MAPPING_URL,
+    private val url: String,
     private val deadlineMs: Long = 8_000L,
 ) {
     sealed interface Outcome {

@@ -50,4 +50,17 @@ class GameDetailCodecTest {
         )
         assertEquals(d, GameDetailCodec.decode(GameDetailCodec.encode(d)))
     }
+
+    @Test fun `backend dialect - kind header and regions broadcast and team-keyed lineup`() {
+        val d = assertNotNull(GameDetailCodec.decode("""{"gameId":"tsdb:1","sport":"Soccer","leagueId":"4328","leagueName":"EPL","round":3,"startsAt":"t","state":"live",
+            "header":{"kind":"event","name":"Grand Prix","venue":"Interlagos"},
+            "blocks":[{"type":"broadcast","source":"tsdb","regions":[{"country":"UK","channels":["A","B"]}]},
+                      {"type":"lineup","source":"tsdb","sides":[{"team":"H","players":[]},{"team":"A","formation":"4-3-3","players":[{"number":"1","name":"X","pos":"GK","starter":true}]}]},
+                      {"type":"form","source":"tsdb","home":["W"]}],"mappingVersion":"x"}"""))
+        assertEquals("Grand Prix", assertIs<com.nuvio.app.features.sportsdetail.api.EventHeader>(d.header).name)
+        assertEquals("3", d.round)
+        assertEquals(listOf("A", "B"), (d.blocks[0] as com.nuvio.app.features.sportsdetail.api.BroadcastBlock).byRegion["UK"])
+        assertEquals(listOf("home", "away"), (d.blocks[1] as com.nuvio.app.features.sportsdetail.api.LineupBlock).sides.map { it.side })
+        assertEquals(emptyList(), (d.blocks[2] as FormBlock).away)
+    }
 }

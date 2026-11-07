@@ -27,13 +27,14 @@ internal class InMemoryMappingStorage : MappingStorage {
 internal class DefaultSportsDetailService(
     storage: MappingStorage = InMemoryMappingStorage(),
     private val http: SportsHttp = PlatformSportsHttp(),
+    endpoints: SportsDetailEndpoints = SportsDetailEndpoints.fromSupabaseUrl(com.nuvio.app.core.network.SupabaseConfig.URL),
 ) : SportsDetailService {
     private val bundled: SportsMapping =
         (SportsMappingParser.parse(BundledSportsMapping.JSON) as SportsMappingParser.ParseResult.Ok).mapping
     private val store = SportsMappingStore(storage, bundled)
-    private val sync = RemoteMappingSync(store, http)
+    private val sync = RemoteMappingSync(store, http, endpoints.mappingUrl)
     private val espn = EspnHttpSource(http) { store.current }
-    private val tsdb = TheSportsDbHttpSource(http)
+    private val tsdb = GameDetailBackendSource(http, endpoints.gameDetailUrl)
 
     override fun open(ref: GameRef): GameDetailSource = GameDetailSession(ref, { store.current }, tsdb, espn)
 

@@ -5,11 +5,9 @@ import com.nuvio.app.features.sportsdetail.internal.HttpReply
 import com.nuvio.app.features.sportsdetail.internal.SourceResult
 import com.nuvio.app.features.sportsdetail.internal.SportsDetailEndpoints
 import com.nuvio.app.features.sportsdetail.internal.SportsHttp
-import com.nuvio.app.features.sportsdetail.internal.TheSportsDbHttpSource
-import com.nuvio.app.features.sportsdetail.internal.TsdbLookup
+import com.nuvio.app.features.sportsdetail.internal.GameDetailBackendSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -57,27 +55,38 @@ class SportsAdaptersTest {
         assertEquals(SourceResult.Failed(timedOut = false), espn.summary("p", "1"))
     }
 
-    @Test fun `TheSportsDB source reads the event row and lookups`() = runBlocking<Unit> {
-        val tvJson = SportsFixtures.tsdb_tv
-        val http = ScriptedHttp { url ->
-            when {
-                url.endsWith("/lookup/event/2494097") -> HttpReply(200, """{"lookup":[{"idEvent":"2494097","strHomeTeam":"Leeds United"}]}""", null)
-                url.endsWith("/lookup/event_tv/2494097") -> HttpReply(200, tvJson, null)
-                url.endsWith("/lookup/event_stats/2494097") -> HttpReply(200, """{"lookup":null}""", null)
-                else -> HttpReply(404, null, null)
-            }
-        }
-        val tsdb = TheSportsDbHttpSource(http, baseUrl = "https://backend.invalid/sports/tsdb")
-        val ev = tsdb.event("2494097")
-        assertEquals("Leeds United", assertIs<SourceResult.Ok<kotlinx.serialization.json.JsonObject>>(ev).value["strHomeTeam"]?.jsonPrimitive?.content)
-        assertTrue(tsdb.lookup("2494097", TsdbLookup.TV) is SourceResult.Ok<*>)
-        assertEquals(SourceResult.Empty, tsdb.lookup("2494097", TsdbLookup.STATS)) // {"lookup":null}
-        assertEquals(SourceResult.Empty, tsdb.lookup("2494097", TsdbLookup.TIMELINE)) // 404
-        assertTrue(http.urls.all { it.startsWith("https://backend.invalid/sports/tsdb/lookup/") })
+    private val backendBody = """{"gameId":"tsdb:2494097","sport":"Soccer","leagueId":"4328","leagueName":"EPL","round":10,"startsAt":"2026-11-07T12:30:00Z",
+        "state":"final","header":{"kind":"teams","home":{"name":"Leeds United","score":"1"},"away":{"name":"Tottenham Hotspur","score":"0"}},
+        "blocks":[{"type":"broadcast","source":"tsdb","regions":[{"country":"United Kingdom","channels":["TNT Sports"]}]},{"type":"hologram","source":"x"}],
+        "sources":{"broadcast":"tsdb"},"asOf":{"tsdb":1},"mappingVersion":"v"}"""
+
+    @Test fun `game-detail backend call builds the URL and decodes the normalised detail`() = runBlocking<Unit> {
+        val http = ScriptedHttp { HttpReply(200, backendBody, null) }
+        val src = GameDetailBackendSource(http, "https://backend.invalid/functions/v1/game-detail")
+        val r = src.detail("2494097", "4328", setOf("stats", "timeline"))
+        assertEquals("https://backend.invalid/functions/v1/game-detail?event_id=2494097&league_id=4328&blocks=stats,timeline", http.urls.single())
+        val d = assertIs<SourceResult.Ok<com.nuvio.app.features.sportsdetail.api.GameDetail>>(r).value
+        assertEquals("Leeds United", assertIs<com.nuvio.app.features.sportsdetail.api.TeamsHeader>(d.header).home.name)
+        assertEquals("10", d.round)
+        assertEquals(listOf("TNT Sports"), assertIs<com.nuvio.app.features.sportsdetail.api.BroadcastBlock>(d.blocks.single()).byRegion["United Kingdom"])
     }
 
-    @Test fun `endpoint constants are single-sourced`() {
-        assertTrue(SportsDetailEndpoints.MAPPING_URL.startsWith("https://"))
-        assertTrue(SportsDetailEndpoints.TSDB_BASE.startsWith("https://"))
+    @Test fun `game-detail disabled 404 400 502 and garbage`() = runBlocking<Unit> {
+        val replies = ArrayDeque(listOf(
+            HttpReply(200, """{"gameId":"tsdb:1","disabled":true,"blocks":[]}""", null), HttpReply(404, null, null),
+            HttpReply(400, null, null), HttpReply(502, "x", null), HttpReply(200, """{"nope":1}""", null),
+        ))
+        val src = GameDetailBackendSource(ScriptedHttp { replies.removeFirst() }, "https://b.invalid/g")
+        assertEquals(SourceResult.Disabled, src.detail("1", null, null))
+        assertEquals(SourceResult.Empty, src.detail("1", null, null))
+        assertEquals(SourceResult.Empty, src.detail("1", null, null))
+        assertEquals(SourceResult.Failed(timedOut = false), src.detail("1", null, null))
+        assertEquals(SourceResult.Failed(timedOut = false), src.detail("1", null, null))
+    }
+
+    @Test fun `endpoints derive both function URLs from one base`() {
+        val e = SportsDetailEndpoints.fromSupabaseUrl("https://abc.supabase.co/")
+        assertEquals("https://abc.supabase.co/functions/v1/game-detail", e.gameDetailUrl)
+        assertEquals("https://abc.supabase.co/functions/v1/sports-mapping", e.mappingUrl)
     }
 }

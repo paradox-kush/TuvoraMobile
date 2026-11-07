@@ -13,7 +13,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlin.time.Clock
 
 /**
@@ -38,10 +37,12 @@ internal class GameDetailSession(
     private val lock = Mutex()
 
     // Last good payloads per source.
-    private var tsdbRow: JsonObject? = null
-    private var tsdbEventAnswer: SourceResult<*>? = null
-    private val tsdbLookups = mutableMapOf<TsdbLookup, JsonObject>()
-    private var espnEventRoot: JsonElement? = null
+    private var tsdbDetail: GameDetail? = null
+    private var tsdbAnswer: SourceResult<*>? = null
+    private var tsdbDisabled = false
+    private val tsdbBlocks = LinkedHashMap<BlockType, GameBlock>()
+    private var espnBase: JsonElement? = null          // the scoreboard event, read ONCE
+    private var espnEventRoot: JsonElement? = null     // base + live overlay from the summary
     private var espnSummary: JsonElement? = null
     private var espnEventId: String? = ref.espnEventId
     private var espnEventStartMs: Long? = null
@@ -71,11 +72,10 @@ internal class GameDetailSession(
         val sport = profileKey ?: "unknown"
         val asm = EspnAssembler(mapping)
         val durations = HashMap<String, Long>()
-        var tsdbFailed: SourceResult.Failed? = null
         var espnEventFailed: SourceResult.Failed? = null
         var espnSummaryFailed: SourceResult.Failed? = null
-        val tsdbPrimary = ref.tsdbEventId != null && tsdb != null
         val espnOn = espn != null && league?.espn != null && mapping.espnEnabledFor(ref.leagueId)
+        val summaryEndpoint = league?.summary != false
 
         fun missKey(what: String) = "$version|$what"
         fun isMissed(what: String): Boolean = misses[missKey(what)]?.let { nowMs() - it < NEGATIVE_TTL_MS } == true
@@ -87,43 +87,76 @@ internal class GameDetailSession(
         }
         fun outcomeOf(f: SourceResult.Failed) = if (f.timedOut) "timeout" else "failed"
 
-        // 1. Primary event row from TheSportsDB.
-        if (tsdbPrimary && (fetchEvent || tsdbEventAnswer == null)) {
+        // 1. Primary: our backend's normalised game-detail (TheSportsDB). One call per tick; a fast tick asks for
+        //    the fast blocks only, a summary tick (or the first) for everything.
+        if (tsdb != null && ref.tsdbEventId != null && !tsdbDisabled && (fetchEvent || fetchSummary || tsdbAnswer == null)) {
+            val full = fetchSummary || tsdbDetail == null
             val t0 = nowMs()
-            val r = tsdb!!.event(ref.tsdbEventId!!)
+            val r = tsdb.detail(ref.tsdbEventId, ref.leagueId, if (full) null else FAST_TSDB_BLOCKS)
             durations["tsdb"] = nowMs() - t0
-            tsdbEventAnswer = r
+            tsdbAnswer = r
             when (r) {
-                is SourceResult.Ok -> { tsdbRow = r.value; tsdbAsOf = nowMs() }
-                is SourceResult.Empty -> tsdbRow = null
-                is SourceResult.Failed -> tsdbFailed = r
+                is SourceResult.Ok -> {
+                    tsdbDetail = r.value
+                    tsdbAsOf = nowMs()
+                    if (full) tsdbBlocks.clear()
+                    r.value.blocks.forEach { b -> blockTypeOf(b)?.let { tsdbBlocks[it] = b } }
+                }
+                is SourceResult.Empty -> tsdbDetail = null
+                is SourceResult.Disabled -> { tsdbDisabled = true; tsdbDetail = null; tsdbBlocks.clear() }
+                is SourceResult.Failed -> {}
             }
         }
+        val tsdbPrimary = tsdb != null && ref.tsdbEventId != null && !tsdbDisabled
 
-        // 2. The matching ESPN event.
-        if (espnOn && (fetchEvent || espnEventRoot == null) && !(espnEventId == null && isMissed("espn|match"))) {
+        // 2. Resolve the ESPN event ONCE (whole-day scoreboard), then keep it. Leagues with no summary endpoint
+        //    (F1, UFC, tennis) have nothing else to poll, so they re-read the scoreboard on an event tick.
+        val needResolve = espnBase == null && !(espnEventId == null && isMissed("espn|match"))
+        val needScoreboardRefresh = espnBase != null && !summaryEndpoint && fetchEvent
+        if (espnOn && (needResolve || needScoreboardRefresh)) {
             val t0 = nowMs()
             val failure = resolveEspnEvent(mapping, league!!, ::miss)
             durations["espn"] = nowMs() - t0
             espnEventFailed = failure
-            if (failure == null && espnEventRoot != null) espnAsOf = nowMs()
-            if (failure == null && espnEventId == null) note("match", "espn", "empty") else if (failure == null) note("match", "espn", "loaded")
-            if (failure != null) note("match", "espn", outcomeOf(failure))
+            if (failure == null && espnBase != null) { espnAsOf = nowMs(); espnEventRoot = espnSummary?.let { EspnLiveOverlay.apply(espnBase!!, it) } ?: espnBase }
+            when {
+                failure != null -> note("match", "espn", outcomeOf(failure))
+                espnEventId == null -> note("match", "espn", "empty")
+                else -> note("match", "espn", "loaded")
+            }
         }
 
-        // 3. Header from the primary source.
+        // 3. Provisional state (to decide whether the summary is worth fetching).
+        val baseHdr = if (espnOn && espnEventRoot != null && profileKey != null) asm.header(profileKey, espnEventRoot!!) else null
+        val tsdbD = tsdbDetail.takeIf { tsdbPrimary }
+        if (tsdbPrimary && tsdbD == null) {
+            return when (val a = tsdbAnswer) {
+                is SourceResult.Failed -> DetailLoad.Failed(a.timedOut)
+                else -> DetailLoad.Empty
+            }
+        }
+        val provisional = tsdbD?.state ?: baseHdr?.state
+
+        // 4. Live tick = the per-game summary only (carries score + clock + everything the blocks need).
+        val wantsSummary = espnOn && espnEventId != null && espnBase != null && summaryEndpoint && profile != null && provisional != null &&
+            (provisional != GameState.UPCOMING || "lineup" in profile.blocks) && provisional != GameState.POSTPONED
+        if (wantsSummary && (fetchEvent || fetchSummary || espnSummary == null) && !isMissed("espn|summary")) {
+            val t0 = nowMs()
+            when (val r = espn!!.summary(league!!.espn!!, espnEventId!!)) {
+                is SourceResult.Ok -> { espnSummary = r.value; espnEventRoot = EspnLiveOverlay.apply(espnBase!!, r.value); espnAsOf = nowMs() }
+                is SourceResult.Empty, is SourceResult.Disabled -> miss("espn|summary")
+                is SourceResult.Failed -> espnSummaryFailed = r
+            }
+            durations["espn"] = (durations["espn"] ?: 0L) + (nowMs() - t0)
+        }
+
+        // 5. Header from the primary source. The ESPN header is computed AFTER the overlay so a live ESPN-primary
+        //    game shows the live score.
         val espnHdr = if (espnOn && espnEventRoot != null && profileKey != null) asm.header(profileKey, espnEventRoot!!) else null
         val hdr: EspnHeader
         val primary: String
-        if (tsdbPrimary) {
-            val row = tsdbRow
-            if (row == null) {
-                return when (val a = tsdbEventAnswer) {
-                    is SourceResult.Failed -> DetailLoad.Failed(a.timedOut)
-                    else -> DetailLoad.Empty
-                }
-            }
-            hdr = TsdbAssembler.header(row, profileKey) ?: return DetailLoad.Empty
+        if (tsdbD != null) {
+            hdr = EspnHeader(tsdbD.header, tsdbD.state, tsdbD.live, tsdbD.startsAt, tsdbD.venue, null, null)
             primary = "tsdb"
             note("header", "tsdb", "loaded")
         } else {
@@ -139,24 +172,10 @@ internal class GameDetailSession(
         // The live line may come from ESPN (richer clock) only when ESPN agrees on the score — never across a mislink.
         val live: LiveInfo? = if (primary == "tsdb" && espnHdr != null && sameScore(hdr, espnHdr)) espnHdr.live else hdr.live
 
-        // 4. ESPN summary, only when something on this screen can use it.
-        val wantsSummary = espnOn && espnEventId != null && league?.summary != false && profile != null &&
-            (state != GameState.UPCOMING || "lineup" in profile.blocks) && state != GameState.POSTPONED
-        if (wantsSummary && (fetchSummary || espnSummary == null) && !isMissed("espn|summary")) {
-            val t0 = nowMs()
-            when (val r = espn!!.summary(league!!.espn!!, espnEventId!!)) {
-                is SourceResult.Ok -> { espnSummary = r.value; espnAsOf = nowMs() }
-                is SourceResult.Empty -> miss("espn|summary")
-                is SourceResult.Failed -> espnSummaryFailed = r
-            }
-            durations["espn"] = (durations["espn"] ?: 0L) + (nowMs() - t0)
-        }
-
-        // 5. Blocks along the chain.
+        // 6. Blocks along the chain.
         val blocks = ArrayList<GameBlock>()
         val sources = LinkedHashMap<String, String>()
         sources["header"] = primary
-        val fetchedLookups = HashSet<TsdbLookup>()
         // Profiles list the screen's blocks, but some (winProbability) only appear as a path spec: those join at the end.
         val order = profile?.let { p -> p.blocks + p.specs.keys.filter { it !in p.blocks && BlockType.byId(it) != null } }
             ?: listOf("broadcast", "stats", "timeline", "highlights")
@@ -165,7 +184,7 @@ internal class GameDetailSession(
             if (type == BlockType.WATCH || !visible(type, state)) continue
             for (source in mapping.chainFor(type)) {
                 val block: GameBlock? = when (source) {
-                    "tsdb" -> tsdbBlock(type, tsdbPrimary, fetchSummary, fetchedLookups, durations, ::isMissed, ::miss, ::note, ::outcomeOf)
+                    "tsdb" -> if (tsdbPrimary) tsdbBlocks[type].also { note(type.id, "tsdb", if (it == null) "empty" else "loaded") } else null
                     "espn" -> espnBlock(type, asm, profileKey, espnOn, espnSummaryFailed, ::note, ::outcomeOf)
                     else -> null
                 }
@@ -173,15 +192,14 @@ internal class GameDetailSession(
             }
         }
 
-        val row = tsdbRow
         return DetailLoad.Loaded(
             GameDetail(
                 gameId = ref.gameId,
-                sport = league?.sport ?: row?.let { SportsPath.text(it, "strSport") }.orEmpty(),
+                sport = league?.sport ?: tsdbD?.sport.orEmpty(),
                 leagueId = ref.leagueId,
-                leagueName = league?.name ?: row?.let { SportsPath.text(it, "strLeague") }.orEmpty(),
-                round = row?.let(TsdbAssembler::round),
-                venue = hdr.venue ?: row?.let { SportsPath.text(it, "strVenue") },
+                leagueName = league?.name ?: tsdbD?.leagueName.orEmpty(),
+                round = tsdbD?.round,
+                venue = hdr.venue ?: tsdbD?.venue,
                 startsAt = hdr.startsAt ?: Iso.format(ref.startsAtMs),
                 state = state,
                 header = hdr.header,
@@ -223,62 +241,25 @@ internal class GameDetailSession(
         for (d in dates) {
             val sb = when (val r = espn!!.scoreboard(path, d)) {
                 is SourceResult.Ok -> r.value
-                is SourceResult.Empty -> continue
+                is SourceResult.Empty, is SourceResult.Disabled -> continue
                 is SourceResult.Failed -> return r
             }
             val events = SportsPath.read(sb, mapping.common.event ?: "events[*]")
             fun rawById(id: String) = events.firstOrNull { SportsPath.text(it, mapping.common.id ?: "id") == id }
             if (known != null) {
-                rawById(known)?.let { espnEventId = known; espnEventRoot = it; espnEventStartMs = Iso.parseMs(SportsPath.text(it, "date")); return null }
+                rawById(known)?.let { espnEventId = known; espnBase = it; espnEventStartMs = Iso.parseMs(SportsPath.text(it, "date")); return null }
             } else {
                 val target = MatchTarget(ref.tsdbEventId ?: ref.gameId, ref.homeName, ref.awayName, ref.startsAtMs)
                 val cand = EventMatcher(mapping).match(target, EventMatcher.candidatesFrom(sb, mapping))
                 val raw = cand?.let { rawById(it.id) }
                 if (cand != null && raw != null) {
-                    espnEventId = cand.id; espnEventRoot = raw; espnEventStartMs = cand.startsAtMs
+                    espnEventId = cand.id; espnBase = raw; espnEventStartMs = cand.startsAtMs
                     return null
                 }
             }
         }
         if (known == null) miss("espn|match")
         return null
-    }
-
-    private suspend fun tsdbBlock(
-        type: BlockType,
-        tsdbPrimary: Boolean,
-        fetchSummary: Boolean,
-        fetchedLookups: MutableSet<TsdbLookup>,
-        durations: MutableMap<String, Long>,
-        isMissed: (String) -> Boolean,
-        miss: (String) -> Unit,
-        note: (String, String, String) -> Unit,
-        outcomeOf: (SourceResult.Failed) -> String,
-    ): GameBlock? {
-        val row = tsdbRow
-        if (!tsdbPrimary || row == null) return null
-        val key = "tsdb|${type.id}"
-        if (isMissed(key)) return null
-        val kind = when (type) {
-            BlockType.BROADCAST -> TsdbLookup.TV
-            BlockType.STATS -> TsdbLookup.STATS
-            BlockType.TIMELINE -> TsdbLookup.TIMELINE
-            else -> null
-        }
-        if (kind != null && (tsdbLookups[kind] == null || (fetchSummary && kind !in fetchedLookups))) {
-            fetchedLookups += kind
-            val t0 = nowMs()
-            val r = tsdb!!.lookup(ref.tsdbEventId!!, kind)
-            durations["tsdb"] = (durations["tsdb"] ?: 0L) + (nowMs() - t0)
-            when (r) {
-                is SourceResult.Ok -> { tsdbLookups[kind] = r.value; tsdbAsOf = nowMs() }
-                is SourceResult.Empty -> { miss(key); note(type.id, "tsdb", "empty"); return null }
-                is SourceResult.Failed -> { note(type.id, "tsdb", outcomeOf(r)); if (tsdbLookups[kind] == null) return null }
-            }
-        }
-        val block = TsdbAssembler.block(type, row, kind?.let { tsdbLookups[it] })
-        if (block == null) { miss(key); note(type.id, "tsdb", "empty") } else note(type.id, "tsdb", "loaded")
-        return block
     }
 
     private fun espnBlock(
@@ -306,6 +287,26 @@ internal class GameDetailSession(
 
     private companion object {
         const val NEGATIVE_TTL_MS = 5L * 60 * 1000
+        /** A fast tick asks the backend for these only; everything else rides the slower summary tick. */
+        val FAST_TSDB_BLOCKS = setOf("stats", "timeline")
         val UPCOMING_BLOCKS = setOf(BlockType.BROADCAST, BlockType.FORM, BlockType.LINEUP, BlockType.RESULTS, BlockType.NEXT, BlockType.STANDINGS, BlockType.HIGHLIGHTS)
     }
+}
+
+internal fun blockTypeOf(b: GameBlock): BlockType? = when (b) {
+    is com.nuvio.app.features.sportsdetail.api.SituationBlock -> BlockType.SITUATION
+    is com.nuvio.app.features.sportsdetail.api.WatchBlock -> BlockType.WATCH
+    is com.nuvio.app.features.sportsdetail.api.BroadcastBlock -> BlockType.BROADCAST
+    is com.nuvio.app.features.sportsdetail.api.LinescoreBlock -> BlockType.LINESCORE
+    is com.nuvio.app.features.sportsdetail.api.StatsBlock -> BlockType.STATS
+    is com.nuvio.app.features.sportsdetail.api.LeadersBlock -> BlockType.LEADERS
+    is com.nuvio.app.features.sportsdetail.api.TimelineBlock -> BlockType.TIMELINE
+    is com.nuvio.app.features.sportsdetail.api.LineupBlock -> BlockType.LINEUP
+    is com.nuvio.app.features.sportsdetail.api.ResultsBlock -> BlockType.RESULTS
+    is com.nuvio.app.features.sportsdetail.api.StandingsBlock -> BlockType.STANDINGS
+    is com.nuvio.app.features.sportsdetail.api.FormBlock -> BlockType.FORM
+    is com.nuvio.app.features.sportsdetail.api.HighlightsBlock -> BlockType.HIGHLIGHTS
+    is com.nuvio.app.features.sportsdetail.api.NextBlock -> BlockType.NEXT
+    is com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock -> BlockType.WIN_PROBABILITY
+    else -> null
 }

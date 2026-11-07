@@ -2,7 +2,9 @@ package com.nuvio.app.features.sportsdetail
 
 import com.nuvio.app.features.sportsdetail.api.BroadcastBlock
 import com.nuvio.app.features.sportsdetail.api.DetailLoad
+import com.nuvio.app.features.sportsdetail.api.GameBlock
 import com.nuvio.app.features.sportsdetail.api.GameDetail
+import com.nuvio.app.features.sportsdetail.api.Side
 import com.nuvio.app.features.sportsdetail.api.GameRef
 import com.nuvio.app.features.sportsdetail.api.GameState
 import com.nuvio.app.features.sportsdetail.api.LinescoreBlock
@@ -18,13 +20,10 @@ import com.nuvio.app.features.sportsdetail.internal.GameDetailSession
 import com.nuvio.app.features.sportsdetail.internal.SourceResult
 import com.nuvio.app.features.sportsdetail.internal.SportsDetailTelemetry
 import com.nuvio.app.features.sportsdetail.internal.SportsMappingStore
-import com.nuvio.app.features.sportsdetail.internal.TheSportsDbHttpSource
-import com.nuvio.app.features.sportsdetail.internal.TsdbLookup
+import com.nuvio.app.features.sportsdetail.internal.blockTypeOf
 import com.nuvio.app.features.sportsdetail.internal.TsdbSource
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -47,26 +46,27 @@ class GameDetailSessionTest {
         override suspend fun summary(espnPath: String, eventId: String): SourceResult<JsonElement> { summaryCalls++; return summary }
     }
 
-    private class FakeTsdb(
-        var event: SourceResult<JsonObject>,
-        val lookups: MutableMap<TsdbLookup, SourceResult<JsonObject>> = mutableMapOf(),
-    ) : TsdbSource {
-        var eventCalls = 0
-        val lookupCalls = mutableListOf<TsdbLookup>()
-        override suspend fun event(idEvent: String): SourceResult<JsonObject> { eventCalls++; return event }
-        override suspend fun lookup(idEvent: String, kind: TsdbLookup): SourceResult<JsonObject> {
-            lookupCalls += kind
-            return lookups[kind] ?: SourceResult.Empty
+    private class FakeTsdb(var answer: SourceResult<GameDetail>) : TsdbSource {
+        val requests = mutableListOf<Set<String>?>()
+        override suspend fun detail(eventId: String, leagueId: String?, blocks: Set<String>?): SourceResult<GameDetail> {
+            requests += blocks
+            return answer
         }
     }
 
     private fun scoreboardOf(vararg events: String): SourceResult<JsonElement> =
         SourceResult.Ok(parse("""{"events":[${events.joinToString(",")}]}"""))
 
-    private fun tsdbEvent(home: String = "Atlanta Hawks", away: String = "Washington Wizards", hs: String = "139", aws: String = "132", status: String = "FT") =
-        SourceResult.Ok(parse("""{"idEvent":"2601","idLeague":"4387","strSport":"Basketball","strHomeTeam":"$home","strAwayTeam":"$away",
-            "intHomeScore":"$hs","intAwayScore":"$aws","strStatus":"$status","strPostponed":"no","strTimestamp":"2026-11-07T00:00:00",
-            "strVenue":"State Farm Arena","strHomeTeamBadge":"https://b/h.png","strAwayTeamBadge":"https://b/a.png","intRound":"0"}""").jsonObject)
+    private fun tsdbEvent(
+        home: String = "Atlanta Hawks", away: String = "Washington Wizards", hs: String? = "139", aws: String? = "132",
+        state: GameState = GameState.FINAL, blocks: List<GameBlock> = emptyList(),
+    ) = SourceResult.Ok(
+        GameDetail(
+            gameId = "tsdb:2601", sport = "Basketball", leagueId = "4387", leagueName = "NBA", venue = "State Farm Arena",
+            startsAt = "2026-11-07T00:00:00Z", state = state, header = TeamsHeader(Side(home, score = hs), Side(away, score = aws)),
+            blocks = blocks, sources = blocks.associate { (blockTypeOf(it)?.id ?: "?") to "tsdb" },
+        ),
+    )
 
     private val ref = GameRef(
         gameId = "tsdb:2601", leagueId = "4387", tsdbEventId = "2601", espnEventId = null,
@@ -113,21 +113,27 @@ class GameDetailSessionTest {
         assertEquals("139", assertIs<TeamsHeader>(d.header).home.score)
     }
 
-    @Test fun `TheSportsDB blocks win the chain and a TSDB miss is negative-cached per game`() = runBlocking<Unit> {
-        val tsdb = FakeTsdb(tsdbEvent(), mutableMapOf(
-            TsdbLookup.TV to SourceResult.Ok(parse(SportsFixtures.tsdb_tv).jsonObject),
-        ))
+    @Test fun `TheSportsDB blocks win the chain and ESPN fills the rest from one backend call per tick`() = runBlocking<Unit> {
+        val tv = BroadcastBlock(mapOf("United Kingdom" to listOf("TNT Sports")), source = "tsdb")
+        val tsdb = FakeTsdb(tsdbEvent(blocks = listOf(tv)))
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
         val s = session(tsdb, espn)
         val d = loaded(s.tick())
-        val bc = d.blocks.filterIsInstance<BroadcastBlock>().single()
-        assertEquals("tsdb", bc.source)
-        assertTrue(bc.byRegion.containsKey("United Kingdom"))
+        assertEquals("tsdb", d.blocks.filterIsInstance<BroadcastBlock>().single().source)
         assertEquals("tsdb", d.sources["broadcast"])
-        assertEquals("espn", d.sources["stats"], "TSDB had no stats for basketball -> falls through to ESPN")
-        repeat(3) { s.tick() }
-        assertEquals(1, tsdb.lookupCalls.count { it == TsdbLookup.STATS }, "probed once, then remembered")
-        assertEquals(1, tsdb.lookupCalls.count { it == TsdbLookup.TIMELINE })
+        assertEquals("espn", d.sources["stats"], "the backend had no stats for basketball -> ESPN")
+        assertEquals(listOf<Set<String>?>(null), tsdb.requests, "first tick asks for everything")
+        s.tick(fetchEvent = true, fetchSummary = false)
+        assertEquals(setOf("stats", "timeline"), tsdb.requests.last(), "a fast tick asks for the fast blocks only")
+        assertTrue(loaded(s.tick(fetchEvent = false, fetchSummary = false)).blocks.any { it is BroadcastBlock }, "slow blocks survive fast ticks")
+        assertEquals(2, tsdb.requests.size, "an idle tick makes no request")
+    }
+
+    @Test fun `backend kill switch falls back to an ESPN-primary game`() = runBlocking<Unit> {
+        val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
+        val d = loaded(session(FakeTsdb(SourceResult.Disabled), espn).tick())
+        assertEquals("espn", d.sources["header"])
+        assertEquals("Atlanta Hawks", assertIs<TeamsHeader>(d.header).home.name)
     }
 
     @Test fun `ESPN failing never renders as empty and is retried`() = runBlocking<Unit> {
@@ -173,26 +179,34 @@ class GameDetailSessionTest {
         assertTrue(d.blocks.none { it is LinescoreBlock })
     }
 
-    @Test fun `a live-tick fetches only the event and not the summary and and reuses the cached summary`() = runBlocking<Unit> {
+    @Test fun `a live tick requests only the summary of the resolved event - never the whole-day scoreboard`() = runBlocking<Unit> {
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
-        val tsdb = FakeTsdb(tsdbEvent())
-        val s = session(tsdb, espn)
+        val s = session(FakeTsdb(tsdbEvent(state = GameState.LIVE)), espn)
         s.tick()
-        val summaryBefore = espn.summaryCalls
-        val d = loaded(s.tick(fetchEvent = true, fetchSummary = false))
-        assertEquals(summaryBefore, espn.summaryCalls)
-        assertTrue(d.blocks.any { it is StatsBlock }, "stats still shown from the cached summary")
-        assertEquals(2, tsdb.eventCalls)
-        val idle = loaded(s.tick(fetchEvent = false, fetchSummary = false))
-        assertEquals(2, tsdb.eventCalls)
-        assertTrue(idle.blocks.isNotEmpty())
+        val scoreboards = espn.scoreboardCalls
+        val summaries = espn.summaryCalls
+        repeat(3) { assertTrue(loaded(s.tick(fetchEvent = true, fetchSummary = false)).blocks.any { it is StatsBlock }) }
+        assertEquals(scoreboards, espn.scoreboardCalls, "scoreboard is read once to resolve the event id")
+        assertEquals(summaries + 3, espn.summaryCalls, "each live tick is exactly one summary request")
+        loaded(s.tick(fetchEvent = false, fetchSummary = false))
+        assertEquals(summaries + 3, espn.summaryCalls, "idle tick makes no request")
+    }
+
+    @Test fun `the live overlay brings the summary score into an ESPN-primary header`() = runBlocking<Unit> {
+        val live = SportsFixtures.espn_nba_summary
+            .replace("\"score\":\"139\"", "\"score\":\"77\"").replace("\"state\":\"post\"", "\"state\":\"in\"")
+        val r = ref.copy(gameId = "espn:401909287", tsdbEventId = null, espnEventId = "401909287")
+        val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(live)))
+        val d = loaded(session(null, espn, r = r).tick())
+        assertEquals("77", assertIs<TeamsHeader>(d.header).home.score)
+        assertEquals(GameState.LIVE, d.state)
     }
 
     @Test fun `live game shows situation and win probability and the live clock`() = runBlocking<Unit> {
         val liveEvent = SportsFixtures.espn_nba_event
             .replace("\"state\":\"post\"", "\"state\":\"in\"")
         val espn = FakeEspn(scoreboardOf(liveEvent), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
-        val d = loaded(session(FakeTsdb(tsdbEvent(status = "Q3")), espn).tick())
+        val d = loaded(session(FakeTsdb(tsdbEvent(state = GameState.LIVE)), espn).tick())
         assertEquals(GameState.LIVE, d.state)
         assertTrue(d.blocks.any { it is WinProbabilityBlock })
     }
@@ -200,7 +214,7 @@ class GameDetailSessionTest {
     @Test fun `upcoming game hides score blocks`() = runBlocking<Unit> {
         val upcoming = SportsFixtures.espn_nba_event.replace("\"state\":\"post\"", "\"state\":\"pre\"")
         val espn = FakeEspn(scoreboardOf(upcoming), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
-        val d = loaded(session(FakeTsdb(tsdbEvent(status = "NS", hs = "", aws = "")), espn).tick())
+        val d = loaded(session(FakeTsdb(tsdbEvent(state = GameState.UPCOMING, hs = null, aws = null)), espn).tick())
         assertEquals(GameState.UPCOMING, d.state)
         assertTrue(d.blocks.none { it is LinescoreBlock || it is StatsBlock || it is TimelineBlock })
     }

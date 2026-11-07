@@ -5,7 +5,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import com.nuvio.app.features.sportsdetail.api.GameDetail
+import com.nuvio.app.features.sportsdetail.api.GameDetailCodec
 import kotlinx.serialization.json.JsonObject
 
 private val adapterJson = Json { ignoreUnknownKeys = true }
@@ -25,7 +28,7 @@ private suspend fun getJson(http: SportsHttp, url: String, deadlineMs: Long, hea
     }
     if (reply == null) return SourceResult.Failed(timedOut = true)
     return when {
-        reply.status == 404 || reply.status == 204 -> SourceResult.Empty
+        reply.status == 404 || reply.status == 400 || reply.status == 204 -> SourceResult.Empty
         reply.status !in 200..299 -> SourceResult.Failed(timedOut = false)
         reply.body.isNullOrBlank() -> SourceResult.Failed(timedOut = false)
         else -> try {
@@ -55,43 +58,27 @@ internal class EspnHttpSource(
     }
 }
 
-/** TheSportsDB via our backend. */
-internal class TheSportsDbHttpSource(
+/** TheSportsDB via our backend's `game-detail` function. */
+internal class GameDetailBackendSource(
     private val http: SportsHttp,
-    private val baseUrl: String = SportsDetailEndpoints.TSDB_BASE,
+    private val gameDetailUrl: String,
     private val deadlineMs: Long = 8_000L,
 ) : TsdbSource {
-    override suspend fun event(idEvent: String): SourceResult<JsonObject> =
-        firstRow(getJson(http, "$baseUrl/lookup/event/$idEvent", deadlineMs))
-
-    override suspend fun lookup(idEvent: String, kind: TsdbLookup): SourceResult<JsonObject> =
-        wrapRows(getJson(http, "$baseUrl/lookup/${kind.path}/$idEvent", deadlineMs))
-
-    /** `{"lookup":[row,...]}` (or `events`/`schedule`) -> the first row. */
-    private fun firstRow(r: SourceResult<JsonElement>): SourceResult<JsonObject> = when (r) {
-        is SourceResult.Ok -> rows(r.value).firstOrNull()?.let { SourceResult.Ok(it) } ?: SourceResult.Empty
-        is SourceResult.Empty -> SourceResult.Empty
-        is SourceResult.Failed -> r
-    }
-
-    /** Keeps the envelope but turns "no rows" into Empty. */
-    private fun wrapRows(r: SourceResult<JsonElement>): SourceResult<JsonObject> = when (r) {
-        is SourceResult.Ok -> if (rows(r.value).isEmpty()) SourceResult.Empty else SourceResult.Ok(r.value as JsonObject)
-        is SourceResult.Empty -> SourceResult.Empty
-        is SourceResult.Failed -> r
-    }
-
-    private fun rows(e: JsonElement): List<JsonObject> {
-        val obj = e as? JsonObject ?: return emptyList()
-        val arr = listOf("lookup", "events", "schedule", "livescore").firstNotNullOfOrNull { k -> (obj[k] as? JsonArray) } ?: return emptyList()
-        return arr.filter { it !is JsonNull }.mapNotNull { it as? JsonObject }
-    }
-
-    companion object {
-        /** Rows of a lookup envelope, for the assemblers. */
-        fun rowsOf(e: JsonObject): List<JsonObject> {
-            val arr = listOf("lookup", "events", "schedule", "livescore").firstNotNullOfOrNull { k -> (e[k] as? JsonArray) } ?: return emptyList()
-            return arr.mapNotNull { it as? JsonObject }
+    override suspend fun detail(eventId: String, leagueId: String?, blocks: Set<String>?): SourceResult<GameDetail> {
+        val url = buildString {
+            append(gameDetailUrl).append("?event_id=").append(eventId)
+            if (!leagueId.isNullOrBlank()) append("&league_id=").append(leagueId)
+            if (!blocks.isNullOrEmpty()) append("&blocks=").append(blocks.joinToString(","))
+        }
+        return when (val r = getJson(http, url, deadlineMs)) {
+            is SourceResult.Empty -> SourceResult.Empty
+            is SourceResult.Disabled -> SourceResult.Disabled
+            is SourceResult.Failed -> r
+            is SourceResult.Ok -> {
+                val body = r.value as? JsonObject ?: return SourceResult.Failed(timedOut = false)
+                if ((body["disabled"] as? JsonPrimitive)?.booleanOrNull == true) SourceResult.Disabled
+                else GameDetailCodec.decodeElement(body)?.let { SourceResult.Ok(it) } ?: SourceResult.Failed(timedOut = false)
+            }
         }
     }
 }
