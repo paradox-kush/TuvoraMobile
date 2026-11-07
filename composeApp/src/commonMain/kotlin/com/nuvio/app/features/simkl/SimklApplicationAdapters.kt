@@ -1,7 +1,7 @@
 package com.nuvio.app.features.simkl
 
 import co.touchlab.kermit.Logger
-import com.nuvio.app.core.analytics.AnalyticsSink
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.features.profiles.ProfileRepository
 import com.nuvio.app.features.tracking.TrackingHistoryItem
 import com.nuvio.app.features.tracking.TrackingProviderId
@@ -97,7 +97,7 @@ object SimklWatchedSyncAdapter : TrackingWatchedProvider {
         // A mismatch is data quality, not a programming error — this was a check() whose
         // uncaught IllegalStateException crashed the app mid-sync. Record it, keep what matched.
         if (!result.isComplete) {
-            AnalyticsSink.capture(
+            TelemetryAccess.current().emit(
                 "simkl_match_failure",
                 mapOf(
                     "lane" to "history_add",
@@ -132,7 +132,7 @@ object SimklWatchedSyncAdapter : TrackingWatchedProvider {
         }
         val result = SimklMutationRepository.removeFromHistory(profileId = profileId, items = media)
         if (!result.isComplete) {
-            AnalyticsSink.capture(
+            TelemetryAccess.current().emit(
                 "simkl_match_failure",
                 mapOf(
                     "lane" to "history_remove",

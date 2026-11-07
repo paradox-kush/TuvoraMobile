@@ -1,6 +1,6 @@
 package com.nuvio.app.features.simkl
 
-import com.nuvio.app.core.analytics.AnalyticsSink
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.features.library.LibraryItem
 import com.nuvio.app.features.library.LibrarySection
 import com.nuvio.app.features.profiles.ProfileRepository
@@ -126,7 +126,7 @@ object SimklLibraryRepository {
         // simply have no Simkl id. This was a check() whose uncaught IllegalStateException took
         // the whole app down mid-mutation (a fielded TV crash). Record it and keep what matched.
         if (!result.isComplete) {
-            AnalyticsSink.capture(
+            TelemetryAccess.current().emit(
                 "simkl_match_failure",
                 mapOf(
                     "lane" to "library",

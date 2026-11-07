@@ -1,6 +1,6 @@
 package com.nuvio.app.features.iptv
 
-import com.nuvio.app.core.analytics.AnalyticsSink
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.features.trakt.TraktPlatformClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -219,7 +219,7 @@ object BoundedLoad {
             (outcome as? LoadOutcome.Failed)?.error?.let { put("error_type", it::class.simpleName ?: "unknown") }
             putAll(extra)
         }
-        runCatching { AnalyticsSink.capture("iptv_load", properties) }
+        runCatching { TelemetryAccess.current().emit("iptv_load", properties) }
     }
 }
 

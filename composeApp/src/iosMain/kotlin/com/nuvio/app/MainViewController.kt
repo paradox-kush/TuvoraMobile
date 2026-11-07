@@ -7,7 +7,6 @@ import androidx.compose.ui.window.ComposeUIViewController
 import com.nuvio.app.core.ui.LocalFold
 import com.nuvio.app.core.ui.LocalVerticalBarPadding
 import com.nuvio.app.core.ui.NativeProfileSwitcherController
-import com.nuvio.app.core.analytics.AnalyticsSink
 import com.nuvio.app.core.contracts.MemoryPortAccess
 import com.nuvio.app.core.contracts.MemoryTierPolicy
 import com.nuvio.app.features.common.lifecycle.FeatureRegistry
@@ -103,6 +102,8 @@ private fun nuvioComposeViewController(
  */
 private fun ensureIosRuntimeBootstrapped() {
     if (!FeatureRegistry.isInitialized) {
+        // Idempotent: Swift already called it in init(); this covers a host that did not (the crash hook installs first).
+        com.nuvio.app.core.telemetry.internal.IosTelemetry.start()
         installUnhandledExceptionReporter()
         registerFeatureContributions()
     }
@@ -118,7 +119,9 @@ private fun ensureIosRuntimeBootstrapped() {
 }
 
 /**
- * Route escaped Kotlin exceptions on iOS to PostHog instead of a silent abort(). Without this hook,
+ * Route escaped Kotlin exceptions on iOS to the Telemetry v2 crash record instead of a silent abort(). The record
+ * itself is written by the hook `IosTelemetry.start()` installs (first, before this one); this hook only decides
+ * whether the exception is the benign scene race (swallowed) or a real crash (handed on to that hook). Without this hook,
  * an unhandled Kotlin exception on the main thread goes straight to the Kotlin/Native terminate
  * handler → abort(), and never reaches PostHog (its Swift-level autocapture doesn't see K/N throws).
  *
@@ -132,16 +135,6 @@ private fun ensureIosRuntimeBootstrapped() {
 private fun installUnhandledExceptionReporter() {
     var previous: ((Throwable) -> Unit)? = null
     previous = setUnhandledExceptionHook { throwable ->
-        runCatching {
-            AnalyticsSink.capture(
-                "app_uncaught_exception_ios",
-                mapOf(
-                    "exception" to (throwable::class.qualifiedName ?: throwable::class.simpleName ?: "Throwable"),
-                    "message" to (throwable.message ?: ""),
-                    "stack" to throwable.stackTraceToString().take(4000),
-                ),
-            )
-        }
         val benignSceneRace = throwable is IllegalStateException &&
             throwable.message?.contains("ComposeScene is closed") == true
         if (!benignSceneRace) {

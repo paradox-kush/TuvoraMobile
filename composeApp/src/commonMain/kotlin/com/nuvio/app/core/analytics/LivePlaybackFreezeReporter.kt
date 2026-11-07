@@ -17,7 +17,7 @@ package com.nuvio.app.core.analytics
  * bad provider cannot flood the project.
  */
 class LivePlaybackFreezeReporter(
-    private val capture: (String, Map<String, Any>) -> Unit = AnalyticsSink::capture,
+    private val capture: (String, Map<String, Any>) -> Unit = com.nuvio.app.core.telemetry.api.TelemetryAccess::emit,
 ) {
 
     /** Playback-time context that is fixed for the channel; captured once when it starts. */

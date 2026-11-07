@@ -1,6 +1,5 @@
 package com.nuvio.app.features.iptv
 
-import com.nuvio.app.core.analytics.AnalyticsSink
 import com.nuvio.app.features.iptv.content.IptvContentDb
 import com.nuvio.app.features.iptv.match.MatchKind
 import com.nuvio.app.features.iptv.match.XtreamMatchIndex

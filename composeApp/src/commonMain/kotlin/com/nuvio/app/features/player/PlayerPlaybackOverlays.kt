@@ -180,6 +180,7 @@ internal fun BoxScope.PlayerPlaybackOverlays(
             message = errorMessage,
             onDismiss = onDismissError,
             onRetry = onRetryError,
+            failureCode = "playback_error",
         )
     }
 }

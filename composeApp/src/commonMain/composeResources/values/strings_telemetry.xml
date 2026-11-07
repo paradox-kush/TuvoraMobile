@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Telemetry v2 (support code and Send report). Keys are shared with TV, Desktop and Apple TV. -->
+<resources>
+    <string name="support_code_title">Support code</string>
+    <string name="support_code_hint">Tell us this code when you report a problem.</string>
+    <string name="report_send">Send report</string>
+    <string name="report_sent">Report sent. Your support code: %1$s</string>
+    <string name="report_consent_off">Turn on Crash &amp; usage reports to send this.</string>
+    <string name="report_rate_limited">Please wait a moment before sending another report.</string>
+    <string name="report_failed">Couldn\'t send the report. Try again in a moment.</string>
+    <string name="report_discord_hint">Tell us this code on Discord.</string>
+    <string name="report_settings_description">Sends your device details and recent app activity. No links, names or passwords.</string>
+    <string name="report_pick_category">What went wrong?</string>
+    <string name="report_category_wont_play">Won\'t play</string>
+    <string name="report_category_black_screen">Black screen</string>
+    <string name="report_category_freezes">Freezes</string>
+    <string name="report_category_app_closed">App closed</string>
+    <string name="report_category_other">Other</string>
+    <string name="report_turn_on">Turn on</string>
+</resources>

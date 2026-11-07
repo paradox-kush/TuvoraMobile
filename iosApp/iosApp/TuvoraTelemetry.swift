@@ -6,6 +6,8 @@ import PostHog
 enum TuvoraTelemetry {
     private static let crashReportsEnabledKey = "sentry_enabled"
     static let geoIpDisableProperty = "$geoip_disable"
+    /// Written by the shared Kotlin (`IosTelemetryHost`); same key.
+    private static let supportCodeKey = "tuvora.support_code"
     private static let sensitivePropertyNames: Set<String> = [
         "url", "uri", "href", "referrer", "code", "state", "token", "access_token",
         "refresh_token", "authorization", "password", "secret", "cookie", "api_key"
@@ -98,6 +100,10 @@ enum TuvoraTelemetry {
         config.sessionReplayConfig.captureLogs = false
         config.sessionReplayConfig.screenshotMode = false
         config.tracingHeaders = []
+        // Telemetry v2: element taps and the $rageclick event are the iPhone's biggest success-path noise
+        // (~2k $rageclick / week). rageClickConfig is separate from captureElementInteractions: disable both.
+        config.captureElementInteractions = false
+        config.rageClickConfig.enabled = false
         #endif
         config.logs.setBeforeSend { _ in nil }
         config.setBeforeSend { event in
@@ -113,6 +119,12 @@ enum TuvoraTelemetry {
         config.flushIntervalSeconds = 10
         PostHogSDK.shared.setup(config)
         PostHogSDK.shared.register([geoIpDisableProperty: true])
+        // Telemetry v2: the install's support code rides on every event. The shared Kotlin generates and stores it
+        // (UserDefaults); registering what is already stored here covers events before Kotlin finishes starting.
+        // Super properties persist across launches and are cleared by reset(), so Kotlin re-registers on every start.
+        if let code = UserDefaults.standard.string(forKey: supportCodeKey) {
+            PostHogSDK.shared.register(["support_code": code])
+        }
         if crashReportsEnabled() {
             PostHogSDK.shared.optIn()
         } else {

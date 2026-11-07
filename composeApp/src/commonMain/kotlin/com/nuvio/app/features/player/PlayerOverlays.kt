@@ -45,6 +45,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.nuvio.app.core.ui.nuvioTypeScale
+import com.nuvio.app.core.telemetry.api.ReportCategoryInference
+import com.nuvio.app.core.telemetry.api.ReportContext
+import com.nuvio.app.core.telemetry.api.ReportSurface
+import com.nuvio.app.core.telemetry.ui.rememberReportSender
+import nuvio.composeapp.generated.resources.report_send
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.compose_player_episode_code_full
 import nuvio.composeapp.generated.resources.compose_player_go_back
@@ -285,7 +290,10 @@ internal fun ErrorModal(
     message: String,
     onDismiss: () -> Unit,
     onRetry: (() -> Unit)? = null,
+    failureCode: String? = null,
+    engine: String? = null,
 ) {
+    val sender = rememberReportSender()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -332,6 +340,31 @@ internal fun ErrorModal(
                         textAlign = TextAlign.Center,
                     )
                 }
+            }
+            // One press sends; the category is inferred from the failure. Secondary to Retry (quieter surface).
+            Surface(
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .widthIn(min = 180.dp, max = 260.dp)
+                    .clickable(enabled = !sender.sending) {
+                        sender.send(
+                            ReportCategoryInference.fromFailureCode(failureCode),
+                            ReportSurface.VOD,
+                            ReportContext(failureCode = failureCode, engine = engine),
+                        )
+                    },
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text(
+                    text = stringResource(Res.string.report_send),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    style = MaterialTheme.nuvioTypeScale.bodyLg,
+                    color = Color.White.copy(alpha = 0.85f),
+                    textAlign = TextAlign.Center,
+                )
             }
             Surface(
                 modifier = Modifier

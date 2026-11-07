@@ -57,6 +57,9 @@ internal fun LazyListScope.aboutSettingsContent(
             isTablet = isTablet,
         ) {
             SettingsGroup(isTablet = isTablet) {
+                // Telemetry v2: the support code is the first thing About shows (what users read out to us).
+                SupportCodeRow(isTablet = isTablet)
+                SettingsGroupDivider(isTablet = isTablet)
                 if (showSupportersContributorsPage) {
                     SettingsNavigationRow(
                         title = stringResource(Res.string.compose_settings_page_supporters_contributors),

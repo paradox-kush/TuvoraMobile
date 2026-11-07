@@ -6,17 +6,15 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
-import com.nuvio.app.core.analytics.PostHogPrivacy
 import com.nuvio.app.core.contracts.MemoryPortAccess
 import com.nuvio.app.core.contracts.MemoryTier
 import com.nuvio.app.core.contracts.MemoryTierPolicy
 import com.nuvio.app.features.settings.SentrySettingsRepository
 import com.nuvio.app.features.settings.SentrySettingsStorage
-import com.posthog.PostHog
-import com.posthog.PostHogBeforeSend
-import com.posthog.android.PostHogAndroid
-import com.posthog.android.PostHogAndroidConfig
-import com.posthog.logs.PostHogBeforeSendLog
+import com.nuvio.app.core.telemetry.api.DiagArea
+import com.nuvio.app.core.telemetry.api.DiagEntry
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
+import com.nuvio.app.core.telemetry.internal.AndroidTelemetry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,6 +40,10 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        // Telemetry v2 FIRST, before DI: the crash handler must exist for a crash during startup. It uses
+        // no coroutines or DI; the SDK is configured later (configurePostHog) once consent is loaded.
+        SentrySettingsStorage.initialize(this)
+        AndroidTelemetry.start(this)
         // Consent must be available before feature registration constructs RecSettingsImpl,
         // including a headless process start with no MainActivity startup tasks.
         initializeAndroidProcessStorage(this)
@@ -69,40 +71,8 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
         SentrySettingsRepository.ensureLoaded()
         val crashReportsEnabled = SentrySettingsRepository.enabled.value
 
-        val config = PostHogAndroidConfig(
-            apiKey = POSTHOG_PROJECT_TOKEN,
-            host = POSTHOG_HOST
-        ).apply {
-            // Capture uncaught exceptions as $exception events (where the app breaks).
-            errorTrackingConfig.autoCapture = true
-            optOut = !crashReportsEnabled
-            captureApplicationLifecycleEvents = false
-            captureScreenViews = false
-            sendFeatureFlagEvent = false
-            preloadFeatureFlags = false
-            surveys = false
-            captureDeepLinks = false
-            sessionReplay = false
-            sessionReplayConfig.screenshot = false
-            sessionReplayConfig.captureLogcat = false
-            tracingHeaders = emptyList()
-            logs.addBeforeSend(PostHogBeforeSendLog { null })
-            addBeforeSend(PostHogBeforeSend { event ->
-                if (PostHogPrivacy.shouldDropEvent(event.event)) null
-                else event.copy(
-                    properties = PostHogPrivacy.sanitize(event.properties.orEmpty()).toMutableMap(),
-                )
-            })
-            // Upload queued events quickly after launch: a crash queued by the previous
-            // run must ship before the user navigates back into whatever crashed
-            // (the default 30s starved uploads during crash-loops).
-            flushIntervalSeconds = 10
-        }
-        PostHogAndroid.setup(this, config)
-        // Lets shared code capture without depending on an Android-only SDK.
-        com.nuvio.app.core.analytics.AnalyticsSink.register { event, properties ->
-            PostHog.capture(event, properties = properties)
-        }
+        // PostHog setup (and the crash handler re-wrap on top of the SDK's) lives in core/telemetry/internal.
+        AndroidTelemetry.configurePostHog(this, crashReportsEnabled)
         // Breadcrumbs persist locally so AppExitReporter can attribute a process death on the
         // NEXT launch; their live-event side goes through the sink above and is consent-gated
         // by the SDK like every other capture.
@@ -120,18 +90,16 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
                     AppExitReporter.recordPlaybackStopped(this@NuvioApplication)
                 }
             }
-        PostHog.register(PostHogPrivacy.GEOIP_DISABLE_PROPERTY, true)
         if (crashReportsEnabled) {
-            PostHog.optIn()
             AppExitReporter.reportPendingExits(this)
-        } else {
-            PostHog.optOut()
         }
         analyticsConsentScope.launch {
             SentrySettingsRepository.enabled.collect { enabled ->
-                if (enabled) PostHog.optIn() else PostHog.optOut()
+                AndroidTelemetry.setOptIn(enabled)
             }
         }
+        // A crash record left by the previous run goes out once, off Main, with a deadline.
+        analyticsConsentScope.launch { TelemetryAccess.current().sendPendingCrash() }
     }
 
     override fun onTrimMemory(level: Int) {
@@ -144,6 +112,9 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
         ) {
             MemoryPortAccess.current().trimCaches()
         }
+        TelemetryAccess.current().record(
+            DiagEntry(System.currentTimeMillis(), DiagArea.MEMORY, "trim_memory", mapOf("trim_level" to level)),
+        )
         AppExitReporter.recordMemorySnapshot(this, "trim_memory", level)
     }
 }
