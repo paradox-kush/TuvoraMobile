@@ -40,6 +40,10 @@ interface GameDetailSource {
 interface MappingStorage {
     fun load(): StoredMapping?
     fun save(value: StoredMapping)
+
+    /** ETag of the last REFUSED remote document, so the same bad push is not downloaded again after a restart. */
+    fun loadRejectedEtag(): String? = null
+    fun saveRejectedEtag(etag: String?) {}
 }
 
 data class StoredMapping(val json: String, val etag: String?)

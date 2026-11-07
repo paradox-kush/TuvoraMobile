@@ -59,7 +59,7 @@ class EventMatcherTest {
     }
 
     @Test fun `event override wins over any matching`() {
-        val overridden = mappingOf(editedMappingJson("\"eventOverrides\": {}", "\"eventOverrides\": {\"tsdb:2494097\": \"forced\"}"))
+        val overridden = mappingOf(editedMappingJson("\"eventOverrides\": {}", "\"eventOverrides\": {\"2494097\": \"forced\"}"))
         val m = EventMatcher(overridden).match(
             MatchTarget("2494097", "Leeds United", "Tottenham Hotspur", t0),
             listOf(cand("e1", "Leeds United", "Tottenham Hotspur"), cand("forced", "Nobody", "Else", t0 + 40 * hour)),

@@ -38,14 +38,14 @@ internal object TeamNames {
 }
 
 /**
- * Finds the ESPN event for a TheSportsDB game: pinned by `eventOverrides["tsdb:<id>"]`, else a candidate whose
+ * Finds the ESPN event for a TheSportsDB game: pinned by `eventOverrides["<tsdb id>"]` (legacy "tsdb:<id>" also read), else a candidate whose
  * kickoff is inside the date window AND whose two teams match after normalisation + alias table (in either
  * order). Single-entity events match on distinctive name tokens. Closest kickoff wins.
  */
 internal class EventMatcher(private val m: SportsMapping) {
 
     fun match(target: MatchTarget, candidates: List<EspnCandidate>): EspnCandidate? {
-        m.eventOverrides["tsdb:${target.tsdbEventId}"]?.let { pinned ->
+        m.eventOverride(target.tsdbEventId)?.let { pinned ->
             return candidates.firstOrNull { it.id == pinned } ?: EspnCandidate(pinned, target.home, target.away, target.startsAtMs, target.home)
         }
         val windowMs = m.match.dateWindowHours * 3_600_000L

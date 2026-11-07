@@ -107,7 +107,10 @@ internal class EspnAssembler(private val m: SportsMapping) {
         when (type) {
             BlockType.LINESCORE -> spec?.let { linescore(it, profile, event, root(it)) }
             BlockType.STATS -> spec?.let { stats(it, event, root(it)) }
-            BlockType.LEADERS -> spec?.let { leaders(it, event, root(it)) }
+            BlockType.LEADERS -> spec?.let { sp ->
+                // Per-game summary first (follows the live game); the scoreboard snapshot when the summary has none.
+                leaders(sp, event, root(sp)) ?: sp.fallback()?.let { fb -> leaders(fb, event, root(fb)) }
+            }
             BlockType.TIMELINE -> spec?.let { timeline(it, profile, event, root(it)) }
             BlockType.WIN_PROBABILITY -> spec?.let { winProbability(it, root(it)) }
             BlockType.SITUATION -> spec?.let { situation(it, root(it)) }

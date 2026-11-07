@@ -178,6 +178,35 @@ class GameDetailSessionTest {
         }
     }
 
+    @Test fun `a persistently failing ESPN backs off about 30 s while the backend stays healthy`() = runBlocking<Unit> {
+        val espn = FakeEspn(SourceResult.Failed(false), SourceResult.Failed(false))
+        val s = session(FakeTsdb(tsdbEvent()), espn)
+        repeat(5) { loaded(s.tick()) }
+        assertEquals(1, espn.scoreboardCalls)
+        now += 31_000
+        loaded(s.tick())
+        assertEquals(2, espn.scoreboardCalls)
+    }
+
+    @Test fun `the legacy tsdb-prefixed override key still works as a fallback`() = runBlocking<Unit> {
+        val store = SportsMappingStore(MemStorage(), bundledMapping())
+        store.offer(editedMappingJson("\"eventOverrides\": {}", "\"eventOverrides\": {\"tsdb:2601\": \"401909287\"}"), null)
+        val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
+        assertTrue(loaded(session(FakeTsdb(tsdbEvent(home = "ATL", away = "WAS")), espn, store).tick()).blocks.any { it is LinescoreBlock })
+    }
+
+    @Test fun `last-good backend blocks survive a refresh that omitted them`() = runBlocking<Unit> {
+        val stats = StatsBlock(listOf(com.nuvio.app.features.sportsdetail.api.StatRow("Shots", "3", "2")), source = "tsdb")
+        val tsdb = FakeTsdb(tsdbEvent(blocks = listOf(stats)))
+        val s = session(tsdb, null, r = ref.copy(leagueId = "4328"))
+        assertTrue(loaded(s.tick()).blocks.any { it is StatsBlock })
+        tsdb.answer = tsdbEvent(blocks = emptyList())   // the backend's stats sub-call failed this time
+        assertTrue(loaded(s.tick(fetchEvent = true, fetchSummary = true)).blocks.any { it is StatsBlock }, "stats must not vanish")
+        tsdb.answer = tsdbEvent(blocks = listOf(StatsBlock(listOf(com.nuvio.app.features.sportsdetail.api.StatRow("Shots", "9", "9")), source = "tsdb")))
+        val fresh = loaded(s.tick(fetchEvent = true, fetchSummary = true)).blocks.filterIsInstance<StatsBlock>().single()
+        assertEquals("9", fresh.rows[0].home, "a block the backend does return is replaced")
+    }
+
     @Test fun `ESPN failing never renders as empty and is retried`() = runBlocking<Unit> {
         val espn = FakeEspn(SourceResult.Failed(timedOut = true), SourceResult.Failed(timedOut = false))
         val s = session(FakeTsdb(tsdbEvent()), espn)
@@ -186,6 +215,9 @@ class GameDetailSessionTest {
         assertIs<TeamsHeader>(d.header)
         espn.scoreboard = scoreboardOf(SportsFixtures.espn_nba_event)
         espn.summary = SourceResult.Ok(parse(SportsFixtures.espn_nba_summary))
+        loaded(s.tick())
+        assertEquals(1, espn.scoreboardCalls, "ESPN just failed: no retry inside the backoff window")
+        now += 31_000
         val again = loaded(s.tick())
         assertTrue(again.blocks.any { it is LinescoreBlock }, "failure was not negative-cached")
         assertEquals(2, espn.scoreboardCalls)
@@ -266,7 +298,7 @@ class GameDetailSessionTest {
 
     @Test fun `event override pins the ESPN event regardless of names`() = runBlocking<Unit> {
         val store = SportsMappingStore(MemStorage(), bundledMapping())
-        store.offer(editedMappingJson("\"eventOverrides\": {}", "\"eventOverrides\": {\"tsdb:2601\": \"401909287\"}"), null)
+        store.offer(editedMappingJson("\"eventOverrides\": {}", "\"eventOverrides\": {\"2601\": \"401909287\"}"), null)
         val misnamed = tsdbEvent(home = "ATL", away = "WAS")
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
         val d = loaded(session(FakeTsdb(misnamed), espn, store).tick())
@@ -277,7 +309,7 @@ class GameDetailSessionTest {
         val store = SportsMappingStore(MemStorage(), bundledMapping())
         val broken = editedMappingJson("\"path\": \"boxscore.teams[*].statistics[*]\", \"label\": \"label\", \"value\": \"displayValue\",\n        \"allow\": [\"Field Goal %\"",
             "\"path\": \"boxscore.teamz[*].statistics[*]\", \"label\": \"label\", \"value\": \"displayValue\",\n        \"allow\": [\"Field Goal %\"")
-            .replace("\"2026-11-07.1\"", "\"2026-11-07.2\"")
+            .replace("\"2026-11-08.1\"", "\"2026-11-07.2\"")
         assertIs<com.nuvio.app.features.sportsdetail.internal.AdoptResult.Adopted>(store.offer(broken, "b"))
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
         val s = session(FakeTsdb(tsdbEvent()), espn, store)
