@@ -123,6 +123,16 @@ class EspnAssemblerTest {
         assertNull(asm.assemble(BlockType.LINESCORE, "soccer", ev(SportsFixtures.espn_epl_event), null))
     }
 
+    @Test fun `a missing period score keeps the columns aligned`() {
+        val ev = """{"id":"1","date":"2026-11-07T00:00Z","status":{"type":{"state":"in","shortDetail":"Q3"}},
+            "competitions":[{"competitors":[
+              {"homeAway":"home","score":"6","team":{"id":"1","displayName":"H","abbreviation":"H"},"linescores":[{"displayValue":"1"},{},{"displayValue":"5"}]},
+              {"homeAway":"away","score":"4","team":{"id":"2","displayName":"A","abbreviation":"A"},"linescores":[{"displayValue":"2"},{"displayValue":"2"},{"displayValue":"0"}]}]}]}"""
+        val b = asm.assemble(BlockType.LINESCORE, "basketball", parse(ev), null) as LinescoreBlock
+        assertEquals(listOf("1", "-", "5", "6"), b.rows[0])
+        assertEquals(listOf("2", "2", "0", "4"), b.rows[1])
+    }
+
     // ---- stats ------------------------------------------------------------------------------------------------
 
     @Test fun `NBA stats follow the allow-list order and put each team on the right side`() {

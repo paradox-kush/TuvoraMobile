@@ -9,6 +9,7 @@ internal class RemoteMappingSync(
     private val http: SportsHttp,
     private val url: String,
     private val deadlineMs: Long = 8_000L,
+    private val report: (Map<String, Any>) -> Unit = SportsDetailTelemetry::send,
 ) {
     sealed interface Outcome {
         data class Updated(val version: String) : Outcome
@@ -18,7 +19,7 @@ internal class RemoteMappingSync(
     }
 
     suspend fun sync(): Outcome {
-        val headers = store.etag?.let { mapOf("If-None-Match" to it) } ?: emptyMap()
+        val headers = (store.rejectedEtag ?: store.etag)?.let { mapOf("If-None-Match" to it) } ?: emptyMap()
         val reply = try {
             withTimeoutOrNull(deadlineMs) { http.get(url, headers, deadlineMs) }
         } catch (e: CancellationException) {
@@ -30,7 +31,10 @@ internal class RemoteMappingSync(
             reply.status == 304 -> Outcome.NotModified
             reply.status in 200..299 && !reply.body.isNullOrBlank() -> when (val r = store.offer(reply.body, reply.etag)) {
                 is AdoptResult.Adopted -> Outcome.Updated(r.version)
-                is AdoptResult.Rejected -> Outcome.Rejected(r.reason)
+                is AdoptResult.Rejected -> {
+                    runCatching { report(SportsDetailTelemetry.mappingRejected(r.code, 0L)) }
+                    Outcome.Rejected(r.reason)
+                }
             }
             else -> Outcome.Failed
         }

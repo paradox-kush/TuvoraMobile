@@ -103,6 +103,44 @@ class SportsMappingTest {
         assertFalse(bundledMapping().espnEnabledFor("4460")) // cricket entry without an ESPN path yet
     }
 
+    @Test fun `ESPN templates must be https on the ESPN host with their placeholders`() {
+        fun reason(from: String, to: String) = SportsMappingValidator.validate(mappingOf(editedMappingJson(from, to)))
+        assertNotNull(reason("https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard", "http://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard"))
+        assertNotNull(reason("https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard", "https://evil.example/apis/site/v2/sports/{path}/scoreboard"))
+        assertNotNull(reason("sports/{path}/scoreboard?dates={yyyymmdd}", "sports/{path}/scoreboard?dates=today"))
+        assertNotNull(reason("sports/{path}/summary?event={id}", "sports/{path}/summary?event=1"))
+    }
+
+    @Test fun `chain overrides are validated`() {
+        val withChain = { v: String -> mappingOf(editedMappingJson("\"eventOverrides\": {}", "\"eventOverrides\": {}, \"chain\": $v")) }
+        assertNull(SportsMappingValidator.validate(withChain("{\"stats\": [\"espn\", \"tsdb\"]}")))
+        assertNotNull(SportsMappingValidator.validate(withChain("{\"stats\": [\"bing\"]}")))
+        assertNotNull(SportsMappingValidator.validate(withChain("{\"nonsense\": [\"espn\"]}")))
+    }
+
+    @Test fun `every profile is smoke-parsed - a broken hockey path is caught`() {
+        val m = mappingOf(editedMappingJson(
+            "\"periodLabel\": \"P\",\n      \"linescore\": { \"from\": \"scoreboard\", \"path\": \"competitions[0].competitors[*].linescores[*].displayValue\" }",
+            "\"periodLabel\": \"P\",\n      \"linescore\": { \"from\": \"scoreboard\", \"path\": \"competitionz[0].competitors[*].linescores[*].displayValue\" }",
+        ))
+        val reason = SportsMappingValidator.validate(m)
+        assertNotNull(reason)
+        assertTrue(reason.contains("hockey"), reason)
+    }
+
+    @Test fun `a rejected ETag is not downloaded again and the rejection is reported by code only`() = runBlocking<Unit> {
+        val store = SportsMappingStore(MemStorage(), bundledMapping())
+        val events = mutableListOf<Map<String, Any>>()
+        val http = FakeHttp(mutableListOf(HttpReply(200, "{\"schemaVersion\": 99}", "\"bad\""), HttpReply(304, null, "\"bad\"")))
+        val sync = RemoteMappingSync(store, http, url = "https://x.invalid/m", report = { events += it })
+        assertIs<RemoteMappingSync.Outcome.Rejected>(sync.sync())
+        assertEquals(1, events.size)
+        assertEquals("rejected", events[0]["outcome"])
+        assertFalse(events[0].values.any { it.toString().contains("99") || it.toString().contains("http") })
+        assertIs<RemoteMappingSync.Outcome.NotModified>(sync.sync())
+        assertEquals("\"bad\"", http.requests[1].second["If-None-Match"])
+    }
+
     private class FakeHttp(val replies: MutableList<HttpReply>) : SportsHttp {
         val requests = mutableListOf<Pair<String, Map<String, String>>>()
         override suspend fun get(url: String, headers: Map<String, String>, deadlineMs: Long): HttpReply {

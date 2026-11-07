@@ -103,7 +103,8 @@ internal data class SportsMapping(
 
     /** Source order for [type]: the mapping's override, else the default (TheSportsDB first where it has data). */
     fun chainFor(type: BlockType): List<String> = chain[type.id]?.takeIf { it.isNotEmpty() } ?: when (type) {
-        BlockType.BROADCAST, BlockType.STATS, BlockType.TIMELINE -> listOf("tsdb", "espn")
+        BlockType.BROADCAST, BlockType.STATS, BlockType.TIMELINE, BlockType.LINEUP, BlockType.STANDINGS,
+        BlockType.FORM, BlockType.RESULTS, BlockType.NEXT -> listOf("tsdb", "espn")
         BlockType.HIGHLIGHTS -> listOf("tsdb")
         else -> listOf("espn")
     }
@@ -208,15 +209,20 @@ internal object SportsMappingParser {
 }
 
 /**
- * Accepts a mapping only if it is one this build understands AND still reads real data: schemaVersion within
- * what we support, a non-empty structure, and a smoke-parse of a bundled ESPN event (the header must resolve and
- * the smoke profile's linescore must read) so a typo in a remote edit can never blank the screen.
+ * Accepts a mapping only if it is one this build understands AND still reads real data: schemaVersion within what
+ * we support, a sane structure (ESPN templates https on the ESPN host with their placeholders, known chain values),
+ * and a smoke-parse of a bundled ESPN-shaped event for EVERY profile (the header must resolve and each profile's
+ * linescore / results spec must read) so a typo in a remote edit can never blank a sport's screen.
  */
 internal object SportsMappingValidator {
     const val SUPPORTED_SCHEMA = 1
     private const val SMOKE_PROFILE = "basketball"
+    private const val ESPN_PREFIX = "https://site.api.espn.com/"
+    private val SOURCES = setOf("tsdb", "espn")
 
-    private val smokeEvent: JsonElement by lazy { Json.parseToJsonElement(SmokeFixture.NBA_EVENT) }
+    private val teamEvent: JsonElement by lazy { Json.parseToJsonElement(SmokeFixture.TEAM_EVENT) }
+    private val eventEvent: JsonElement by lazy { Json.parseToJsonElement(SmokeFixture.EVENT_EVENT) }
+    private val versusEvent: JsonElement by lazy { Json.parseToJsonElement(SmokeFixture.VERSUS_EVENT) }
 
     /** null = OK, else the reason it was rejected. */
     fun validate(m: SportsMapping): String? {
@@ -225,39 +231,81 @@ internal object SportsMappingValidator {
         if (m.profiles.isEmpty()) return "no profiles"
         if (m.leagues.isEmpty()) return "no leagues"
         if (m.leagues.any { it.profile !in m.profiles }) return "league points at a missing profile"
-        if (m.espn.scoreboardTemplate.isBlank() || m.espn.summaryTemplate.isBlank()) return "empty espn templates"
+        val sb = m.espn.scoreboardTemplate
+        val sm = m.espn.summaryTemplate
+        if (!sb.startsWith(ESPN_PREFIX) || !sm.startsWith(ESPN_PREFIX)) return "espn template: not https on the ESPN host"
+        if ("{path}" !in sb || "{yyyymmdd}" !in sb) return "espn template: scoreboard needs {path} and {yyyymmdd}"
+        if ("{path}" !in sm || "{id}" !in sm) return "espn template: summary needs {path} and {id}"
         if (m.espn.deadlineMs !in 500L..60_000L) return "espn deadline out of range"
         if (m.espn.liveMs < 1_000L || m.espn.minMs < 1_000L) return "refresh cadence out of range"
+        for ((block, sources) in m.chain) {
+            if (BlockType.byId(block) == null) return "chain: unknown block '$block'"
+            if (sources.isEmpty() || sources.any { it !in SOURCES }) return "chain: bad source list for '$block'"
+        }
         if (SMOKE_PROFILE !in m.profiles) return "smoke profile '$SMOKE_PROFILE' missing"
         val asm = EspnAssembler(m)
-        val h = asm.header(SMOKE_PROFILE, smokeEvent)
-            ?: return "smoke parse: header did not resolve"
-        val teams = h.header as? com.nuvio.app.features.sportsdetail.api.TeamsHeader
-            ?: return "smoke parse: header is not teams"
-        if (teams.home.name != "Smoke Home" || teams.away.name != "Smoke Away" || teams.home.score != "101" || teams.away.score != "99") {
-            return "smoke parse: header read wrong values"
+        for ((key, profile) in m.profiles) smoke(asm, key, profile)?.let { return it }
+        return null
+    }
+
+    private fun smoke(asm: EspnAssembler, key: String, profile: ProfileSpec): String? {
+        val kind = profile.headerKind ?: when (key) { "motorsport", "fighting" -> "event"; "tennis" -> "versus"; else -> "teams" }
+        val event = when (kind) { "event" -> eventEvent; "versus" -> versusEvent; else -> teamEvent }
+        val h = asm.header(key, event) ?: return "smoke parse: $key header did not resolve"
+        val expectedState = com.nuvio.app.features.sportsdetail.api.GameState.FINAL
+        if (h.state != expectedState) return "smoke parse: $key state read wrong"
+        when (val header = h.header) {
+            is com.nuvio.app.features.sportsdetail.api.TeamsHeader ->
+                if (header.home.name != "Smoke Home" || header.away.name != "Smoke Away" || header.home.score != "101" || header.away.score != "99") return "smoke parse: $key header read wrong values"
+            is com.nuvio.app.features.sportsdetail.api.VersusHeader ->
+                if (header.a.name != "Smoke A" || header.b.name != "Smoke B") return "smoke parse: $key header read wrong values"
+            is com.nuvio.app.features.sportsdetail.api.EventHeader ->
+                if (header.name != "Smoke Grand Prix") return "smoke parse: $key header read wrong values"
         }
-        if (m.profiles.getValue(SMOKE_PROFILE).spec(BlockType.LINESCORE) != null && asm.assemble(BlockType.LINESCORE, SMOKE_PROFILE, smokeEvent, null) == null) {
-            return "smoke parse: linescore did not resolve"
+        for (type in listOf(BlockType.LINESCORE, BlockType.RESULTS)) {
+            if (profile.spec(type) != null && asm.assemble(type, key, event, null) == null) return "smoke parse: $key ${type.id} did not resolve"
         }
         return null
     }
+
+    /** Short, free-text-free code for telemetry. */
+    fun codeOf(reason: String): String = when {
+        reason.startsWith("unsupported schema") -> "schema"
+        reason.startsWith("smoke") -> "smoke"
+        reason.startsWith("espn template") -> "template"
+        reason.startsWith("chain") -> "chain"
+        reason.startsWith("unparseable") || reason == "not an object" -> "parse"
+        else -> "structure"
+    }
 }
 
-/** Always-available, tiny ESPN-shaped event the validator smoke-parses candidate mappings against. */
+/** Always-available tiny ESPN-shaped events the validator smoke-parses candidate mappings against, one per header kind. */
 internal object SmokeFixture {
-    const val NBA_EVENT: String = """{"id":"1","date":"2026-11-07T00:00Z","name":"Smoke Away at Smoke Home",
+    const val TEAM_EVENT: String = """{"id":"1","date":"2026-11-07T00:00Z","name":"Smoke Away at Smoke Home",
         "status":{"displayClock":"0.0","period":4,"type":{"state":"post","shortDetail":"Final"}},
         "competitions":[{"venue":{"fullName":"Smoke Arena"},"broadcasts":[{"market":"national","names":["SMK"]}],"competitors":[
           {"homeAway":"home","score":"101","records":[{"summary":"1-0"}],"team":{"id":"1","displayName":"Smoke Home","abbreviation":"SMH","logo":"https://x/h.png"},
            "linescores":[{"displayValue":"25"},{"displayValue":"25"},{"displayValue":"25"},{"displayValue":"26"}]},
           {"homeAway":"away","score":"99","records":[{"summary":"0-1"}],"team":{"id":"2","displayName":"Smoke Away","abbreviation":"SMA","logo":"https://x/a.png"},
            "linescores":[{"displayValue":"24"},{"displayValue":"25"},{"displayValue":"25"},{"displayValue":"25"}]}]}]}"""
+
+    const val EVENT_EVENT: String = """{"id":"9","date":"2026-11-07T00:00Z","name":"Smoke Grand Prix",
+        "status":{"type":{"state":"post","shortDetail":"Final"}},
+        "competitions":[{"id":"c1","type":{"abbreviation":"RACE"},"status":{"type":{"state":"post","shortDetail":"Final"}},"competitors":[
+          {"order":1,"winner":true,"athlete":{"displayName":"Smoke Driver One"}},{"order":2,"athlete":{"displayName":"Smoke Driver Two"}}]}]}"""
+
+    const val VERSUS_EVENT: String = """{"id":"5","date":"2026-11-07T00:00Z","name":"Smoke Open",
+        "status":{"type":{"state":"post","shortDetail":"Final"}},
+        "competitions":[{"competitors":[
+          {"order":1,"homeAway":"home","athlete":{"displayName":"Smoke A"},"score":"2","linescores":[{"displayValue":"6","value":6.0},{"displayValue":"6","value":6.0}]},
+          {"order":2,"homeAway":"away","athlete":{"displayName":"Smoke B"},"score":"0","linescores":[{"displayValue":"1","value":1.0},{"displayValue":"2","value":2.0}]}]}]}"""
 }
 
 internal sealed interface AdoptResult {
     data class Adopted(val version: String) : AdoptResult
-    data class Rejected(val reason: String) : AdoptResult
+    data class Rejected(val reason: String) : AdoptResult {
+        val code: String get() = SportsMappingValidator.codeOf(reason)
+    }
 }
 
 /**
@@ -275,6 +323,10 @@ internal class SportsMappingStore(
     var etag: String? = null
         private set
 
+    /** ETag of the last REFUSED remote document (this process): sent as If-None-Match so it is not downloaded again. */
+    var rejectedEtag: String? = null
+        private set
+
     init {
         val stored = runCatching { storage.load() }.getOrNull()
         if (stored != null) {
@@ -290,11 +342,12 @@ internal class SportsMappingStore(
         val parsed = SportsMappingParser.parse(json)
         val candidate = when (parsed) {
             is SportsMappingParser.ParseResult.Ok -> parsed.mapping
-            is SportsMappingParser.ParseResult.Invalid -> return AdoptResult.Rejected(parsed.reason)
+            is SportsMappingParser.ParseResult.Invalid -> { rejectedEtag = etag; return AdoptResult.Rejected(parsed.reason) }
         }
-        SportsMappingValidator.validate(candidate)?.let { return AdoptResult.Rejected(it) }
+        SportsMappingValidator.validate(candidate)?.let { rejectedEtag = etag; return AdoptResult.Rejected(it) }
         current = candidate
         this.etag = etag
+        rejectedEtag = null
         runCatching { storage.save(StoredMapping(json, etag)) }
         return AdoptResult.Adopted(candidate.version)
     }
