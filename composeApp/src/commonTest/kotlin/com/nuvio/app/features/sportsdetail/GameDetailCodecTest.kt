@@ -63,4 +63,23 @@ class GameDetailCodecTest {
         assertEquals(listOf("home", "away"), (d.blocks[1] as com.nuvio.app.features.sportsdetail.api.LineupBlock).sides.map { it.side })
         assertEquals(emptyList(), (d.blocks[2] as FormBlock).away)
     }
+
+    @Test fun `realistic server body - asOf as number or ISO string and empty startsAt and explicit lineup side`() {
+        val d = assertNotNull(GameDetailCodec.decode("""{"gameId":"tsdb:2494097","sport":"Soccer","leagueId":"4328","leagueName":"English Premier League",
+            "round":"10","venue":"Elland Road","startsAt":"","state":"live","live":{"clock":"61'","detail":"2H"},
+            "header":{"kind":"teams","home":{"name":"Leeds United","badgeUrl":"https://b/h.png","score":"1"},"away":{"name":"Tottenham Hotspur","score":"0"}},
+            "blocks":[
+              {"type":"lineup","source":"tsdb","sides":[{"side":"away","team":"Tottenham","players":[]},{"side":"home","team":"Leeds","formation":"3-4-2-1","players":[{"number":"1","name":"X","pos":"GK","starter":true}]}]},
+              {"type":"stats","source":"tsdb","rows":[{"label":"Shots","home":"3","away":"2","unit":""}]},
+              {"type":"standings","source":"tsdb","rows":[{"pos":"1","name":"Arsenal","played":"10","points":"25","badgeUrl":"https://b/a.png"}]}
+            ],"sources":{"stats":"tsdb"},"asOf":{"tsdb":1794054600000,"other":"2026-11-07T12:30:00Z","bad":"yesterday"},
+            "mappingVersion":"2026-11-07.1","disabled":false}"""))
+        assertEquals("", d.startsAt)
+        assertEquals(1794054600000L, d.asOf["tsdb"])
+        assertEquals(1794054600000L, d.asOf["other"])
+        assertNull(d.asOf["bad"])
+        assertEquals(listOf("away", "home"), (d.blocks[0] as com.nuvio.app.features.sportsdetail.api.LineupBlock).sides.map { it.side })
+        assertEquals(3, d.blocks.size)
+        assertEquals("61'", d.live?.clock)
+    }
 }

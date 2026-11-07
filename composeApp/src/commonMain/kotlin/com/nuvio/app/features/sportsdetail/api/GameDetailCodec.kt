@@ -45,6 +45,13 @@ object GameDetailCodec {
             val kind = (h["kind"] as? JsonPrimitive)?.content
             if (kind != null && "type" !in h) m["header"] = JsonObject(h + ("type" to JsonPrimitive(kind)))
         }
+        (m["asOf"] as? JsonObject)?.let { a ->
+            m["asOf"] = JsonObject(a.mapNotNull { (k, v) ->
+                val p = v as? JsonPrimitive ?: return@mapNotNull null
+                val ms = if (p.isString) com.nuvio.app.features.sportsdetail.internal.Iso.parseMs(p.content) else p.content.toDoubleOrNull()?.toLong()
+                ms?.let { k to JsonPrimitive(it) }
+            }.toMap())
+        }
         listOf("round", "venue").forEach { k -> m[k]?.let { v -> str(v)?.let { m[k] = it } } }
         (m["blocks"] as? JsonArray)?.let { arr -> m["blocks"] = JsonArray(arr.map { b -> (b as? JsonObject)?.let(::normalizeBlock) ?: b }) }
         return JsonObject(m)

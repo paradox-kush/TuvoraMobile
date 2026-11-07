@@ -37,10 +37,27 @@ class GameDetailRefreshPolicyTest {
         }
     }
 
-    @Test fun `upcoming far from kickoff is idle`() {
+    @Test fun `upcoming far from kickoff fetches nothing but wakes when the lead window opens`() {
         val p = plan(GameState.UPCOMING, startsAt = now + 2 * 3_600_000L)
-        assertTrue(p.isIdle)
-        assertNull(p.nextCheckInMs)
+        assertFalse(p.fetchEvent || p.fetchSummary)
+        assertEquals(2 * 3_600_000L - 30 * 60_000L, p.nextCheckInMs, "the screen must wake, not sleep forever")
+    }
+
+    @Test fun `a game still upcoming hours after kickoff is re-checked slowly - never stuck`() {
+        val p = plan(GameState.UPCOMING, startsAt = now - 4 * 3_600_000L, lastEvent = now - 1_000L)
+        assertTrue(p.nextCheckInMs != null)
+        assertFalse(p.fetchEvent)
+    }
+
+    @Test fun `live degrades to idle 12 hours after kickoff`() {
+        assertTrue(plan(GameState.LIVE, startsAt = now - 13 * 3_600_000L, lastEvent = now - 60_000L, lastSummary = now - 60_000L).isIdle)
+        assertFalse(plan(GameState.LIVE, startsAt = now - 11 * 3_600_000L).isIdle)
+    }
+
+    @Test fun `the client floor is 10 s whatever the mapping says`() {
+        val p = plan(GameState.LIVE, lastEvent = now - 7_000L, lastSummary = now - 7_000L, config = Config(liveMs = 1_000L, summaryMs = 1_000L, minMs = 1_000L))
+        assertFalse(p.fetchEvent)
+        assertEquals(3_000L, p.nextCheckInMs)
     }
 
     @Test fun `upcoming inside the pre-kickoff lead ticks the event only so the card flips to live`() {
@@ -70,10 +87,10 @@ class GameDetailRefreshPolicyTest {
     }
 
     @Test fun `remote config cannot push the cadence below its floor`() {
-        val aggressive = Config(liveMs = 1_000L, summaryMs = 2_000L, minMs = 6_000L)
+        val aggressive = Config(liveMs = 1_000L, summaryMs = 2_000L, minMs = 12_000L)
         val p = plan(GameState.LIVE, lastEvent = now - 3_000L, lastSummary = now - 3_000L, config = aggressive)
         assertFalse(p.fetchEvent)
-        assertEquals(3_000L, p.nextCheckInMs)
+        assertEquals(9_000L, p.nextCheckInMs)
     }
 
     @Test fun `failures back off exponentially up to a cap`() {

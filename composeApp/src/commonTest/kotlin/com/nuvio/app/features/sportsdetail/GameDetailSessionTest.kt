@@ -124,9 +124,10 @@ class GameDetailSessionTest {
         assertEquals("espn", d.sources["stats"], "the backend had no stats for basketball -> ESPN")
         assertEquals(listOf<Set<String>?>(null), tsdb.requests, "first tick asks for everything")
         s.tick(fetchEvent = true, fetchSummary = false)
-        assertEquals(setOf("stats", "timeline"), tsdb.requests.last(), "a fast tick asks for the fast blocks only")
+        assertEquals(1, tsdb.requests.size, "a live tick never calls the backend")
         assertTrue(loaded(s.tick(fetchEvent = false, fetchSummary = false)).blocks.any { it is BroadcastBlock }, "slow blocks survive fast ticks")
-        assertEquals(2, tsdb.requests.size, "an idle tick makes no request")
+        s.tick(fetchEvent = true, fetchSummary = true)
+        assertEquals(listOf<Set<String>?>(null, null), tsdb.requests, "the slow cadence refreshes everything")
     }
 
     @Test fun `backend kill switch falls back to an ESPN-primary game`() = runBlocking<Unit> {
@@ -134,6 +135,47 @@ class GameDetailSessionTest {
         val d = loaded(session(FakeTsdb(SourceResult.Disabled), espn).tick())
         assertEquals("espn", d.sources["header"])
         assertEquals("Atlanta Hawks", assertIs<TeamsHeader>(d.header).home.name)
+    }
+
+    @Test fun `a pinned ESPN id missing from the scoreboard is looked up once then remembered`() = runBlocking<Unit> {
+        val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_epl_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
+        val s = session(FakeTsdb(tsdbEvent()), espn, r = ref.copy(espnEventId = "does-not-exist"))
+        loaded(s.tick())
+        val afterFirst = espn.scoreboardCalls
+        assertTrue(afterFirst in 1..2)
+        repeat(4) { loaded(s.tick()) }
+        assertEquals(afterFirst, espn.scoreboardCalls, "a wrong id must not re-fetch whole-day scoreboards every tick")
+        assertEquals(0, espn.summaryCalls)
+    }
+
+    @Test fun `leagues without a summary endpoint refresh the scoreboard only on the slow cadence`() = runBlocking<Unit> {
+        val f1 = ref.copy(gameId = "tsdb:9", leagueId = "4370", tsdbEventId = "9", homeName = "MSC Cruises Sao Paulo Grand Prix", awayName = null, startsAtMs = 1_794_000_000_000L)
+        val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_f1_event), SourceResult.Empty)
+        val s = session(FakeTsdb(SourceResult.Empty), espn, r = f1)
+        loaded(s.tick())
+        val first = espn.scoreboardCalls
+        repeat(3) { loaded(s.tick(fetchEvent = true, fetchSummary = false)) }
+        assertEquals(first, espn.scoreboardCalls, "fast ticks must not re-read the whole-day scoreboard")
+        loaded(s.tick(fetchEvent = true, fetchSummary = true))
+        assertEquals(first + 1, espn.scoreboardCalls)
+        assertEquals(0, espn.summaryCalls, "no summary endpoint for F1")
+    }
+
+    @Test fun `backend standings are shown - the default chain does not drop them`() = runBlocking<Unit> {
+        val standings = com.nuvio.app.features.sportsdetail.api.StandingsBlock(listOf(com.nuvio.app.features.sportsdetail.api.StandingRow("1", "Arsenal", "10", "25")), source = "tsdb")
+        val soccer = ref.copy(leagueId = "4328")
+        val d = loaded(session(FakeTsdb(tsdbEvent(blocks = listOf(standings))), null, r = soccer).tick())
+        assertTrue(d.blocks.any { it is com.nuvio.app.features.sportsdetail.api.StandingsBlock })
+        assertEquals("tsdb", d.sources["standings"])
+    }
+
+    @Test fun `a failed or empty backend falls back to the ESPN header when ESPN resolved the event`() = runBlocking<Unit> {
+        for (answer in listOf<SourceResult<GameDetail>>(SourceResult.Failed(true), SourceResult.Empty, SourceResult.Disabled)) {
+            val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
+            val d = loaded(session(FakeTsdb(answer), espn).tick())
+            assertEquals("espn", d.sources["header"], "$answer")
+            assertEquals("Atlanta Hawks", assertIs<TeamsHeader>(d.header).home.name)
+        }
     }
 
     @Test fun `ESPN failing never renders as empty and is retried`() = runBlocking<Unit> {
@@ -181,11 +223,14 @@ class GameDetailSessionTest {
 
     @Test fun `a live tick requests only the summary of the resolved event - never the whole-day scoreboard`() = runBlocking<Unit> {
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
-        val s = session(FakeTsdb(tsdbEvent(state = GameState.LIVE)), espn)
+        val tsdb = FakeTsdb(tsdbEvent(state = GameState.LIVE))
+        val s = session(tsdb, espn)
         s.tick()
         val scoreboards = espn.scoreboardCalls
         val summaries = espn.summaryCalls
+        val backend = tsdb.requests.size
         repeat(3) { assertTrue(loaded(s.tick(fetchEvent = true, fetchSummary = false)).blocks.any { it is StatsBlock }) }
+        assertEquals(backend, tsdb.requests.size, "a live tick is ESPN summary only - no backend call")
         assertEquals(scoreboards, espn.scoreboardCalls, "scoreboard is read once to resolve the event id")
         assertEquals(summaries + 3, espn.summaryCalls, "each live tick is exactly one summary request")
         loaded(s.tick(fetchEvent = false, fetchSummary = false))

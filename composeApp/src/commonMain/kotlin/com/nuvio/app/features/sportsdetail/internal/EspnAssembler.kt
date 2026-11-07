@@ -226,9 +226,16 @@ internal class EspnAssembler(private val m: SportsMapping) {
         val (ownersPath, rest) = splitStar(spec.path ?: return null) ?: return null
         val owners = orderedOwners(event, SportsPath.read(root, ownersPath))
         if (owners.isEmpty()) return null
-        val perOwner = owners.map { o -> SportsPath.read(o, rest).mapNotNull(::cell) }
+        // Read per period ELEMENT, so a missing score stays a "-" in its column instead of shifting the row left.
+        val star = rest.lastIndexOf("[*]")
+        val periodsPath = if (star >= 0) rest.substring(0, star + 3) else rest
+        val leaf = if (star >= 0) rest.substring(star + 3).trimStart('.') else ""
+        val perOwner = owners.map { o ->
+            if (star < 0) SportsPath.read(o, rest).mapNotNull(::cell)
+            else SportsPath.read(o, periodsPath).map { el -> (if (leaf.isEmpty()) cell(el) else SportsPath.read(el, leaf).firstOrNull()?.let(::cell)) ?: "-" }
+        }
         val n = perOwner.maxOfOrNull { it.size } ?: 0
-        if (n == 0) return null
+        if (n == 0 || perOwner.all { cells -> cells.all { it == "-" } }) return null
         val periodLabel = profile.periodLabel
         val labels = (0 until n).map { i -> periodColumn(profile.key, periodLabel, i) }.toMutableList()
         val extras = spec.strings("extra")

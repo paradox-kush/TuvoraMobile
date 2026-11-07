@@ -87,19 +87,18 @@ internal class GameDetailSession(
         }
         fun outcomeOf(f: SourceResult.Failed) = if (f.timedOut) "timeout" else "failed"
 
-        // 1. Primary: our backend's normalised game-detail (TheSportsDB). One call per tick; a fast tick asks for
-        //    the fast blocks only, a summary tick (or the first) for everything.
-        if (tsdb != null && ref.tsdbEventId != null && !tsdbDisabled && (fetchEvent || fetchSummary || tsdbAnswer == null)) {
-            val full = fetchSummary || tsdbDetail == null
+        // 1. Primary: our backend's normalised game-detail (TheSportsDB). Delta rule: the backend is called on the
+        //    first load and on the slow (summary) cadence ONLY — a live tick is the ESPN per-game summary alone.
+        if (tsdb != null && ref.tsdbEventId != null && !tsdbDisabled && (fetchSummary || tsdbAnswer == null)) {
             val t0 = nowMs()
-            val r = tsdb.detail(ref.tsdbEventId, ref.leagueId, if (full) null else FAST_TSDB_BLOCKS)
+            val r = tsdb.detail(ref.tsdbEventId, ref.leagueId, null)
             durations["tsdb"] = nowMs() - t0
             tsdbAnswer = r
             when (r) {
                 is SourceResult.Ok -> {
                     tsdbDetail = r.value
                     tsdbAsOf = nowMs()
-                    if (full) tsdbBlocks.clear()
+                    tsdbBlocks.clear()
                     r.value.blocks.forEach { b -> blockTypeOf(b)?.let { tsdbBlocks[it] = b } }
                 }
                 is SourceResult.Empty -> tsdbDetail = null
@@ -110,9 +109,11 @@ internal class GameDetailSession(
         val tsdbPrimary = tsdb != null && ref.tsdbEventId != null && !tsdbDisabled
 
         // 2. Resolve the ESPN event ONCE (whole-day scoreboard), then keep it. Leagues with no summary endpoint
-        //    (F1, UFC, tennis) have nothing else to poll, so they re-read the scoreboard on an event tick.
-        val needResolve = espnBase == null && !(espnEventId == null && isMissed("espn|match"))
-        val needScoreboardRefresh = espnBase != null && !summaryEndpoint && fetchEvent
+        //    (F1, UFC, tennis) have nothing else to poll, so they re-read the scoreboard on the SLOW cadence only.
+        //    A miss (no hit in the queried scoreboards, pinned id or not) is remembered, so a wrong id cannot
+        //    re-fetch whole-day scoreboards every tick.
+        val needResolve = espnBase == null && !isMissed("espn|match")
+        val needScoreboardRefresh = espnBase != null && !summaryEndpoint && fetchSummary
         if (espnOn && (needResolve || needScoreboardRefresh)) {
             val t0 = nowMs()
             val failure = resolveEspnEvent(mapping, league!!, ::miss)
@@ -129,7 +130,8 @@ internal class GameDetailSession(
         // 3. Provisional state (to decide whether the summary is worth fetching).
         val baseHdr = if (espnOn && espnEventRoot != null && profileKey != null) asm.header(profileKey, espnEventRoot!!) else null
         val tsdbD = tsdbDetail.takeIf { tsdbPrimary }
-        if (tsdbPrimary && tsdbD == null) {
+        // No backend answer (failed / empty / disabled) is fine when ESPN resolved the event: ESPN is then the primary.
+        if (tsdbPrimary && tsdbD == null && baseHdr == null) {
             return when (val a = tsdbAnswer) {
                 is SourceResult.Failed -> DetailLoad.Failed(a.timedOut)
                 else -> DetailLoad.Empty
@@ -184,7 +186,7 @@ internal class GameDetailSession(
             if (type == BlockType.WATCH || !visible(type, state)) continue
             for (source in mapping.chainFor(type)) {
                 val block: GameBlock? = when (source) {
-                    "tsdb" -> if (tsdbPrimary) tsdbBlocks[type].also { note(type.id, "tsdb", if (it == null) "empty" else "loaded") } else null
+                    "tsdb" -> if (tsdbD != null) tsdbBlocks[type].also { note(type.id, "tsdb", if (it == null) "empty" else "loaded") } else null
                     "espn" -> espnBlock(type, asm, profileKey, espnOn, espnSummaryFailed, ::note, ::outcomeOf)
                     else -> null
                 }
@@ -258,7 +260,7 @@ internal class GameDetailSession(
                 }
             }
         }
-        if (known == null) miss("espn|match")
+        miss("espn|match")
         return null
     }
 
@@ -287,8 +289,6 @@ internal class GameDetailSession(
 
     private companion object {
         const val NEGATIVE_TTL_MS = 5L * 60 * 1000
-        /** A fast tick asks the backend for these only; everything else rides the slower summary tick. */
-        val FAST_TSDB_BLOCKS = setOf("stats", "timeline")
         val UPCOMING_BLOCKS = setOf(BlockType.BROADCAST, BlockType.FORM, BlockType.LINEUP, BlockType.RESULTS, BlockType.NEXT, BlockType.STANDINGS, BlockType.HIGHLIGHTS)
     }
 }

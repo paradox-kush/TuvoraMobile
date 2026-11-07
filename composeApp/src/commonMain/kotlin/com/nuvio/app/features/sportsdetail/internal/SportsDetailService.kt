@@ -24,6 +24,8 @@ internal class InMemoryMappingStorage : MappingStorage {
     override fun save(value: StoredMapping) { stored = value }
 }
 
+private const val SYNC_MIN_INTERVAL_MS = 10L * 60 * 1000
+
 internal class DefaultSportsDetailService(
     storage: MappingStorage = InMemoryMappingStorage(),
     private val http: SportsHttp = PlatformSportsHttp(),
@@ -38,7 +40,15 @@ internal class DefaultSportsDetailService(
 
     override fun open(ref: GameRef): GameDetailSource = GameDetailSession(ref, { store.current }, tsdb, espn)
 
-    override suspend fun syncMapping() { sync.sync() }
+    private var lastSyncMs = 0L
+
+    /** Throttled: every screen open asks, the network is touched at most every 10 minutes. */
+    override suspend fun syncMapping() {
+        val now = kotlin.time.Clock.System.now().toEpochMilliseconds()
+        if (lastSyncMs != 0L && now - lastSyncMs < SYNC_MIN_INTERVAL_MS) return
+        lastSyncMs = now
+        sync.sync()
+    }
 
     override fun refreshConfig(): GameDetailRefreshPolicy.Config = store.current.espn.let {
         GameDetailRefreshPolicy.configFrom(it.liveMs, it.summaryMs, it.minMs)

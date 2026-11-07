@@ -60,8 +60,8 @@ data class GameDetail(
     val leagueName: String,
     val round: String? = null,
     val venue: String? = null,
-    /** ISO-8601 UTC. */
-    val startsAt: String,
+    /** ISO-8601 UTC; may be empty when the provider has no kickoff time. */
+    val startsAt: String = "",
     val state: GameState = GameState.UPCOMING,
     val header: Header,
     val live: LiveInfo? = null,
