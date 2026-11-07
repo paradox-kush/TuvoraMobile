@@ -158,6 +158,21 @@ class SportsMappingTest {
         assertNull(storage.rejected)
     }
 
+    @Test fun `a rollback publish with a LOWER version string than the bundled one is adopted and survives a restart`() = runBlocking<Unit> {
+        val lower = editedMappingJson("\"version\": \"2026-11-08.2\"", "\"version\": \"2026-11-07.3\"")
+        assertTrue("2026-11-07.3" < bundledMapping().version, "precondition: the remote version sorts below the bundled one")
+        val storage = MemStorage()
+        val store = SportsMappingStore(storage, bundledMapping())
+        val http = FakeHttp(mutableListOf(HttpReply(200, lower, "\"rollback\"")))
+        assertIs<RemoteMappingSync.Outcome.Updated>(RemoteMappingSync(store, http, url = "u", report = {}).sync())
+        assertEquals("2026-11-07.3", store.current.version, "adoption is by validity and publish order, never by comparing version strings")
+        assertEquals("2026-11-07.3", SportsMappingStore(storage, bundledMapping()).current.version, "the persisted remote beats the bundled one on the next launch; bundled is only the fallback")
+        // and the next poll revalidates by ETag
+        val again = FakeHttp(mutableListOf(HttpReply(304, null, null)))
+        RemoteMappingSync(SportsMappingStore(storage, bundledMapping()), again, url = "u", report = {}).sync()
+        assertEquals("\"rollback\"", again.requests[0].second["If-None-Match"])
+    }
+
     private class FakeHttp(val replies: MutableList<HttpReply>) : SportsHttp {
         val requests = mutableListOf<Pair<String, Map<String, String>>>()
         override suspend fun get(url: String, headers: Map<String, String>, deadlineMs: Long): HttpReply {
