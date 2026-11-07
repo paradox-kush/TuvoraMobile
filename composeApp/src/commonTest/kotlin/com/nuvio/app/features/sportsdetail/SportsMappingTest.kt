@@ -30,7 +30,7 @@ class SportsMappingTest {
     @Test fun `bundled default parses and validates`() {
         val m = bundledMapping()
         assertEquals(1, m.schemaVersion)
-        assertEquals("2026-11-08.2", m.version)
+        assertEquals("2026-11-08.3", m.version)
         assertEquals(9, m.profiles.size)
         assertEquals("soccer/eng.1", m.leagueByTsdb("4328")?.espn)
         assertEquals(15_000L, m.espn.liveMs)
@@ -72,27 +72,27 @@ class SportsMappingTest {
         val store = SportsMappingStore(MemStorage(), bundledMapping())
         val bad = editedMappingJson("\"schemaVersion\": 1", "\"schemaVersion\": 9")
         assertIs<AdoptResult.Rejected>(store.offer(bad, "e1"))
-        assertEquals("2026-11-08.2", store.current.version)
-        val good = editedMappingJson("\"version\": \"2026-11-08.2\"", "\"version\": \"2026-11-08.2\"")
+        assertEquals("2026-11-08.3", store.current.version)
+        val good = editedMappingJson("\"version\": \"2026-11-08.3\"", "\"version\": \"2026-11-08.3\"")
         assertIs<AdoptResult.Adopted>(store.offer(good, "e2"))
-        assertEquals("2026-11-08.2", store.current.version)
+        assertEquals("2026-11-08.3", store.current.version)
         assertIs<AdoptResult.Rejected>(store.offer("{ not json", "e3"))
-        assertEquals("2026-11-08.2", store.current.version)
+        assertEquals("2026-11-08.3", store.current.version)
     }
 
     @Test fun `store restores a persisted mapping and falls back to bundled if it no longer validates`() {
         val storage = MemStorage()
         val first = SportsMappingStore(storage, bundledMapping())
-        first.offer(editedMappingJson("\"version\": \"2026-11-08.2\"", "\"version\": \"2026-11-09.1\""), "etag-9")
+        first.offer(editedMappingJson("\"version\": \"2026-11-08.3\"", "\"version\": \"2026-11-09.1\""), "etag-9")
         assertEquals("etag-9", storage.stored?.etag)
         assertEquals("2026-11-09.1", SportsMappingStore(storage, bundledMapping()).current.version)
         storage.stored = StoredMapping("{\"schemaVersion\":7}", "x")
-        assertEquals("2026-11-08.2", SportsMappingStore(storage, bundledMapping()).current.version)
+        assertEquals("2026-11-08.3", SportsMappingStore(storage, bundledMapping()).current.version)
     }
 
     @Test fun `kill switches cover ESPN as a whole and a sport and a league`() {
         assertTrue(bundledMapping().espnEnabledFor(leagueTsdbId = "4387"))
-        val all = mappingOf(editedMappingJson("\"espn\": false, \"sports\": []", "\"espn\": true, \"sports\": []"))
+        val all = mappingOf(editedMappingJson("\"espn\": false", "\"espn\": true"))
         assertFalse(all.espnEnabledFor("4387"))
         val sport = mappingOf(editedMappingJson("\"sports\": []", "\"sports\": [\"Basketball\", \"hockey\"]"))
         assertFalse(sport.espnEnabledFor("4387"))   // league sport "Basketball"
@@ -154,12 +154,12 @@ class SportsMappingTest {
         assertEquals("\"bad\"", http.requests[0].second["If-None-Match"])
         // a later good document clears it
         val s2 = SportsMappingStore(storage, bundledMapping())
-        assertIs<AdoptResult.Adopted>(s2.offer(editedMappingJson("\"version\": \"2026-11-08.2\"", "\"version\": \"2026-12-02.1\""), "\"good\""))
+        assertIs<AdoptResult.Adopted>(s2.offer(editedMappingJson("\"version\": \"2026-11-08.3\"", "\"version\": \"2026-12-02.1\""), "\"good\""))
         assertNull(storage.rejected)
     }
 
     @Test fun `a rollback publish with a LOWER version string than the bundled one is adopted and survives a restart`() = runBlocking<Unit> {
-        val lower = editedMappingJson("\"version\": \"2026-11-08.2\"", "\"version\": \"2026-11-07.3\"")
+        val lower = editedMappingJson("\"version\": \"2026-11-08.3\"", "\"version\": \"2026-11-07.3\"")
         assertTrue("2026-11-07.3" < bundledMapping().version, "precondition: the remote version sorts below the bundled one")
         val storage = MemStorage()
         val store = SportsMappingStore(storage, bundledMapping())
@@ -173,6 +173,19 @@ class SportsMappingTest {
         assertEquals("\"rollback\"", again.requests[0].second["If-None-Match"])
     }
 
+    @Test fun `market win chance is OFF by default and a remote mapping can switch it on`() {
+        assertFalse(bundledMapping().marketEnabled, "bundled default: killSwitch.market = true")
+        assertTrue(mappingOf(editedMappingJson("\"market\": true", "\"market\": false")).marketEnabled)
+        assertFalse(mappingOf(editedMappingJson("\"market\": true,", "")).marketEnabled, "no key means killed")
+        assertFalse(mappingOf(editedMappingJson("\"market\": true", "\"market\": \"maybe\"")).marketEnabled, "anything but an explicit false stays off")
+    }
+
+    @Test fun `win probability chain is ESPN first then the market and the chain accepts market`() {
+        assertEquals(listOf("espn", "market"), bundledMapping().chainFor(com.nuvio.app.features.sportsdetail.internal.BlockType.WIN_PROBABILITY))
+        val withChain = mappingOf(editedMappingJson("\"eventOverrides\": {}", "\"eventOverrides\": {}, \"chain\": {\"winProbability\": [\"market\", \"espn\"]}"))
+        assertNull(SportsMappingValidator.validate(withChain))
+    }
+
     private class FakeHttp(val replies: MutableList<HttpReply>) : SportsHttp {
         val requests = mutableListOf<Pair<String, Map<String, String>>>()
         override suspend fun get(url: String, headers: Map<String, String>, deadlineMs: Long): HttpReply {
@@ -184,7 +197,7 @@ class SportsMappingTest {
     @Test fun `remote sync sends the stored ETag and treats 304 as unchanged`() = runBlocking<Unit> {
         val storage = MemStorage()
         val store = SportsMappingStore(storage, bundledMapping())
-        val body = editedMappingJson("\"version\": \"2026-11-08.2\"", "\"version\": \"2026-12-01.1\"")
+        val body = editedMappingJson("\"version\": \"2026-11-08.3\"", "\"version\": \"2026-12-01.1\"")
         val http = FakeHttp(mutableListOf(HttpReply(200, body, "\"v2\""), HttpReply(304, null, "\"v2\""), HttpReply(500, null, null)))
         val sync = RemoteMappingSync(store, http, url = "https://example.invalid/mapping.json")
         assertIs<RemoteMappingSync.Outcome.Updated>(sync.sync())
@@ -202,7 +215,7 @@ class SportsMappingTest {
         val http = FakeHttp(mutableListOf(HttpReply(200, "{\"schemaVersion\": 99}", "\"bad\"")))
         val out = RemoteMappingSync(store, http, url = "u").sync()
         assertIs<RemoteMappingSync.Outcome.Rejected>(out)
-        assertEquals("2026-11-08.2", store.current.version)
+        assertEquals("2026-11-08.3", store.current.version)
         assertNull(store.etag)
     }
 

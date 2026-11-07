@@ -1,5 +1,6 @@
 package com.nuvio.app.features.sportsdetail.internal.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,6 +33,9 @@ import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -188,19 +192,55 @@ internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?
     if (situation == null && win == null) return
     NuvioSurfaceCard {
         situation?.let { Text(it.line, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary) }
-        if (situation != null && win != null) Spacer(Modifier.height(NuvioTokens.Space.s8))
+        if (situation != null && win != null) Spacer(Modifier.height(NuvioTokens.Space.s12))
         win?.let { w ->
             val home = w.homePercent.coerceIn(0, 100)
+            val draw = w.drawPercent?.coerceIn(0, 100)
+            Text("WIN CHANCE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textMuted)
+            Spacer(Modifier.height(NuvioTokens.Space.s6))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("$awayName ${100 - home}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textSecondary)
+                Text("$awayName ${(100 - home - (draw ?: 0)).coerceAtLeast(0)}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textSecondary)
+                if (draw != null && draw > 0) Text("Draw $draw%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
                 Text("$homeName $home%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textSecondary)
             }
             Spacer(Modifier.height(NuvioTokens.Space.s4))
+            val awayPart = (100 - home - (draw ?: 0)).coerceAtLeast(0)
             Row(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(percent = 50))) {
-                if (100 - home > 0) Box(Modifier.weight((100 - home).toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.borderStrong))
+                if (awayPart > 0) Box(Modifier.weight(awayPart.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.borderStrong))
+                if (draw != null && draw > 0) Box(Modifier.weight(draw.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.borderDefault))
                 if (home > 0) Box(Modifier.weight(home.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.accent))
             }
+            GameDetailUiPolicy.chartPoints(w.history)?.let { pts ->
+                Spacer(Modifier.height(NuvioTokens.Space.s12))
+                MomentumChart(pts, homeName)
+            }
+            GameDetailUiPolicy.winChanceCaption(w)?.let {
+                Spacer(Modifier.height(NuvioTokens.Space.s6))
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
+            }
         }
+    }
+}
+
+/** A small momentum line of the home team's win chance (phone/iPad; TV keeps the bar). 50% is the faint midline. */
+@Composable
+private fun MomentumChart(points: List<Float>, homeName: String) {
+    val line = MaterialTheme.nuvio.colors.accent
+    val mid = MaterialTheme.nuvio.colors.borderSubtle
+    Column {
+        Canvas(Modifier.fillMaxWidth().height(56.dp)) {
+            val w = size.width
+            val h = size.height
+            drawLine(mid, Offset(0f, h / 2), Offset(w, h / 2), strokeWidth = 1f)
+            val path = Path()
+            points.forEachIndexed { i, v ->
+                val x = if (points.size == 1) 0f else w * i / (points.size - 1)
+                val y = h * (1f - v)
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, line, style = Stroke(width = 3f))
+        }
+        Text("$homeName win chance over time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
     }
 }
 

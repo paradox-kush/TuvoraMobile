@@ -6,6 +6,8 @@ import com.nuvio.app.features.sportsdetail.api.Header
 import com.nuvio.app.features.sportsdetail.api.LiveInfo
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.VersusHeader
+import com.nuvio.app.features.sportsdetail.api.WinPoint
+import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
 import com.nuvio.app.features.sportsdetail.api.FormBlock
 import com.nuvio.app.features.sportsdetail.api.GameBlock
 import com.nuvio.app.features.sportsdetail.api.HighlightsBlock
@@ -72,6 +74,23 @@ internal object GameDetailUiPolicy {
             else -> null
         } ?: return null
         return s.short?.takeIf { it.isNotBlank() } ?: s.name
+    }
+
+    private const val CHART_MAX_POINTS = 60
+
+    /** Momentum line: home percent as 0..1, time-ordered, at most 60 points; null when there is no line to draw (< 2 points). */
+    fun chartPoints(history: List<WinPoint>): List<Float>? {
+        if (history.size < 2) return null
+        val sorted = history.sortedBy { it.t }
+        val picked = if (sorted.size <= CHART_MAX_POINTS) sorted else (0 until CHART_MAX_POINTS).map { sorted[(it.toLong() * (sorted.size - 1) / (CHART_MAX_POINTS - 1)).toInt()] }
+        return picked.map { it.home.coerceIn(0, 100) / 100f }
+    }
+
+    /** "via Polymarket" / "via ESPN": the block's attribution, else derived from its source; null when unknown. */
+    fun winChanceCaption(b: WinProbabilityBlock): String? = b.attribution?.takeIf { it.isNotBlank() } ?: when (b.source) {
+        "espn" -> "via ESPN"
+        "polymarket" -> "via Polymarket"
+        else -> null
     }
 
     fun isWide(widthDp: Int): Boolean = widthDp >= WIDE_MIN_DP

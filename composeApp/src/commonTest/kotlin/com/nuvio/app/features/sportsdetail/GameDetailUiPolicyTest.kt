@@ -124,4 +124,22 @@ class GameDetailUiPolicyTest {
         assertNull(GameDetailUiPolicy.teamTag("home", EventHeader("Grand Prix")))
     }
 
+
+    @Test fun `momentum chart points are time-ordered normalised and capped`() {
+        assertNull(GameDetailUiPolicy.chartPoints(emptyList()))
+        assertNull(GameDetailUiPolicy.chartPoints(listOf(com.nuvio.app.features.sportsdetail.api.WinPoint(1, 50))), "one point is no line")
+        val pts = GameDetailUiPolicy.chartPoints(listOf(
+            com.nuvio.app.features.sportsdetail.api.WinPoint(3, 80), com.nuvio.app.features.sportsdetail.api.WinPoint(1, 50), com.nuvio.app.features.sportsdetail.api.WinPoint(2, 100),
+        ))!!
+        assertEquals(listOf(0.5f, 1.0f, 0.8f), pts, "sorted by time, percent -> 0..1")
+        val many = (1L..500L).map { com.nuvio.app.features.sportsdetail.api.WinPoint(it, (it % 101).toInt()) }
+        assertEquals(60, GameDetailUiPolicy.chartPoints(many)!!.size)
+        assertEquals(0.01f, GameDetailUiPolicy.chartPoints(many)!!.first(), 0.0001f)
+    }
+
+    @Test fun `win chance caption is the attribution or the source name`() {
+        assertEquals("via Polymarket", GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "polymarket", attribution = "via Polymarket")))
+        assertEquals("via ESPN", GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "espn")))
+        assertNull(GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "")))
+    }
 }

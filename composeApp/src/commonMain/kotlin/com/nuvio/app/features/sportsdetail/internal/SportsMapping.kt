@@ -22,7 +22,8 @@ internal enum class BlockType(val id: String) {
     }
 }
 
-internal data class KillSwitch(val espn: Boolean, val sports: Set<String>, val leagues: Set<String>)
+/** [market] true = the Polymarket win chance is OFF (the default); only an explicit `false` in the mapping turns it on. */
+internal data class KillSwitch(val espn: Boolean, val sports: Set<String>, val leagues: Set<String>, val market: Boolean = true)
 
 internal data class EspnSourceConfig(
     val scoreboardTemplate: String,
@@ -92,6 +93,9 @@ internal data class SportsMapping(
     fun eventOverride(tsdbEventId: String?): String? =
         tsdbEventId?.let { eventOverrides[it] ?: eventOverrides["tsdb:$it"] }
 
+    /** Polymarket win chance (served by our backend). OFF unless the mapping says `killSwitch.market: false`. */
+    val marketEnabled: Boolean get() = !killSwitch.market
+
     fun leagueByTsdb(id: String): LeagueEntry? = leagues.firstOrNull { it.tsdb == id }
 
     /** Remote kill switches: ESPN as a whole, per sport (matches the league's sport OR its profile), per league. */
@@ -112,6 +116,7 @@ internal data class SportsMapping(
         BlockType.STATS, BlockType.TIMELINE, BlockType.LINEUP, BlockType.STANDINGS,
         BlockType.FORM, BlockType.RESULTS, BlockType.NEXT -> listOf("tsdb", "espn")
         BlockType.HIGHLIGHTS -> listOf("tsdb")
+        BlockType.WIN_PROBABILITY -> listOf("espn", "market")
         else -> listOf("espn")
     }
 }
@@ -180,6 +185,7 @@ internal object SportsMappingParser {
                 espn = (kill?.get("espn") as? JsonPrimitive)?.booleanOrNull ?: false,
                 sports = kill?.get("sports").strSet(),
                 leagues = kill?.get("leagues").strSet(),
+                market = (kill?.get("market") as? JsonPrimitive)?.booleanOrNull ?: true,
             ),
             espn = EspnSourceConfig(
                 scoreboardTemplate = espnSrc["scoreboard"].s() ?: throw InvalidMapping("no espn.scoreboard"),
@@ -224,7 +230,7 @@ internal object SportsMappingValidator {
     const val SUPPORTED_SCHEMA = 1
     private const val SMOKE_PROFILE = "basketball"
     private const val ESPN_PREFIX = "https://site.api.espn.com/"
-    private val SOURCES = setOf("tsdb", "espn")
+    private val SOURCES = setOf("tsdb", "espn", "market")
 
     private val teamEvent: JsonElement by lazy { Json.parseToJsonElement(SmokeFixture.TEAM_EVENT) }
     private val eventEvent: JsonElement by lazy { Json.parseToJsonElement(SmokeFixture.EVENT_EVENT) }

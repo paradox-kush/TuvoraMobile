@@ -165,9 +165,22 @@ data class NextItem(@SerialName("when") val whenText: String, val text: String)
 @Serializable @SerialName("next")
 data class NextBlock(val items: List<NextItem>, override val source: String = "") : GameBlock
 
-/** Home win chance, whole percent 0..100. */
+/** One point of the win-chance history (epoch ms, home percent 0..100). */
+@Serializable
+data class WinPoint(val t: Long, val home: Int)
+
+/**
+ * Home win chance, whole percent 0..100. [source] is "espn" or "polymarket"; [attribution] is the caption ("via Polymarket",
+ * "via ESPN"); [drawPercent] for sports with a draw; [history] feeds the momentum line (phone/iPad). No odds, prices or links.
+ */
 @Serializable @SerialName("winProbability")
-data class WinProbabilityBlock(val homePercent: Int, override val source: String = "") : GameBlock
+data class WinProbabilityBlock(
+    val homePercent: Int,
+    override val source: String = "",
+    val attribution: String? = null,
+    val drawPercent: Int? = null,
+    val history: List<WinPoint> = emptyList(),
+) : GameBlock
 
 /** Decoded from a block type this build does not know; dropped by [GameDetailCodec]. */
 @Serializable @SerialName("unknown")

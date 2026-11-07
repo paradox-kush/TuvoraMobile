@@ -387,7 +387,7 @@ internal class EspnAssembler(private val m: SportsMapping) {
     private fun winProbability(spec: BlockSpec, root: JsonElement?): GameBlock? {
         val v = (SportsPath.first(root, spec.path) as? JsonPrimitive)?.doubleOrNull ?: return null
         val pct = if (v <= 1.0) v * 100.0 else v
-        return WinProbabilityBlock(pct.roundToInt().coerceIn(0, 100), ESPN)
+        return WinProbabilityBlock(pct.roundToInt().coerceIn(0, 100), ESPN, attribution = "via ESPN")
     }
 
     private fun situation(spec: BlockSpec, root: JsonElement?): GameBlock? {
