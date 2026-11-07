@@ -16,6 +16,11 @@ struct TuvoraTVApp: App {
             UserDefaults.standard.set(args[i + 1] != "false", forKey: NuvioLayoutPrefs.collapseSidebarKey)
         }
         #if DEBUG && targetEnvironment(simulator)
+        // `-smokeDiagnostics <true|false>` sets Settings -> Diagnostics -> Crash & usage reports, so a UI test
+        // starts from a known consent state whatever an earlier run left behind.
+        if let i = args.firstIndex(of: "-smokeDiagnostics"), i + 1 < args.count {
+            UserDefaults.standard.set(args[i + 1] != "false", forKey: "sentry_enabled")
+        }
         // Disposable simulator acceptance tests: local-only profile, no account sign-in or telemetry.
         if args.contains("-smokeLocalGuest") {
             if AuthStorage.shared.loadAnonymousUserId() == nil {
@@ -27,6 +32,8 @@ struct TuvoraTVApp: App {
         #endif
         // PostHog with crash autocapture, the iPhone app's scrubbing and its consent switch.
         TuvoraTelemetry.start()
+        // Telemetry v2: support code and hardware profile on every event (the code is made once per install).
+        TvTelemetryBootstrap.registerSuperProperties()
         AnalyticsSink.shared.register { event, properties in
             PostHogSDK.shared.capture(event, properties: properties)
         }

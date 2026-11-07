@@ -9,7 +9,7 @@ import TuvoraCore
 /// Categories follow NuvioTV's order. Android-only debug tooling is omitted.
 struct SettingsScreen: View {
     enum Category: String, CaseIterable, Identifiable {
-        case account, profiles, appearance, layout, discovery, integrations, playback, tracking, party, advanced, about
+        case account, profiles, appearance, layout, discovery, integrations, playback, tracking, party, advanced, diagnostics, about
         var id: String { rawValue }
         /// The rail's categories. Content & Discovery manages add-ons and plugins, which the App Store
         /// build compiles out (the phone's store build drops the same row).
@@ -30,6 +30,7 @@ struct SettingsScreen: View {
             case .tracking: return "Tracking"
             case .party: return "Watch party"
             case .advanced: return "Advanced"
+            case .diagnostics: return "Diagnostics"
             case .about: return "About"
             }
         }
@@ -45,6 +46,7 @@ struct SettingsScreen: View {
             case .tracking: return "md_sync"
             case .party: return "md_people"
             case .advanced: return "sidebar_settings"
+            case .diagnostics: return "md_flag"
             case .about: return "md_info"
             }
         }
@@ -213,6 +215,7 @@ struct SettingsScreen: View {
         case .tracking: TrackingSettingsDetail(model: integrations)
         case .party: WatchPartySettingsDetail(party: party)
         case .advanced: PrivacySettingsDetail()
+        case .diagnostics: DiagnosticsSettingsDetail()
         case .about: AboutSettingsDetail()
         }
     }
@@ -1607,6 +1610,8 @@ private struct AboutSettingsDetail: View {
     @EnvironmentObject private var dialogs: SettingsDialogs
     @Environment(\.nuvio) private var colors
     private var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–" }
+    /// Per-install support code (K7Q2-9MPX), the one thing a viewer reads off the TV to identify themselves.
+    private let supportCode = TvTelemetry.shared.displaySupportCode
 
     var body: some View {
         VStack(alignment: .leading, spacing: dp(14)) {
@@ -1618,6 +1623,7 @@ private struct AboutSettingsDetail: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, dp(4))
+                SupportCodeRow(code: supportCode)
                 SettingsActionRow(title: "Join the Discord", subtitle: "Setup help, feature ideas and release news", trailingIcon: "md_open_in_new") {
                     dialogs.push(.qr(url: "https://discord.gg/wFu9T2nS8X", instruction: "Scan with your phone to join the Tuvora Discord"))
                 }

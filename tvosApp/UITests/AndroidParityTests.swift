@@ -114,9 +114,9 @@ final class AndroidParityTests: XCTestCase {
 
     func testPrivacyControlsAreReachableWithoutEnablingTelemetry() {
         launch(["-smokeTab", "settings", "-smokeSettings", "advanced"])
-        let diagnostic = app.buttons["privacy.diagnostics"]
-        focus(diagnostic)
         focus(app.buttons["privacy.recommendations"])
+        launch(["-smokeTab", "settings", "-smokeSettings", "diagnostics"])
+        focus(app.buttons["privacy.diagnostics"])
         snapshot("privacy-controls")
     }
 

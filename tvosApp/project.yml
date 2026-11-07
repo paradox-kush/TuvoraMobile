@@ -7,8 +7,10 @@ options:
 packages:
   # Our MPVKit fork (git submodule at NuvioMobile/MPVKit): libmpv + FFmpeg, LGPL build, tvOS slices.
   MPVKit: { path: ../MPVKit }
-  # Same SDK and version floor as the iPhone app (crash autocapture works on tvOS via POSIX signals).
-  PostHog: { url: https://github.com/PostHog/posthog-ios.git, majorVersion: 3.63.1 }
+  # Same SDK AND version as the iPhone app. iPhone's committed Package.resolved pins 3.63.1; `majorVersion`
+  # here floated to 3.90.0 on Apple TV, so the one shared TuvoraTelemetry.swift ran against two SDKs.
+  # Exact, until both apps move together (the iPhone project is another lane's to bump).
+  PostHog: { url: https://github.com/PostHog/posthog-ios.git, exactVersion: 3.63.1 }
 configFiles:
   Debug: Configuration/TuvoraTV.xcconfig
   Release: Configuration/TuvoraTV.xcconfig

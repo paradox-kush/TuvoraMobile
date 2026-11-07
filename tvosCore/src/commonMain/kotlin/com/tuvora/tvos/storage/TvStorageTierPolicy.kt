@@ -28,7 +28,10 @@ object TvStorageTierPolicy {
 
     private val durableExact = setOf(
         // identity and backend
-        "anonymous_user_id", "client_instance_id", "local_data_owner_user_id", "local_data_owner_email",
+        "anonymous_user_id", "client_instance_id",
+        // telemetry identity and consent: a cache purge must neither rotate the support code nor
+        // silently turn reporting back on for someone who switched it off
+        "telemetry_support_code", "sentry_enabled", "local_data_owner_user_id", "local_data_owner_email",
         "nuvio_sync_backend_selection_payload_v1",
         // profiles and addons
         "profile_payload", "installed_manifest_urls", "installed_manifest_enabled_states",

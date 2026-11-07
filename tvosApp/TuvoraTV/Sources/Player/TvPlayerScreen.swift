@@ -68,6 +68,8 @@ struct TvPlayerScreen: View {
     /// Bare video: nothing over it that takes focus.
     private var bareVideoFocusable: Bool {
         panel == nil && overlay == nil && !controlsVisible && !skipVisible && !startOverVisible
+            // The error card's Retry owns focus.
+            && state?.errorMessage == nil
     }
 
     /// UI-test marker: the session this screen drives and whether *that* session is playing.
@@ -119,7 +121,6 @@ struct TvPlayerScreen: View {
                 PlayerChrome(session: session, state: state, scrubMs: scrubMs, visible: controlsVisible || scrubMs != nil,
                              skipFlash: skipFlash,
                              onShowPanel: { panel = $0 }, onShowOverlay: { overlay = $0 }, onActivity: bumpControls,
-                             onReport: { report(trigger: state.errorMessage != nil ? "error" : "player") },
                              partyAvailable: party.view.available || party.view.inParty,
                              onSeekBarFocus: { seekBarFocused = $0 })
                     // Nothing under a dialog or panel may take focus from it.
@@ -240,9 +241,6 @@ struct TvPlayerScreen: View {
                     }
                 }
             }
-            if args.contains("-smokeReport") {
-                Task { try? await Task.sleep(nanoseconds: 8_000_000_000); report(trigger: "smoke") }
-            }
             if let i = args.firstIndex(of: "-smokeSkip"), i + 1 < args.count {
                 let parts = args[i + 1].split(separator: ",").map(String.init)
                 if parts.count == 3, let a = Double(parts[0]), let b = Double(parts[1]) {
@@ -315,12 +313,6 @@ struct TvPlayerScreen: View {
                       next.startOverAtMs.map { "\($0)" } ?? "-", next.speed, next.subtitleDelayMs, next.addonSubtitleId ?? "-", next.skipSegmentCount, next.audioDelayMs, next.audioDelaySupported ? 1 : 0)
             }
         }
-    }
-
-    /// NuvioTV "Report Issue": logged and sent as an analytics event (TvPlayerSession.reportIssue).
-    private func report(trigger: String) {
-        session.reportIssue(trigger: trigger)
-        playback.notify(L("Report Sent"))
     }
 
     /// Live zapping: the next/previous channel of the list the viewer started from.
@@ -517,10 +509,28 @@ private struct PlayerChrome: View {
     let onShowPanel: (PlayerPanel) -> Void
     let onShowOverlay: (PlayerOverlay) -> Void
     let onActivity: () -> Void
-    let onReport: () -> Void
     var partyAvailable = false
     var onSeekBarFocus: (Bool) -> Void = { _ in }
-    @State private var reported = false
+    /// Telemetry v2 "Send report": the shared Kotlin port does the work; this view renders its outcome.
+    @StateObject private var flow = ReportFlow()
+    @FocusState private var retryFocused: Bool
+    private var reported: Bool { if case .sent = flow.state { return true } else { return false } }
+
+    private var sendTitle: String {
+        switch flow.state {
+        case .sending: return "Sending…"
+        case .sent: return "Report sent"
+        case .consentOff: return "Turn on reports"
+        default: return "Send report"
+        }
+    }
+
+    private func sendReport() {
+        // From an error screen the category is inferred (no picker): the failure is the context.
+        let failed = state.errorMessage != nil
+        flow.send(category: failed ? .wontPlay : .other, surface: state.isLive ? .live : .vod,
+                  engine: state.lane == .avPlayer ? "avplayer" : "libmpv", failureCode: failed ? "player_error" : nil)
+    }
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -530,8 +540,27 @@ private struct PlayerChrome: View {
                     Text("Playback failed").font(NuvioType.titleLarge).foregroundStyle(colors.textPrimary)
                     Text(error).font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary).multilineTextAlignment(.center)
                     Text("Press Play/Pause to try again").font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary)
-                    ReportButton(reported: reported) { reported = true; onReport() }
+                    // Retry is the primary action and keeps initial focus; Send report is the next focusable to its right.
+                    HStack(spacing: dp(12)) {
+                        ErrorActionButton(title: "Retry", filled: true, id: "player.error.retry", focus: $retryFocused) {
+                            flow.reset(); session.retry(); onActivity()
+                        }
+                        // One button in one position for every state, so focus stays on it as its label changes.
+                        ErrorActionButton(title: sendTitle, filled: false, id: "player.error.send") {
+                            switch flow.state {
+                            case .consentOff: flow.turnOnReports()
+                            case .sent, .sending: break
+                            default: sendReport()
+                            }
+                        }
+                    }
+                    .focusSection()
+                    if let message = flow.state.message {
+                        Text(message).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                            .multilineTextAlignment(.center).accessibilityIdentifier("player.error.reportState")
+                    }
                 }
+                .onAppear { DispatchQueue.main.async { retryFocused = true } }
                 .padding(dp(24))
                 .navigationGlass(in: RoundedRectangle(cornerRadius: NuvioTokens.Radius.dialog))
             } else if state.isLoading && scrubMs == nil {
@@ -586,8 +615,8 @@ private struct PlayerChrome: View {
                 PlayerButton(icon: "md_info") { onShowOverlay(.info) }
                 PlayerButton(icon: reported ? "md_check_circle" : "md_flag") {
                     guard !reported else { return }
-                    reported = true; onReport()
-                }
+                    sendReport()
+                }.accessibilityIdentifier("player.sendReport")
             }
             .focusSection()
         }
@@ -1301,22 +1330,27 @@ private struct DelayButton: View {
     }
 }
 
-/// The "Report Issue" button NuvioTV shows on a playback error; "Report Sent" once pressed.
-private struct ReportButton: View {
-    let reported: Bool
+/// A pill on the playback-error card: Retry (filled, the primary) and Send report (outlined, secondary).
+/// Highlights white when focused like every other player control; disabled while a send is in flight.
+private struct ErrorActionButton: View {
+    let title: String
+    let filled: Bool
+    let id: String
+    var focus: FocusState<Bool>.Binding? = nil
     let action: () -> Void
-    @FocusState private var focused: Bool
+    @FocusState private var ownFocus: Bool
 
     var body: some View {
-        Button(action: action) {
-            Text(reported ? "Report Sent" : "Report Issue").font(NuvioType.labelLargeSemi)
+        let focused = (focus?.wrappedValue ?? false) || ownFocus
+        let button = Button(action: action) {
+            Text(ui: title).font(NuvioType.labelLargeSemi)
                 .foregroundStyle(focused ? Color.black : Color.white)
-                .padding(.horizontal, dp(18)).padding(.vertical, dp(8))
-                .background(Capsule().fill(focused ? Color.white : Color.white.opacity(0.12)))
+                .padding(.horizontal, dp(22)).padding(.vertical, dp(10))
+                .background(Capsule().fill(focused ? Color.white : Color.white.opacity(filled ? 0.28 : 0.12)))
         }
         .buttonStyle(PlainNoChromeButtonStyle())
-        .focused($focused)
-        .disabled(reported)
+        .accessibilityIdentifier(id)
+        if let focus { button.focused(focus) } else { button.focused($ownFocus) }
     }
 }
 
