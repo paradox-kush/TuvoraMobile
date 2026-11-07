@@ -216,7 +216,9 @@ internal class GameDetailSession(
                 val block: GameBlock? = when (source) {
                     "tsdb" -> if (tsdbD != null) tsdbBlocks[type].also { note(type.id, "tsdb", if (it == null) "empty" else "loaded") } else null
                     "espn" -> if (type == BlockType.WIN_PROBABILITY && state != GameState.LIVE) null
-                        else espnBlock(type, asm, profileKey, espnOn, espnSummaryFailed, ::note, ::outcomeOf)
+                        else espnBlock(type, asm, profileKey, espnOn, espnSummaryFailed, ::note, ::outcomeOf)?.let { b ->
+                            if (type == BlockType.WIN_PROBABILITY && b is WinProbabilityBlock) withMarketExtras(b, mapping, state, fetchSummary, ::isMissed, ::miss, ::note, durations) else b
+                        }
                     "market" -> if (type == BlockType.WIN_PROBABILITY) marketBlock(mapping, state, fetchSummary, ::isMissed, ::miss, ::note, durations) else null
                     else -> null
                 }
@@ -317,11 +319,11 @@ internal class GameDetailSession(
     }
 
     /**
-     * The Polymarket win chance, from OUR backend. Fetched on the first tick and then only on the slow (summary) cadence —
-     * never a separate poll; a final game fetches once. A miss (404 / disabled) is remembered per game; a failure backs off.
-     * A final game shows it only when there is a real momentum history to draw (a 100/0 bar after the whistle says nothing).
+     * The market's win-chance response, from OUR backend (Polymarket stays server-side). Fetched on the first tick and then only
+     * on the slow (summary) cadence — never a separate poll; a final game fetches once. A miss (404 / disabled) is remembered per
+     * game; a failure backs off. Returns the last good response, or null.
      */
-    private suspend fun marketBlock(
+    private suspend fun marketData(
         mapping: SportsMapping,
         state: GameState,
         fetchSummary: Boolean,
@@ -329,7 +331,7 @@ internal class GameDetailSession(
         miss: (String) -> Unit,
         note: (String, String, String) -> Unit,
         durations: MutableMap<String, Long>,
-    ): GameBlock? {
+    ): WinProbabilityBlock? {
         val src = market ?: return null
         val away = ref.awayName ?: return null
         if (!mapping.marketEnabledFor(ref.leagueId) || state == GameState.POSTPONED) return null
@@ -350,10 +352,36 @@ internal class GameDetailSession(
                 is SourceResult.Failed -> { marketBackoffUntilMs = nowMs() + ESPN_BACKOFF_MS; note("winProbability", "polymarket", if (r.timedOut) "timeout" else "failed") }
             }
         }
-        val b = marketCached ?: return null
+        return marketCached?.copy(asOfMs = marketAsOf)
+    }
+
+    /** The headline from the market (ESPN has none): a final game shows it only with a real momentum history. */
+    private suspend fun marketBlock(
+        mapping: SportsMapping, state: GameState, fetchSummary: Boolean,
+        isMissed: (String) -> Boolean, miss: (String) -> Unit, note: (String, String, String) -> Unit, durations: MutableMap<String, Long>,
+    ): GameBlock? {
+        val b = marketData(mapping, state, fetchSummary, isMissed, miss, note, durations) ?: return null
         if (state == GameState.FINAL && b.history.size < 2) return null
         note("winProbability", "polymarket", "loaded")
         return b
+    }
+
+    /**
+     * ESPN stays the headline when it has one (no source flip-flop), but the market is ALWAYS asked as well — same slow cadence,
+     * server-cached — for its storylines and, since ESPN has no series, the chart. The extras are credited separately.
+     */
+    private suspend fun withMarketExtras(
+        headline: WinProbabilityBlock, mapping: SportsMapping, state: GameState, fetchSummary: Boolean,
+        isMissed: (String) -> Boolean, miss: (String) -> Unit, note: (String, String, String) -> Unit, durations: MutableMap<String, Long>,
+    ): WinProbabilityBlock {
+        val m = marketData(mapping, state, fetchSummary, isMissed, miss, note, durations) ?: return headline
+        note("winProbability", "polymarket", "loaded")
+        return headline.copy(
+            history = headline.history.ifEmpty { m.history },
+            storylines = m.storylines,
+            extrasAttribution = m.attribution ?: "via Polymarket",
+            asOfMs = m.asOfMs,
+        )
     }
 
     private fun espnBlock(

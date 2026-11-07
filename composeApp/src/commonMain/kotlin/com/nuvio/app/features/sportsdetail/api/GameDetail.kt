@@ -188,6 +188,10 @@ data class WinProbabilityBlock(
     val history: List<WinPoint> = emptyList(),
     /** Up to three market storylines shown under the win chance (phone/iPad; TV at most one line). */
     val storylines: List<Storyline> = emptyList(),
+    /** Credit for the chart/storylines when they come from a different source than the headline ("via Polymarket" under an ESPN bar). */
+    val extrasAttribution: String? = null,
+    /** When the MARKET data of this block was valid (server time): the card shows its own staleness, not the screen's. */
+    val asOfMs: Long? = null,
 ) : GameBlock
 
 /** Decoded from a block type this build does not know; dropped by [GameDetailCodec]. */

@@ -357,7 +357,7 @@ class GameDetailSessionTest {
         val store = SportsMappingStore(MemStorage(), bundledMapping())
         val broken = editedMappingJson("\"path\": \"boxscore.teams[*].statistics[*]\", \"label\": \"label\", \"value\": \"displayValue\",\n        \"allow\": [\"Field Goal %\"",
             "\"path\": \"boxscore.teamz[*].statistics[*]\", \"label\": \"label\", \"value\": \"displayValue\",\n        \"allow\": [\"Field Goal %\"")
-            .replace("\"2026-11-08.3\"", "\"2026-11-07.2\"")
+            .replace("\"${bundledMapping().version}\"", "\"2026-11-07.2\"")
         assertIs<com.nuvio.app.features.sportsdetail.internal.AdoptResult.Adopted>(store.offer(broken, "b"))
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
         val s = session(FakeTsdb(tsdbEvent()), espn, store)
@@ -425,14 +425,37 @@ class GameDetailSessionTest {
 
     private fun winBlock(d: GameDetail) = d.blocks.filterIsInstance<com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock>().singleOrNull()
 
-    @Test fun `ESPN's own win probability comes first and the market is never asked`() = runBlocking<Unit> {
+    @Test fun `ESPN stays the headline but the market is always asked for storylines and the chart`() = runBlocking<Unit> {
+        val liveEvent = SportsFixtures.espn_nba_event.replace("\"state\":\"post\"", "\"state\":\"in\"")
+        val liveSummary = SportsFixtures.espn_nba_summary.replace("\"state\":\"post\"", "\"state\":\"in\"")
+        val hist = listOf(com.nuvio.app.features.sportsdetail.api.WinPoint(1L, 40), com.nuvio.app.features.sportsdetail.api.WinPoint(2L, 44))
+        val stories = listOf(com.nuvio.app.features.sportsdetail.api.Storyline("ot", "Goes to overtime", 8, null))
+        val market = FakeMarket(mc(44, hist, storylines = stories, asOf = 1_000L))
+        val s = session(FakeTsdb(tsdbEvent(state = GameState.LIVE)), FakeEspn(scoreboardOf(liveEvent), SourceResult.Ok(parse(liveSummary))), marketOn(), market = market)
+        val d = loaded(s.tick())
+        val w = assertNotNull(winBlock(d))
+        assertEquals("espn", w.source, "the headline is ESPN's")
+        assertEquals("via ESPN", w.attribution)
+        assertEquals(100, w.homePercent, "ESPN's number, not the market's 44")
+        assertEquals(stories, w.storylines)
+        assertEquals(hist, w.history, "ESPN has no series, so the chart is the market's")
+        assertEquals("via Polymarket", w.extrasAttribution)
+        assertEquals(1_000L, w.asOfMs, "the market block carries its own timestamp")
+        assertEquals("espn", d.sources["winProbability"])
+        assertEquals(1, market.requests.size)
+        s.tick(fetchEvent = true, fetchSummary = false)
+        assertEquals(1, market.requests.size, "the market rides the slow cadence only")
+        s.tick(fetchEvent = true, fetchSummary = true)
+        assertEquals(2, market.requests.size)
+    }
+
+    @Test fun `with the market off ESPN's win probability has no extras and the market is never asked`() = runBlocking<Unit> {
         val liveEvent = SportsFixtures.espn_nba_event.replace("\"state\":\"post\"", "\"state\":\"in\"")
         val liveSummary = SportsFixtures.espn_nba_summary.replace("\"state\":\"post\"", "\"state\":\"in\"")
         val market = FakeMarket(mc())
-        val d = loaded(session(FakeTsdb(tsdbEvent(state = GameState.LIVE)), FakeEspn(scoreboardOf(liveEvent), SourceResult.Ok(parse(liveSummary))), marketOn(), market = market).tick())
-        val w = assertNotNull(winBlock(d))
-        assertEquals("espn", w.source)
-        assertEquals("via ESPN", w.attribution)
+        val w = assertNotNull(winBlock(loaded(session(FakeTsdb(tsdbEvent(state = GameState.LIVE)), FakeEspn(scoreboardOf(liveEvent), SourceResult.Ok(parse(liveSummary))), market = market).tick())))
+        assertEquals(emptyList(), w.storylines)
+        assertNull(w.extrasAttribution)
         assertTrue(market.requests.isEmpty())
     }
 

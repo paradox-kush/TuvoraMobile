@@ -79,48 +79,82 @@ internal object GameDetailUiPolicy {
 
     private const val CHART_MAX_POINTS = 60
 
-    /** Momentum line: home's normalised share as 0..1, time-ordered, at most 60 points; null when there is no line to draw (< 2 points). */
-    fun chartPoints(history: List<WinPoint>, drawPercent: Int? = null): List<Float>? {
+    /** Momentum line as given by the server (home's per-point non-draw share): 0..1, time-ordered, at most 60 points; null when < 2 points. */
+    fun chartPoints(history: List<WinPoint>): List<Float>? {
         if (history.size < 2) return null
         val sorted = history.sortedBy { it.t }
         val picked = if (sorted.size <= CHART_MAX_POINTS) sorted else (0 until CHART_MAX_POINTS).map { sorted[(it.toLong() * (sorted.size - 1) / (CHART_MAX_POINTS - 1)).toInt()] }
-        // Home's share of the non-draw mass (soccer: 30% home with a 25% draw plots at 0.4); series points carry only home.
-        val mass = (100 - (drawPercent ?: 0)).coerceAtLeast(1)
-        return picked.map { (it.home.coerceIn(0, 100).toFloat() / mass).coerceIn(0f, 1f) }
+        return picked.map { it.home.coerceIn(0, 100) / 100f }
     }
 
-    /** The trailing team gained [rise] win-chance points within the last 10 minutes of the series. */
+    /** The trailing team gained [rise] win-chance points across the last 10 minutes of the series. */
     data class Comeback(val side: String, val rise: Int)
 
     private const val COMEBACK_WINDOW_MS = 10L * 60 * 1000
     private const val COMEBACK_MIN_RISE = 15
+    private const val COMEBACK_MIN_POINTS = 3
+    private const val SERIES_FRESH_MS = 2L * 60 * 1000
 
     /**
-     * "Comeback watch": the team currently trailing (share < 50%) gained ≥ 15 points within the last 10 minutes of the series
-     * (anchored at its latest point). Shares are home's non-draw mass, as the chart plots them. Null when there is no such move.
+     * "Comeback watch". Only for a LIVE game, with a series whose last point is within ~2 min of the server's [asOfMs], at least
+     * three points inside the last 10 minutes, and the rise measured from the START of that window to its end (a spike that came
+     * back down is nothing). Who is "trailing" comes from the headline price ([headlineHome]), not from the series' last point.
      */
-    fun comebackWatch(history: List<WinPoint>, drawPercent: Int?): Comeback? {
-        if (history.size < 2) return null
+    fun comebackWatch(history: List<WinPoint>, headlineHome: Int, state: GameState, asOfMs: Long?): Comeback? {
+        if (state != GameState.LIVE || asOfMs == null || history.size < COMEBACK_MIN_POINTS) return null
         val pts = history.sortedBy { it.t }
-        val mass = (100 - (drawPercent ?: 0)).coerceAtLeast(1).toFloat()
-        fun share(p: WinPoint) = p.home.coerceIn(0, 100) / mass * 100f
         val last = pts.last()
+        if (asOfMs - last.t > SERIES_FRESH_MS) return null
         val window = pts.filter { it.t >= last.t - COMEBACK_WINDOW_MS }
-        val now = share(last)
+        if (window.size < COMEBACK_MIN_POINTS) return null
+        val start = window.first().home
+        val end = last.home
         val (side, rise) = when {
-            now < 50f -> "home" to now.let { n -> n - window.minOf { share(it) } }
-            now > 50f -> "away" to window.maxOf { share(it) }.let { m -> m - now }
+            headlineHome < 50 -> "home" to (end - start)
+            headlineHome > 50 -> "away" to (start - end)
             else -> return null
         }
-        val points = kotlin.math.round(rise).toInt()
-        return if (points >= COMEBACK_MIN_RISE) Comeback(side, points) else null
+        return if (rise >= COMEBACK_MIN_RISE) Comeback(side, rise) else null
     }
 
     fun comebackText(c: Comeback, header: Header): String? = teamTag(c.side, header)?.let { "Comeback watch · $it +${c.rise} in 10 min" }
 
-    /** "Goes to overtime · 23%": blank labels dropped, at most [max] lines (3 on phone/iPad, 1 on TV). */
-    fun storylineLines(storylines: List<Storyline>, max: Int = 3): List<String> =
-        storylines.filter { it.label.isNotBlank() }.take(max).map { "${it.label.trim()} · ${it.yes.coerceIn(0, 100)}%" }
+    /** "Goes to overtime · 23%" / "Leading at half-time: DEN · 62%" (a one-sided storyline carries its team tag); at most [max] lines. */
+    fun storylineLines(storylines: List<Storyline>, header: Header?, max: Int = 3): List<String> =
+        storylines.filter { it.label.isNotBlank() }.take(max).map { s ->
+            val label = s.label.trim()
+            val tag = header?.let { teamTag(s.side, it) }
+            val named = if (tag != null && !label.contains(tag, ignoreCase = true)) "$label: $tag" else label
+            "$named · ${s.yes.coerceIn(0, 100)}%"
+        }
+
+    private fun halfBoundary(sport: String?): Int? = when (sport?.lowercase()) { "soccer" -> 1; "basketball", "american football" -> 2; else -> null }
+    private fun regulationPeriods(sport: String?): Int? = when (sport?.lowercase()) { "basketball", "american football" -> 4; "ice hockey" -> 3; else -> null }
+
+    /** Storylines only before and during the game; first-half ones vanish after half-time, overtime ones once overtime has started. */
+    fun visibleStorylines(storylines: List<Storyline>, state: GameState, live: LiveInfo?, sport: String?): List<Storyline> {
+        if (state != GameState.UPCOMING && state != GameState.LIVE) return emptyList()
+        val period = if (state == GameState.LIVE) live?.period else null
+        val regulation = regulationPeriods(sport)
+        val inOvertime = state == GameState.LIVE && (live?.periodLabel?.contains("OT", ignoreCase = true) == true || (period != null && regulation != null && period > regulation))
+        val half = halfBoundary(sport)
+        return storylines.filter { s ->
+            val key = s.key.lowercase()
+            when {
+                "first_half" in key -> period == null || half == null || period <= half
+                "overtime" in key -> !inOvertime
+                else -> true
+            }
+        }
+    }
+
+    /** The win-chance card's OWN staleness: shown once the market value is older than 2 minutes (a server-cached minute is normal). */
+    fun blockStaleLabel(asOfMs: Long?, nowMs: Long, thresholdMs: Long = 120_000L): String? {
+        val age = nowMs - (asOfMs ?: return null)
+        if (age <= thresholdMs) return null
+        val minutes = age / 60_000
+        return if (minutes < 60) "Updated $minutes min ago" else "Updated ${minutes / 60} h ago"
+    }
 
     /** "via Polymarket" / "via ESPN": the block's attribution, else derived from its source; null when unknown. */
     fun winChanceCaption(b: WinProbabilityBlock): String? = b.attribution?.takeIf { it.isNotBlank() } ?: when (b.source) {

@@ -117,4 +117,36 @@ internal object SportsFixtures {
         "{\"livescore\":[{\"idLiveScore\":\"25118137\",\"idEvent\":\"2475495\",\"strSport\":\"American Football\",\"idLeague\":\"4391\",\"strLeague\":\"NFL\",\"intDivision\":\"0\",\"idHomeTeam\":\"134922\",\"idAwayTeam\":\"134928\",\"strHomeTeam\":\"Baltimore Ravens\",\"strAwayTeam\":\"Jacksonville Jaguars\",\"strHomeTeamBadge\":\"https://r2.thesportsdb.com/images/media/team/badge/einz3p1546172463.png\",\"strAwayTeamBadge\":\"https://r2.thesportsdb.com/images/media/team/badge/0mrsd41546427902.png\",\"intHomeScore\":\"10\",\"intAwayScore\":\"33\",\"strStatus\":null,\"strProgress\":\"Final\",\"strTimestamp\":\"2026-11-06T01:15:00\",\"strEventTime\":\"01:15:00\",\"dateEvent\":\"2026-11-06\",\"updated\":\"2026-11-06 07:13:02\"},{\"idLiveScore\":\"25174734\",\"idEvent\":\"2506806\",\"strSport\":\"Ice Hockey\",\"idLeague\":\"4920\",\"strLeague\":\"Russian KHL\",\"intDivision\":\"1\",\"idHomeTeam\":\"140883\",\"idAwayTeam\":\"140898\",\"strHomeTeam\":\"Avangard Omsk\",\"strAwayTeam\":\"Sibir Novosibirsk\",\"strHomeTeamBadge\":\"https://r2.thesportsdb.com/images/media/team/badge/usqllb1615575894.png\",\"strAwayTeamBadge\":\"https://r2.thesportsdb.com/images/media/team/badge/55s9q31615576286.png\",\"intHomeScore\":\"4\",\"intAwayScore\":\"3\",\"strStatus\":\"AOT\",\"strProgress\":\"20\",\"strTimestamp\":\"2026-11-07T11:00:00\",\"strEventTime\":\"11:00\",\"dateEvent\":\"2026-11-07\",\"updated\":\"2026-11-07 13:35:01\"}]}",
     ).joinToString("")
 
+    val market_winchance_disabled: String = listOf(
+        "{\"gameId\":\"tsdb:2494097\",\"disabled\":true}",
+    ).joinToString("")
+
+    val market_winchance_history_three_way: String = listOf(
+        "{\"gameId\":\"tsdb:2111\",\"home\":16,\"draw\":22,\"away\":62,\"asOf\":1794148200000,\"series\":[{\"t\":1794000000000,\"home\":16.6},{\"t\":1794000060000,\"home\":16.6},{\"t\":1794000120000,\"home\":16.6}],\"storylines\":[],\"source\":\"polymarket\",\"attribution\":\"via Polymarket\"}",
+    ).joinToString("")
+
+    val market_winchance_history_two_way: String = listOf(
+        "{\"gameId\":\"tsdb:2494097\",\"home\":60,\"away\":40,\"asOf\":1794073800000,\"series\":[{\"t\":1794000000000,\"home\":60},{\"t\":1794000060000,\"home\":60},{\"t\":1794000120000,\"home\":60}],\"storylines\":[],\"source\":\"polymarket\",\"attribution\":\"via Polymarket\"}",
+    ).joinToString("")
+
+    val market_winchance_no_market: String = listOf(
+        "{\"error\":\"no market\"}",
+    ).joinToString("")
+
+    val market_winchance_price_three_way_storylines: String = listOf(
+        "{\"gameId\":\"tsdb:2111\",\"home\":16,\"draw\":22,\"away\":62,\"asOf\":1794148200000,\"storylines\":[{\"key\":\"both_teams_to_score\",\"label\":\"Both teams to score\",\"yes\":58}],\"source\":\"polymarket\",\"attribution\":\"via Polymarket\"}",
+    ).joinToString("")
+
+    val market_winchance_price_three_way: String = listOf(
+        "{\"gameId\":\"tsdb:2111\",\"home\":16,\"draw\":22,\"away\":62,\"asOf\":1794148200000,\"storylines\":[],\"source\":\"polymarket\",\"attribution\":\"via Polymarket\"}",
+    ).joinToString("")
+
+    val market_winchance_price_two_way_storylines: String = listOf(
+        "{\"gameId\":\"tsdb:3001\",\"home\":70,\"away\":30,\"asOf\":1794097800000,\"storylines\":[{\"key\":\"first_half_moneyline\",\"label\":\"Leading at half-time\",\"yes\":62,\"side\":\"home\"},{\"key\":\"basketball_game_overtime\",\"label\":\"Goes to overtime\",\"yes\":8}],\"source\":\"polymarket\",\"attribution\":\"via Polymarket\"}",
+    ).joinToString("")
+
+    val market_winchance_price_two_way: String = listOf(
+        "{\"gameId\":\"tsdb:2494097\",\"home\":60,\"away\":40,\"asOf\":1794073800000,\"storylines\":[],\"source\":\"polymarket\",\"attribution\":\"via Polymarket\"}",
+    ).joinToString("")
+
 }

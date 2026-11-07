@@ -137,11 +137,9 @@ class GameDetailUiPolicyTest {
         assertEquals(0.01f, GameDetailUiPolicy.chartPoints(many)!!.first(), 0.0001f)
     }
 
-    @Test fun `soccer chart is home's share of the non-draw mass`() {
+    @Test fun `the chart plots the series as given - the server sends the per-point non-draw share`() {
         val h = listOf(com.nuvio.app.features.sportsdetail.api.WinPoint(1, 30), com.nuvio.app.features.sportsdetail.api.WinPoint(2, 45))
-        assertEquals(listOf(0.4f, 0.6f), GameDetailUiPolicy.chartPoints(h, drawPercent = 25))
-        assertEquals(listOf(0.3f, 0.45f), GameDetailUiPolicy.chartPoints(h, drawPercent = null))
-        assertEquals(listOf(1.0f, 1.0f), GameDetailUiPolicy.chartPoints(h, drawPercent = 100), "a degenerate draw never divides by zero")
+        assertEquals(listOf(0.3f, 0.45f), GameDetailUiPolicy.chartPoints(h), "no division by today's draw")
     }
 
     @Test fun `win chance caption is the attribution or the source name`() {
@@ -155,28 +153,45 @@ class GameDetailUiPolicyTest {
     private fun pts(vararg p: Pair<Long, Int>) = p.map { com.nuvio.app.features.sportsdetail.api.WinPoint(it.first, it.second) }
     private val min = 60_000L
 
-    @Test fun `comeback watch fires when the trailing team gained 15 points within the last 10 minutes`() {
-        // home trails (40) and was at 22 eight minutes earlier: +18
-        val c = GameDetailUiPolicy.comebackWatch(pts(0L to 30, 5 * min to 22, 13 * min to 40), drawPercent = null)
+    private val live = GameState.LIVE
+    private fun cw(history: List<com.nuvio.app.features.sportsdetail.api.WinPoint>, headlineHome: Int, state: GameState = live, asOf: Long? = history.lastOrNull()?.t) =
+        GameDetailUiPolicy.comebackWatch(history, headlineHome, state, asOf)
+
+    @Test fun `comeback watch fires when the trailing team gained 15 points from the start of the last 10 minutes`() {
+        // home trails (headline 40); the window (last 10 min) starts at 22 and ends at 40: +18
+        val c = cw(pts(0L to 30, 4 * min to 22, 8 * min to 30, 13 * min to 40), headlineHome = 40)
         assertEquals("home", c?.side); assertEquals(18, c?.rise)
-        // away trails (home 70 -> away 30) and was at 12 six minutes earlier (home 88): +18 for away
-        val a = GameDetailUiPolicy.comebackWatch(pts(0L to 80, 4 * min to 88, 10 * min to 70), drawPercent = null)
+        // away trails (headline home 70): home fell 88 -> 70 across the window
+        val a = cw(pts(0L to 60, 1 * min to 88, 5 * min to 80, 11 * min to 70), headlineHome = 70)
         assertEquals("away", a?.side); assertEquals(18, a?.rise)
     }
 
-    @Test fun `no comeback watch for a small move an old move or a team that is no longer trailing`() {
-        assertNull(GameDetailUiPolicy.comebackWatch(pts(0L to 30, 8 * min to 40), null), "+10 is not enough")
-        assertNull(GameDetailUiPolicy.comebackWatch(pts(0L to 20, 5 * min to 20, 20 * min to 38), null), "the rise happened more than 10 minutes before the end")
-        assertNull(GameDetailUiPolicy.comebackWatch(pts(0L to 30, 8 * min to 55), null), "it now leads: that is not a comeback to watch")
-        assertNull(GameDetailUiPolicy.comebackWatch(pts(0L to 40), null))
-        assertNull(GameDetailUiPolicy.comebackWatch(emptyList(), null))
+    @Test fun `a spike that came back down is not a comeback`() {
+        assertNull(cw(pts(0L to 40, 3 * min to 22, 6 * min to 30, 9 * min to 40), headlineHome = 40), "40 -> 22 -> 40 ended where it began")
     }
 
-    @Test fun `comeback watch uses home's non-draw share for soccer`() {
-        // 20% home with a 25% draw is a 26.7% share; 36% is 48%: a 21-point rise
-        val c = GameDetailUiPolicy.comebackWatch(pts(0L to 20, 6 * min to 36), drawPercent = 25)
-        assertEquals("home", c?.side)
-        assertEquals(21, c?.rise)
+    @Test fun `comeback watch needs a live game a fresh series and enough points`() {
+        val rising = pts(0L to 22, 4 * min to 30, 8 * min to 40)
+        assertEquals("home", cw(rising, 40)?.side)
+        assertNull(cw(rising, 40, state = GameState.UPCOMING), "pre-game")
+        assertNull(cw(rising, 40, state = GameState.FINAL), "post-game")
+        assertNull(cw(rising, 40, asOf = 8 * min + 5 * min), "the series' last point is 5 min older than the server's asOf: stale")
+        assertEquals("home", cw(rising, 40, asOf = 8 * min + 90_000)?.side, "within ~2 min of asOf is fresh")
+        assertNull(cw(pts(0L to 22, 8 * min to 40), 40), "two points in the window are noise")
+        assertNull(cw(rising, 40, asOf = null), "no asOf, no trust")
+        assertNull(cw(emptyList(), 40))
+    }
+
+    @Test fun `trailing comes from the headline price not the series end`() {
+        // the series ended at 45 (still < 50) but the headline says home leads 52: nobody is mounting a comeback
+        assertNull(cw(pts(0L to 22, 4 * min to 33, 8 * min to 45), headlineHome = 52))
+        assertNull(cw(pts(0L to 22, 4 * min to 33, 8 * min to 45), headlineHome = 50))
+    }
+
+    @Test fun `comeback is measured on the series as given`() {
+        // soccer: points are already non-draw shares
+        val c = cw(pts(0L to 20, 4 * min to 28, 8 * min to 36), headlineHome = 36)
+        assertEquals(16, c?.rise)
     }
 
     @Test fun `comeback text names the team`() {
@@ -185,16 +200,56 @@ class GameDetailUiPolicyTest {
         assertNull(GameDetailUiPolicy.comebackText(GameDetailUiPolicy.Comeback("home", 18), EventHeader("Grand Prix")))
     }
 
-    @Test fun `storylines show as label dot percent - three on phone one on TV`() {
+    private val denHeader = TeamsHeader(Side("Denver Nuggets", short = "DEN"), Side("Indiana Pacers", short = "IND"))
+
+    @Test fun `storylines show as label dot percent with the team tag when they are about one side`() {
         val s = listOf(
             com.nuvio.app.features.sportsdetail.api.Storyline("a", "Goes to overtime", 23, null),
             com.nuvio.app.features.sportsdetail.api.Storyline("b", "  ", 50, null),
-            com.nuvio.app.features.sportsdetail.api.Storyline("c", "Both teams score", 55, null),
-            com.nuvio.app.features.sportsdetail.api.Storyline("d", "Leading at half-time: DEN", 70, "home"),
+            com.nuvio.app.features.sportsdetail.api.Storyline("c", "Both teams to score", 55, null),
+            com.nuvio.app.features.sportsdetail.api.Storyline("d", "Leading at half-time", 62, "home"),
             com.nuvio.app.features.sportsdetail.api.Storyline("e", "Fifth", 1, null),
         )
-        assertEquals(listOf("Goes to overtime · 23%", "Both teams score · 55%", "Leading at half-time: DEN · 70%"), GameDetailUiPolicy.storylineLines(s))
-        assertEquals(listOf("Goes to overtime · 23%"), GameDetailUiPolicy.storylineLines(s, max = 1))
-        assertEquals(emptyList(), GameDetailUiPolicy.storylineLines(emptyList()))
+        assertEquals(listOf("Goes to overtime · 23%", "Both teams to score · 55%", "Leading at half-time: DEN · 62%"), GameDetailUiPolicy.storylineLines(s, denHeader))
+        assertEquals(listOf("Goes to overtime · 23%"), GameDetailUiPolicy.storylineLines(s, denHeader, max = 1))
+        assertEquals(emptyList(), GameDetailUiPolicy.storylineLines(emptyList(), denHeader))
+        assertEquals("Leading at half-time: IND · 62%", GameDetailUiPolicy.storylineLines(listOf(com.nuvio.app.features.sportsdetail.api.Storyline("d", "Leading at half-time", 62, "away")), denHeader).single())
+        assertEquals("Leading at half-time: DEN · 62%", GameDetailUiPolicy.storylineLines(listOf(com.nuvio.app.features.sportsdetail.api.Storyline("d", "Leading at half-time: DEN", 62, "home")), denHeader).single(), "a label that already names the team is not doubled")
+    }
+
+    private fun story(key: String, label: String) = com.nuvio.app.features.sportsdetail.api.Storyline(key, label, 40, null)
+
+    @Test fun `storylines show only before and during the game`() {
+        val all = listOf(story("both_teams_to_score", "Both teams to score"))
+        assertEquals(1, GameDetailUiPolicy.visibleStorylines(all, GameState.UPCOMING, null, "Soccer").size)
+        assertEquals(1, GameDetailUiPolicy.visibleStorylines(all, GameState.LIVE, LiveInfo(period = 1), "Soccer").size)
+        assertEquals(0, GameDetailUiPolicy.visibleStorylines(all, GameState.FINAL, null, "Soccer").size)
+        assertEquals(0, GameDetailUiPolicy.visibleStorylines(all, GameState.POSTPONED, null, "Soccer").size)
+    }
+
+    @Test fun `first-half storylines vanish once half-time has passed`() {
+        val l = listOf(story("first_half_moneyline", "Leading at half-time"))
+        assertEquals(1, GameDetailUiPolicy.visibleStorylines(l, GameState.LIVE, LiveInfo(period = 1), "Soccer").size)
+        assertEquals(0, GameDetailUiPolicy.visibleStorylines(l, GameState.LIVE, LiveInfo(period = 2), "Soccer").size, "soccer: second half started")
+        assertEquals(1, GameDetailUiPolicy.visibleStorylines(l, GameState.LIVE, LiveInfo(period = 2), "Basketball").size, "basketball: Q2 is still the first half")
+        assertEquals(0, GameDetailUiPolicy.visibleStorylines(l, GameState.LIVE, LiveInfo(period = 3), "Basketball").size)
+        assertEquals(1, GameDetailUiPolicy.visibleStorylines(l, GameState.UPCOMING, null, "Basketball").size)
+        assertEquals(1, GameDetailUiPolicy.visibleStorylines(l, GameState.LIVE, null, "Basketball").size, "period unknown: keep")
+    }
+
+    @Test fun `the overtime storyline vanishes once overtime has started`() {
+        val l = listOf(story("basketball_game_overtime", "Goes to overtime"))
+        assertEquals(1, GameDetailUiPolicy.visibleStorylines(l, GameState.LIVE, LiveInfo(period = 4), "Basketball").size)
+        assertEquals(0, GameDetailUiPolicy.visibleStorylines(l, GameState.LIVE, LiveInfo(period = 5), "Basketball").size)
+        assertEquals(0, GameDetailUiPolicy.visibleStorylines(l, GameState.LIVE, LiveInfo(periodLabel = "OT", period = 4), "Basketball").size)
+        assertEquals(1, GameDetailUiPolicy.visibleStorylines(l, GameState.LIVE, LiveInfo(period = 3), "Ice Hockey").size, "hockey regulation is 3 periods")
+        assertEquals(0, GameDetailUiPolicy.visibleStorylines(l, GameState.LIVE, LiveInfo(period = 4), "Ice Hockey").size)
+    }
+
+    @Test fun `the win chance card has its own staleness`() {
+        val now = 10_000_000L
+        assertNull(GameDetailUiPolicy.blockStaleLabel(now - 60_000, now), "a server-cached minute is normal")
+        assertEquals("Updated 3 min ago", GameDetailUiPolicy.blockStaleLabel(now - 190_000, now))
+        assertNull(GameDetailUiPolicy.blockStaleLabel(null, now))
     }
 }

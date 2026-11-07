@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
+import kotlin.math.roundToInt
 
 /** What the backend needs to find the market for a game. [startsAtIso] is UTC. */
 internal data class MarketRequest(val gameId: String, val leagueId: String, val home: String, val away: String, val startsAtIso: String)
@@ -89,7 +90,7 @@ internal class MarketWinChanceHttpSource(
 
     private fun pct(e: JsonElement?): Int? {
         val d = (e as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull ?: return null
-        return d.toInt().coerceIn(0, 100)
+        return d.roundToInt().coerceIn(0, 100)
     }
 
     /** RFC 3986 percent-encoding of UTF-8 bytes (unreserved characters kept). */

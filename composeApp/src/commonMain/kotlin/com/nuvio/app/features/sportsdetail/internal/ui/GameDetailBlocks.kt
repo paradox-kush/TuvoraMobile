@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
+import kotlin.time.Clock
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -188,7 +189,7 @@ private fun StatusLine(detail: GameDetail) {
 }
 
 @Composable
-internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?, homeName: String, awayName: String, teamsHeader: com.nuvio.app.features.sportsdetail.api.Header? = null) {
+internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?, homeName: String, awayName: String, detail: GameDetail) {
     if (situation == null && win == null) return
     NuvioSurfaceCard {
         situation?.let { Text(it.line, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary) }
@@ -211,12 +212,12 @@ internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?
                 if (draw != null && draw > 0) Box(Modifier.weight(draw.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.borderDefault))
                 if (home > 0) Box(Modifier.weight(home.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.accent))
             }
-            GameDetailUiPolicy.chartPoints(w.history, w.drawPercent)?.let { pts ->
+            GameDetailUiPolicy.chartPoints(w.history)?.let { pts ->
                 Spacer(Modifier.height(NuvioTokens.Space.s12))
                 MomentumChart(pts, homeName)
             }
-            val lines = GameDetailUiPolicy.storylineLines(w.storylines)
-            val comeback = GameDetailUiPolicy.comebackWatch(w.history, w.drawPercent)?.let { c -> teamsHeader?.let { h -> GameDetailUiPolicy.comebackText(c, h) } }
+            val lines = GameDetailUiPolicy.storylineLines(GameDetailUiPolicy.visibleStorylines(w.storylines, detail.state, detail.live, detail.sport), detail.header)
+            val comeback = GameDetailUiPolicy.comebackWatch(w.history, w.homePercent, detail.state, w.asOfMs)?.let { c -> GameDetailUiPolicy.comebackText(c, detail.header) }
             if (comeback != null || lines.isNotEmpty()) {
                 Spacer(Modifier.height(NuvioTokens.Space.s8))
                 comeback?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.accent) }
@@ -226,6 +227,11 @@ internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?
                 Spacer(Modifier.height(NuvioTokens.Space.s6))
                 Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
             }
+            if (w.extrasAttribution != null && (w.history.size >= 2 || w.storylines.isNotEmpty())) {
+                Text("Chart and storylines ${w.extrasAttribution}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
+            }
+            // The card's own staleness: a stale market value is not hidden behind a fresh ESPN fetch.
+            GameDetailUiPolicy.blockStaleLabel(w.asOfMs, Clock.System.now().toEpochMilliseconds())?.let { StaleChip(it) }
         }
     }
 }
