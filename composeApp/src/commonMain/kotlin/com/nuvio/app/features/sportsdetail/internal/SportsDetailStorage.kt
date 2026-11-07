@@ -21,7 +21,12 @@ internal class SettingsMappingStorage : MappingStorage {
         SportsDetailStorage.saveString(ETAG_KEY, value.etag.orEmpty())
     }
 
+    override fun loadRejectedEtag(): String? = SportsDetailStorage.loadString(REJECTED_KEY)?.takeIf { it.isNotBlank() }
+
+    override fun saveRejectedEtag(etag: String?) = SportsDetailStorage.saveString(REJECTED_KEY, etag.orEmpty())
+
     private companion object {
+        const val REJECTED_KEY = "mapping.rejectedEtag"
         const val JSON_KEY = "mapping.json"
         const val ETAG_KEY = "mapping.etag"
     }
