@@ -16,7 +16,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,6 +61,17 @@ import com.nuvio.app.features.sportsdetail.api.VersusHeader
 import com.nuvio.app.features.sportsdetail.api.WatchOffer
 import com.nuvio.app.features.sportsdetail.api.WatchUi
 import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
+
+/** Back control that shows on every platform (the shared NuvioBackButton hides itself under iOS native navigation, which this overlay does not have). */
+@Composable
+internal fun GameBackButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier.size(NuvioTokens.Space.s40).clip(CircleShape).background(MaterialTheme.nuvio.colors.surface).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = MaterialTheme.nuvio.colors.textPrimary, modifier = Modifier.size(NuvioTokens.Icon.md))
+    }
+}
 
 /** Thin renderers: every decision (what shows, what it is called) comes from state/policy, nothing here does I/O. */
 

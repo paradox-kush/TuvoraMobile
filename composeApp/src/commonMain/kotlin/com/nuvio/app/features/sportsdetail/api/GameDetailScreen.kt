@@ -35,7 +35,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.nuvio.app.core.ui.NuvioPrimaryButton
-import com.nuvio.app.core.ui.NuvioBackButton
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.nuvio
@@ -44,6 +43,7 @@ import com.nuvio.app.features.sportsdetail.internal.GameDetailController
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiState
 import com.nuvio.app.features.sportsdetail.internal.ui.BlockContent
+import com.nuvio.app.features.sportsdetail.internal.ui.GameBackButton
 import com.nuvio.app.features.sportsdetail.internal.ui.GameHeader
 import com.nuvio.app.features.sportsdetail.internal.ui.SituationCard
 import com.nuvio.app.features.sportsdetail.internal.ui.StaleChip
@@ -95,7 +95,7 @@ fun GameDetailScreen(
     Column(modifier = modifier.fillMaxSize().background(MaterialTheme.nuvio.colors.background)) {
         // Own top bar: the shared header collapses under iOS native navigation (no back control, content under the island).
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = NuvioTokens.Space.s16, top = NuvioTokens.Space.s8, end = NuvioTokens.Space.s16)) {
-            NuvioBackButton(onClick = onBack)
+            GameBackButton(onClick = onBack)
         }
         when (val s = state) {
             is GameDetailUiState.Loading, GameDetailUiState.Empty -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
