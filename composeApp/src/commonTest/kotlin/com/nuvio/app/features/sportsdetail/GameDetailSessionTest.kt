@@ -406,8 +406,9 @@ class GameDetailSessionTest {
         }
     }
 
-    private fun mc(home: Int = 62, history: List<com.nuvio.app.features.sportsdetail.api.WinPoint> = emptyList(), draw: Int? = null, asOf: Long? = 1L) =
-        SourceResult.Ok(com.nuvio.app.features.sportsdetail.internal.MarketWinChance(home, 100 - home - (draw ?: 0), draw, asOf, "polymarket", "via Polymarket", history))
+    private fun mc(home: Int = 62, history: List<com.nuvio.app.features.sportsdetail.api.WinPoint> = emptyList(), draw: Int? = null, asOf: Long? = 1L,
+        storylines: List<com.nuvio.app.features.sportsdetail.api.Storyline> = emptyList()) =
+        SourceResult.Ok(com.nuvio.app.features.sportsdetail.internal.MarketWinChance(home, 100 - home - (draw ?: 0), draw, asOf, "polymarket", "via Polymarket", history, storylines))
 
     private fun marketOn(): SportsMappingStore =
         SportsMappingStore(MemStorage(), bundledMapping()).also { it.offer(editedMappingJson("\"market\": {\"all\": true", "\"market\": {\"all\": false"), null) }
@@ -459,6 +460,14 @@ class GameDetailSessionTest {
         val w = assertNotNull(winBlock(d))
         assertEquals(Triple(45, 25, 30), Triple(w.homePercent, w.drawPercent, w.awayPercent))
         assertEquals(1_700_000_000_000L, d.asOf["polymarket"])
+    }
+
+    @Test fun `storylines ride on the win chance block and vanish with the kill switch`() = runBlocking<Unit> {
+        val stories = listOf(com.nuvio.app.features.sportsdetail.api.Storyline("ot", "Goes to overtime", 23, null))
+        val on = loaded(session(nhlTsdb(GameState.LIVE), nhl("post", "in"), marketOn(), r = nhlRef, market = FakeMarket(mc(storylines = stories))).tick())
+        assertEquals(stories, winBlock(on)?.storylines)
+        val off = loaded(session(nhlTsdb(GameState.LIVE), nhl("post", "in"), r = nhlRef, market = FakeMarket(mc(storylines = stories))).tick())
+        assertNull(winBlock(off), "kill switch on (default): no block, so no storylines either")
     }
 
     @Test fun `with the kill switch on - the default - the market is never called`() = runBlocking<Unit> {

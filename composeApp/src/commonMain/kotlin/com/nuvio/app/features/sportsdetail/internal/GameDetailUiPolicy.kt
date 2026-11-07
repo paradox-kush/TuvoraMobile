@@ -4,6 +4,7 @@ import com.nuvio.app.features.sportsdetail.api.BroadcastBlock
 import com.nuvio.app.features.sportsdetail.api.GameState
 import com.nuvio.app.features.sportsdetail.api.Header
 import com.nuvio.app.features.sportsdetail.api.LiveInfo
+import com.nuvio.app.features.sportsdetail.api.Storyline
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.VersusHeader
 import com.nuvio.app.features.sportsdetail.api.WinPoint
@@ -87,6 +88,39 @@ internal object GameDetailUiPolicy {
         val mass = (100 - (drawPercent ?: 0)).coerceAtLeast(1)
         return picked.map { (it.home.coerceIn(0, 100).toFloat() / mass).coerceIn(0f, 1f) }
     }
+
+    /** The trailing team gained [rise] win-chance points within the last 10 minutes of the series. */
+    data class Comeback(val side: String, val rise: Int)
+
+    private const val COMEBACK_WINDOW_MS = 10L * 60 * 1000
+    private const val COMEBACK_MIN_RISE = 15
+
+    /**
+     * "Comeback watch": the team currently trailing (share < 50%) gained ≥ 15 points within the last 10 minutes of the series
+     * (anchored at its latest point). Shares are home's non-draw mass, as the chart plots them. Null when there is no such move.
+     */
+    fun comebackWatch(history: List<WinPoint>, drawPercent: Int?): Comeback? {
+        if (history.size < 2) return null
+        val pts = history.sortedBy { it.t }
+        val mass = (100 - (drawPercent ?: 0)).coerceAtLeast(1).toFloat()
+        fun share(p: WinPoint) = p.home.coerceIn(0, 100) / mass * 100f
+        val last = pts.last()
+        val window = pts.filter { it.t >= last.t - COMEBACK_WINDOW_MS }
+        val now = share(last)
+        val (side, rise) = when {
+            now < 50f -> "home" to now.let { n -> n - window.minOf { share(it) } }
+            now > 50f -> "away" to window.maxOf { share(it) }.let { m -> m - now }
+            else -> return null
+        }
+        val points = kotlin.math.round(rise).toInt()
+        return if (points >= COMEBACK_MIN_RISE) Comeback(side, points) else null
+    }
+
+    fun comebackText(c: Comeback, header: Header): String? = teamTag(c.side, header)?.let { "Comeback watch · $it +${c.rise} in 10 min" }
+
+    /** "Goes to overtime · 23%": blank labels dropped, at most [max] lines (3 on phone/iPad, 1 on TV). */
+    fun storylineLines(storylines: List<Storyline>, max: Int = 3): List<String> =
+        storylines.filter { it.label.isNotBlank() }.take(max).map { "${it.label.trim()} · ${it.yes.coerceIn(0, 100)}%" }
 
     /** "via Polymarket" / "via ESPN": the block's attribution, else derived from its source; null when unknown. */
     fun winChanceCaption(b: WinProbabilityBlock): String? = b.attribution?.takeIf { it.isNotBlank() } ?: when (b.source) {

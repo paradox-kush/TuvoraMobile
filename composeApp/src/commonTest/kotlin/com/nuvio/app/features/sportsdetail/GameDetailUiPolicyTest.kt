@@ -149,4 +149,52 @@ class GameDetailUiPolicyTest {
         assertEquals("via ESPN", GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "espn")))
         assertNull(GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "")))
     }
+
+    // ---- storylines + comeback watch -----------------------------------------------------------------------------------
+
+    private fun pts(vararg p: Pair<Long, Int>) = p.map { com.nuvio.app.features.sportsdetail.api.WinPoint(it.first, it.second) }
+    private val min = 60_000L
+
+    @Test fun `comeback watch fires when the trailing team gained 15 points within the last 10 minutes`() {
+        // home trails (40) and was at 22 eight minutes earlier: +18
+        val c = GameDetailUiPolicy.comebackWatch(pts(0L to 30, 5 * min to 22, 13 * min to 40), drawPercent = null)
+        assertEquals("home", c?.side); assertEquals(18, c?.rise)
+        // away trails (home 70 -> away 30) and was at 12 six minutes earlier (home 88): +18 for away
+        val a = GameDetailUiPolicy.comebackWatch(pts(0L to 80, 4 * min to 88, 10 * min to 70), drawPercent = null)
+        assertEquals("away", a?.side); assertEquals(18, a?.rise)
+    }
+
+    @Test fun `no comeback watch for a small move an old move or a team that is no longer trailing`() {
+        assertNull(GameDetailUiPolicy.comebackWatch(pts(0L to 30, 8 * min to 40), null), "+10 is not enough")
+        assertNull(GameDetailUiPolicy.comebackWatch(pts(0L to 20, 5 * min to 20, 20 * min to 38), null), "the rise happened more than 10 minutes before the end")
+        assertNull(GameDetailUiPolicy.comebackWatch(pts(0L to 30, 8 * min to 55), null), "it now leads: that is not a comeback to watch")
+        assertNull(GameDetailUiPolicy.comebackWatch(pts(0L to 40), null))
+        assertNull(GameDetailUiPolicy.comebackWatch(emptyList(), null))
+    }
+
+    @Test fun `comeback watch uses home's non-draw share for soccer`() {
+        // 20% home with a 25% draw is a 26.7% share; 36% is 48%: a 21-point rise
+        val c = GameDetailUiPolicy.comebackWatch(pts(0L to 20, 6 * min to 36), drawPercent = 25)
+        assertEquals("home", c?.side)
+        assertEquals(21, c?.rise)
+    }
+
+    @Test fun `comeback text names the team`() {
+        val h = TeamsHeader(Side("Denver Nuggets", short = "DEN"), Side("Indiana Pacers", short = "IND"))
+        assertEquals("Comeback watch · DEN +18 in 10 min", GameDetailUiPolicy.comebackText(GameDetailUiPolicy.Comeback("home", 18), h))
+        assertNull(GameDetailUiPolicy.comebackText(GameDetailUiPolicy.Comeback("home", 18), EventHeader("Grand Prix")))
+    }
+
+    @Test fun `storylines show as label dot percent - three on phone one on TV`() {
+        val s = listOf(
+            com.nuvio.app.features.sportsdetail.api.Storyline("a", "Goes to overtime", 23, null),
+            com.nuvio.app.features.sportsdetail.api.Storyline("b", "  ", 50, null),
+            com.nuvio.app.features.sportsdetail.api.Storyline("c", "Both teams score", 55, null),
+            com.nuvio.app.features.sportsdetail.api.Storyline("d", "Leading at half-time: DEN", 70, "home"),
+            com.nuvio.app.features.sportsdetail.api.Storyline("e", "Fifth", 1, null),
+        )
+        assertEquals(listOf("Goes to overtime · 23%", "Both teams score · 55%", "Leading at half-time: DEN · 70%"), GameDetailUiPolicy.storylineLines(s))
+        assertEquals(listOf("Goes to overtime · 23%"), GameDetailUiPolicy.storylineLines(s, max = 1))
+        assertEquals(emptyList(), GameDetailUiPolicy.storylineLines(emptyList()))
+    }
 }

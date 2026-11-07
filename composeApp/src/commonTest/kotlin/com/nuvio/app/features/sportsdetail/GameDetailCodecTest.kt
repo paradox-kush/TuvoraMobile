@@ -86,6 +86,7 @@ class GameDetailCodecTest {
     @Test fun `win probability carries attribution draw and history and round-trips`() {
         val b = com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock(
             homePercent = 62, source = "polymarket", attribution = "via Polymarket", drawPercent = 5, awayPercent = 33,
+            storylines = listOf(com.nuvio.app.features.sportsdetail.api.Storyline("ot", "Goes to overtime", 23, "home")),
             history = listOf(com.nuvio.app.features.sportsdetail.api.WinPoint(1L, 50), com.nuvio.app.features.sportsdetail.api.WinPoint(2L, 62)),
         )
         val d = GameDetail(gameId = "x", sport = "s", leagueId = "1", leagueName = "l", header = TeamsHeader(Side("H"), Side("A")), blocks = listOf(b))

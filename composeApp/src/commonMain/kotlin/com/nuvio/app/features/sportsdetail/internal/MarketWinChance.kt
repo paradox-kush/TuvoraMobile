@@ -1,5 +1,6 @@
 package com.nuvio.app.features.sportsdetail.internal
 
+import com.nuvio.app.features.sportsdetail.api.Storyline
 import com.nuvio.app.features.sportsdetail.api.WinPoint
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -21,6 +22,7 @@ internal data class MarketWinChance(
     val source: String,
     val attribution: String?,
     val history: List<WinPoint>,
+    val storylines: List<Storyline> = emptyList(),
 )
 
 /** Port: the Polymarket win chance for a game, served by OUR backend (devices never call Polymarket). */
@@ -71,9 +73,19 @@ internal class MarketWinChanceHttpSource(
                 source = (o["source"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: "polymarket",
                 attribution = (o["attribution"] as? JsonPrimitive)?.takeIf { it.isString }?.content,
                 history = points,
+                storylines = storylines(o["storylines"]),
             ),
         )
     }
+
+    /** `storylines:[{key,label,yes,side?}]` — blank labels and rows without a number are dropped, then at most 3 kept. */
+    private fun storylines(e: JsonElement?): List<Storyline> = (e as? JsonArray).orEmpty().mapIndexedNotNull { i, row ->
+        val o = row as? JsonObject ?: return@mapIndexedNotNull null
+        val label = (o["label"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapIndexedNotNull null
+        val yes = pct(o["yes"]) ?: return@mapIndexedNotNull null
+        val side = (o["side"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it == "home" || it == "away" }
+        Storyline(key = (o["key"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: "s$i", label = label, yes = yes, side = side)
+    }.take(MAX_STORYLINES)
 
     private fun pct(e: JsonElement?): Int? {
         val d = (e as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull ?: return null
@@ -92,5 +104,6 @@ internal class MarketWinChanceHttpSource(
 
     private companion object {
         const val HEX = "0123456789ABCDEF"
+        const val MAX_STORYLINES = 3
     }
 }

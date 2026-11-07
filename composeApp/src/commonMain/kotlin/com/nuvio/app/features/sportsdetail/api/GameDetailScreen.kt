@@ -165,7 +165,7 @@ private fun LoadedContent(
                 Spacer(Modifier.height(NuvioTokens.Space.s12))
                 Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12)) {
                     LazyColumn(Modifier.weight(1f), verticalArrangement = gap) {
-                        item { SituationCard(situation, win, teams?.home?.name.orEmpty(), teams?.away?.name.orEmpty()) }
+                        item { SituationCard(situation, win, teams?.home?.name.orEmpty(), teams?.away?.name.orEmpty(), detail.header) }
                         item { watchCard() }
                         items(rest.filter(GameDetailUiPolicy::isPrimaryColumn)) { BlockContent(it, detail) }
                     }
@@ -178,7 +178,7 @@ private fun LoadedContent(
             LazyColumn(Modifier.fillMaxSize(), contentPadding = pad, verticalArrangement = gap) {
                 item { GameHeader(detail) }
                 s.staleLabel?.let { item { StaleChip(it) } }
-                item { SituationCard(situation, win, teams?.home?.name.orEmpty(), teams?.away?.name.orEmpty()) }
+                item { SituationCard(situation, win, teams?.home?.name.orEmpty(), teams?.away?.name.orEmpty(), detail.header) }
                 item { watchCard() }
                 items(rest) { BlockContent(it, detail) }
             }

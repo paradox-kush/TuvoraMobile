@@ -55,6 +55,22 @@ class MarketWinChanceSourceTest {
         assertEquals(listOf(40, 43, 45), r.history.map { it.home })
     }
 
+    @Test fun `storylines are read - at most three - with the side and clamped percentages`() = runBlocking<Unit> {
+        val body = """{"home":55,"away":45,"asOf":1,"source":"polymarket","storylines":[
+            {"key":"ot","label":"Goes to overtime","yes":23},
+            {"key":"half","label":"Leading at half-time: DEN","yes":70,"side":"home"},
+            {"key":"btts","label":"Both teams score","yes":155,"side":"nope"},
+            {"key":"x","label":"A fourth","yes":10},{"label":"","yes":5},{"key":"bad","label":"No number"}]}"""
+        val r = assertIs<SourceResult.Ok<MarketWinChance>>(src(HttpReply(200, body, null)).second.winChance(req, false)).value
+        assertEquals(listOf("ot", "half", "btts"), r.storylines.map { it.key }, "max 3, blanks and number-less rows dropped first")
+        assertEquals(listOf(23, 70, 100), r.storylines.map { it.yes })
+        assertEquals(listOf(null, "home", null), r.storylines.map { it.side })
+    }
+
+    @Test fun `no storylines key is an empty list`() = runBlocking<Unit> {
+        assertEquals(emptyList(), assertIs<SourceResult.Ok<MarketWinChance>>(src(HttpReply(200, """{"home":50,"away":50,"source":"polymarket"}""", null)).second.winChance(req, false)).value.storylines)
+    }
+
     @Test fun `a series named history from an older backend is still read`() = runBlocking<Unit> {
         val r = assertIs<SourceResult.Ok<MarketWinChance>>(src(HttpReply(200, """{"home":50,"away":50,"history":[{"t":1,"home":50},{"t":2,"home":51}],"source":"polymarket"}""", null)).second.winChance(req, true)).value
         assertEquals(2, r.history.size)

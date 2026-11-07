@@ -165,6 +165,10 @@ data class NextItem(@SerialName("when") val whenText: String, val text: String)
 @Serializable @SerialName("next")
 data class NextBlock(val items: List<NextItem>, override val source: String = "") : GameBlock
 
+/** A short market storyline ("Goes to overtime" 23%): [yes] is 0..100, [side] "home"|"away" when it is about one team. */
+@Serializable
+data class Storyline(val key: String, val label: String, val yes: Int, val side: String? = null)
+
 /** One point of the win-chance history (epoch ms, home percent 0..100). */
 @Serializable
 data class WinPoint(val t: Long, val home: Int)
@@ -182,6 +186,8 @@ data class WinProbabilityBlock(
     /** The away share when the provider gave it (soccer: home + draw + away); null = derive as the remainder. */
     val awayPercent: Int? = null,
     val history: List<WinPoint> = emptyList(),
+    /** Up to three market storylines shown under the win chance (phone/iPad; TV at most one line). */
+    val storylines: List<Storyline> = emptyList(),
 ) : GameBlock
 
 /** Decoded from a block type this build does not know; dropped by [GameDetailCodec]. */

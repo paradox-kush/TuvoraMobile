@@ -342,7 +342,7 @@ internal class GameDetailSession(
             when (r) {
                 is SourceResult.Ok -> {
                     val w = r.value
-                    marketCached = WinProbabilityBlock(w.home, w.source, w.attribution, w.draw, w.away, w.history)
+                    marketCached = WinProbabilityBlock(w.home, w.source, w.attribution, w.draw, w.away, w.history, w.storylines)
                     marketAsOf = w.asOfMs ?: nowMs()   // the SERVER's time: a stale served value then shows 'Updated Xm ago'
                     if (state == GameState.FINAL) marketFinalFetched = true
                 }

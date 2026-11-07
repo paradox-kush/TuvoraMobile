@@ -188,7 +188,7 @@ private fun StatusLine(detail: GameDetail) {
 }
 
 @Composable
-internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?, homeName: String, awayName: String) {
+internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?, homeName: String, awayName: String, teamsHeader: com.nuvio.app.features.sportsdetail.api.Header? = null) {
     if (situation == null && win == null) return
     NuvioSurfaceCard {
         situation?.let { Text(it.line, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary) }
@@ -214,6 +214,13 @@ internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?
             GameDetailUiPolicy.chartPoints(w.history, w.drawPercent)?.let { pts ->
                 Spacer(Modifier.height(NuvioTokens.Space.s12))
                 MomentumChart(pts, homeName)
+            }
+            val lines = GameDetailUiPolicy.storylineLines(w.storylines)
+            val comeback = GameDetailUiPolicy.comebackWatch(w.history, w.drawPercent)?.let { c -> teamsHeader?.let { h -> GameDetailUiPolicy.comebackText(c, h) } }
+            if (comeback != null || lines.isNotEmpty()) {
+                Spacer(Modifier.height(NuvioTokens.Space.s8))
+                comeback?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.accent) }
+                lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.nuvio.colors.textSecondary) }
             }
             GameDetailUiPolicy.winChanceCaption(w)?.let {
                 Spacer(Modifier.height(NuvioTokens.Space.s6))
