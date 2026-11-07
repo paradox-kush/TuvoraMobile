@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,7 +35,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.nuvio.app.core.ui.NuvioPrimaryButton
-import com.nuvio.app.core.ui.NuvioScreenHeader
+import com.nuvio.app.core.ui.NuvioBackButton
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.nuvio
@@ -92,7 +93,10 @@ fun GameDetailScreen(
     LaunchedEffect(state) { if (state is GameDetailUiState.Empty) onNoData() }
 
     Column(modifier = modifier.fillMaxSize().background(MaterialTheme.nuvio.colors.background)) {
-        NuvioScreenHeader(title = "", onBack = onBack)
+        // Own top bar: the shared header collapses under iOS native navigation (no back control, content under the island).
+        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = NuvioTokens.Space.s16, top = NuvioTokens.Space.s8, end = NuvioTokens.Space.s16)) {
+            NuvioBackButton(onClick = onBack)
+        }
         when (val s = state) {
             is GameDetailUiState.Loading, GameDetailUiState.Empty -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(strokeWidth = 2.dp)
