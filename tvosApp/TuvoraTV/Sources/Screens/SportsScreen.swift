@@ -124,7 +124,11 @@ struct SportsScreen: View {
     }
 
     /// OK on a match opens the live game screen; it hands over to the channel sheet when it has no data.
-    private func open(_ fixture: RadarFixture) { game = MatchSheetTarget(fixture: fixture) }
+    private func open(_ fixture: RadarFixture) {
+        // A fixture the game screen can't open (no event id / kick-off) goes straight to the channel sheet.
+        if TvGameDetail.shared.ref(fixture: fixture) == nil { sheet = MatchSheetTarget(fixture: fixture) }
+        else { game = MatchSheetTarget(fixture: fixture) }
+    }
 
     private func hub(_ radar: RadarUiState, _ hub: TvSportsHub) -> some View {
         ScrollView(.vertical, showsIndicators: false) {

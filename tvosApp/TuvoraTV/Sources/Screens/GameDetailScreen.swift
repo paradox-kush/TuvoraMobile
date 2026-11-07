@@ -53,17 +53,20 @@ struct GameDetailScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(colors.background.ignoresSafeArea())
         .onExitCommand { dismiss() }
-        .task {
-            guard let opened = TvGameDetail.shared.open(fixture: fixture) else { onNoData(); return }
-            model = opened
-            for await next in opened.state { state = next }
-        }
-        // Egress rule: refresh lives only while this screen is up and the app is active; leaving or
-        // backgrounding cancels the task and with it the loop.
+        // The model is made once, here; the state collector follows it (no polling-for-nil loop).
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
-            while model == nil { try? await Task.sleep(nanoseconds: 50_000_000) }
+            if model == nil {
+                guard let opened = TvGameDetail.shared.open(fixture: fixture) else { onNoData(); return }
+                model = opened
+            }
+            // Egress rule: refresh lives only while this screen is up and the app is active; leaving or
+            // backgrounding cancels this task and with it the loop. Cancellation is not swallowed.
             try? await model?.runWhileVisible()
+        }
+        .task(id: model.map { ObjectIdentifier($0) }) {
+            guard let model else { return }
+            for await next in model.state { state = next }
         }
         .task {
             matches = (try? await TvSports.shared.matchChannels(fixture: fixture, onPartial: { matches = $0 })) ?? matches

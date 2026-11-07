@@ -68,6 +68,14 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
     val state: StateFlow<TvGameDetailState> = _state.asStateFlow()
     private val retrySignal = Channel<Unit>(Channel.CONFLATED)
 
+    // Model fields, not locals: the Swift task restarts on every foreground, and a restart must not
+    // re-fire a full tick (a FINAL game stays at zero requests).
+    private var mappingSynced = false
+    private var failures = 0
+    private var lastEvent: Long? = null
+    private var lastSummary: Long? = null
+    private var first = true
+
     /** Retry after Failed/Empty (the only way back from them: an event, never a timer). */
     fun retry() {
         if (_state.value !is TvGameDetailState.Loaded) _state.value = TvGameDetailState.Loading
@@ -79,11 +87,7 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
      * Cancelling the caller's task (screen gone, app backgrounded) ends it: no free-running poll.
      */
     suspend fun runWhileVisible() {
-        runCatching { service.syncMapping() }
-        var failures = 0
-        var lastEvent: Long? = null
-        var lastSummary: Long? = null
-        var first = true
+        if (!mappingSynced) { mappingSynced = true; runCatching { service.syncMapping() } }
         while (true) {
             val now = RadarTime.nowMs()
             val current = _state.value
