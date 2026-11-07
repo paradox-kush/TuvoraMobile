@@ -102,8 +102,8 @@ struct GameDetailScreen: View {
             watchRow(detail)
             plays(detail)
             Spacer(minLength: 0)
-            if stale {
-                Text("Updating… showing the last score we got").font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary)
+            if let chip = updatedChip(detail, stale: stale) {
+                Text(chip).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary)
             }
         }
         .padding(.horizontal, dp(52)).padding(.vertical, dp(32))
@@ -164,13 +164,21 @@ struct GameDetailScreen: View {
         VStack(spacing: dp(4)) {
             switch detail.state {
             case .live:
-                Text(detail.live?.clock ?? detail.live?.periodLabel ?? L("LIVE")).font(NuvioType.labelLargeSemi).foregroundStyle(colors.live)
+                Text([detail.live?.periodLabel, detail.live?.clock].compactMap { $0 }.joined(separator: " ").nilIfEmpty ?? L("LIVE")).font(NuvioType.labelLargeSemi).foregroundStyle(colors.live)
                 if let d = detail.live?.detail { Text(d).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary) }
             case .final: Text("Final").font(NuvioType.labelLargeSemi).foregroundStyle(colors.textSecondary)
             case .postponed: Text("Postponed").font(NuvioType.labelLargeSemi).foregroundStyle(colors.textSecondary)
             default: Text(SportsWhen.label(fixture, now: TvSports.shared.nowMs())).font(NuvioType.labelLargeSemi).foregroundStyle(colors.secondary)
             }
         }
+    }
+
+    /// "Updated 2 min ago" from the freshest source fetch, once it is older than ~20 s (or a refresh failed).
+    private func updatedChip(_ d: GameDetail, stale: Bool) -> String? {
+        guard let freshest = d.asOf.values.map({ $0.int64Value }).max() else { return stale ? L("Updating…") : nil }
+        let age = max(0, (TvSports.shared.nowMs() - freshest) / 1000)
+        guard age > 20 || stale else { return nil }
+        return age < 90 ? L("Updated \(age) s ago") : L("Updated \(age / 60) min ago")
     }
 
     // MARK: Watch row
@@ -237,6 +245,14 @@ struct GameDetailScreen: View {
         }
     }
 
+    private func teamTag(_ side: String?, _ d: GameDetail) -> String? {
+        switch side {
+        case "home": return homeName(d)
+        case "away": return awayName(d)
+        default: return nil
+        }
+    }
+
     @ViewBuilder
     private func plays(_ d: GameDetail) -> some View {
         let items: [TimelineItem] = d.blocks.compactMap { b in
@@ -250,6 +266,9 @@ struct GameDetailScreen: View {
                 ForEach(Array(items.suffix(5).reversed().enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .firstTextBaseline, spacing: dp(12)) {
                         Text(item.time).font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary).frame(width: dp(64), alignment: .leading)
+                        if let tag = teamTag(item.side, d) {
+                            Text(tag).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).frame(width: dp(56), alignment: .leading).lineLimit(1)
+                        }
                         Text(item.text).font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary).lineLimit(1)
                     }
                 }
@@ -335,4 +354,8 @@ private struct GameActionButton: View {
         .reportsFocus(focused)
         .onAppear { if autoFocus { DispatchQueue.main.async { focused = true } } }
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
