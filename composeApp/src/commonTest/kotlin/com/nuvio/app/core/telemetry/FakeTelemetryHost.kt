@@ -6,9 +6,13 @@ import com.nuvio.app.core.telemetry.internal.TelemetryHost
 internal class FakeFileStore : TelemetryFileStore {
     val files = LinkedHashMap<String, String>()
     var failWrites = false
+    /** Fails the Nth write (1-based) only, to model an allocation failure in the middle of the crash handler. */
+    var failWriteNumber: Int? = null
+    private var writes = 0
     override fun read(name: String): String? = files[name]
     override fun writeAtomic(name: String, text: String): Boolean {
-        if (failWrites) return false
+        writes++
+        if (failWrites || failWriteNumber == writes) return false
         files[name] = text
         return true
     }
@@ -33,7 +37,8 @@ internal class FakeTelemetryHost(
     val superProps = ArrayList<Map<String, Any>>()
     var flushes = 0
     var failCapture = false
-    private var seed = 7
+    override var deliveryDurable: Boolean = false
+    var seed = 7
 
     override fun nowMs(): Long = now
     override fun randomBelow(bound: Int): Int { seed = (seed * 31 + 11) and 0x7fffffff; return seed % bound }
@@ -45,6 +50,7 @@ internal class FakeTelemetryHost(
         sent += Sent(event, props, timestampMs)
     }
     override fun captureException(error: Throwable, props: Map<String, Any>) {}
+    /** A flush is a request, not a delivery: nothing here counts as delivered unless a test says so. */
     override fun flush() { flushes++ }
     override fun registerSuperProperties(props: Map<String, Any>) { superProps += props }
     override fun hardwareProfile(): Map<String, Any> = mapOf("hw_ram_total_mb" to 3000)

@@ -147,16 +147,28 @@ class ArchitectureTest {
      * No baseline: the call sites were migrated in the same change.
      */
     @Test
+    fun `the architecture rule catches a fully-qualified SDK call (self-check)`() {
+        val sdkRef = Regex("""\bcom\.posthog\.|\bPostHogSDK\b|\bAnalyticsSink\s*\.\s*capture(At)?\b|\bAnalyticsSink\s*::\s*capture""")
+        assertTrue(sdkRef.containsMatchIn("com.posthog.PostHog.capture(\"x\")"))
+        assertTrue(sdkRef.containsMatchIn("AnalyticsSink.capture(a, b)"))
+        assertTrue(sdkRef.containsMatchIn("val c = AnalyticsSink::capture"))
+        assertTrue(!sdkRef.containsMatchIn("TelemetryAccess.current().emit(a, b)"))
+    }
+
+    @Test
     fun `only core-telemetry-internal calls the PostHog SDK or AnalyticsSink capture (Telemetry v2)`() {
-        val sdkRef = Regex("""\bimport\s+com\.posthog\.|\bPostHogSDK\b|\bAnalyticsSink\s*\.\s*capture(At)?\b|\bAnalyticsSink\s*::\s*capture""")
-        val mainSourceSet = Regex("""/composeApp/src/[A-Za-z]*Main/""")
-        val violations = files
+        // Any mention of the SDK package (import OR fully-qualified call), the iOS SDK type, or the sink's capture.
+        val sdkRef = Regex("""\bcom\.posthog\.|\bPostHogSDK\b|\bAnalyticsSink\s*\.\s*capture(At)?\b|\bAnalyticsSink\s*::\s*capture""")
+        val mainSourceSet = Regex("""/(composeApp|tvosCore)/src/[A-Za-z]*Main/""")
+        // tvosCore compiles composeApp's commonMain for Apple TV and adds its own tvosMain: both are in scope.
+        val tvosFiles = Konsist.scopeFromDirectory("tvosCore/src").files.map { it.path to it.text }
+        val violations = (files + tvosFiles)
             .filter { (p, _) -> mainSourceSet.containsMatchIn(p) }
             .filterNot { (p, _) -> "/core/telemetry/internal/" in p || p.endsWith("/core/analytics/AnalyticsSink.kt") }
             .flatMap { (p, text) ->
                 stripComments(text).lines().withIndex()
                     .filter { (_, line) -> sdkRef.containsMatchIn(line) }
-                    .map { (i, line) -> "${rel(p)}:${i + 1}: ${line.trim()}" }
+                    .map { (i, line) -> "${p.substringAfter("/wt/telemetry-v2-mobile/").substringAfter("NuvioMobile/")}:${i + 1}: ${line.trim()}" }
             }
         assertTrue(
             violations.isEmpty(),

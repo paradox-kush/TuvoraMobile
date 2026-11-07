@@ -894,7 +894,7 @@ class TvPlayerSession(
             audioCodec = info?.audioCodec, speed = st.speed, audioDelayMs = st.audioDelayMs, subtitleDelayMs = st.subtitleDelayMs,
         )
         log.w { "playback issue reported: $props" }
-        com.nuvio.app.core.analytics.AnalyticsSink.capture(TvPlaybackIssueReport.EVENT, props)
+        com.nuvio.app.core.telemetry.api.TelemetryAccess.current().emit(TvPlaybackIssueReport.EVENT, props)
     }
 
     private fun open(lane: PlaybackLane, startMs: Long): NuvioPlayerBridge? {

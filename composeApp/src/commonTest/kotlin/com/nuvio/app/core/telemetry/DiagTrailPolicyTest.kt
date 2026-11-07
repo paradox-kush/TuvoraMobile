@@ -73,17 +73,18 @@ class DiagTrailPolicyTest {
     }
 
     @Test
-    fun `free text loses urls and hosts but keeps class names and frames`() {
-        val text = "java.net.UnknownHostException: Unable to resolve host \"pro.provider.tv\" for http://pro.provider.tv:8080/get.php?username=bob&password=x at com.nuvio.app.Foo.bar(Foo.kt:12)"
-        val out = DiagTrailPolicy.scrubText(text, 400)
-        assertFalse("provider" in out, out)
-        assertFalse("password" in out, out)
-        assertTrue("java.net.UnknownHostException" in out, out)
-        assertTrue("com.nuvio.app.Foo.bar" in out, out)
+    fun `a free-form label becomes a clean code or the placeholder`() {
+        assertEquals("freeze", DiagTrailPolicy.codeOrOther("Freeze"))
+        assertEquals("other", DiagTrailPolicy.codeOrOther("http://pro.provider.tv/live"))
+        assertEquals("other", DiagTrailPolicy.codeOrOther("My Channel Name"))
+        assertEquals(null, DiagTrailPolicy.codeOrOther(null))
     }
 
     @Test
-    fun `an ip address with a port is scrubbed`() {
-        assertFalse("192.168.1.5" in DiagTrailPolicy.scrubText("connect to 192.168.1.5:8096 failed", 100))
+    fun `a thread name that carries a host is replaced`() {
+        assertEquals("main", DiagTrailPolicy.threadLabel("main"))
+        assertEquals("DefaultDispatcher-worker-3", DiagTrailPolicy.threadLabel("DefaultDispatcher-worker-3"))
+        assertEquals("other", DiagTrailPolicy.threadLabel("OkHttp pro.provider.tv"))
+        assertEquals("other", DiagTrailPolicy.threadLabel("x".repeat(80)))
     }
 }

@@ -58,6 +58,9 @@ val tvosExcludedCommon = listOf(
     "com/nuvio/app/features/announcements/internal/AnnouncementsRepository.kt", "com/nuvio/app/features/home/HomeEpisodeShuffle.kt",
     // In-app APK updater: App Store builds update through the store.
     "com/nuvio/app/features/updater/**",
+    // Telemetry v2 report UI (toast + category labels over Compose runtime state); Apple TV draws "Send report" in SwiftUI
+    // and calls TelemetryPort.sendUserReport itself.
+    "com/nuvio/app/core/telemetry/ui/**",
     // Platform key: Apple TV supplies its own ("tvos") in tvosCore/src/commonMain/.../SyncPlatform.tvos.kt.
     "com/nuvio/app/core/sync/SyncPlatform.kt",
     // Trailer surface: Compose player host.

@@ -1,6 +1,5 @@
 package com.tuvora.tvos.app
 
-import com.nuvio.app.core.analytics.AnalyticsSink
 import com.nuvio.app.core.analytics.Breadcrumbs
 import com.nuvio.app.core.contracts.MemoryPortAccess
 import com.nuvio.app.core.contracts.MemoryTierPolicy
@@ -43,21 +42,14 @@ object TvAppGraph {
     /** SwiftUI calls this on every screen change; the first call also marks the launch interactive. */
     fun screenChanged(name: String) = Breadcrumbs.screenChanged(name)
 
-    /** Kotlin exceptions that escape to the top reach PostHog before the process ends (iOS parity). */
+    /** Kotlin exceptions that escape to the top: the Telemetry v2 hook (previous) writes the crash record (iOS parity). */
     @OptIn(ExperimentalNativeApi::class)
     private fun installUnhandledExceptionReporter() {
+        // Idempotent: the Telemetry v2 service and its crash-record hook come up before this one wraps it.
+        com.nuvio.app.core.telemetry.internal.IosTelemetry.start()
         var previous: ((Throwable) -> Unit)? = null
         previous = setUnhandledExceptionHook { throwable ->
-            runCatching {
-                AnalyticsSink.capture(
-                    "app_uncaught_exception_tvos",
-                    mapOf(
-                        "exception" to (throwable::class.qualifiedName ?: throwable::class.simpleName ?: "Throwable"),
-                        "message" to (throwable.message ?: ""),
-                        "stack" to throwable.stackTraceToString().take(4000),
-                    ),
-                )
-            }
+            // The crash record is written by the hook IosTelemetry.start() installs (it runs through `previous`).
             previous?.invoke(throwable)
         }
     }
