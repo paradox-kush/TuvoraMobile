@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,6 +21,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.intl.Locale
+import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -155,8 +162,8 @@ private fun StatusLine(detail: GameDetail) {
     val live = detail.live
     when (detail.state) {
         GameState.LIVE -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            LivePill(listOfNotNull(live?.periodLabel, live?.clock).joinToString(" ").ifBlank { "LIVE" }.let { if (it == "LIVE") it else "LIVE $it" })
-            live?.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textSecondary) }
+            LivePill("LIVE")
+            Text(GameDetailUiPolicy.liveStatusText(live), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textSecondary)
         }
         GameState.FINAL -> Text(live?.detail?.takeIf { it.isNotBlank() } ?: "Final", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.nuvio.colors.textSecondary)
         GameState.POSTPONED -> Text("Postponed", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.nuvio.colors.textSecondary)
@@ -215,19 +222,21 @@ internal fun WatchCard(
                 Text(ui.offer.channelName, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary)
                 Spacer(Modifier.height(NuvioTokens.Space.s8))
                 NuvioPrimaryButton("Play", onClick = { onPlay(ui.offer) })
-                TextButton(onClick = onFindChannels) { Text("Find other channels") }
+                TextButton(onClick = onFindChannels, contentPadding = PaddingValues(0.dp)) { Text("Find other channels") }
             }
             WatchUi.NoPlaylist -> Column {
                 Text("Add an IPTV playlist to find and watch this game on your channels.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
-                TextButton(onClick = onAddPlaylist) { Text("Add IPTV playlist") }
+                Spacer(Modifier.height(NuvioTokens.Space.s8))
+                NuvioPrimaryButton("Add IPTV playlist", onClick = onAddPlaylist)
             }
             WatchUi.NoMatch -> Column {
                 Text("None of your channels list this game yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
-                TextButton(onClick = onFindChannels) { Text("Find channels") }
+                Spacer(Modifier.height(NuvioTokens.Space.s8))
+                NuvioPrimaryButton("Find channels", onClick = onFindChannels)
             }
             WatchUi.LookupFailed -> Column {
                 Text("Couldn't check your channels.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
-                TextButton(onClick = onRetry) { Text("Retry") }
+                TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text("Retry") }
             }
         }
     }
@@ -247,22 +256,30 @@ private fun LabeledRow(label: String, left: String, right: String) {
 internal fun BlockContent(block: GameBlock, detail: GameDetail) {
     when (block) {
         is LinescoreBlock -> BlockCard("By period") {
+            val ls = GameDetailUiPolicy.trimUnstartedPeriods(block, detail.state, detail.live?.period)
             Row(Modifier.fillMaxWidth()) {
                 Spacer(Modifier.width(56.dp))
-                block.columns.forEach { Text(it, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted) }
+                ls.columns.forEach { Text(it, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted) }
             }
-            block.rows.forEachIndexed { i, row ->
+            ls.rows.forEachIndexed { i, row ->
                 Row(Modifier.fillMaxWidth().padding(vertical = NuvioTokens.Space.s4), verticalAlignment = Alignment.CenterVertically) {
-                    Text(block.rowLabels.getOrNull(i).orEmpty(), modifier = Modifier.width(56.dp), maxLines = 1, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textPrimary)
+                    Text(ls.rowLabels.getOrNull(i).orEmpty(), modifier = Modifier.width(56.dp), maxLines = 1, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textPrimary)
                     row.forEach { Text(it, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textPrimary) }
                 }
             }
         }
         is BroadcastBlock -> BlockCard("Broadcast") {
-            block.byRegion.filterValues { it.isNotEmpty() }.forEach { (region, channels) ->
+            var showMore by remember { mutableStateOf(false) }
+            val (shown, more) = GameDetailUiPolicy.splitBroadcast(block.byRegion, Locale.current.region)
+            (if (showMore) shown + more else shown).forEach { (region, channels) ->
                 Row(Modifier.fillMaxWidth().padding(vertical = NuvioTokens.Space.s2)) {
                     Text(region, modifier = Modifier.width(96.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textMuted)
                     Text(channels.joinToString(", "), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textPrimary)
+                }
+            }
+            if (more.isNotEmpty()) {
+                TextButton(onClick = { showMore = !showMore }, contentPadding = PaddingValues(0.dp)) {
+                    Text(if (showMore) "Fewer regions" else "More regions (${more.size})")
                 }
             }
         }
@@ -274,7 +291,7 @@ internal fun BlockContent(block: GameBlock, detail: GameDetail) {
                 Row(Modifier.fillMaxWidth().padding(vertical = NuvioTokens.Space.s4), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(l.athlete, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(l.category, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
+                        Text(listOfNotNull(GameDetailUiPolicy.teamTag(l.side, detail.header), l.category).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
                     }
                     Text(l.value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.nuvio.colors.textPrimary)
                 }
@@ -284,7 +301,7 @@ internal fun BlockContent(block: GameBlock, detail: GameDetail) {
             block.items.forEach { t ->
                 Row(Modifier.fillMaxWidth().padding(vertical = NuvioTokens.Space.s4)) {
                     Text(listOfNotNull(t.period, t.time.takeIf { it.isNotBlank() }).joinToString(" "), modifier = Modifier.width(88.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
-                    Text(t.text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.nuvio.colors.textPrimary)
+                    Text(GameDetailUiPolicy.teamTag(t.side, detail.header)?.let { tag -> "$tag · ${t.text}" } ?: t.text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.nuvio.colors.textPrimary)
                 }
             }
         }

@@ -1,6 +1,11 @@
 package com.nuvio.app.features.sportsdetail.internal
 
 import com.nuvio.app.features.sportsdetail.api.BroadcastBlock
+import com.nuvio.app.features.sportsdetail.api.GameState
+import com.nuvio.app.features.sportsdetail.api.Header
+import com.nuvio.app.features.sportsdetail.api.LiveInfo
+import com.nuvio.app.features.sportsdetail.api.TeamsHeader
+import com.nuvio.app.features.sportsdetail.api.VersusHeader
 import com.nuvio.app.features.sportsdetail.api.FormBlock
 import com.nuvio.app.features.sportsdetail.api.GameBlock
 import com.nuvio.app.features.sportsdetail.api.HighlightsBlock
@@ -37,12 +42,64 @@ internal object GameDetailUiPolicy {
         return u.startsWith("https://") || u.startsWith("http://")
     }
 
+    /** The live line under the score: "2nd · 5:12", or the break wording (Halftime / Intermission) instead of a stopped clock. */
+    fun liveStatusText(live: LiveInfo?): String {
+        val detail = live?.detail?.lowercase().orEmpty()
+        return when {
+            "halftime" in detail || "half-time" in detail -> "Halftime"
+            "intermission" in detail || "end of" in detail || "break" in detail -> "Intermission"
+            else -> listOfNotNull(live?.periodLabel, live?.clock?.takeIf { it.isNotBlank() }).joinToString(" · ").ifBlank { "LIVE" }
+        }
+    }
+
+    private val TOTAL_COLUMNS = setOf("T", "R", "H", "E")
+
+    /** While live, periods after the current one have not started: hide their columns (totals stay). */
+    fun trimUnstartedPeriods(b: LinescoreBlock, state: GameState, livePeriod: Int?): LinescoreBlock {
+        if (state != GameState.LIVE || livePeriod == null || livePeriod < 1) return b
+        val tail = b.columns.takeLastWhile { it in TOTAL_COLUMNS }.size
+        val periods = b.columns.size - tail
+        if (livePeriod >= periods) return b
+        val keep = (0 until livePeriod) + (periods until b.columns.size)
+        return b.copy(columns = keep.map { b.columns[it] }, rows = b.rows.map { r -> keep.mapNotNull { r.getOrNull(it) } })
+    }
+
+    /** "WSH" for a row's side; the full name when the provider gave no short name; null for no side / no teams. */
+    fun teamTag(side: String?, header: Header): String? {
+        val s = when (header) {
+            is TeamsHeader -> if (side == "home") header.home else if (side == "away") header.away else null
+            is VersusHeader -> if (side == "home") header.a else if (side == "away") header.b else null
+            else -> null
+        } ?: return null
+        return s.short?.takeIf { it.isNotBlank() } ?: s.name
+    }
+
+    private val COUNTRY_NAMES = mapOf(
+        "US" to "United States", "GB" to "United Kingdom", "UK" to "United Kingdom", "CA" to "Canada", "AU" to "Australia",
+        "NZ" to "New Zealand", "IE" to "Ireland", "DE" to "Germany", "FR" to "France", "ES" to "Spain", "IT" to "Italy",
+        "NL" to "Netherlands", "BE" to "Belgium", "PT" to "Portugal", "SE" to "Sweden", "NO" to "Norway", "DK" to "Denmark",
+        "FI" to "Finland", "PL" to "Poland", "CH" to "Switzerland", "AT" to "Austria", "IN" to "India", "BR" to "Brazil",
+        "MX" to "Mexico", "AR" to "Argentina", "ZA" to "South Africa", "JP" to "Japan", "KR" to "South Korea",
+    )
+    private const val BROADCAST_SHOWN = 3
+
+    /** (shown, more): the viewer's region first (matched by country name or ESPN's "US" key), then A-Z; at most 3 shown. */
+    fun splitBroadcast(byRegion: Map<String, List<String>>, regionCode: String?): Pair<List<Pair<String, List<String>>>, List<Pair<String, List<String>>>> {
+        val entries = byRegion.filterValues { it.isNotEmpty() }.toList()
+        val code = regionCode?.uppercase()
+        val mine = code?.let { COUNTRY_NAMES[it] }
+        val (home, others) = entries.partition { (k, _) -> code != null && (k.equals(code, ignoreCase = true) || (mine != null && k.equals(mine, ignoreCase = true))) }
+        val ordered = home + others.sortedBy { it.first.lowercase() }
+        return ordered.take(BROADCAST_SHOWN) to ordered.drop(BROADCAST_SHOWN)
+    }
+
     fun isWide(widthDp: Int): Boolean = widthDp >= WIDE_MIN_DP
 
-    /** "Updated 40s ago" once the OLDEST source is older than 20 s; null while fresh. */
+    /** "Updated 40s ago" once even the freshest source fetch is older than 20 s; null while fresh. */
     fun staleLabel(asOf: Map<String, Long>, nowMs: Long): String? {
-        val oldest = asOf.values.minOrNull() ?: return null
-        val ageMs = nowMs - oldest
+        // The FRESHEST fetch of any source: the chip says how stale the screen really is, not how stale its laggiest part is.
+        val newest = asOf.values.maxOrNull() ?: return null
+        val ageMs = nowMs - newest
         if (ageMs <= STALE_AFTER_MS) return null
         val s = ageMs / 1000
         return when {

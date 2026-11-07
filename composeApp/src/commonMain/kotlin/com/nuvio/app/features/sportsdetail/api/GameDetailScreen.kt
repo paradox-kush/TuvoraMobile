@@ -38,6 +38,7 @@ import com.nuvio.app.core.ui.NuvioScreenHeader
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.nuvio
+import com.nuvio.app.core.ui.nuvioSafeBottomPadding
 import com.nuvio.app.features.sportsdetail.internal.GameDetailController
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiState
@@ -139,7 +140,8 @@ private fun LoadedContent(
         )
     }
     val gap = Arrangement.spacedBy(NuvioTokens.Space.s12)
-    val pad = PaddingValues(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s8)
+    // Bottom inset: the last row must clear the floating bottom navigation.
+    val pad = PaddingValues(start = NuvioTokens.Space.s16, end = NuvioTokens.Space.s16, top = NuvioTokens.Space.s8, bottom = nuvioSafeBottomPadding(NuvioTokens.Space.s16))
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (GameDetailUiPolicy.isWide(maxWidth.value.toInt())) {
             Column(Modifier.fillMaxSize().padding(pad)) {
