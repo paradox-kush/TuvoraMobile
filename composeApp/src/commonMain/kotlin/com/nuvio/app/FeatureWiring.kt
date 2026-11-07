@@ -34,6 +34,7 @@ import com.nuvio.app.features.livetv.LiveNowWatching
 import com.nuvio.app.features.radar.RadarGameWatch
 import com.nuvio.app.features.sportsdetail.api.LocalGameWatch
 import com.nuvio.app.features.sportsdetail.api.LocalSportsDetail
+import com.nuvio.app.features.sportsdetail.api.SportsDetailAccess
 import com.nuvio.app.features.sportsdetail.api.SportsDetail
 
 /**
@@ -86,6 +87,8 @@ fun registerFeatureContributions() {
     HomeCalendarSectionAccess.register(CalendarUiSlots.homeSection())
     DetailsCalendarBellAccess.register(CalendarUiSlots.detailsBell())
     CalendarScreenContentAccess.register(CalendarUiSlots.screen())
+    // Game screen: registered at process init so iOS (which never wraps its UI in installFeatures) finds it too.
+    SportsDetailAccess.register(sportsDetailService, gameWatch)
     FeatureRegistry.markInitialized()
 }
 

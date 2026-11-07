@@ -22,6 +22,9 @@ internal fun RadarFixture.toGameRef(): GameRef? {
     )
 }
 
+/** Whether the Sports hub can open the game screen for this fixture (it needs an id, a league and a kickoff). */
+internal fun RadarFixture.opensGameScreen(): Boolean = toGameRef() != null
+
 /**
  * The game screen's Watch block backend: the Sports Centre's own channel matcher (the same one the match sheet
  * uses) plus the Live TV player's current channel. Only a CONFIRMED match is offered as "Play" — a channel that

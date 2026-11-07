@@ -148,7 +148,7 @@ fun SportsHubScreen(
     // The game screen (live score, stats, Watch). A fixture it cannot describe, or one no source has data for,
     // falls back to today's channel-matching sheet.
     var detailFixture by remember { mutableStateOf<RadarFixture?>(null) }
-    val openFixture: (RadarFixture) -> Unit = { fx -> if (fx.toGameRef() != null) detailFixture = fx else sheetFixture = fx }
+    val openFixture: (RadarFixture) -> Unit = { fx -> if (fx.opensGameScreen()) detailFixture = fx else sheetFixture = fx }
     // The Calendar's "Watch now": open the same channel-matching sheet for that game once its fixture is held.
     val requestedGameId by com.nuvio.app.core.contracts.SportsMatchRequest.gameId.collectAsStateWithLifecycle()
     LaunchedEffect(requestedGameId, state.fixturesByLeague, state.fixturesByTeam) {
@@ -204,6 +204,7 @@ fun SportsHubScreen(
                     onOpenLeague = { leaguePage = it },
                     onOpenFixtures = { title, fixtures -> fixturesPage = SportsFixturesPage(title, fixtures) },
                     onFixtureClick = openFixture,
+                    onFindChannels = { sheetFixture = it },
                 )
             }
         }
@@ -248,6 +249,8 @@ private fun SportsOverview(
     onOpenLeague: (RadarLeague) -> Unit,
     onOpenFixtures: (String, List<RadarFixture>) -> Unit,
     onFixtureClick: (RadarFixture) -> Unit,
+    /** The hero's primary action: the channel-matching sheet, not the game screen. */
+    onFindChannels: (RadarFixture) -> Unit = onFixtureClick,
 ) {
     val nowMs = RadarTime.nowMs()
     val featured = state.activeFeatured(nowMs)
@@ -339,8 +342,9 @@ private fun SportsOverview(
                 item(key = "spotlight") {
                     val heroLive = state.isLive(hero, nowMs)
                     val heroScore = hero.id?.let { state.liveScores[it] }
-                    val findChannels = { onFixtureClick(hero) }
-                    val details = { hero.leagueId?.let { state.leagueById(it) }?.let(onOpenLeague) ?: onFixtureClick(hero) }
+                    val findChannels = { onFindChannels(hero) }
+                    // Details opens the GAME when it can (live score, stats, Watch); the league page only for a fixture the game screen cannot describe.
+                    val details = { if (hero.opensGameScreen()) onFixtureClick(hero) else hero.leagueId?.let { state.leagueById(it) }?.let(onOpenLeague) ?: onFixtureClick(hero) }
                     if (isWide) {
                         Row(
                             Modifier.padding(horizontal = sectionPadding, vertical = NuvioTokens.Space.s4).height(232.dp),
@@ -1845,7 +1849,7 @@ private fun ChannelMatchRow(
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
