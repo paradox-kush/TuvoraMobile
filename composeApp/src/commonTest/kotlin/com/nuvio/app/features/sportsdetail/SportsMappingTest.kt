@@ -173,11 +173,39 @@ class SportsMappingTest {
         assertEquals("\"rollback\"", again.requests[0].second["If-None-Match"])
     }
 
-    @Test fun `market win chance is OFF by default and a remote mapping can switch it on`() {
-        assertFalse(bundledMapping().marketEnabled, "bundled default: killSwitch.market = true")
-        assertTrue(mappingOf(editedMappingJson("\"market\": true", "\"market\": false")).marketEnabled)
-        assertFalse(mappingOf(editedMappingJson("\"market\": true,", "")).marketEnabled, "no key means killed")
-        assertFalse(mappingOf(editedMappingJson("\"market\": true", "\"market\": \"maybe\"")).marketEnabled, "anything but an explicit false stays off")
+    private val realMarket = "\"market\": {\"all\": false, \"sports\": [], \"leagues\": []}"
+
+    private fun withMarket(value: String) = mappingOf(editedMappingJson("\"market\": {\"all\": true, \"sports\": [], \"leagues\": []}", "\"market\": $value"))
+
+    @Test fun `the bundled mapping keeps the market OFF`() {
+        assertFalse(bundledMapping().marketEnabledFor("4380"))
+        assertFalse(bundledMapping().marketEnabledFor("4387"))
+    }
+
+    @Test fun `the market is ON only for an object with all false and the game not listed`() {
+        val on = withMarket("{\"all\": false, \"sports\": [], \"leagues\": []}")   // exactly what the research mapping 2026-11-08.3 carries
+        assertTrue(on.marketEnabledFor("4380"))
+        assertTrue(on.marketEnabledFor("4328"))
+        val league = withMarket("{\"all\": false, \"sports\": [], \"leagues\": [\"4380\"]}")
+        assertFalse(league.marketEnabledFor("4380")); assertTrue(league.marketEnabledFor("4387"))
+        val sport = withMarket("{\"all\": false, \"sports\": [\"Ice Hockey\", \"soccer\"], \"leagues\": []}")
+        assertFalse(sport.marketEnabledFor("4380"), "league sport 'Ice Hockey'")
+        assertFalse(sport.marketEnabledFor("4328"), "profile 'soccer'")
+        assertTrue(sport.marketEnabledFor("4387"))
+        assertFalse(withMarket("{\"all\": true, \"sports\": [], \"leagues\": []}").marketEnabledFor("4380"))
+    }
+
+    @Test fun `any other shape of killSwitch market means OFF`() {
+        for (v in listOf("false", "true", "\"off\"", "null", "[]", "{}", "{\"sports\": [], \"leagues\": []}", "{\"all\": \"false\"}", "{\"all\": 0}")) {
+            assertFalse(withMarket(v).marketEnabledFor("4380"), v)
+        }
+        assertFalse(mappingOf(editedMappingJson(", \"market\": {\"all\": true, \"sports\": [], \"leagues\": []}", "")).marketEnabledFor("4380"), "missing key")
+    }
+
+    @Test fun `the research mapping's own killSwitch object is adopted as ON`() {
+        val store = SportsMappingStore(MemStorage(), bundledMapping())
+        assertIs<AdoptResult.Adopted>(store.offer(editedMappingJson("\"market\": {\"all\": true, \"sports\": [], \"leagues\": []}", realMarket), "e"))
+        assertTrue(store.current.marketEnabledFor("4380"))
     }
 
     @Test fun `win probability chain is ESPN first then the market and the chain accepts market`() {

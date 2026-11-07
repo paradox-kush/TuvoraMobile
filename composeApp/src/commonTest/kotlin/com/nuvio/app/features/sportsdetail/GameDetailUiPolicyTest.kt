@@ -137,6 +137,13 @@ class GameDetailUiPolicyTest {
         assertEquals(0.01f, GameDetailUiPolicy.chartPoints(many)!!.first(), 0.0001f)
     }
 
+    @Test fun `soccer chart is home's share of the non-draw mass`() {
+        val h = listOf(com.nuvio.app.features.sportsdetail.api.WinPoint(1, 30), com.nuvio.app.features.sportsdetail.api.WinPoint(2, 45))
+        assertEquals(listOf(0.4f, 0.6f), GameDetailUiPolicy.chartPoints(h, drawPercent = 25))
+        assertEquals(listOf(0.3f, 0.45f), GameDetailUiPolicy.chartPoints(h, drawPercent = null))
+        assertEquals(listOf(1.0f, 1.0f), GameDetailUiPolicy.chartPoints(h, drawPercent = 100), "a degenerate draw never divides by zero")
+    }
+
     @Test fun `win chance caption is the attribution or the source name`() {
         assertEquals("via Polymarket", GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "polymarket", attribution = "via Polymarket")))
         assertEquals("via ESPN", GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "espn")))

@@ -39,11 +39,25 @@ class MarketWinChanceSourceTest {
 
     @Test fun `a normal answer becomes a win chance`() = runBlocking<Unit> {
         val body = """{"gameId":"tsdb:2601","home":62,"away":33,"draw":5,"asOf":1794000000000,"source":"polymarket","attribution":"via Polymarket",
-            "history":[{"t":1793990000000,"home":50},{"t":1794000000000,"home":62},{"t":"bad","home":1}],"extra":1}"""
+            "series":[{"t":1793990000000,"home":50},{"t":1794000000000,"home":62},{"t":"bad","home":1}],"extra":1}"""
         val r = assertIs<SourceResult.Ok<MarketWinChance>>(src(HttpReply(200, body, null)).second.winChance(req, true)).value
         assertEquals(62, r.home); assertEquals(33, r.away); assertEquals(5, r.draw)
         assertEquals("polymarket", r.source); assertEquals("via Polymarket", r.attribution)
         assertEquals(listOf(WinPoint(1793990000000, 50), WinPoint(1794000000000, 62)), r.history, "a malformed point is dropped, the rest kept")
+    }
+
+    @Test fun `the backend's history=1 answer carries the current price AND the series - three-way for soccer`() = runBlocking<Unit> {
+        val body = """{"gameId":"tsdb:2494097","home":45,"away":30,"draw":25,"asOf":1794054600000,
+            "series":[{"t":1794050000000,"home":40},{"t":1794052000000,"home":43},{"t":1794054600000,"home":45}],"source":"polymarket","attribution":"via Polymarket"}"""
+        val r = assertIs<SourceResult.Ok<MarketWinChance>>(src(HttpReply(200, body, null)).second.winChance(req, true)).value
+        assertEquals(Triple(45, 25, 30), Triple(r.home, r.draw, r.away))
+        assertEquals(1794054600000L, r.asOfMs)
+        assertEquals(listOf(40, 43, 45), r.history.map { it.home })
+    }
+
+    @Test fun `a series named history from an older backend is still read`() = runBlocking<Unit> {
+        val r = assertIs<SourceResult.Ok<MarketWinChance>>(src(HttpReply(200, """{"home":50,"away":50,"history":[{"t":1,"home":50},{"t":2,"home":51}],"source":"polymarket"}""", null)).second.winChance(req, true)).value
+        assertEquals(2, r.history.size)
     }
 
     @Test fun `percentages are clamped and a missing home is a failure`() = runBlocking<Unit> {

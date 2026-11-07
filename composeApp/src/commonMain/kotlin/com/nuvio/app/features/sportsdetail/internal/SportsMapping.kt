@@ -22,8 +22,13 @@ internal enum class BlockType(val id: String) {
     }
 }
 
-/** [market] true = the Polymarket win chance is OFF (the default); only an explicit `false` in the mapping turns it on. */
-internal data class KillSwitch(val espn: Boolean, val sports: Set<String>, val leagues: Set<String>, val market: Boolean = true)
+/**
+ * The Polymarket win-chance switch: `{all, sports, leagues}`. ON only when `all` is an explicit boolean false and the game's
+ * sport/league is not listed. Any other shape (missing, boolean, malformed, `all` absent or not a boolean) parses to null = OFF.
+ */
+internal data class MarketSwitch(val all: Boolean, val sports: Set<String>, val leagues: Set<String>)
+
+internal data class KillSwitch(val espn: Boolean, val sports: Set<String>, val leagues: Set<String>, val market: MarketSwitch? = null)
 
 internal data class EspnSourceConfig(
     val scoreboardTemplate: String,
@@ -93,8 +98,14 @@ internal data class SportsMapping(
     fun eventOverride(tsdbEventId: String?): String? =
         tsdbEventId?.let { eventOverrides[it] ?: eventOverrides["tsdb:$it"] }
 
-    /** Polymarket win chance (served by our backend). OFF unless the mapping says `killSwitch.market: false`. */
-    val marketEnabled: Boolean get() = !killSwitch.market
+    /** Polymarket win chance (served by our backend): ON only for `killSwitch.market = {all:false,…}` and a game not listed by league or sport. */
+    fun marketEnabledFor(leagueTsdbId: String): Boolean {
+        val k = killSwitch.market ?: return false
+        if (k.all || leagueTsdbId in k.leagues) return false
+        val league = leagueByTsdb(leagueTsdbId) ?: return true
+        val off = k.sports.map { it.lowercase() }
+        return league.sport.lowercase() !in off && league.profile.lowercase() !in off
+    }
 
     fun leagueByTsdb(id: String): LeagueEntry? = leagues.firstOrNull { it.tsdb == id }
 
@@ -185,7 +196,10 @@ internal object SportsMappingParser {
                 espn = (kill?.get("espn") as? JsonPrimitive)?.booleanOrNull ?: false,
                 sports = kill?.get("sports").strSet(),
                 leagues = kill?.get("leagues").strSet(),
-                market = (kill?.get("market") as? JsonPrimitive)?.booleanOrNull ?: true,
+                market = (kill?.get("market") as? JsonObject)?.let { mk ->
+                    val all = (mk["all"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+                    if (all == null) null else MarketSwitch(all, mk["sports"].strSet(), mk["leagues"].strSet())
+                },
             ),
             espn = EspnSourceConfig(
                 scoreboardTemplate = espnSrc["scoreboard"].s() ?: throw InvalidMapping("no espn.scoreboard"),

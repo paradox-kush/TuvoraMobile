@@ -179,6 +179,8 @@ data class WinProbabilityBlock(
     override val source: String = "",
     val attribution: String? = null,
     val drawPercent: Int? = null,
+    /** The away share when the provider gave it (soccer: home + draw + away); null = derive as the remainder. */
+    val awayPercent: Int? = null,
     val history: List<WinPoint> = emptyList(),
 ) : GameBlock
 

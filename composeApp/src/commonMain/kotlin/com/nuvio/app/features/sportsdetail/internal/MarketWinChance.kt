@@ -55,7 +55,8 @@ internal class MarketWinChanceHttpSource(
         val o = e as? JsonObject ?: return SourceResult.Failed(false)
         if ((o["disabled"] as? JsonPrimitive)?.booleanOrNull == true) return SourceResult.Disabled
         val home = pct(o["home"]) ?: return SourceResult.Failed(false)
-        val points = (o["history"] as? JsonArray).orEmpty().mapNotNull { p ->
+        // `history=1` answers with the current price AND `series` (older backends named it `history`).
+        val points = ((o["series"] ?: o["history"]) as? JsonArray).orEmpty().mapNotNull { p ->
             val po = p as? JsonObject ?: return@mapNotNull null
             val t = (po["t"] as? JsonPrimitive)?.longOrNull ?: return@mapNotNull null
             val h = pct(po["home"]) ?: return@mapNotNull null

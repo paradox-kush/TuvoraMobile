@@ -78,12 +78,14 @@ internal object GameDetailUiPolicy {
 
     private const val CHART_MAX_POINTS = 60
 
-    /** Momentum line: home percent as 0..1, time-ordered, at most 60 points; null when there is no line to draw (< 2 points). */
-    fun chartPoints(history: List<WinPoint>): List<Float>? {
+    /** Momentum line: home's normalised share as 0..1, time-ordered, at most 60 points; null when there is no line to draw (< 2 points). */
+    fun chartPoints(history: List<WinPoint>, drawPercent: Int? = null): List<Float>? {
         if (history.size < 2) return null
         val sorted = history.sortedBy { it.t }
         val picked = if (sorted.size <= CHART_MAX_POINTS) sorted else (0 until CHART_MAX_POINTS).map { sorted[(it.toLong() * (sorted.size - 1) / (CHART_MAX_POINTS - 1)).toInt()] }
-        return picked.map { it.home.coerceIn(0, 100) / 100f }
+        // Home's share of the non-draw mass (soccer: 30% home with a 25% draw plots at 0.4); series points carry only home.
+        val mass = (100 - (drawPercent ?: 0)).coerceAtLeast(1)
+        return picked.map { (it.home.coerceIn(0, 100).toFloat() / mass).coerceIn(0f, 1f) }
     }
 
     /** "via Polymarket" / "via ESPN": the block's attribution, else derived from its source; null when unknown. */

@@ -207,7 +207,7 @@ internal class GameDetailSession(
             ?: listOf("stats", "timeline", "highlights")
         // The market fills win chance for sports/leagues ESPN has none for (NHL, soccer, college…), so it is asked for on any
         // two-sided game when the mapping switched it on.
-        val order = if (market != null && mapping.marketEnabled && ref.awayName != null && "winProbability" !in baseOrder) baseOrder + "winProbability" else baseOrder
+        val order = if (market != null && mapping.marketEnabledFor(ref.leagueId) && ref.awayName != null && "winProbability" !in baseOrder) baseOrder + "winProbability" else baseOrder
         for (id in order) {
             val type = BlockType.byId(id) ?: continue
             // Owner decision: no broadcast block. A mapping or backend that still lists/sends one is simply ignored.
@@ -332,7 +332,7 @@ internal class GameDetailSession(
     ): GameBlock? {
         val src = market ?: return null
         val away = ref.awayName ?: return null
-        if (!mapping.marketEnabled || state == GameState.POSTPONED) return null
+        if (!mapping.marketEnabledFor(ref.leagueId) || state == GameState.POSTPONED) return null
         val key = "market|winProbability"
         val due = (marketCached == null || fetchSummary) && !(state == GameState.FINAL && marketFinalFetched)
         if (due && !isMissed(key) && nowMs() >= marketBackoffUntilMs) {
@@ -342,8 +342,8 @@ internal class GameDetailSession(
             when (r) {
                 is SourceResult.Ok -> {
                     val w = r.value
-                    marketCached = WinProbabilityBlock(w.home, w.source, w.attribution, w.draw, w.history)
-                    marketAsOf = nowMs()
+                    marketCached = WinProbabilityBlock(w.home, w.source, w.attribution, w.draw, w.away, w.history)
+                    marketAsOf = w.asOfMs ?: nowMs()   // the SERVER's time: a stale served value then shows 'Updated Xm ago'
                     if (state == GameState.FINAL) marketFinalFetched = true
                 }
                 is SourceResult.Empty, is SourceResult.Disabled -> { miss(key); marketCached = null; note("winProbability", "polymarket", "empty"); return null }

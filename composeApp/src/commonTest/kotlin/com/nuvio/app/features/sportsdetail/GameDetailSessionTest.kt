@@ -406,11 +406,11 @@ class GameDetailSessionTest {
         }
     }
 
-    private fun mc(home: Int = 62, history: List<com.nuvio.app.features.sportsdetail.api.WinPoint> = emptyList()) =
-        SourceResult.Ok(com.nuvio.app.features.sportsdetail.internal.MarketWinChance(home, 100 - home, null, 1L, "polymarket", "via Polymarket", history))
+    private fun mc(home: Int = 62, history: List<com.nuvio.app.features.sportsdetail.api.WinPoint> = emptyList(), draw: Int? = null, asOf: Long? = 1L) =
+        SourceResult.Ok(com.nuvio.app.features.sportsdetail.internal.MarketWinChance(home, 100 - home - (draw ?: 0), draw, asOf, "polymarket", "via Polymarket", history))
 
     private fun marketOn(): SportsMappingStore =
-        SportsMappingStore(MemStorage(), bundledMapping()).also { it.offer(editedMappingJson("\"market\": true", "\"market\": false"), null) }
+        SportsMappingStore(MemStorage(), bundledMapping()).also { it.offer(editedMappingJson("\"market\": {\"all\": true", "\"market\": {\"all\": false"), null) }
 
     private val nhlRef get() = ref.copy(gameId = "tsdb:2701", leagueId = "4380", tsdbEventId = "2701", espnEventId = "401892659", homeName = "Buffalo Sabres", awayName = "Columbus Blue Jackets")
 
@@ -445,12 +445,20 @@ class GameDetailSessionTest {
         assertEquals("via Polymarket", w.attribution)
         assertEquals(hist, w.history)
         assertEquals("polymarket", d.sources["winProbability"])
-        assertNotNull(d.asOf["polymarket"])
+        assertEquals(1L, d.asOf["polymarket"], "the server's asOf, so a stale served value shows 'Updated Xm ago'")
         val (req, wantHistory) = market.requests.single()
         assertEquals("tsdb:2701", req.gameId); assertEquals("4380", req.leagueId)
         assertEquals("Buffalo Sabres", req.home); assertEquals("Columbus Blue Jackets", req.away)
         assertTrue(wantHistory)
         assertTrue(telemetry.any { it["block"] == "winProbability" && it["source"] == "polymarket" && it["outcome"] == "loaded" && it["sport"] == "hockey" })
+    }
+
+    @Test fun `a soccer game carries the honest three-way split and the server timestamp`() = runBlocking<Unit> {
+        val market = FakeMarket(mc(45, draw = 25, asOf = 1_700_000_000_000L))
+        val d = loaded(session(nhlTsdb(GameState.LIVE), nhl("post", "in"), marketOn(), r = nhlRef, market = market).tick())
+        val w = assertNotNull(winBlock(d))
+        assertEquals(Triple(45, 25, 30), Triple(w.homePercent, w.drawPercent, w.awayPercent))
+        assertEquals(1_700_000_000_000L, d.asOf["polymarket"])
     }
 
     @Test fun `with the kill switch on - the default - the market is never called`() = runBlocking<Unit> {

@@ -196,21 +196,22 @@ internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?
         win?.let { w ->
             val home = w.homePercent.coerceIn(0, 100)
             val draw = w.drawPercent?.coerceIn(0, 100)
+            val away = (w.awayPercent ?: (100 - home - (draw ?: 0))).coerceIn(0, 100)
             Text("WIN CHANCE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textMuted)
             Spacer(Modifier.height(NuvioTokens.Space.s6))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("$awayName ${(100 - home - (draw ?: 0)).coerceAtLeast(0)}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textSecondary)
+                Text("$awayName $away%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textSecondary)
                 if (draw != null && draw > 0) Text("Draw $draw%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
                 Text("$homeName $home%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textSecondary)
             }
             Spacer(Modifier.height(NuvioTokens.Space.s4))
-            val awayPart = (100 - home - (draw ?: 0)).coerceAtLeast(0)
+            val awayPart = away
             Row(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(percent = 50))) {
                 if (awayPart > 0) Box(Modifier.weight(awayPart.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.borderStrong))
                 if (draw != null && draw > 0) Box(Modifier.weight(draw.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.borderDefault))
                 if (home > 0) Box(Modifier.weight(home.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.accent))
             }
-            GameDetailUiPolicy.chartPoints(w.history)?.let { pts ->
+            GameDetailUiPolicy.chartPoints(w.history, w.drawPercent)?.let { pts ->
                 Spacer(Modifier.height(NuvioTokens.Space.s12))
                 MomentumChart(pts, homeName)
             }
