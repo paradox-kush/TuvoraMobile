@@ -53,28 +53,16 @@ internal object DiagTrailPolicy {
         else -> null
     }
 
-    private val urlRegex = Regex("""(?i)\b[a-z][a-z0-9+.\-]*://[^\s"'<>]+""")
-    private val dottedToken = Regex("""(?i)\b[a-z0-9_\-]+(?:\.[a-z0-9_\-]+)+(?::\d+)?\b""")
-    private val packagePrefixes = listOf(
-        "com.", "org.", "java.", "javax.", "kotlin.", "kotlinx.", "android.", "androidx.", "okhttp3.", "okio.",
-        "io.", "dalvik.", "libcore.", "sun.", "jdk.", "platform.", "kfun:", "coil3.", "app.cash.",
-    )
-
-    /**
-     * Free text (an exception message, a stack line) loses anything URL- or host-shaped before it is stored or
-     * sent. Dotted class names survive (they start with a known package root or have a capitalised segment);
-     * `example.com` and `10.0.0.5:8080` do not.
-     */
-    fun scrubText(text: String, maxLength: Int): String {
-        val noUrls = urlRegex.replace(text, "[url]")
-        val noHosts = dottedToken.replace(noUrls) { m ->
-            val token = m.value
-            val classLike = packagePrefixes.any { token.startsWith(it, ignoreCase = false) } ||
-                token.split('.').any { it.firstOrNull()?.isUpperCase() == true } && !token.contains(':')
-            if (classLike) token else "[host]"
-        }
-        return noHosts.take(maxLength)
+    /** A free-form short label (failure code, engine) reduced to a clean code or a fixed placeholder. */
+    fun codeOrOther(value: String?, placeholder: String = "other"): String? {
+        if (value == null) return null
+        val v = value.lowercase()
+        return if (v.length <= MAX_STRING && isCode(v)) v else placeholder
     }
+
+    /** Thread names carry library-chosen text (OkHttp names threads after the host): only a plain short name passes. */
+    fun threadLabel(name: String): String =
+        if (name.length <= 32 && name.all { it.isLetterOrDigit() || it == '_' || it == '-' || it == ' ' || it == '#' } && !urlLike.containsMatchIn(name)) name else "other"
 
     /**
      * Serializes the newest entries that fit: at most [MAX_ENTRIES] and [MAX_BYTES]. Each entry is

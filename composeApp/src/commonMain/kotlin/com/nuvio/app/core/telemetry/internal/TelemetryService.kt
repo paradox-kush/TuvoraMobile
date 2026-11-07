@@ -18,6 +18,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.channels.Channel
+import com.nuvio.app.core.analytics.PostHogPrivacy
 
 /**
  * The one place that decides what leaves the device. Every SDK call in the shared code goes through here via
@@ -27,17 +29,29 @@ internal class TelemetryService(
     private val host: TelemetryHost,
     internal val recorder: FlightRecorder = FlightRecorder(),
     private val rateLimit: ReportRateLimit = ReportRateLimit(),
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : TelemetryPort {
 
     override val supportCode: String = resolveSupportCode()
 
-    private val health = atomic(SessionHealth(host.nowMs()))
+    private val health = SessionHealth(host.nowMs())
     private val screen = atomic<String?>(null)
     private val lastMemory = atomic<Map<String, Long>>(emptyMap())
     private val hardware = atomic<Map<String, Any>>(emptyMap())
     private val samplerJob = atomic<Job?>(null)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val sentCrashIds = atomic<Set<String>>(emptySet())
+
+    // Freed first thing in the crash handler so an OutOfMemoryError still leaves room to write a record.
+    private val memoryReserve = atomic<ByteArray?>(ByteArray(MEMORY_RESERVE_BYTES))
+
+    // Ring persistence runs on one background worker: the callers (often Main) only signal.
+    private val persistRequests = Channel<Unit>(Channel.CONFLATED)
+    private val forcePersist = atomic(false)
     private val previousTrail: String? = host.store.read(RING_FILE)?.takeIf { it.length <= DiagTrailPolicy.MAX_BYTES * 2 }
+
+    init {
+        scope.launch { for (ignored in persistRequests) persistNow() }
+    }
 
     private fun resolveSupportCode(): String {
         val stored = host.loadSupportCode()
@@ -84,7 +98,7 @@ internal class TelemetryService(
         }
         when (decision) {
             SendDecision.RECORD_ONLY -> persistRingIfDue(force = false)
-            SendDecision.COUNT -> { health.value.countEvent(event, props); persistRingIfDue(force = false) }
+            SendDecision.COUNT -> { health.countEvent(event, props); persistRingIfDue(force = false) }
             SendDecision.SEND -> {
                 val error = TelemetrySendPolicy.attachesTrail(event, props)
                 sendEvent(event, props, withTrail = error)
@@ -95,19 +109,20 @@ internal class TelemetryService(
 
     override fun reportError(event: String, props: Map<String, Any>) {
         recorder.record(DiagEntry(host.nowMs(), areaOf(event), codeOf(event), props.filterKeys { it in DiagTrailPolicy.ALLOWED_FIELDS }))
-        health.value.count("error_${codeOf(event)}")
+        health.count("error_${codeOf(event)}")
         sendEvent(event, props, withTrail = true)
         persistRingIfDue(force = true)
     }
 
     override fun reportException(error: Throwable, props: Map<String, Any>) {
         if (!consentEnabled()) return
-        runCatching { host.captureException(error, props + (SUPPORT_CODE_PROPERTY to supportCode)) }
+        runCatching { host.captureException(error, PostHogPrivacy.sanitize(props) + (SUPPORT_CODE_PROPERTY to supportCode)) }
     }
 
     private fun sendEvent(event: String, props: Map<String, Any>, withTrail: Boolean) {
         if (!consentEnabled()) return
-        val out = LinkedHashMap<String, Any>(props)
+        // Second guard besides the call sites: sensitive keys (url, token, ...) dropped, URLs in strings redacted.
+        val out = LinkedHashMap<String, Any>(PostHogPrivacy.sanitize(props))
         out["schema_version"] = SCHEMA_VERSION
         if (withTrail) {
             out["diag_trail"] = DiagTrailPolicy.serialize(recorder.snapshot(), host.nowMs(), maxEntries = ERROR_TRAIL_ENTRIES)
@@ -133,8 +148,8 @@ internal class TelemetryService(
                 put("category", category.name.lowercase())
                 put("surface", surface.name.lowercase())
                 put("app_version", host.appVersion)
-                context.failureCode?.let { put("failure_code", DiagTrailPolicy.scrubText(it, 48)) }
-                context.engine?.let { put("engine", DiagTrailPolicy.scrubText(it, 24)) }
+                DiagTrailPolicy.codeOrOther(context.failureCode)?.let { put("failure_code", it) }
+                DiagTrailPolicy.codeOrOther(context.engine)?.let { put("engine", it) }
                 screen.value?.let { put("screen", it) }
                 for ((k, v) in memory) put("mem_$k", v)
                 putAll(hardware.value)
@@ -153,20 +168,32 @@ internal class TelemetryService(
         }
     }
 
+    /**
+     * Only records. Counters are NOT reset here: iOS `.inactive -> .active` (Control Centre, a call banner) and Android
+     * config changes reach this without a background in between, and a reset would silently drop the counts.
+     */
     override fun onForeground() {
-        health.value = SessionHealth(host.nowMs())
         recorder.record(DiagEntry(host.nowMs(), DiagArea.LIFECYCLE, "foreground"))
     }
 
     override fun onBackground() {
-        val now = host.nowMs()
-        recorder.record(DiagEntry(now, DiagArea.LIFECYCLE, "background"))
-        sampleMemoryOnce()
-        health.value.summary(now)?.let { summary ->
-            if (consentEnabled()) runCatching { host.capture(SESSION_HEALTH_EVENT, summary, null) }
+        recorder.record(DiagEntry(host.nowMs(), DiagArea.LIFECYCLE, "background"))
+        // Memory probe, summary, disk and flush all happen off the caller's thread (it is usually Main).
+        scope.launch {
+            sampleMemoryOnce()
+            sendHealth()
+            persistRingIfDue(force = true)
+            runCatching { host.flush() }
         }
-        persistRingIfDue(force = true)
-        runCatching { host.flush() }
+    }
+
+    /** Sends `session_health` and resets the counters only AFTER the SDK accepted it. */
+    internal fun sendHealth() {
+        val now = host.nowMs()
+        if (!consentEnabled()) { health.discard(now); return }
+        val pending = health.snapshot(now) ?: return
+        val accepted = try { host.capture(SESSION_HEALTH_EVENT, pending.payload, null); true } catch (_: Throwable) { false }
+        if (accepted) health.commit(pending, now)
     }
 
     override fun onPlaybackScopeOpened() {
@@ -188,7 +215,7 @@ internal class TelemetryService(
         val sample = runCatching { host.memorySample() }.getOrDefault(emptyMap())
         if (sample.isEmpty()) return
         lastMemory.value = sample
-        health.value.noteMemory(sample["java_mb"], sample["pss_mb"])
+        health.noteMemory(sample["java_mb"], sample["pss_mb"])
         recorder.record(DiagEntry(host.nowMs(), DiagArea.MEMORY, "sample", sample))
     }
 
@@ -197,59 +224,77 @@ internal class TelemetryService(
     // --- crash path ---------------------------------------------------------------------------------------
 
     /**
-     * Runs in the dying thread. No coroutines, no DI, no blocking lock: the ring is tried with a short timeout and
-     * the record is written without the trail if it cannot be had. Never throws.
+     * Runs in the dying thread. No coroutines, no DI, no locks: the ring is read lock-free. Writes nothing when
+     * reports are off (a crash from while they were off must not be sent after they are turned on). A minimal
+     * fixed-shape record goes down first, then the full one replaces it, so an OutOfMemoryError that kills the
+     * second allocation still leaves a record. Never throws.
      */
     fun handleCrash(threadName: String, error: Throwable) {
         try {
+            memoryReserve.value = null
+            if (!runCatching { host.consentEnabled() }.getOrDefault(false)) return
             val now = host.nowMs()
-            val tail = recorder.tail(DiagTrailPolicy.MAX_ENTRIES)
-            val record = CrashRecord(
+            val minimal = CrashRecord(
                 crash_id = newId(),
                 support_code = supportCode,
                 app_version = host.appVersion,
                 at_ms = now,
-                thread = DiagTrailPolicy.scrubText(threadName, 48),
+                thread = DiagTrailPolicy.threadLabel(threadName),
                 exception_type = CrashRecordCodec.exceptionType(error),
-                message = CrashRecordCodec.messageOf(error),
+            )
+            host.store.writeAtomic(PENDING_CRASH_FILE, CrashRecordCodec.encode(minimal))
+            val full = minimal.copy(
                 stack = CrashRecordCodec.framesOf(error),
-                trail = tail?.let { DiagTrailPolicy.serialize(it, now) },
+                trail = DiagTrailPolicy.serialize(recorder.tail(DiagTrailPolicy.MAX_ENTRIES), now),
                 memory = lastMemory.value,
                 screen = screen.value,
             )
-            host.store.writeAtomic(PENDING_CRASH_FILE, CrashRecordCodec.encode(record))
+            host.store.writeAtomic(PENDING_CRASH_FILE, CrashRecordCodec.encode(full))
         } catch (_: Throwable) {
             // Never let crash capture replace the real crash.
         }
     }
 
     /**
-     * At-least-once with an idempotency key: pending -> sending, capture, flush, delete. A leftover `sending` file
-     * from a run that died mid-send is sent again with the same `crash_id`. Cancellation is rethrown.
+     * At-least-once with an idempotency key (`crash_id`). A record stays on disk until delivery is confirmed: right
+     * after flush when the host's queue is durable, otherwise once the app has run [DELIVERY_CONFIRM_MS] longer and
+     * flushed again (a quick kill after the first flush can still lose the event; the next launch re-sends the same
+     * id). Cancellation is rethrown; nothing else reaches startup.
      */
     override suspend fun sendPendingCrash() {
         try {
             withContext(Dispatchers.Default) {
                 withTimeoutOrNull(SEND_PENDING_DEADLINE_MS) {
-                    if (host.store.read(PENDING_CRASH_FILE) != null && host.store.read(SENDING_CRASH_FILE) == null) {
-                        host.store.rename(PENDING_CRASH_FILE, SENDING_CRASH_FILE)
-                    }
-                    val text = host.store.read(SENDING_CRASH_FILE) ?: return@withTimeoutOrNull
-                    val record = CrashRecordCodec.decode(text)
-                    if (record == null || !consentEnabled()) {
-                        // Unreadable, or the user turned reports off: keep nothing on disk.
-                        host.store.delete(SENDING_CRASH_FILE)
-                        return@withTimeoutOrNull
-                    }
-                    host.capture(CRASH_EVENT, crashProperties(record), record.at_ms)
-                    host.flush()
-                    host.store.delete(SENDING_CRASH_FILE)
+                    for (name in listOf(SENDING_CRASH_FILE, PENDING_CRASH_FILE)) sendCrashFile(name)
                 }
             }
         } catch (c: CancellationException) {
             throw c
         } catch (_: Throwable) {
-            // A failed send leaves sending.json for the next launch; it never reaches startup.
+            // A failed send leaves the file for the next launch; it never reaches startup.
+        }
+    }
+
+    private fun sendCrashFile(name: String) {
+        val text = host.store.read(name) ?: return
+        val record = CrashRecordCodec.decode(text)
+        if (record == null || !consentEnabled()) {
+            // Unreadable, or reports are off: keep nothing on disk.
+            host.store.delete(name)
+            return
+        }
+        if (record.crash_id in sentCrashIds.value) return
+        host.capture(CRASH_EVENT, crashProperties(record), record.at_ms)
+        host.flush()
+        sentCrashIds.value = sentCrashIds.value + record.crash_id
+        if (host.deliveryDurable) {
+            host.store.delete(name)
+        } else {
+            scope.launch {
+                delay(DELIVERY_CONFIRM_MS)
+                runCatching { host.flush() }
+                if (host.store.read(name)?.contains(record.crash_id) == true) host.store.delete(name)
+            }
         }
     }
 
@@ -261,7 +306,6 @@ internal class TelemetryService(
         put("crashed_app_version", r.app_version)
         put("thread", r.thread)
         put("exception_type", r.exception_type)
-        put("message", r.message.orEmpty())
         put("stack", r.stack.joinToString("\n"))
         r.trail?.let { put("diag_trail", it) }
         r.screen?.let { put("screen", it) }
@@ -272,6 +316,18 @@ internal class TelemetryService(
     // --- ring snapshot ------------------------------------------------------------------------------------
 
     private fun persistRingIfDue(force: Boolean) {
+        if (force) forcePersist.value = true
+        persistRequests.trySend(Unit)
+    }
+
+    /** Worker-side: consent gate, delta gate, JSON, atomic write. Off the caller's thread. */
+    private fun persistNow() {
+        val force = forcePersist.getAndSet(false)
+        if (!consentEnabled()) {
+            // Reports are off: the ring stays in memory only, and a snapshot from earlier is removed.
+            host.store.delete(RING_FILE)
+            return
+        }
         val now = host.nowMs()
         if (!recorder.shouldPersist(now, force = force)) return
         val ok = runCatching {
@@ -315,6 +371,8 @@ internal class TelemetryService(
         const val RING_PERSIST_ENTRIES = 80
         const val MEMORY_SAMPLE_INTERVAL_MS = 60_000L
         const val SEND_PENDING_DEADLINE_MS = 10_000L
+        const val DELIVERY_CONFIRM_MS = 90_000L
+        private const val MEMORY_RESERVE_BYTES = 32 * 1024
         private const val ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
     }
 }

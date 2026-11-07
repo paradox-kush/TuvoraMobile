@@ -41,7 +41,7 @@ class FlightRecorderTest {
     fun `tail returns the newest n`() {
         val r = FlightRecorder()
         (1..10).forEach { r.record(e(it)) }
-        assertEquals(listOf("e8", "e9", "e10"), r.tail(3)!!.map { it.code })
+        assertEquals(listOf("e8", "e9", "e10"), r.tail(3).map { it.code })
     }
 
     @Test
@@ -73,7 +73,7 @@ class FlightRecorderTest {
         withContext(Dispatchers.Default) {
             coroutineScope {
                 repeat(8) { w -> launch { repeat(2_000) { r.record(e(w * 10_000 + it)); if (it % 50 == 0) r.snapshot() } } }
-                launch { repeat(500) { assertNotNull(r.tail(40, timeoutMs = 2_000L)) } }
+                launch { repeat(500) { assertTrue(r.tail(40).size <= 40) } }
             }
         }
         assertEquals(200, r.snapshot().size)

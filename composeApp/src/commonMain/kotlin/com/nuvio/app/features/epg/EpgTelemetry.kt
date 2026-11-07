@@ -137,6 +137,9 @@ internal object EpgTelemetry {
                 "matched" to matched,
                 "channels" to channels,
                 "duration_ms" to durationMs,
+                // A catalog with channels and not one match is the failure this event exists to catch; the send
+                // policy sends it at once instead of only counting it.
+                "outcome" to if (channels > 0 && matched == 0) "failed" else "ok",
             ),
         )
     }

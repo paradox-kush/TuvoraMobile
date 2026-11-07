@@ -17,6 +17,7 @@ internal data class CrashRecord(
     val at_ms: Long,
     val thread: String,
     val exception_type: String,
+    /** Kept for schema v1 readers; never populated: exception messages are not sent. */
     val message: String? = null,
     val stack: List<String> = emptyList(),
     val trail: String? = null,
@@ -27,8 +28,6 @@ internal data class CrashRecord(
 internal object CrashRecordCodec {
     const val SCHEMA_VERSION = 1
     const val MAX_FRAMES = 64
-    const val MAX_MESSAGE = 300
-    private const val MAX_FRAME_LENGTH = 220
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -39,17 +38,8 @@ internal object CrashRecordCodec {
         json.decodeFromString(CrashRecord.serializer(), text)
     }.getOrNull()?.takeIf { it.schema_version == SCHEMA_VERSION && it.crash_id.isNotBlank() }
 
-    /** Flattens the throwable (cause chain included) into at most [MAX_FRAMES] scrubbed lines. */
-    fun framesOf(error: Throwable): List<String> =
-        error.stackTraceToString().lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .take(MAX_FRAMES)
-            .map { DiagTrailPolicy.scrubText(it, MAX_FRAME_LENGTH) }
-            .toList()
+    /** Exception types and frames only, at most [MAX_FRAMES] lines. Never message text (see [CrashFrames]). */
+    fun framesOf(error: Throwable): List<String> = CrashFrames.linesOf(error).take(MAX_FRAMES)
 
     fun exceptionType(error: Throwable): String = error::class.qualifiedName ?: error::class.simpleName ?: "Throwable"
-
-    fun messageOf(error: Throwable): String? =
-        error.message?.let { DiagTrailPolicy.scrubText(it, MAX_MESSAGE) }?.takeIf { it.isNotBlank() }
 }

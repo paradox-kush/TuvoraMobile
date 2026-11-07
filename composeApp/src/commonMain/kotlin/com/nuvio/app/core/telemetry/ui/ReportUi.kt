@@ -1,15 +1,10 @@
 package com.nuvio.app.core.telemetry.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import com.nuvio.app.core.telemetry.api.ReportCategory
 import com.nuvio.app.core.telemetry.api.ReportContext
 import com.nuvio.app.core.telemetry.api.ReportResult
@@ -18,6 +13,10 @@ import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.core.ui.NuvioToastController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import com.nuvio.app.features.settings.SentrySettingsRepository
+import nuvio.composeapp.generated.resources.report_turn_on
 import kotlinx.coroutines.launch
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.report_category_app_closed
@@ -56,12 +55,18 @@ internal suspend fun reportResultMessage(result: ReportResult): String = when (r
     ReportResult.Failed -> getString(Res.string.report_failed)
 }
 
+/**
+ * Reports outlive the screen that started them: a reconnect that clears the error pill, or leaving Settings, must not
+ * cancel the send and swallow its outcome. So the work runs on this app-lifetime scope, never a composable's.
+ */
+private val reportScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
 /** Holds the "sending" state so a double press cannot double-send (the rate limit also guards). */
-internal class ReportSender(private val scope: CoroutineScope) {
+internal class ReportSender(private val scope: CoroutineScope = reportScope) {
     var sending by mutableStateOf(false)
         private set
 
-    /** Fires and forgets; the outcome arrives as a toast. [onResult] lets a caller react (e.g. close a picker). */
+    /** Fires and forgets; the outcome ALWAYS arrives as a toast. [onResult] lets a caller react (e.g. close a picker). */
     fun send(
         category: ReportCategory,
         surface: ReportSurface,
@@ -75,11 +80,21 @@ internal class ReportSender(private val scope: CoroutineScope) {
                 val result = try {
                     TelemetryAccess.current().sendUserReport(category, surface, context)
                 } catch (c: CancellationException) {
-                    throw c
+                    ReportResult.Failed
                 } catch (_: Throwable) {
                     ReportResult.Failed
                 }
-                NuvioToastController.show(reportResultMessage(result), durationMillis = 5000L)
+                if (result == ReportResult.ConsentOff) {
+                    // The way out is on the toast: one tap turns the switch on, the user then presses Send again.
+                    NuvioToastController.show(
+                        reportResultMessage(result),
+                        durationMillis = 6000L,
+                        actionLabel = getString(Res.string.report_turn_on),
+                        onAction = { SentrySettingsRepository.setEnabled(true) },
+                    )
+                } else {
+                    NuvioToastController.show(reportResultMessage(result), durationMillis = 5000L)
+                }
                 onResult(result)
             } finally {
                 sending = false
@@ -89,7 +104,4 @@ internal class ReportSender(private val scope: CoroutineScope) {
 }
 
 @Composable
-internal fun rememberReportSender(): ReportSender {
-    val scope = rememberCoroutineScope()
-    return remember(scope) { ReportSender(scope) }
-}
+internal fun rememberReportSender(): ReportSender = remember { ReportSender() }

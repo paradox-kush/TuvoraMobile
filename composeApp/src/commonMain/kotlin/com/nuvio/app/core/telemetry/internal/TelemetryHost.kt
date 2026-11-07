@@ -20,6 +20,13 @@ internal interface TelemetryHost {
 
     fun nowMs(): Long
 
+    /**
+     * True when the SDK's own queue is on disk by the time [flush] returns. False (the safe default) means a quick
+     * quit or kill after flush can still lose the event, so a recovered crash record is kept for a re-send until
+     * the app has run [TelemetryService.DELIVERY_CONFIRM_MS] more. Desktop's queue is in memory: false.
+     */
+    val deliveryDurable: Boolean get() = false
+
     /** Uniform random int in `0 until bound` from a secure source. */
     fun randomBelow(bound: Int): Int
 
