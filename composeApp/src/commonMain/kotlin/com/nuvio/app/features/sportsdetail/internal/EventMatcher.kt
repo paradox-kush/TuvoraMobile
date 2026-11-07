@@ -32,6 +32,16 @@ internal object TeamNames {
         return base
     }
 
+    /** The one "same team?" rule: equal after normalisation, or one is a whole-word subset of the other. */
+    fun sameTeam(a: String, b: String, aliases: Map<String, String>): Boolean = sameNormalized(normalize(a, aliases), normalize(b, aliases))
+
+    internal fun sameNormalized(a: String, b: String): Boolean {
+        if (a.isEmpty() || b.isEmpty()) return false
+        if (a == b) return true
+        val x = a.split(' ').toSet(); val y = b.split(' ').toSet()
+        return (x.size >= 2 && y.containsAll(x)) || (y.size >= 2 && x.containsAll(y))
+    }
+
     private fun clean(name: String): String =
         stripAccents(name).map { if (it.isLetterOrDigit() || it == '-') it else ' ' }.joinToString("")
             .split(' ').filter { it.isNotEmpty() && it !in DROP }.joinToString(" ")
@@ -75,13 +85,7 @@ internal class EventMatcher(private val m: SportsMapping) {
 
     private fun norm(s: String) = TeamNames.normalize(s, m.aliases)
 
-    /** Equal, or one is a whole-word subset of the other ("girona" vs "girona fc" already dropped, "man city" via alias). */
-    private fun same(a: String, b: String): Boolean {
-        if (a.isEmpty() || b.isEmpty()) return false
-        if (a == b) return true
-        val x = a.split(' ').toSet(); val y = b.split(' ').toSet()
-        return (x.size >= 2 && y.containsAll(x)) || (y.size >= 2 && x.containsAll(y))
-    }
+    private fun same(a: String, b: String): Boolean = TeamNames.sameNormalized(a, b)
 
     private fun Boolean.toInt() = if (this) 1 else 0
 

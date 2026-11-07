@@ -6,7 +6,9 @@ import com.nuvio.app.features.sportsdetail.internal.MatchTarget
 import com.nuvio.app.features.sportsdetail.internal.TeamNames
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class EventMatcherTest {
     private val mapping = bundledMapping()
@@ -88,5 +90,14 @@ class EventMatcherTest {
         assertEquals("Leeds United", list[0].home)
         assertEquals("Tottenham Hotspur", list[0].away)
         assertEquals(1794054600000L, list[0].startsAtMs)
+    }
+
+    @Test fun `sameTeam is the shared name rule for matching and for header agreement`() {
+        val al = mapping.aliases
+        assertTrue(TeamNames.sameTeam("Man Utd", "Manchester United", al))
+        assertTrue(TeamNames.sameTeam("Tottenham Hotspur FC", "Tottenham Hotspur", al))
+        assertTrue(TeamNames.sameTeam("Atlético Madrid", "Atletico Madrid", al))
+        assertFalse(TeamNames.sameTeam("Leeds United", "Tottenham Hotspur", al))
+        assertFalse(TeamNames.sameTeam("", "", al))
     }
 }
