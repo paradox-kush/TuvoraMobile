@@ -23,7 +23,7 @@ struct GameDetailScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var playback: PlaybackCoordinator
     @State private var model: TvGameDetailModel?
-    @State private var state: TvGameDetailState = TvGameDetailState.Loading.shared
+    @State private var state: TvGameDetailState = TvGameDetailStateLoading.shared
     @State private var matches: [RadarChannelMatcher.ChannelMatch] = []
     @State private var matching = true
     @State private var opening = false
@@ -163,7 +163,7 @@ struct GameDetailScreen: View {
             case .live:
                 Text(detail.live?.clock ?? detail.live?.periodLabel ?? L("LIVE")).font(NuvioType.labelLargeSemi).foregroundStyle(colors.live)
                 if let d = detail.live?.detail { Text(d).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary) }
-            case .final_: Text("Final").font(NuvioType.labelLargeSemi).foregroundStyle(colors.textSecondary)
+            case .final: Text("Final").font(NuvioType.labelLargeSemi).foregroundStyle(colors.textSecondary)
             case .postponed: Text("Postponed").font(NuvioType.labelLargeSemi).foregroundStyle(colors.textSecondary)
             default: Text(SportsWhen.label(fixture, now: TvSports.shared.nowMs())).font(NuvioType.labelLargeSemi).foregroundStyle(colors.secondary)
             }
