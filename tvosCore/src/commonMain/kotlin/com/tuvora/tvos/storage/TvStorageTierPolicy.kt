@@ -48,7 +48,7 @@ object TvStorageTierPolicy {
     )
 
     private val durablePrefixes = listOf(
-        "server_", "custom_poster_", "tmdb_", "mdblist_", "debrid_",
+        "server_", "tuvora.telemetry.", "custom_poster_", "tmdb_", "mdblist_", "debrid_",
         // player preference keys (PlayerSettingsStorage / PlayerTrackPreferenceStorage)
         "preferred_", "secondary_preferred_", "subtitle_", "ios_", "stream_auto_play_", "stream_reuse_",
         "next_episode_", "auto_skip_", "skip_intro_", "hold_to_speed_", "resize_mode", "playback_brightness",

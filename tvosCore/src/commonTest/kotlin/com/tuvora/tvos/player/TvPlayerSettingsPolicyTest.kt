@@ -67,18 +67,3 @@ class TvSubtitleStyleEditorTest {
         assertTrue(reset.stripSdh)
     }
 }
-
-class TvPlaybackIssueReportTest {
-    @Test
-    fun `the report never carries a stream address`() {
-        val props = TvPlaybackIssueReport.properties(
-            trigger = "error", lane = "libmpv", isLive = true, contentType = "tv", positionMs = 65_000, durationMs = 0,
-            isLoading = false, isPlaying = false,
-            errorMessage = "Failed to open http://user:pass@provider.example:8080/live/abc/123.ts (403)",
-            videoCodec = "HEVC", resolution = "1080p", audioCodec = null, speed = 1f, audioDelayMs = 0, subtitleDelayMs = 0,
-        )
-        assertEquals("Failed to open [redacted-url] (403)", props["error"])
-        assertEquals(65L, props["position_s"])
-        assertFalse(props.values.any { it.toString().contains("provider.example") })
-    }
-}

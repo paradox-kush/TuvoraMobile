@@ -18,6 +18,14 @@ final class ReportFlow: ObservableObject {
     /// The wait ends here even if the work never answers (BoundedLoad's rule for Swift loads).
     static let deadlineSeconds: UInt64 = 15
 
+    private var work: Task<Void, Never>?
+
+    /// Sends once from `.idle` (re-appearing after a result never sends again).
+    func sendIfIdle(category: ReportCategory, surface: ReportSurface, engine: String?, failureCode: String?) {
+        guard state == .idle else { return }
+        send(category: category, surface: surface, engine: engine, failureCode: failureCode)
+    }
+
     func send(category: ReportCategory, surface: ReportSurface, engine: String?, failureCode: String?) {
         // Disabled while sending, so a double OK cannot double-send (the 120 s limit also guards).
         guard state != .sending else { return }
@@ -28,10 +36,17 @@ final class ReportFlow: ObservableObject {
             guard !Task.isCancelled, let self, self.state == .sending else { return }
             self.state = .failed
         }
-        Task.detached {
-            let result = try? await TvTelemetry.shared.sendReport(category: category, surface: surface, engine: engine, failureCode: failureCode)
-            await MainActor.run { self.finish(result) }
+        work?.cancel()
+        work = Task { [weak self] in
+            let result = await Self.perform(category, surface, engine, failureCode)   // off Main
+            guard !Task.isCancelled, let self else { return }
+            self.finish(result)
         }
+    }
+
+    private nonisolated static func perform(_ category: ReportCategory, _ surface: ReportSurface, _ engine: String?, _ failureCode: String?) async -> ReportResult? {
+        if Task.isCancelled { return nil }   // Cancel before the work starts sends nothing
+        return try? await TvTelemetry.shared.sendReport(category: category, surface: surface, engine: engine, failureCode: failureCode)
     }
 
     private func finish(_ result: ReportResult?) {
@@ -46,7 +61,7 @@ final class ReportFlow: ObservableObject {
         }
     }
 
-    func reset() { deadline?.cancel(); state = .idle }
+    func reset() { deadline?.cancel(); work?.cancel(); state = .idle }
 
     /// The consent-off shortcut: flips the same switch as Settings → Diagnostics, in place.
     func turnOnReports() {
@@ -103,7 +118,7 @@ struct ReportSendDialog: View {
                 HStack(spacing: dp(8)) {
                     Spacer()
                     if flow.state == .consentOff {
-                        SettingsDialogButton(title: "Turn on", primary: true) {
+                        SettingsDialogButton(title: "Turn on", primary: true, initialFocus: true) {
                             flow.turnOnReports()
                             flow.send(category: category, surface: .settings, engine: nil, failureCode: nil)
                         }.accessibilityIdentifier("report.turnOn")
@@ -114,20 +129,25 @@ struct ReportSendDialog: View {
                 }
             }
         }
-        .onAppear { flow.send(category: category, surface: .settings, engine: nil, failureCode: nil) }
+        .onAppear { flow.sendIfIdle(category: category, surface: .settings, engine: nil, failureCode: nil) }
         .accessibilityIdentifier("report.dialog")
     }
 }
 
 /// The HDR half of the hardware profile, registered as PostHog super properties (the shared Kotlin registers model,
 /// RAM, cores and OS). Display capability needs AVFoundation, so it is the one part Swift owns.
+/// `AVPlayer.availableHDRModes` is deprecated in the tvOS 26 SDK in favour of `eligibleForHDRPlayback` (a single
+/// yes/no), so tvOS 26+ reports only `hw_hdr_eligible`; earlier systems also report the per-format flags.
 enum TvTelemetryBootstrap {
     static func registerSuperProperties() {
-        let hdr = AVPlayer.availableHDRModes
-        PostHogSDK.shared.register([
-            "hw_hdr10": hdr.contains(.hdr10),
-            "hw_hlg": hdr.contains(.hlg),
-            "hw_dolby_vision": hdr.contains(.dolbyVision),
-        ])
+        var props: [String: Any] = ["hw_hdr_eligible": AVPlayer.eligibleForHDRPlayback]
+        if #unavailable(tvOS 26) { props.merge(legacyHdrModes()) { $1 } }
+        PostHogSDK.shared.register(props)
+    }
+
+    @available(tvOS, deprecated: 26, message: "only reached on tvOS < 26")
+    private static func legacyHdrModes() -> [String: Any] {
+        let modes = AVPlayer.availableHDRModes
+        return ["hw_hdr10": modes.contains(.hdr10), "hw_hlg": modes.contains(.hlg), "hw_dolby_vision": modes.contains(.dolbyVision)]
     }
 }

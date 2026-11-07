@@ -38,7 +38,8 @@ final class TelemetryReportTests: XCTestCase {
             else { remote.press(dx > 0 ? .right : .left) }
             Thread.sleep(forTimeInterval: 0.5)
         }
-        XCTFail("Could not focus \(target.identifier); focused=\(focusedElement.identifier)")
+        let dump = app.buttons.allElementsBoundByIndex.map { "\($0.identifier)@\(Int($0.frame.midX)),\(Int($0.frame.midY))\($0.hasFocus ? "*" : "")" }.joined(separator: " ")
+        XCTFail("Could not focus \(target.identifier); focused=\(focusedElement.identifier); buttons: \(dump); target frame \(target.frame)")
     }
 
     private func waitForFocus(_ e: XCUIElement, timeout: TimeInterval = 20, _ message: String) {
@@ -124,6 +125,7 @@ final class TelemetryReportTests: XCTestCase {
         XCTAssertTrue(focused(el("report.close")), "Close has no focus")
         press(.select, settle: 1)
         XCTAssertFalse(dialog.exists)
+        waitForFocus(row, "Close did not return focus to the Send a report row")
     }
 
     /// Consent off: nothing is sent, the dialog says so and offers the shortcut; the shortcut turns reports on and sends.
@@ -140,8 +142,82 @@ final class TelemetryReportTests: XCTestCase {
         let turnOn = el("report.turnOn")
         XCTAssertTrue(turnOn.exists)
         waitForFocus(turnOn, "the shortcut does not take focus")
+        XCTAssertFalse(focused(el("report.close")), "focus stayed on Close")
         press(.select, settle: 1.5)
         let sent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Report sent. Your support code:'")).firstMatch
         XCTAssertTrue(sent.waitForExistence(timeout: 20), "turning reports on from the dialog did not send")
+    }
+
+    private let mkv = "http://127.0.0.1:8093/vod_h264_ac3.mkv"
+
+    private func reachable(_ url: String) -> Bool {
+        var request = URLRequest(url: URL(string: url)!, timeoutInterval: 3)
+        request.httpMethod = "HEAD"
+        let done = DispatchSemaphore(value: 0)
+        var ok = false
+        URLSession.shared.dataTask(with: request) { _, response, _ in ok = (response as? HTTPURLResponse)?.statusCode == 200; done.signal() }.resume()
+        _ = done.wait(timeout: .now() + 4)
+        return ok
+    }
+
+    /// Review finding 1: a stream that PLAYS and then fails with the controls hidden. The error card's buttons must
+    /// take the remote (Select and the edges), not retry / skip. Needs the VOD range server (research/tvos-spike).
+    func testErrorCardAppearingMidPlayWithHiddenControlsIsReachable() throws {
+        try XCTSkipUnless(reachable(mkv), "start the range server: cd research/tvos-spike/media && python3 ../range_server.py 8093")
+        launch(["-smokePlay", mkv, "-smokePresent", "-smokeFailAfter", "16"])   // presented path = the UIKit press recognizers
+        let now = el("player.now")
+        XCTAssertTrue(now.waitForExistence(timeout: 30))
+        let end = Date().addingTimeInterval(45)
+        while Date() < end, !now.label.hasSuffix("|playing") { Thread.sleep(forTimeInterval: 1) }
+        XCTAssertTrue(now.label.hasSuffix("|playing"), "never played: \(now.label)")
+        let retry = el("player.error.retry")
+        XCTAssertTrue(retry.waitForExistence(timeout: 40), "the failure card never appeared")
+        XCTAssertFalse(el("player.sendReport").exists, "the controls were still showing; the test needs them hidden")
+        waitForFocus(retry, "Retry did not take initial focus over hidden controls")
+        press(.right)
+        let send = el("player.error.send")
+        XCTAssertTrue(focused(send), "Right did not move focus from Retry to Send report (the edge was taken as skip)")
+        press(.select, settle: 1.5)
+        let state = el("player.error.reportState")
+        XCTAssertTrue(waitForText(state, containing: "Report sent. Your support code:"), "Select did not send: \(text(state))")
+    }
+
+    /// Review finding 3: a sent report must not stick to the next channel after a zap. Needs two live relays:
+    /// cd research/tvos-spike && python3 live_relay.py 8941 h264 & python3 live_relay.py 8942 h264 &
+    /// Each channel plays, then fails (-smokeFailAfter) with the controls hidden, so Up zaps.
+    func testSentReportDoesNotFollowTheNextChannel() throws {
+        let first = "http://127.0.0.1:8941/live.ts", second = "http://127.0.0.1:8942/live.ts"
+        try XCTSkipUnless(reachable(first) && reachable(second), "start the two live relays (see the comment)")
+        launch(["-smokePlay", first, "-smokeZapTo", second, "-smokeFailAfter", "16"])
+        let retry = el("player.error.retry")
+        XCTAssertTrue(retry.waitForExistence(timeout: 60), "the first channel never failed")
+        press(.right); press(.select, settle: 1.5)
+        XCTAssertTrue(waitForText(el("player.error.reportState"), containing: "Report sent"))
+        Thread.sleep(forTimeInterval: 8)           // the presses above raised the controls; Up zaps only over hidden ones
+        press(.up, settle: 1)
+        XCTAssertTrue(waitForText(el("player.now"), containing: "Smoke zap", timeout: 30), "the zap never happened: \(text(el("player.now")))")
+        XCTAssertTrue(retry.waitForExistence(timeout: 60), "the second channel never failed")
+        waitForFocus(el("player.error.retry"), "Retry did not take focus on the next channel")
+        let send = el("player.error.send")
+        XCTAssertEqual(text(send), "Send report", "the next channel inherited the old report state")
+        XCTAssertFalse(el("player.error.reportState").exists, "the next channel shows the old report line")
+    }
+
+    /// Review finding 2: pressing the controls' flag button with reports off says so and offers the shortcut
+    /// (`-smokeSendReport` presses it for us: the simulator's focus engine will not walk to a control over live video).
+    func testFlagButtonExplainsConsentOffAndOffersTheShortcut() throws {
+        try XCTSkipUnless(reachable(mkv), "start the range server")
+        launch(["-smokePlay", mkv, "-smokePresent", "-smokeSendReport", "10"], consent: false)
+        let state = el("player.reportState")
+        XCTAssertTrue(waitForText(state, containing: "Turn on Crash & usage reports", timeout: 60), "consent-off not shown: \(text(state))")
+        XCTAssertTrue(el("player.report.turnOn").exists, "no consent shortcut next to the message")
+    }
+
+    /// The same with reports on: the controls say it was sent, with the code.
+    func testFlagButtonConfirmsWithTheCode() throws {
+        try XCTSkipUnless(reachable(mkv), "start the range server")
+        launch(["-smokePlay", mkv, "-smokePresent", "-smokeSendReport", "10"])
+        let state = el("player.reportState")
+        XCTAssertTrue(waitForText(state, containing: "Report sent. Your support code:", timeout: 60), "no confirmation: \(text(state))")
     }
 }

@@ -48,6 +48,12 @@ data class TvPlayerRemoteContext(
     val livePauseAvailable: Boolean = false,
     /** Live pause failed: Play/Pause retries it, as it does a playback failure. */
     val livePauseFailed: Boolean = false,
+    /**
+     * The playback-error card is up (Retry, Send report). Even over hidden controls its buttons hold focus, so
+     * Select and the clickpad's left/right edges belong to the focused button and the focus engine, not to
+     * retry / skip / show-controls. Up/Down still zap, and Play/Pause and Back behave as ever.
+     */
+    val errorCardUp: Boolean = false,
 )
 
 /**
@@ -84,12 +90,12 @@ object TvPlayerRemotePolicy {
         TvRemoteInput.Select -> when {
             ctx.panelOpen || ctx.overlayOpen -> TvRemoteAction.PassThrough
             ctx.scrubbing -> TvRemoteAction.CommitScrub
-            ctx.controlsVisible || ctx.actionButtonUp -> TvRemoteAction.PassThrough
+            ctx.controlsVisible || ctx.actionButtonUp || ctx.errorCardUp -> TvRemoteAction.PassThrough
             ctx.hasError -> TvRemoteAction.Retry
             else -> TvRemoteAction.TogglePlayPause
         }
         TvRemoteInput.Left, TvRemoteInput.Right -> when {
-            !ownsArrows(ctx) -> TvRemoteAction.PassThrough
+            !ownsArrows(ctx) || ctx.errorCardUp -> TvRemoteAction.PassThrough
             ctx.isLive && ctx.livePauseAvailable ->
                 if (input == TvRemoteInput.Left) TvRemoteAction.LiveStepBack else TvRemoteAction.LiveStepForward
             ctx.isLive -> TvRemoteAction.ShowControls
@@ -116,7 +122,7 @@ object TvPlayerRemotePolicy {
         !ctx.controlsVisible && !ctx.panelOpen && !ctx.overlayOpen && !ctx.scrubbing
 
     /** Whether the player takes Select itself (no control or Skip button holds focus). */
-    fun ownsSelect(ctx: TvPlayerRemoteContext): Boolean = ownsArrows(ctx) && !ctx.actionButtonUp
+    fun ownsSelect(ctx: TvPlayerRemoteContext): Boolean = ownsArrows(ctx) && !ctx.actionButtonUp && !ctx.errorCardUp
 
     /**
      * Whether a touch-surface swipe may scrub: VOD with nothing open over the video, and either bare

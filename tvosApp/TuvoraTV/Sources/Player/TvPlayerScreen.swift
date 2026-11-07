@@ -123,6 +123,8 @@ struct TvPlayerScreen: View {
                              onShowPanel: { panel = $0 }, onShowOverlay: { overlay = $0 }, onActivity: bumpControls,
                              partyAvailable: party.view.available || party.view.inParty,
                              onSeekBarFocus: { seekBarFocused = $0 })
+                    // A new session (a live zap) is a new subject: its report state starts clean.
+                    .id(ObjectIdentifier(session))
                     // Nothing under a dialog or panel may take focus from it.
                     .disabled(panel != nil || overlay != nil)
                 if state.showNextEpisode, let next = state.nextEpisode, panel == nil, let meta = session.seriesMeta {
@@ -241,6 +243,10 @@ struct TvPlayerScreen: View {
                     }
                 }
             }
+            // `-smokeFailAfter <seconds>`: the failure card appears that long into playback (controls auto-hidden).
+            if let i = args.firstIndex(of: "-smokeFailAfter"), i + 1 < args.count, let seconds = Double(args[i + 1]) {
+                Task { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); session.failForTesting(message: "Smoke failure") }
+            }
             if let i = args.firstIndex(of: "-smokeSkip"), i + 1 < args.count {
                 let parts = args[i + 1].split(separator: ",").map(String.init)
                 if parts.count == 3, let a = Double(parts[0]), let b = Double(parts[1]) {
@@ -333,7 +339,8 @@ struct TvPlayerScreen: View {
             isLive: isLive, isPlaying: state?.isPlaying ?? false, hasError: state?.errorMessage != nil,
             scrubbing: scrubMs != nil, canZap: playback.zapper != nil, actionButtonUp: skipVisible || startOverVisible,
             livePauseAvailable: state.map { $0.livePause.kind != .unavailable } ?? false,
-            livePauseFailed: state?.livePause.kind == .failed
+            livePauseFailed: state?.livePause.kind == .failed,
+            errorCardUp: state?.errorMessage != nil
         )
     }
 
@@ -526,14 +533,28 @@ private struct PlayerChrome: View {
     }
 
     private func sendReport() {
-        // From an error screen the category is inferred (no picker): the failure is the context.
+        // From an error screen the code and category come from the failure (no picker); the flag button has no failure.
         let failed = state.errorMessage != nil
-        flow.send(category: failed ? .wontPlay : .other, surface: state.isLive ? .live : .vod,
-                  engine: state.lane == .avPlayer ? "avplayer" : "libmpv", failureCode: failed ? "player_error" : nil)
+        let code = failed ? TvPlayerFailureCode.shared.of(isLive: state.isLive, positionMs: state.positionMs, message: state.errorMessage) : nil
+        flow.send(category: failed ? TvTelemetry.shared.inferredCategory(failureCode: code) : .other,
+                  surface: state.isLive ? .live : .vod,
+                  engine: state.lane == .avPlayer ? "avplayer" : "libmpv", failureCode: code)
     }
+
     @Environment(\.nuvio) private var colors
 
     var body: some View {
+        chromeBody
+            // Simulator hook: `-smokeSendReport <seconds>` presses the flag button for us, with the controls up.
+            .task {
+                let args = AppArguments.list
+                guard let i = args.firstIndex(of: "-smokeSendReport"), i + 1 < args.count, let seconds = Double(args[i + 1]) else { return }
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                sendReport(); onActivity()
+            }
+    }
+
+    private var chromeBody: some View {
         ZStack {
             if let error = state.errorMessage {
                 VStack(spacing: dp(10)) {
@@ -600,6 +621,16 @@ private struct PlayerChrome: View {
                         scrubbing: scrubMs != nil, onSeek: { session.seekBy(offsetMs: $0); onActivity() },
                         onFocusChange: onSeekBarFocus)
             }
+            // The flag button's outcome (sending, consent off, rate limited, failed) — the error card has its own line.
+            if state.errorMessage == nil, let message = flow.state.message {
+                HStack(spacing: dp(12)) {
+                    Text(message).font(NuvioType.labelMedium).foregroundStyle(.white.opacity(0.85))
+                        .accessibilityIdentifier("player.reportState")
+                    if flow.state == .consentOff {
+                        ErrorActionButton(title: "Turn on reports", filled: false, id: "player.report.turnOn") { flow.turnOnReports() }
+                    }
+                }
+            }
             HStack(spacing: dp(4)) {
                 PlayerButton(icon: state.isPlaying ? "ic_player_pause" : "ic_player_play") { session.togglePlayPause(); onActivity() }
                 Spacer()
@@ -614,7 +645,7 @@ private struct PlayerChrome: View {
                 }
                 PlayerButton(icon: "md_info") { onShowOverlay(.info) }
                 PlayerButton(icon: reported ? "md_check_circle" : "md_flag") {
-                    guard !reported else { return }
+                    guard !reported, flow.state != .sending else { return }
                     sendReport()
                 }.accessibilityIdentifier("player.sendReport")
             }

@@ -13,6 +13,9 @@ import com.nuvio.app.core.telemetry.api.TelemetryAccess
  * a small surface and the Apple TV player's category inference. Swift calls [sendReport] from a Task off Main.
  */
 object TvTelemetry {
+    /** First thing in the app's init: the service, and the crash hook that writes the record (durable on Apple TV). */
+    fun start() = TvTelemetryStartup.start()
+
     /** `K7Q2-9MPX`. Empty until the service has started (IosTelemetry.start in the Swift app init). */
     val displaySupportCode: String get() = TelemetryAccess.current().displaySupportCode()
 

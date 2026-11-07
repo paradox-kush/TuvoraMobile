@@ -53,5 +53,6 @@ class TvStorageTierPolicyTest {
     fun `support code and the reports consent survive a cache purge`() {
         assertEquals(StorageTier.Durable, TvStorageTierPolicy.tierFor("tuvora.support_code"))
         assertEquals(StorageTier.Durable, TvStorageTierPolicy.tierFor("sentry_enabled"))
+        assertEquals(StorageTier.Durable, TvStorageTierPolicy.tierFor("tuvora.telemetry.file.pending_crash.json"))
     }
 }

@@ -64,6 +64,28 @@ class TvPlayerRemotePolicyTest {
         assertTrue(TvPlayerRemotePolicy.ownsSelect(bare))
     }
 
+    // Telemetry v2 review: the error card's buttons (Retry, Send report) were unreachable over hidden controls,
+    // because the policy still saw bare video and took Select (as Retry) and the edges (as skip).
+    @Test
+    fun `an error card over hidden controls leaves select and the edges to the focused button`() {
+        val card = bare.copy(hasError = true, isPlaying = false, errorCardUp = true)
+        assertEquals(TvRemoteAction.PassThrough, decide(TvRemoteInput.Select, card))
+        assertEquals(TvRemoteAction.PassThrough, decide(TvRemoteInput.Left, card))
+        assertEquals(TvRemoteAction.PassThrough, decide(TvRemoteInput.Right, card))
+        assertFalse(TvPlayerRemotePolicy.ownsSelect(card))
+        // The old behaviour (no card flag) is what swallowed them:
+        assertEquals(TvRemoteAction.Retry, decide(TvRemoteInput.Select, card.copy(errorCardUp = false)))
+        assertEquals(TvRemoteAction.SkipForward, decide(TvRemoteInput.Right, card.copy(errorCardUp = false)))
+    }
+
+    @Test
+    fun `an error card still retries on play pause leaves on back and zaps live on up down`() {
+        val card = bare.copy(hasError = true, isPlaying = false, errorCardUp = true)
+        assertEquals(TvRemoteAction.Retry, decide(TvRemoteInput.PlayPause, card))
+        assertEquals(TvRemoteAction.Leave, decide(TvRemoteInput.Back, card))
+        assertEquals(TvRemoteAction.ZapNext, decide(TvRemoteInput.Down, card.copy(isLive = true, canZap = true)))
+    }
+
     @Test
     fun `live has no seeking - edges show the controls and up down zap when a list exists`() {
         val live = bare.copy(isLive = true)

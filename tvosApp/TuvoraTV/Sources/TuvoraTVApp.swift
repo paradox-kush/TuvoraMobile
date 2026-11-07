@@ -33,7 +33,7 @@ struct TuvoraTVApp: App {
         // PostHog with crash autocapture, the iPhone app's scrubbing and its consent switch.
         TuvoraTelemetry.start()
         // Telemetry v2: the Kotlin service and its crash hook come up before any other shared code runs.
-        IosTelemetry.shared.start()
+        TvTelemetry.shared.start()
         // Lets shared Kotlin capture without linking PostHog; only the telemetry service calls these.
         AnalyticsSink.shared.register { event, properties in
             PostHogSDK.shared.capture(event, properties: properties)

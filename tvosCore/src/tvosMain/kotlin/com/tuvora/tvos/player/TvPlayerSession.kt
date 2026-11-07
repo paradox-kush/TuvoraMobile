@@ -873,28 +873,9 @@ class TvPlayerSession(
         bridge?.setMpvProperties(com.nuvio.app.features.player.VideoZoomPolicy.mpvProperties(zoom))
     }
 
-    // ---- Playback-issue report --------------------------------------------------------------
-
-    /**
-     * NuvioTV's "Report Issue". NuvioTV uploads to its own report endpoint, which Tuvora doesn't
-     * configure; here the report goes to the log and, as an analytics event, through AnalyticsSink
-     * (PostHog once it is wired on Apple TV). No stream address, host or credentials are sent.
-     */
-    fun reportIssue(trigger: String) {
-        val st = _state.value
-        val b = bridge
-        val engine = if (st.lane == PlaybackLane.AvPlayer) "AVPlayer" else "libmpv"
-        val info = b?.let { runCatching { decodePlayerStreamInfo(it.getStreamInfoJson(), engine) }.getOrNull() }
-        val props = TvPlaybackIssueReport.properties(
-            trigger = trigger, lane = engine, isLive = st.isLive,
-            contentType = launch.contentType ?: launch.parentMetaType,
-            positionMs = st.positionMs, durationMs = st.durationMs, isLoading = st.isLoading, isPlaying = st.isPlaying,
-            errorMessage = st.errorMessage, videoCodec = info?.videoCodec,
-            resolution = info?.let { com.nuvio.app.features.player.StreamInfoFormat.qualityLabel(it.videoWidth, it.videoHeight) },
-            audioCodec = info?.audioCodec, speed = st.speed, audioDelayMs = st.audioDelayMs, subtitleDelayMs = st.subtitleDelayMs,
-        )
-        log.w { "playback issue reported: $props" }
-        com.nuvio.app.core.analytics.AnalyticsSink.capture(TvPlaybackIssueReport.EVENT, props)
+    /** Simulator smoke hook: the playback failure card, as if the engine had failed mid-play. */
+    fun failForTesting(message: String) {
+        _state.value = _state.value.copy(errorMessage = message, isLoading = false, isPlaying = false)
     }
 
     private fun open(lane: PlaybackLane, startMs: Long): NuvioPlayerBridge? {
