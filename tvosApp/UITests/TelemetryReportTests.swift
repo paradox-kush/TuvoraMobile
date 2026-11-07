@@ -176,13 +176,18 @@ final class TelemetryReportTests: XCTestCase {
         waitForFocus(retry, "Retry did not take initial focus over hidden controls")
         press(.right)
         let send = el("player.error.send")
-        XCTAssertTrue(focused(send), "Right did not move focus from Retry to Send report (the edge was taken as skip)")
+        let trailAfterRight = el("player.remote").exists ? el("player.remote").label : ""
+        XCTAssertTrue(focused(send), "Right did not move focus from Retry to Send report (the edge was taken as skip); trail: \(trailAfterRight)")
+        XCTAssertFalse(trailAfterRight.contains("skip") || trailAfterRight.contains("showControls"), "the player took Right as \(trailAfterRight) instead of leaving it to focus")
         press(.select, settle: 1.5)
         let state = el("player.error.reportState")
-        XCTAssertTrue(waitForText(state, containing: "Report sent. Your support code:"), "Select did not send: \(text(state))")
+        let trail = el("player.remote").exists ? el("player.remote").label : ""
+        XCTAssertFalse(trail.contains("select>retry"), "the player took Select as Retry instead of the focused button: \(trail)")
+        XCTAssertTrue(waitForText(state, containing: "Report sent. Your support code:"), "Select did not send: \(text(state)); trail \(trail)")
     }
 
-    /// Review finding 3: a sent report must not stick to the next channel after a zap. Needs two live relays:
+    /// Review finding 3 (a guard, not a regression test: PlaybackCoordinator.play already keys the whole screen by session,
+    /// so this passes with and without any extra identity in PlayerChrome): a sent report must not stick to the next channel. Needs two live relays:
     /// cd research/tvos-spike && python3 live_relay.py 8941 h264 & python3 live_relay.py 8942 h264 &
     /// Each channel plays, then fails (-smokeFailAfter) with the controls hidden, so Up zaps.
     func testSentReportDoesNotFollowTheNextChannel() throws {

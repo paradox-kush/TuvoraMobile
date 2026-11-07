@@ -123,8 +123,6 @@ struct TvPlayerScreen: View {
                              onShowPanel: { panel = $0 }, onShowOverlay: { overlay = $0 }, onActivity: bumpControls,
                              partyAvailable: party.view.available || party.view.inParty,
                              onSeekBarFocus: { seekBarFocused = $0 })
-                    // A new session (a live zap) is a new subject: its report state starts clean.
-                    .id(ObjectIdentifier(session))
                     // Nothing under a dialog or panel may take focus from it.
                     .disabled(panel != nil || overlay != nil)
                 if state.showNextEpisode, let next = state.nextEpisode, panel == nil, let meta = session.seriesMeta {
