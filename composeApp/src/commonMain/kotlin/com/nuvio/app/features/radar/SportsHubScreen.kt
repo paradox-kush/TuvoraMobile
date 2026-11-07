@@ -963,6 +963,8 @@ internal fun SportsSpotlightHero(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 if (live) {
                     LiveBadge(progress = liveScore?.progress)
+                } else if (fixture.scoreLabel != null) {
+                    StatusPill(text = "FT", color = tokens.colors.textSecondary)   // a finished game says so, not its kickoff time
                 } else {
                     val day = fixture.startEpochMs?.let { RadarTime.dayLabel(it) }
                     StatusPill(
