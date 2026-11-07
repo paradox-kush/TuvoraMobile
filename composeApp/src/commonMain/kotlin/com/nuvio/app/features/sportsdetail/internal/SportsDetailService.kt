@@ -1,0 +1,45 @@
+package com.nuvio.app.features.sportsdetail.internal
+
+import com.nuvio.app.features.addons.httpRequestRaw
+import com.nuvio.app.features.sportsdetail.api.GameDetailRefreshPolicy
+import com.nuvio.app.features.sportsdetail.api.GameDetailSource
+import com.nuvio.app.features.sportsdetail.api.GameRef
+import com.nuvio.app.features.sportsdetail.api.MappingStorage
+import com.nuvio.app.features.sportsdetail.api.SportsDetailService
+import com.nuvio.app.features.sportsdetail.api.StoredMapping
+
+/** [SportsHttp] over the app's HTTP stack (`httpRequestRaw`: OkHttp / Darwin), with ETag passthrough. */
+internal class PlatformSportsHttp : SportsHttp {
+    override suspend fun get(url: String, headers: Map<String, String>, deadlineMs: Long): HttpReply {
+        val r = httpRequestRaw(method = "GET", url = url, headers = headers + ("Accept" to "application/json"), body = "")
+        val etag = r.headers.entries.firstOrNull { it.key.equals("etag", ignoreCase = true) }?.value
+        return HttpReply(r.status, r.body, etag)
+    }
+}
+
+/** Process-memory storage; the app host swaps in a persistent [MappingStorage] at wiring time. */
+internal class InMemoryMappingStorage : MappingStorage {
+    private var stored: StoredMapping? = null
+    override fun load(): StoredMapping? = stored
+    override fun save(value: StoredMapping) { stored = value }
+}
+
+internal class DefaultSportsDetailService(
+    storage: MappingStorage = InMemoryMappingStorage(),
+    private val http: SportsHttp = PlatformSportsHttp(),
+) : SportsDetailService {
+    private val bundled: SportsMapping =
+        (SportsMappingParser.parse(BundledSportsMapping.JSON) as SportsMappingParser.ParseResult.Ok).mapping
+    private val store = SportsMappingStore(storage, bundled)
+    private val sync = RemoteMappingSync(store, http)
+    private val espn = EspnHttpSource(http) { store.current }
+    private val tsdb = TheSportsDbHttpSource(http)
+
+    override fun open(ref: GameRef): GameDetailSource = GameDetailSession(ref, { store.current }, tsdb, espn)
+
+    override suspend fun syncMapping() { sync.sync() }
+
+    override fun refreshConfig(): GameDetailRefreshPolicy.Config = store.current.espn.let {
+        GameDetailRefreshPolicy.configFrom(it.liveMs, it.summaryMs, it.minMs)
+    }
+}
