@@ -63,6 +63,8 @@ fun GameDetailScreen(
     onAddPlaylist: () -> Unit,
     onFindChannels: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Reports the freshest state of THIS game (ESPN-backed) so lists can stop saying LIVE: (isLive, period like "3rd"). Final -> (false, null). */
+    onFreshState: (live: Boolean, periodLabel: String?) -> Unit = { _, _ -> },
 ) {
     val service = LocalSportsDetail.current
     val watch = LocalGameWatch.current
@@ -91,6 +93,15 @@ fun GameDetailScreen(
     }
     val state = GameDetailUiPolicy.effective(raw, clock)
     LaunchedEffect(state) { if (state is GameDetailUiState.Empty) onNoData() }
+    LaunchedEffect(raw) {
+        (raw as? GameDetailUiState.Loaded)?.detail?.let { d ->
+            when (d.state) {
+                GameState.LIVE -> onFreshState(true, d.live?.periodLabel)
+                GameState.FINAL -> onFreshState(false, null)
+                else -> {}
+            }
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize().background(MaterialTheme.nuvio.colors.background)) {
         // Own top bar: the shared header collapses under iOS native navigation (no back control, content under the island).

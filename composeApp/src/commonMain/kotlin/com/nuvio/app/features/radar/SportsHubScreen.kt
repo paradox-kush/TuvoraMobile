@@ -220,6 +220,7 @@ fun SportsHubScreen(
                     onPlayChannel = onPlayChannel,
                     onAddPlaylist = onAddPlaylist,
                     onFindChannels = { sheetFixture = fx },
+                    onFreshState = { live, period -> fx.id?.let { id -> RadarRepository.setFreshState(id, live, period) } },
                 )
             }
         }
@@ -341,7 +342,7 @@ private fun SportsOverview(
             heroFixture?.let { hero ->
                 item(key = "spotlight") {
                     val heroLive = state.isLive(hero, nowMs)
-                    val heroScore = hero.id?.let { state.liveScores[it] }
+                    val heroScore = state.liveScoreFor(hero)
                     val findChannels = { onFindChannels(hero) }
                     // Details opens the GAME when it can (live score, stats, Watch); the league page only for a fixture the game screen cannot describe.
                     val details = { if (hero.opensGameScreen()) onFixtureClick(hero) else hero.leagueId?.let { state.leagueById(it) }?.let(onOpenLeague) ?: onFixtureClick(hero) }
@@ -358,7 +359,7 @@ private fun SportsOverview(
                             SportsLiveRail(
                                 fixtures = upcoming,
                                 isLive = { state.isLive(it, nowMs) },
-                                liveScoreFor = { fx -> fx.id?.let { state.liveScores[it] } },
+                                liveScoreFor = { fx -> state.liveScoreFor(fx) },
                                 onClick = onFixtureClick,
                                 onViewAll = { onOpenFixtures("Live & Upcoming", upcoming) },
                                 modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -420,7 +421,7 @@ private fun SportsOverview(
                             fx,
                             live = state.isLive(fx, nowMs),
                             onClick = { onFixtureClick(fx) },
-                            liveScore = fx.id?.let { state.liveScores[it] },
+                            liveScore = state.liveScoreFor(fx),
                         )
                     }
                 }
@@ -448,7 +449,7 @@ private fun SportsOverview(
                         fx,
                         live = state.isLive(fx, nowMs),
                         onClick = { onFixtureClick(fx) },
-                        liveScore = fx.id?.let { state.liveScores[it] },
+                        liveScore = state.liveScoreFor(fx),
                     )
                 }
             }
@@ -472,7 +473,7 @@ private fun SportsOverview(
                             fx,
                             live = state.isLive(fx, nowMs),
                             onClick = { onFixtureClick(fx) },
-                            liveScore = fx.id?.let { state.liveScores[it] },
+                            liveScore = state.liveScoreFor(fx),
                         )
                     }
                 }
@@ -552,7 +553,7 @@ private fun SportsFixturesPage(
                     live = state.isLive(fixture, nowMs),
                     onClick = { onFixtureClick(fixture) },
                     modifier = Modifier.fillMaxWidth(),
-                    liveScore = fixture.id?.let { state.liveScores[it] },
+                    liveScore = state.liveScoreFor(fixture),
                 )
             }
         }
@@ -828,7 +829,7 @@ private fun LeagueFixturesPage(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s4),
-                        liveScore = fx.id?.let { state.liveScores[it] },
+                        liveScore = state.liveScoreFor(fx),
                     )
                 }
             }
@@ -1128,7 +1129,7 @@ private fun SportsLiveRail(
             val away = fx.away?.takeIf { it.isNotBlank() }
             val title = if (home != null && away != null) "$home v $away" else fx.displayTitle
             val status = when {
-                live -> liveScoreFor(fx)?.progress?.takeIf { it.isNotBlank() } ?: "LIVE"
+                live -> liveScoreFor(fx)?.progress?.takeIf { it.isNotBlank() }?.let { "LIVE · $it" } ?: "LIVE"
                 fx.scoreLabel != null -> "FT"
                 fx.startEpochMs != null -> radarWhenLabel(fx.startEpochMs!!)
                 else -> "TBC"
@@ -1390,7 +1391,7 @@ internal fun LiveBadge(progress: String? = null) {
         Box(Modifier.size(6.dp).clip(CircleShape).background(danger))
         Spacer(Modifier.width(4.dp))
         Text(
-            if (progress.isNullOrBlank()) "LIVE" else "LIVE $progress",
+            if (progress.isNullOrBlank()) "LIVE" else "LIVE · $progress",
             style = MaterialTheme.typography.labelSmall,
             color = danger,
             fontWeight = FontWeight.Bold,
