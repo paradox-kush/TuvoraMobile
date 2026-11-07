@@ -94,7 +94,7 @@ class SetupCodeControllerTest {
 
     @AfterTest
     fun tearDown() {
-        ProviderSetupTelemetry.capture = com.nuvio.app.core.analytics.AnalyticsSink::capture
+        ProviderSetupTelemetry.capture = com.nuvio.app.core.telemetry.api.TelemetryAccess::emit
     }
 
     @Test

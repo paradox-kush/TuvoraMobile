@@ -1,6 +1,7 @@
 package com.nuvio.app.features.iptv
 
-import com.nuvio.app.core.analytics.AnalyticsSink
+import com.nuvio.app.core.telemetry.RecordingTelemetryPort
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
@@ -21,13 +22,13 @@ class BoundedLoadTest {
     fun setUp() {
         BoundedLoad.stallOverrideMsForTests = 150L
         BoundedLoad.resetReportsForTests()
-        AnalyticsSink.register { name, props -> events += name to props }
+        TelemetryAccess.register(RecordingTelemetryPort { name, props -> events += name to props })
     }
 
     @AfterTest
     fun tearDown() {
         BoundedLoad.stallOverrideMsForTests = null
-        AnalyticsSink.register { _, _ -> }
+        TelemetryAccess.resetForTest()
     }
 
     @Test

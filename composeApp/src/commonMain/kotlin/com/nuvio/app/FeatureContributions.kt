@@ -1,6 +1,7 @@
 package com.nuvio.app
 
 import com.nuvio.app.core.diag.installLogRedaction
+import com.nuvio.app.core.telemetry.api.TelemetryStartup
 import com.nuvio.app.core.contracts.IptvCatalogAccess
 import com.nuvio.app.core.contracts.IptvSubtitleIdAccess
 import com.nuvio.app.core.contracts.LivePlaybackAccess
@@ -64,6 +65,8 @@ import kotlinx.coroutines.flow.stateIn
 fun registerLogicFeatureContributions() {
     // B116: first, so every later log line (all Kermit loggers share this config) is redacted.
     installLogRedaction()
+    // Telemetry v2: publish the service the platform started first (crash handler up before DI) as the app's port.
+    TelemetryStartup.registerPort()
     // S10: app-wide memory port (AppMemory + BudgetRegistry) — image loaders, player buffer
     // sizing, and the platform startup probes size their budgets through this.
     MemoryPortAccess.register(MemoryPortImpl)

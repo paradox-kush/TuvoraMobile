@@ -1,6 +1,6 @@
 package com.nuvio.app.features.epg
 
-import com.nuvio.app.core.analytics.AnalyticsSink
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 
 /**
  * The one place EPG work reports what it did.
@@ -67,9 +67,9 @@ internal object EpgTelemetry {
         durationMs: Long = 0,
         errorClass: String? = null,
     ) {
-        AnalyticsSink.capture(
+        TelemetryAccess.current().emit(
             event = "epg_ingest",
-            properties = buildMap {
+            props = buildMap {
                 put("source", source.wire)
                 put("outcome", outcome.wire)
                 put("programmes", programmes)
@@ -105,9 +105,9 @@ internal object EpgTelemetry {
     fun resolveTallied(manual: Int, provider: Int, mirror: Int, none: Int, unavailable: Int = 0, store: Int = 0) {
         val total = manual + store + provider + mirror + none + unavailable
         if (total <= 0) return
-        AnalyticsSink.capture(
+        TelemetryAccess.current().emit(
             event = "epg_resolve",
-            properties = mapOf(
+            props = mapOf(
                 "manual" to manual,
                 // Served from the account's own stored guide: zero network for this channel.
                 "store" to store,
@@ -131,9 +131,9 @@ internal object EpgTelemetry {
      * its catalog looks, from support's side, exactly like the app breaking.
      */
     fun mappingFinished(matched: Int, channels: Int, durationMs: Long) {
-        AnalyticsSink.capture(
+        TelemetryAccess.current().emit(
             event = "epg_mapping",
-            properties = mapOf(
+            props = mapOf(
                 "matched" to matched,
                 "channels" to channels,
                 "duration_ms" to durationMs,

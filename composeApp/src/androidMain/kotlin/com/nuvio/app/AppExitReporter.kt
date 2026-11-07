@@ -6,7 +6,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Debug
 import com.nuvio.app.core.build.AppVersionConfig
-import com.posthog.PostHog
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import java.io.InputStream
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -163,6 +163,7 @@ object AppExitReporter {
         val seenIds = prefs.getStringSet(KEY_SEEN_EXIT_IDS, emptySet()).orEmpty().toMutableSet()
         val runContexts = readRunContexts(context)
 
+        val newestExitTimestamp = exits.maxOf { it.timestamp }
         exits.asSequence()
             .filter { it.timestamp > lastSeen }
             .sortedBy { it.timestamp }
@@ -179,11 +180,20 @@ object AppExitReporter {
                 // Drop normal OS lifecycle (e.g. a cached/background process SIGKILLed to reclaim RAM)
                 // so it does not skew crash metrics — only report app faults and user-visible reclaims.
                 // The end-of-loop timestamp advance below still moves past the skipped record.
-                if (!AppExitReportPolicy.shouldReport(reason, exit.importance)) return@forEach
+                if (!AppExitReportPolicy.shouldReport(reason, exit.importance)) {
+                    // Background reclaims are no longer silent: the send policy counts them in session_health.
+                    TelemetryAccess.current().emit("app_exit", mapOf("reason" to reason, "importance" to exit.importance))
+                    return@forEach
+                }
 
                 val failedRun = findRunContext(exit.timestamp, runContexts)
                 val properties = buildProperties(context, exit, reason, failedRun)
-                PostHog.capture("app_exit", properties = properties)
+                // The newest abnormal exit gets the previous run's flight-recorder trail: a native crash or a
+                // low-memory kill runs no handler, so the ring snapshot on disk is all that is left of its last minutes.
+                val withTrail = if (exit.timestamp == newestExitTimestamp) {
+                    TelemetryAccess.current().previousSessionTrail()?.let { properties + ("diag_trail" to it) } ?: properties
+                } else properties
+                TelemetryAccess.current().emit("app_exit", withTrail)
                 if (shouldPromoteProcessExitToIssue(reason, exit.importance)) {
                     captureExitIssue(reason, properties)
                 }
@@ -331,9 +341,9 @@ object AppExitReporter {
      */
     private fun captureExitIssue(reason: String, properties: Map<String, Any>) {
         runCatching {
-            PostHog.captureException(
-                throwable = AndroidProcessExitException(reason),
-                properties = properties + mapOf(
+            TelemetryAccess.current().reportException(
+                AndroidProcessExitException(reason),
+                properties + mapOf(
                     "\$exception_fingerprint" to processExitIssueFingerprint(reason),
                     "\$exception_level" to processExitIssueLevel(reason),
                     "diagnostic_source" to "application_exit_info",
@@ -569,9 +579,9 @@ object AppExitReporter {
                     destroyWaitMs = destroyWaitMs,
                 )
                 if (safeStage in MPV_WARNING_STAGES) {
-                    PostHog.capture(
+                    TelemetryAccess.current().emit(
                         "mpv_lifecycle_warning",
-                        properties = buildMap {
+                        buildMap {
                             put("mpv_instance_id", instanceId)
                             put("mpv_lifecycle_stage", safeStage)
                             put("mpv_active_instances", activeInstances)

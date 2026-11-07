@@ -1,6 +1,7 @@
 package com.nuvio.app.core.analytics
 
 import com.nuvio.app.core.journal.StartupJournal
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 
 /**
  * Screen and playback breadcrumbs.
@@ -27,7 +28,7 @@ object Breadcrumbs {
     /** Registered by hosts that have a process-exit reporter; null hosts just skip persistence. */
     var crashWriter: CrashWriter? = null
 
-    private var capture: (String, Map<String, Any>) -> Unit = AnalyticsSink::capture
+    private var capture: (String, Map<String, Any>) -> Unit = { event, props -> TelemetryAccess.current().emit(event, props) }
     private var lastScreen: String? = null
     private var lastPlaybackKey: String? = null
     private var lastPlaybackEmitAtMs = 0L
@@ -55,6 +56,8 @@ object Breadcrumbs {
         // The persisted note always updates: it must reflect reality at the moment of death
         // even when the analytics event below is deduped or rate-capped.
         crashWriter?.onPlaybackStarted(kind, engine, surface)
+        // Memory sampling runs only while a playback scope is open (and is cancelled when it closes).
+        TelemetryAccess.current().onPlaybackScopeOpened()
 
         // Reconnect ladders and channel zapping re-fire starts; identical back-to-back starts
         // inside the window are one viewing decision, not many.
@@ -77,6 +80,7 @@ object Breadcrumbs {
     fun playbackStopped() {
         com.nuvio.app.features.iptv.stalker.StalkerPlaybackTraffic.onPlaybackStopped()
         crashWriter?.onPlaybackStopped()
+        TelemetryAccess.current().onPlaybackScopeClosed()
     }
 
     private fun allowEmit(nowMs: Long): Boolean {
@@ -89,7 +93,7 @@ object Breadcrumbs {
     }
 
     /** Tests swap the capture sink and clear the dedupe/rate state between cases. */
-    internal fun resetForTest(capture: (String, Map<String, Any>) -> Unit = AnalyticsSink::capture) {
+    internal fun resetForTest(capture: (String, Map<String, Any>) -> Unit = { event, props -> TelemetryAccess.current().emit(event, props) }) {
         this.capture = capture
         crashWriter = null
         lastScreen = null

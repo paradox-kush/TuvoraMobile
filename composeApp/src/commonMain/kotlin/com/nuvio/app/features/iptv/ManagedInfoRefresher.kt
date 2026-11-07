@@ -1,7 +1,6 @@
 package com.nuvio.app.features.iptv
 
 import co.touchlab.kermit.Logger
-import com.nuvio.app.core.analytics.AnalyticsSink
 import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
 import com.nuvio.app.features.profiles.ProfileRepository
@@ -102,7 +101,7 @@ internal object ManagedInfoRefresher {
 
 /** Provider-setup analytics: an outcome only. Never the code, a URL, a provider name or a playlist name. */
 internal object ProviderSetupTelemetry {
-    internal var capture: (String, Map<String, Any>) -> Unit = AnalyticsSink::capture
+    internal var capture: (String, Map<String, Any>) -> Unit = com.nuvio.app.core.telemetry.api.TelemetryAccess::emit
 
     fun previewed(outcome: SetupCodeOutcome) =
         capture("setup_code_preview", mapOf("outcome" to outcome.analyticsName))

@@ -114,6 +114,8 @@ internal fun LazyListScope.advancedSettingsContent(
                     isTablet = isTablet,
                     onCheckedChange = RecTrackingAccess.settings::setEnabled,
                 )
+                SettingsGroupDivider(isTablet = isTablet)
+                SendReportRows(isTablet = isTablet)
             }
         }
 

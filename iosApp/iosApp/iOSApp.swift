@@ -33,6 +33,7 @@ private final class MemoryPressureObserver {
 @main
 struct iOSApp: App {
     @UIApplicationDelegateAdaptor(OrientationLockAppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         #if DEBUG
@@ -43,10 +44,32 @@ struct iOSApp: App {
         // PostHog: crash autocapture, event scrubbing and the diagnostics consent switch
         // (TuvoraTelemetry.swift, shared with the Apple TV app).
         TuvoraTelemetry.start()
+        // Telemetry v2: the Kotlin service and its crash hook come up first, before any other shared code runs.
+        IosTelemetry.shared.start()
         // Lets shared Kotlin code capture without linking a PostHog SDK into the framework.
-        // Registered before any shared code can run, so no early event is dropped.
+        // Registered before any shared code can run, so no early event is dropped. Only the Kotlin
+        // telemetry service calls these (send policy, consent, support code, trail live there).
         AnalyticsSink.shared.register { event, properties in
             PostHogSDK.shared.capture(event, properties: properties)
+        }
+        // A recovered crash keeps the time it happened, not the time it was sent.
+        AnalyticsSink.shared.registerTimed { event, properties, atEpochMs in
+            PostHogSDK.shared.capture(
+                event,
+                properties: properties,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(atEpochMs.int64Value) / 1000.0)
+            )
+        }
+        AnalyticsSink.shared.registerSuperProperties { properties in
+            PostHogSDK.shared.register(properties as [String: Any])
+        }
+        AnalyticsSink.shared.registerFlush {
+            PostHogSDK.shared.flush()
+        }
+        IosTelemetry.shared.onSdkReady()
+        Task.detached(priority: .utility) {
+            // Off Main; the Kotlin side has its own deadline and never throws.
+            try? await IosTelemetry.shared.sendPendingCrash()
         }
         // Registered next to the AnalyticsSink bridge, before shared code can allocate:
         // pressure events trim the Kotlin-side budget registry from the very first screen.
@@ -65,6 +88,14 @@ struct iOSApp: App {
                 .preferredColorScheme(.dark)
                 .onOpenURL { url in
                     AppUrlBridgeKt.handleAppUrl(url: url.absoluteString)
+                }
+                // session_health goes out when the app leaves the foreground (Telemetry v2).
+                .onChange(of: scenePhase) { phase in
+                    switch phase {
+                    case .active: IosTelemetry.shared.onForeground()
+                    case .background: IosTelemetry.shared.onBackground()
+                    default: break
+                    }
                 }
         }
     }

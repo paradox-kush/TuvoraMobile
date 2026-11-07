@@ -148,6 +148,11 @@ import nuvio.composeapp.generated.resources.compose_livetv_catchup_session_limit
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_start_over
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_watch_live
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_watch
+import com.nuvio.app.core.telemetry.api.ReportCategoryInference
+import com.nuvio.app.core.telemetry.api.ReportContext
+import com.nuvio.app.core.telemetry.api.ReportSurface
+import com.nuvio.app.core.telemetry.ui.rememberReportSender
+import nuvio.composeapp.generated.resources.report_send
 import nuvio.composeapp.generated.resources.compose_livetv_error_tap_retry
 import nuvio.composeapp.generated.resources.compose_livetv_exit_fullscreen
 import nuvio.composeapp.generated.resources.compose_livetv_fullscreen
@@ -1176,6 +1181,14 @@ fun LiveTvScreen(
                     hasError -> Box(Modifier.fillMaxSize(), Alignment.Center) {
                         ErrorPill(
                             colors.danger, onRetry,
+                            failureCode = when {
+                                resolveError -> "resolve_failed"
+                                startupFailed -> "startup_failed"
+                                reconnectGaveUp -> "reconnect_gave_up"
+                                replayStartupFailed || replayRetry != null -> "replay_failed"
+                                playbackError != null -> "playback_error"
+                                else -> null
+                            },
                             message = when {
                                 replayFailure == StalkerReplayFailure.SESSION_LIMIT -> stringResource(Res.string.compose_livetv_catchup_stalker_limit)
                                 replayFailure == StalkerReplayFailure.NOTHING_TO_PLAY -> stringResource(Res.string.compose_livetv_catchup_stalker_nothing)
@@ -1625,24 +1638,51 @@ internal fun LiveBadge(danger: Color, behindLiveMs: Long? = null, onGoLive: (() 
 }
 
 @Composable
-private fun ErrorPill(danger: Color, onRetry: () -> Unit, message: String? = null) {
+private fun ErrorPill(danger: Color, onRetry: () -> Unit, message: String? = null, failureCode: String? = null) {
+    val sender = rememberReportSender()
     Row(
-        modifier = Modifier
-            .padding(horizontal = NuvioTokens.Space.s16)
-            .clip(RoundedCornerShape(NuvioTokens.Radius.md))
-            .background(Color.Black.copy(alpha = 0.6f))
-            .clickable(onClick = onRetry)
-            .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s10),
-        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.Refresh, contentDescription = null, tint = danger)
-        Text(
-            // A replay that never started explains itself; every other failure keeps the short tap-to-retry line.
-            text = message ?: stringResource(Res.string.compose_livetv_error_tap_retry),
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color.White,
-        )
+        // Retry stays the primary action and keeps its place first; Send report is the quieter second pill.
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(NuvioTokens.Radius.md))
+                .background(Color.Black.copy(alpha = 0.6f))
+                .clickable(onClick = onRetry)
+                .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s10),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8),
+        ) {
+            Icon(Icons.Filled.Refresh, contentDescription = null, tint = danger)
+            Text(
+                // A replay that never started explains itself; every other failure keeps the short tap-to-retry line.
+                text = message ?: stringResource(Res.string.compose_livetv_error_tap_retry),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White,
+            )
+        }
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(NuvioTokens.Radius.md))
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable(enabled = !sender.sending) {
+                    // One press sends: the category is inferred from the failure, there is no picker here.
+                    sender.send(
+                        ReportCategoryInference.fromFailureCode(failureCode),
+                        ReportSurface.LIVE,
+                        ReportContext(failureCode = failureCode),
+                    )
+                }
+                .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s10),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(Res.string.report_send),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.8f),
+            )
+        }
     }
 }
 
