@@ -145,6 +145,10 @@ fun SportsHubScreen(
     var browseCategory by remember { mutableStateOf<RadarCategory?>(null) }
     var browsing by remember { mutableStateOf(false) }
     var sheetFixture by remember { mutableStateOf<RadarFixture?>(null) }
+    // The game screen (live score, stats, Watch). A fixture it cannot describe, or one no source has data for,
+    // falls back to today's channel-matching sheet.
+    var detailFixture by remember { mutableStateOf<RadarFixture?>(null) }
+    val openFixture: (RadarFixture) -> Unit = { fx -> if (fx.toGameRef() != null) detailFixture = fx else sheetFixture = fx }
     // The Calendar's "Watch now": open the same channel-matching sheet for that game once its fixture is held.
     val requestedGameId by com.nuvio.app.core.contracts.SportsMatchRequest.gameId.collectAsStateWithLifecycle()
     LaunchedEffect(requestedGameId, state.fixturesByLeague, state.fixturesByTeam) {
@@ -167,13 +171,13 @@ fun SportsHubScreen(
                     state = state,
                     page = fixturesPage!!,
                     onBack = { fixturesPage = null },
-                    onFixtureClick = { sheetFixture = it },
+                    onFixtureClick = openFixture,
                 )
                 leaguePage != null -> LeagueFixturesPage(
                     state = state,
                     league = leaguePage!!,
                     onBack = { leaguePage = null },
-                    onFixtureClick = { sheetFixture = it },
+                    onFixtureClick = openFixture,
                 )
                 browsing && isWide -> BrowseTwoPane(
                     state = state,
@@ -199,7 +203,22 @@ fun SportsHubScreen(
                     onOpenCategory = { browsing = true; browseCategory = it },
                     onOpenLeague = { leaguePage = it },
                     onOpenFixtures = { title, fixtures -> fixturesPage = SportsFixturesPage(title, fixtures) },
-                    onFixtureClick = { sheetFixture = it },
+                    onFixtureClick = openFixture,
+                )
+            }
+        }
+    }
+
+    detailFixture?.let { fx ->
+        fx.toGameRef()?.let { gameRef ->
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                com.nuvio.app.features.sportsdetail.api.GameDetailScreen(
+                    ref = gameRef,
+                    onBack = { detailFixture = null },
+                    onNoData = { detailFixture = null; sheetFixture = fx },
+                    onPlayChannel = onPlayChannel,
+                    onAddPlaylist = onAddPlaylist,
+                    onFindChannels = { sheetFixture = fx },
                 )
             }
         }

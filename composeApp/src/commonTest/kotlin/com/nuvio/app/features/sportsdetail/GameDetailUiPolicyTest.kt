@@ -62,4 +62,11 @@ class GameDetailUiPolicyTest {
         assertFalse(GameDetailUiPolicy.isWide(767))
         assertTrue(GameDetailUiPolicy.isWide(768))
     }
+
+    @Test fun `wide layout puts score blocks left and detail blocks right`() {
+        assertTrue(GameDetailUiPolicy.isPrimaryColumn(LinescoreBlock(listOf("Q1"), listOf(listOf("1")))))
+        assertTrue(GameDetailUiPolicy.isPrimaryColumn(BroadcastBlock(mapOf("US" to listOf("ESPN")))))
+        assertFalse(GameDetailUiPolicy.isPrimaryColumn(StatsBlock(listOf(StatRow("a", "1", "2")))))
+        assertFalse(GameDetailUiPolicy.isPrimaryColumn(TimelineBlock(emptyList())))
+    }
 }

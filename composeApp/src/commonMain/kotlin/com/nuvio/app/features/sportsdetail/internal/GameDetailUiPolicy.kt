@@ -20,6 +20,13 @@ internal object GameDetailUiPolicy {
     const val STALE_AFTER_MS = 20_000L
     const val WIDE_MIN_DP = 768
 
+    /** Wide (iPad / landscape) layout: score-and-schedule blocks on the left, the detail blocks on the right. */
+    fun isPrimaryColumn(b: GameBlock): Boolean = when (b) {
+        is LinescoreBlock, is BroadcastBlock, is FormBlock, is HighlightsBlock, is SituationBlock, is ResultsBlock,
+        is com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock -> true
+        else -> false
+    }
+
     fun isWide(widthDp: Int): Boolean = widthDp >= WIDE_MIN_DP
 
     /** "Updated 40s ago" once the OLDEST source is older than 20 s; null while fresh. */
