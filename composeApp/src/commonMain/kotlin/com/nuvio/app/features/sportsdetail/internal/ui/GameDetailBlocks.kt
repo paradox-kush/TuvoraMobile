@@ -217,7 +217,7 @@ internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?
                 MomentumChart(pts, homeName)
             }
             val lines = GameDetailUiPolicy.storylineLines(GameDetailUiPolicy.visibleStorylines(w.storylines, detail.state, detail.live, detail.sport), detail.header)
-            val comeback = GameDetailUiPolicy.comebackWatch(w.history, w.homePercent, detail.state, w.asOfMs)?.let { c -> GameDetailUiPolicy.comebackText(c, detail.header) }
+            val comeback = GameDetailUiPolicy.comebackWatch(w.history, w.homePercent, w.awayPercent ?: (100 - w.homePercent - (w.drawPercent ?: 0)), detail.state, w.asOfMs)?.let { c -> GameDetailUiPolicy.comebackText(c, detail.header) }
             if (comeback != null || lines.isNotEmpty()) {
                 Spacer(Modifier.height(NuvioTokens.Space.s8))
                 comeback?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.accent) }
@@ -231,7 +231,7 @@ internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?
                 Text("Chart and storylines ${w.extrasAttribution}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
             }
             // The card's own staleness: a stale market value is not hidden behind a fresh ESPN fetch.
-            GameDetailUiPolicy.blockStaleLabel(w.asOfMs, Clock.System.now().toEpochMilliseconds())?.let { StaleChip(it) }
+            GameDetailUiPolicy.winChanceStaleLabel(w, detail.state, Clock.System.now().toEpochMilliseconds())?.let { StaleChip(it) }
         }
     }
 }

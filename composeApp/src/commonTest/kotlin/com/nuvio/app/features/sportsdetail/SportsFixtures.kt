@@ -122,7 +122,7 @@ internal object SportsFixtures {
     ).joinToString("")
 
     val market_winchance_history_three_way: String = listOf(
-        "{\"gameId\":\"tsdb:2111\",\"home\":16,\"draw\":22,\"away\":62,\"asOf\":1794148200000,\"series\":[{\"t\":1794000000000,\"home\":16.6},{\"t\":1794000060000,\"home\":16.6},{\"t\":1794000120000,\"home\":16.6}],\"storylines\":[],\"source\":\"polymarket\",\"attribution\":\"via Polymarket\"}",
+        "{\"gameId\":\"tsdb:2111\",\"home\":16,\"draw\":22,\"away\":62,\"asOf\":1794148200000,\"series\":[{\"t\":1794000000000,\"home\":21.2,\"draw\":21.6},{\"t\":1794000060000,\"home\":21.2,\"draw\":21.6},{\"t\":1794000120000,\"home\":21.2,\"draw\":21.6}],\"storylines\":[],\"source\":\"polymarket\",\"attribution\":\"via Polymarket\"}",
     ).joinToString("")
 
     val market_winchance_history_two_way: String = listOf(

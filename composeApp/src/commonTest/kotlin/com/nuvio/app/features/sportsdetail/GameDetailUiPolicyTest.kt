@@ -154,8 +154,8 @@ class GameDetailUiPolicyTest {
     private val min = 60_000L
 
     private val live = GameState.LIVE
-    private fun cw(history: List<com.nuvio.app.features.sportsdetail.api.WinPoint>, headlineHome: Int, state: GameState = live, asOf: Long? = history.lastOrNull()?.t) =
-        GameDetailUiPolicy.comebackWatch(history, headlineHome, state, asOf)
+    private fun cw(history: List<com.nuvio.app.features.sportsdetail.api.WinPoint>, headlineHome: Int, state: GameState = live, asOf: Long? = history.lastOrNull()?.t, headlineAway: Int = 100 - headlineHome) =
+        GameDetailUiPolicy.comebackWatch(history, headlineHome, headlineAway, state, asOf)
 
     @Test fun `comeback watch fires when the trailing team gained 15 points from the start of the last 10 minutes`() {
         // home trails (headline 40); the window (last 10 min) starts at 22 and ends at 40: +18
@@ -186,6 +186,16 @@ class GameDetailUiPolicyTest {
         // the series ended at 45 (still < 50) but the headline says home leads 52: nobody is mounting a comeback
         assertNull(cw(pts(0L to 22, 4 * min to 33, 8 * min to 45), headlineHome = 52))
         assertNull(cw(pts(0L to 22, 4 * min to 33, 8 * min to 45), headlineHome = 50))
+    }
+
+    @Test fun `soccer - trailing is home vs away and not vs 50 and the rise is on the non-draw share`() {
+        // 30 / 25 draw / 45: home trails although 45 would look like "the leader" against 50 in a 3-way market
+        val homeTrails = cw(pts(0L to 20, 4 * min to 28, 8 * min to 38), headlineHome = 30, headlineAway = 45)
+        assertEquals("home", homeTrails?.side); assertEquals(18, homeTrails?.rise)
+        // 45 / 25 draw / 30: AWAY trails (30 < 45); the old '< 50' rule named home. Home's non-draw share fell 60 -> 44
+        val awayTrails = cw(pts(0L to 60, 4 * min to 52, 8 * min to 44), headlineHome = 45, headlineAway = 30)
+        assertEquals("away", awayTrails?.side); assertEquals(16, awayTrails?.rise)
+        assertNull(cw(pts(0L to 60, 4 * min to 52, 8 * min to 44), headlineHome = 35, headlineAway = 35), "level headline: nobody trails")
     }
 
     @Test fun `comeback is measured on the series as given`() {
@@ -251,5 +261,16 @@ class GameDetailUiPolicyTest {
         assertNull(GameDetailUiPolicy.blockStaleLabel(now - 60_000, now), "a server-cached minute is normal")
         assertEquals("Updated 3 min ago", GameDetailUiPolicy.blockStaleLabel(now - 190_000, now))
         assertNull(GameDetailUiPolicy.blockStaleLabel(null, now))
+    }
+
+    @Test fun `the card chip is only for a live market headline`() {
+        val now = 10_000_000L
+        val stale = now - 190_000
+        val market = WinProbabilityBlock(60, source = "polymarket", asOfMs = stale)
+        val espnWithStaleExtras = WinProbabilityBlock(60, source = "espn", extrasAttribution = "via Polymarket", asOfMs = stale)
+        assertEquals("Updated 3 min ago", GameDetailUiPolicy.winChanceStaleLabel(market, GameState.LIVE, now))
+        assertNull(GameDetailUiPolicy.winChanceStaleLabel(market, GameState.FINAL, now), "never on a settled game")
+        assertNull(GameDetailUiPolicy.winChanceStaleLabel(market, GameState.UPCOMING, now))
+        assertNull(GameDetailUiPolicy.winChanceStaleLabel(espnWithStaleExtras, GameState.LIVE, now), "an ESPN headline is not marked stale because only the market extras are")
     }
 }

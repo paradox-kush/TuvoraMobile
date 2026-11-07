@@ -100,7 +100,7 @@ internal object GameDetailUiPolicy {
      * three points inside the last 10 minutes, and the rise measured from the START of that window to its end (a spike that came
      * back down is nothing). Who is "trailing" comes from the headline price ([headlineHome]), not from the series' last point.
      */
-    fun comebackWatch(history: List<WinPoint>, headlineHome: Int, state: GameState, asOfMs: Long?): Comeback? {
+    fun comebackWatch(history: List<WinPoint>, headlineHome: Int, headlineAway: Int, state: GameState, asOfMs: Long?): Comeback? {
         if (state != GameState.LIVE || asOfMs == null || history.size < COMEBACK_MIN_POINTS) return null
         val pts = history.sortedBy { it.t }
         val last = pts.last()
@@ -109,9 +109,11 @@ internal object GameDetailUiPolicy {
         if (window.size < COMEBACK_MIN_POINTS) return null
         val start = window.first().home
         val end = last.home
+        // Trailing = the lower of home and away in the headline (a 3-way soccer market has a draw, so "vs 50" names the wrong side).
+        // The series is home's per-point non-draw share, so away's rise is home's fall.
         val (side, rise) = when {
-            headlineHome < 50 -> "home" to (end - start)
-            headlineHome > 50 -> "away" to (start - end)
+            headlineHome < headlineAway -> "home" to (end - start)
+            headlineAway < headlineHome -> "away" to (start - end)
             else -> return null
         }
         return if (rise >= COMEBACK_MIN_RISE) Comeback(side, rise) else null
@@ -149,6 +151,10 @@ internal object GameDetailUiPolicy {
     }
 
     /** The win-chance card's OWN staleness: shown once the market value is older than 2 minutes (a server-cached minute is normal). */
+    /** The card chip: only for a LIVE game and only when the MARKET is the headline (an ESPN headline is not marked stale for stale extras). */
+    fun winChanceStaleLabel(b: WinProbabilityBlock, state: GameState, nowMs: Long): String? =
+        if (state == GameState.LIVE && b.source == "polymarket") blockStaleLabel(b.asOfMs, nowMs) else null
+
     fun blockStaleLabel(asOfMs: Long?, nowMs: Long, thresholdMs: Long = 120_000L): String? {
         val age = nowMs - (asOfMs ?: return null)
         if (age <= thresholdMs) return null

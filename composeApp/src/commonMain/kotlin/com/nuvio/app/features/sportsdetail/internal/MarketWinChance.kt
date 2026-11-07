@@ -63,7 +63,7 @@ internal class MarketWinChanceHttpSource(
             val po = p as? JsonObject ?: return@mapNotNull null
             val t = (po["t"] as? JsonPrimitive)?.longOrNull ?: return@mapNotNull null
             val h = pct(po["home"]) ?: return@mapNotNull null
-            WinPoint(t, h)
+            WinPoint(t, h, pct(po["draw"]))
         }
         return SourceResult.Ok(
             MarketWinChance(

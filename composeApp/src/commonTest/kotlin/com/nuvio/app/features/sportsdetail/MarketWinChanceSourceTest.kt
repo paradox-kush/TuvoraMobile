@@ -71,6 +71,11 @@ class MarketWinChanceSourceTest {
         assertEquals(emptyList(), assertIs<SourceResult.Ok<MarketWinChance>>(src(HttpReply(200, """{"home":50,"away":50,"source":"polymarket"}""", null)).second.winChance(req, false)).value.storylines)
     }
 
+    @Test fun `series points carry an optional draw`() = runBlocking<Unit> {
+        val r = assertIs<SourceResult.Ok<MarketWinChance>>(src(HttpReply(200, """{"home":40,"away":35,"draw":25,"source":"polymarket","series":[{"t":1,"home":53.4,"draw":24.6},{"t":2,"home":54}]}""", null)).second.winChance(req, true)).value
+        assertEquals(listOf(WinPoint(1, 53, 25), WinPoint(2, 54, null)), r.history)
+    }
+
     @Test fun `a series named history from an older backend is still read`() = runBlocking<Unit> {
         val r = assertIs<SourceResult.Ok<MarketWinChance>>(src(HttpReply(200, """{"home":50,"away":50,"history":[{"t":1,"home":50},{"t":2,"home":51}],"source":"polymarket"}""", null)).second.winChance(req, true)).value
         assertEquals(2, r.history.size)

@@ -169,9 +169,9 @@ data class NextBlock(val items: List<NextItem>, override val source: String = ""
 @Serializable
 data class Storyline(val key: String, val label: String, val yes: Int, val side: String? = null)
 
-/** One point of the win-chance history (epoch ms, home percent 0..100). */
+/** One point of the win-chance history (epoch ms). [home] is plotted as given (soccer: home's non-draw share h/(h+a)); [draw] is that point's draw percent when the market has one. */
 @Serializable
-data class WinPoint(val t: Long, val home: Int)
+data class WinPoint(val t: Long, val home: Int, val draw: Int? = null)
 
 /**
  * Home win chance, whole percent 0..100. [source] is "espn" or "polymarket"; [attribution] is the caption ("via Polymarket",

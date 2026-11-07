@@ -54,11 +54,12 @@ class MarketFixturesTest {
         assertEquals(1794000000000L, r.history.first().t)
     }
 
-    @Test fun `history three-way rounds fractional series points`() {
+    @Test fun `history three-way carries per-point home and draw`() {
         val r = ok(SportsFixtures.market_winchance_history_three_way)
         assertEquals(Triple(16, 22, 62), Triple(r.home, r.draw, r.away))
         assertEquals(3, r.history.size)
-        assertEquals(17, r.history.first().home, "16.6 rounds to 17")
+        assertEquals(21, r.history.first().home, "21.2 rounds to 21: home is the per-point non-draw share, plotted as given")
+        assertEquals(22, r.history.first().draw, "and each point carries its draw (21.6 rounds to 22)")
     }
 
     @Test fun `three-way storylines render`() {
