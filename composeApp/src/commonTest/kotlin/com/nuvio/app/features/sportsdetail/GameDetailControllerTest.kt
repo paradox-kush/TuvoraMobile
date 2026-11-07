@@ -16,6 +16,8 @@ import com.nuvio.app.features.sportsdetail.api.WatchUi
 import com.nuvio.app.features.sportsdetail.internal.GameDetailController
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +30,7 @@ import kotlin.test.assertTrue
 
 class GameDetailControllerTest {
     private var now = 1_000_000_000L
+    private var stopAfter: Int? = null
     private val ref = GameRef("tsdb:1", "4387", "1", null, "Home", "Away", null, now)
 
     private fun detail(state: GameState, asOf: Map<String, Long> = mapOf("espn" to now), home: String = "Home") = GameDetail(
@@ -44,15 +47,15 @@ class GameDetailControllerTest {
         }
     }
 
-    private class FakeWatch(var answer: WatchLookup = WatchLookup.NoMatch) : GameWatchPort {
+    private class FakeWatch(var answer: WatchLookup = WatchLookup.NoMatch, var hang: Boolean = false) : GameWatchPort {
         val playing = MutableStateFlow<NowWatching?>(null)
         override val nowWatching: StateFlow<NowWatching?> get() = playing
         var lookups = 0
-        override suspend fun lookup(ref: GameRef): WatchLookup { lookups++; return answer }
+        override suspend fun lookup(ref: GameRef): WatchLookup { lookups++; if (hang) awaitCancellation(); return answer }
     }
 
-    private fun controller(source: GameDetailSource, watch: GameWatchPort = FakeWatch(), deadline: Long = 20_000, sleeps: MutableList<Long> = mutableListOf()) =
-        GameDetailController(ref, source, watch, { GameDetailRefreshPolicy.Config() }, { now }, { sleeps += it; now += it }, deadline)
+    private fun controller(source: GameDetailSource, watch: GameWatchPort = FakeWatch(), deadline: Long = 20_000, sleeps: MutableList<Long> = mutableListOf(), lookupDeadline: Long = 15_000) =
+        GameDetailController(ref, source, watch, { GameDetailRefreshPolicy.Config() }, { now }, { sleeps += it; now += it; kotlinx.coroutines.yield(); if (stopAfter != null && sleeps.size >= stopAfter!!) throw CancellationException("stop") }, deadline, lookupDeadline)
 
     private fun source(vararg a: DetailLoad) = FakeSource(ArrayDeque(a.toList()))
 
@@ -179,5 +182,45 @@ class GameDetailControllerTest {
         assertEquals(4, sleeps.size)
         assertTrue(sleeps.all { it in 1..5_000 }, "$sleeps")
         assertTrue(src.calls.size >= 2)
+    }
+
+    @Test fun `a watch lookup that never returns ends at its deadline as LookupFailed - never Checking forever`() = runBlocking<Unit> {
+        val c = controller(source(DetailLoad.Loaded(detail(GameState.LIVE))), FakeWatch(hang = true), lookupDeadline = 60)
+        c.start()
+        assertEquals(WatchUi.LookupFailed, assertIs<GameDetailUiState.Loaded>(c.state.value).watch)
+    }
+
+    @Test fun `a cancelled run leaves the lookup to be redone on the next run`() = runBlocking<Unit> {
+        val watch = FakeWatch(WatchLookup.Found(WatchOffer("c", "C")), hang = true)
+        val c = controller(source(DetailLoad.Loaded(detail(GameState.LIVE))), watch)
+        stopAfter = 2
+        try { c.run() } catch (_: CancellationException) {}
+        assertEquals(WatchUi.Checking, assertIs<GameDetailUiState.Loaded>(c.state.value).watch, "the cancelled lookup left no answer")
+        watch.hang = false
+        stopAfter = 4
+        try { c.run() } catch (_: CancellationException) {}
+        assertEquals(WatchUi.Browsing(WatchOffer("c", "C")), assertIs<GameDetailUiState.Loaded>(c.state.value).watch, "the next run redoes it")
+    }
+
+    @Test fun `finished games skip the channel lookup entirely`() = runBlocking<Unit> {
+        val watch = FakeWatch()
+        val c = controller(source(DetailLoad.Loaded(detail(GameState.FINAL))), watch)
+        c.start()
+        assertEquals(0, watch.lookups)
+    }
+
+    @Test fun `a cancelled tick does not delay the next one`() = runBlocking<Unit> {
+        val src = source(DetailLoad.Loaded(detail(GameState.LIVE)))
+        val c = controller(src)
+        c.start()
+        now += 16_000
+        src.hang = true
+        val job = launch(Dispatchers.Unconfined) { c.step() }
+        job.cancel()
+        job.join()
+        src.hang = false
+        val before = src.calls.size
+        c.step()
+        assertEquals(before + 1, src.calls.size, "the cancelled tick never completed, so the resume fetches at once")
     }
 }

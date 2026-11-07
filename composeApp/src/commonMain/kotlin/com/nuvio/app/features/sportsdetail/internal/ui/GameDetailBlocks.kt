@@ -316,7 +316,7 @@ internal fun BlockContent(block: GameBlock, detail: GameDetail) {
         is HighlightsBlock -> {
             val uri = LocalUriHandler.current
             BlockCard("Highlights") {
-                Row(Modifier.fillMaxWidth().clickable { runCatching { uri.openUri(block.url) } }, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clickable { if (com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy.isSafeLink(block.url)) runCatching { uri.openUri(block.url) } }, verticalAlignment = Alignment.CenterVertically) {
                     block.thumbnail?.let { AsyncImage(model = it, contentDescription = null, modifier = Modifier.width(120.dp).height(68.dp).clip(RoundedCornerShape(NuvioTokens.Space.s6))) }
                     Spacer(Modifier.width(NuvioTokens.Space.s12))
                     Text("Watch highlights", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.accent)

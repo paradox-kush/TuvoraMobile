@@ -20,6 +20,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -75,7 +78,16 @@ fun GameDetailScreen(
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) { controller.run() }
     }
     val scope = rememberCoroutineScope()
-    val state by controller.state.collectAsStateWithLifecycle()
+    val raw by controller.state.collectAsStateWithLifecycle()
+    // UI backstop: a Loading that outlives its deadline is shown as Failed whatever the controller is doing.
+    var clock by remember { mutableLongStateOf(Clock.System.now().toEpochMilliseconds()) }
+    LaunchedEffect(raw) {
+        (raw as? GameDetailUiState.Loading)?.let {
+            delay((it.deadlineAtMs - Clock.System.now().toEpochMilliseconds()).coerceAtLeast(0L) + 50L)
+            clock = Clock.System.now().toEpochMilliseconds()
+        }
+    }
+    val state = GameDetailUiPolicy.effective(raw, clock)
     LaunchedEffect(state) { if (state is GameDetailUiState.Empty) onNoData() }
 
     Column(modifier = modifier.fillMaxSize().background(MaterialTheme.nuvio.colors.background)) {

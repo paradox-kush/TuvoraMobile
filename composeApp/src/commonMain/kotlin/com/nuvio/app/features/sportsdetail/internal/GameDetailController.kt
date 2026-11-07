@@ -45,6 +45,7 @@ internal class GameDetailController(
     private val nowMs: () -> Long,
     private val sleep: suspend (Long) -> Unit = { delay(it) },
     private val loadDeadlineMs: Long = 20_000L,
+    private val lookupDeadlineMs: Long = 15_000L,
 ) {
     private val _state = MutableStateFlow<GameDetailUiState>(GameDetailUiState.Loading(nowMs(), nowMs() + loadDeadlineMs))
     val state: StateFlow<GameDetailUiState> = _state.asStateFlow()
@@ -54,6 +55,7 @@ internal class GameDetailController(
     private var failures = 0
     private var lookup: WatchLookup? = null
     private var lookupDone = false
+    private var lookupInFlight = false
     private var retryRequested = false
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
@@ -89,9 +91,17 @@ internal class GameDetailController(
         launch { watch.nowWatching.collect { refreshWatch() } }
         if (_state.value is GameDetailUiState.Loading) loadFirst()
         while (true) {
-            if (!lookupDone && _state.value is GameDetailUiState.Loaded) {
-                lookupDone = true
-                launch { lookup = safeLookup(); refreshWatch() }
+            if (needsLookup() && !lookupInFlight) {
+                lookupInFlight = true
+                launch {
+                    try {
+                        lookup = safeLookup()
+                        lookupDone = true          // only a COMPLETED lookup counts; a cancelled run redoes it
+                        refreshWatch()
+                    } finally {
+                        lookupInFlight = false
+                    }
+                }
             }
             val wait = step()
             if (wait == null) wake.receive() else sleep(wait)
@@ -116,9 +126,11 @@ internal class GameDetailController(
         val plan = plan(loaded.detail)
         if (plan.fetchEvent || plan.fetchSummary) {
             val t = nowMs()
+            val r = withTimeoutOrNull(loadDeadlineMs) { source.tick(plan.fetchEvent, plan.fetchSummary) }
+            // Recorded only once the fetch COMPLETED (success, failure or deadline): a cancelled tick (screen paused
+            // mid-request) must not delay the fetch on resume.
             if (plan.fetchEvent) lastEventMs = t
             if (plan.fetchSummary) lastSummaryMs = t
-            val r = withTimeoutOrNull(loadDeadlineMs) { source.tick(plan.fetchEvent, plan.fetchSummary) }
             if (r is DetailLoad.Loaded) {
                 failures = 0
                 publish(r.detail)
@@ -149,16 +161,21 @@ internal class GameDetailController(
         _state.value = GameDetailUiState.Loaded(detail, watchUi(detail), chip(detail))
     }
 
+    /** Finished and postponed games show no Watch block, so they never pay for a channel lookup. */
+    private fun needsLookup(): Boolean {
+        val s = _state.value as? GameDetailUiState.Loaded ?: return false
+        return !lookupDone && s.detail.state != GameState.FINAL && s.detail.state != GameState.POSTPONED
+    }
+
     private suspend fun ensureLookup() {
-        if (lookupDone) return
-        if ((_state.value as? GameDetailUiState.Loaded) == null) return
-        lookupDone = true
+        if (!needsLookup()) return
         lookup = safeLookup()
+        lookupDone = true
         refreshWatch()
     }
 
     private suspend fun safeLookup(): WatchLookup = try {
-        watch.lookup(ref)
+        withTimeoutOrNull(lookupDeadlineMs) { watch.lookup(ref) } ?: WatchLookup.Failed
     } catch (e: CancellationException) {
         throw e
     } catch (_: Throwable) {

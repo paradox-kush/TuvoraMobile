@@ -27,6 +27,16 @@ internal object GameDetailUiPolicy {
         else -> false
     }
 
+    /** The screen's own backstop: a Loading past its deadline is shown as Failed(timedOut) whatever the work is doing. */
+    fun effective(state: GameDetailUiState, nowMs: Long): GameDetailUiState =
+        if (state is GameDetailUiState.Loading && nowMs >= state.deadlineAtMs) GameDetailUiState.Failed(timedOut = true) else state
+
+    /** Links from a provider open only if they are plain web links. */
+    fun isSafeLink(url: String): Boolean {
+        val u = url.trim().lowercase()
+        return u.startsWith("https://") || u.startsWith("http://")
+    }
+
     fun isWide(widthDp: Int): Boolean = widthDp >= WIDE_MIN_DP
 
     /** "Updated 40s ago" once the OLDEST source is older than 20 s; null while fresh. */

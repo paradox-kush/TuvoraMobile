@@ -69,4 +69,21 @@ class GameDetailUiPolicyTest {
         assertFalse(GameDetailUiPolicy.isPrimaryColumn(StatsBlock(listOf(StatRow("a", "1", "2")))))
         assertFalse(GameDetailUiPolicy.isPrimaryColumn(TimelineBlock(emptyList())))
     }
+
+    @Test fun `loading ends at its deadline in the UI even if the controller is stuck`() {
+        val loading = com.nuvio.app.features.sportsdetail.internal.GameDetailUiState.Loading(startedAtMs = 0, deadlineAtMs = 20_000)
+        assertEquals(loading, GameDetailUiPolicy.effective(loading, 19_999))
+        assertEquals(com.nuvio.app.features.sportsdetail.internal.GameDetailUiState.Failed(timedOut = true), GameDetailUiPolicy.effective(loading, 20_000))
+        val failed = com.nuvio.app.features.sportsdetail.internal.GameDetailUiState.Failed(false)
+        assertEquals(failed, GameDetailUiPolicy.effective(failed, 99_999))
+    }
+
+    @Test fun `only http and https links open`() {
+        assertTrue(GameDetailUiPolicy.isSafeLink("https://youtu.be/x"))
+        assertTrue(GameDetailUiPolicy.isSafeLink("http://example.com/a"))
+        assertFalse(GameDetailUiPolicy.isSafeLink("intent://x#Intent;end"))
+        assertFalse(GameDetailUiPolicy.isSafeLink("javascript:alert(1)"))
+        assertFalse(GameDetailUiPolicy.isSafeLink("file:///etc/passwd"))
+        assertFalse(GameDetailUiPolicy.isSafeLink(""))
+    }
 }
