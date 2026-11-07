@@ -29,7 +29,14 @@ internal class TvMappingStorage(private val defaults: NSUserDefaults = NSUserDef
         if (value.etag != null) defaults.setObject(value.etag, KEY_ETAG) else defaults.removeObjectForKey(KEY_ETAG)
     }
 
+    override fun loadRejectedEtag(): String? = defaults.stringForKey(KEY_REJECTED)
+
+    override fun saveRejectedEtag(etag: String?) {
+        if (etag != null) defaults.setObject(etag, KEY_REJECTED) else defaults.removeObjectForKey(KEY_REJECTED)
+    }
+
     private companion object {
+        const val KEY_REJECTED = "tuvora.sportsdetail.mapping.rejected"
         const val KEY_JSON = "tuvora.sportsdetail.mapping"
         const val KEY_ETAG = "tuvora.sportsdetail.mapping.etag"
     }
@@ -101,6 +108,8 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
                     lastEventFetchMs = lastEvent, lastSummaryFetchMs = lastSummary,
                     consecutiveFailures = failures, config = service.refreshConfig(),
                 )
+                // Idle (final / long-dead live) ends the loop. Far-future upcoming is NOT idle: it carries
+                // nextCheckInMs with no fetch, and the delay below wakes the screen when the lead window opens.
                 if (plan.isIdle) return
                 if (!plan.fetchEvent && !plan.fetchSummary) { delay(plan.nextCheckInMs ?: return); continue }
                 fetchEvent = plan.fetchEvent; fetchSummary = plan.fetchSummary
