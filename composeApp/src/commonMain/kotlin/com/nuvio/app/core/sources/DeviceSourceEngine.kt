@@ -102,6 +102,8 @@ class DeviceSourceEngine(
     @Suppress("unused") private val existingInstallation: Boolean = false,
     // One line per refusal (source kind + engine mode; no host). Injected so the engine stays pure.
     private val onRefused: (kind: String, mode: String) -> Unit = { _, _ -> },
+    // Connectivity signal for failure wording (null = unknown). Injected so the engine stays pure.
+    private val isOnline: () -> Boolean? = { null },
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val lock = SynchronizedObject()
@@ -415,8 +417,21 @@ class DeviceSourceEngine(
             "binding_replaced" in text || "setup_not_found" in text -> view.copy(mode = "replaced", message = "This setup was restored or removed elsewhere. Choose a setup again.")
             view.disk.binding == null && ("PGRST202" in text || "Could not find the function" in text) ->
                 view.copy(mode = "unavailable", message = "Device controls need a server update.")
-            else -> view.copy(mode = if (view.mode == "loading") "select" else view.mode, message = if (view.disk.pending.isNotEmpty()) "Saved on this device · waiting to sync" else "Could not reach your account. Retry.")
+            else -> view.copy(mode = if (view.mode == "loading") "select" else view.mode, message = if (view.disk.pending.isNotEmpty()) "Saved on this device · waiting to sync" else failureMessage(e))
         } }
+    }
+
+    private fun failureMessage(e: Exception): String = when (AccountFailurePolicy.classify(e, isOnline())) {
+        AccountFailureKind.SESSION_EXPIRED -> "Your session expired. Sign in again, then retry."
+        AccountFailureKind.OFFLINE -> "No internet connection. Check this device's network, then retry."
+        AccountFailureKind.SERVER_UNREACHABLE -> "Could not reach Tuvora's servers. Retry."
+        AccountFailureKind.TIMEOUT -> "Your account took too long to answer. Retry."
+        AccountFailureKind.PROFILE_MISSING -> "This profile is not on your account yet. Open the profile list to sync it, then retry."
+        AccountFailureKind.NOT_OWNER -> "Only the account owner can set up this device."
+        AccountFailureKind.RATE_LIMITED -> "Too many requests. Wait a minute, then retry."
+        AccountFailureKind.SERVER_OUTDATED -> "Device controls need a server update."
+        AccountFailureKind.SERVER_ERROR -> "Tuvora's servers had a problem. Retry later."
+        AccountFailureKind.MISSING_CONFIG, AccountFailureKind.ANONYMOUS_DISABLED, AccountFailureKind.UNKNOWN -> "Could not reach your account. Retry."
     }
 
     private suspend inline fun <reified T> call(name: String, args: JsonObject): T = json.decodeFromJsonElement(rpc(name,args))

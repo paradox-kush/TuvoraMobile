@@ -27,6 +27,28 @@ class DeviceSourceEngineTest {
     }
     private fun page() = json.encodeToJsonElement(DevicePreferencePage(false,1,0,0,false,emptyList()))
 
+    private suspend fun failureMessageFor(error: Exception, online: Boolean? = null): String? {
+        val device = DeviceSourceEngine(Memory(), { _, _ -> throw error }, { "id" }, { "secret" }, { 1000L }, "android",
+            automaticSetupName = "TV", isOnline = { online })
+        device.refresh(1)
+        return device.state.value.message
+    }
+
+    @Test fun b188ExpiredSessionAsksToSignInAgain() = runTest {
+        assertEquals("Your session expired. Sign in again, then retry.", failureMessageFor(Exception("JWT expired 401")))
+    }
+    @Test fun b188OfflineAndServerUnreachableAreDifferentMessages() = runTest {
+        class UnknownHostException(m: String) : Exception(m)
+        assertTrue(failureMessageFor(UnknownHostException("Unable to resolve host"), online = false)!!.startsWith("No internet"))
+        assertTrue(failureMessageFor(UnknownHostException("Unable to resolve host"), online = true)!!.startsWith("Could not reach Tuvora's servers"))
+    }
+    @Test fun b188ProfileNotFoundIsNamed() = runTest {
+        assertTrue(failureMessageFor(Exception("profile_not_found"))!!.contains("profile is not on your account"))
+    }
+    @Test fun b188UnknownFailureKeepsGenericMessage() = runTest {
+        assertEquals("Could not reach your account. Retry.", failureMessageFor(IllegalStateException("boom")))
+    }
+
     @Test fun upgradeRegistersAutomaticallyEvenWhenOtherDevicesHaveSavedSettings() = runTest {
         val disk = Memory()
         var creates = 0
