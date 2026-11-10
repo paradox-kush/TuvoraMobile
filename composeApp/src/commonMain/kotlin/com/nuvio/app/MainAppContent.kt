@@ -231,7 +231,7 @@ internal fun MainAppContent(
     onTabTitles: ((home: String, search: String, library: String, iptv: String, sports: String, profile: String, switchProfile: String, addProfile: String) -> Unit)? = null,
     appGateController: AppGateController? = null,
     onRootContentReady: ((Boolean) -> Unit)? = null,
-    onSwitchProfile: () -> Unit = {},
+    onSwitchProfile: (() -> Unit)? = null,
 ) {
         com.nuvio.app.core.sources.DeviceSourcesHost(ownsAppRuntime = ownsAppRuntime)
         val navBackStack = rememberNavBackStack(navigationSavedStateConfiguration, initialRoute)
@@ -1856,14 +1856,14 @@ internal fun MainAppContent(
                                         throw cancelled
                                     } catch (failure: Exception) {
                                         co.touchlab.kermit.Logger.withTag("ProfileSwitch").e(failure) { "Profile switch failed" }
-                                        onSwitchProfile()
+                                        onSwitchProfile?.invoke()
                                     } finally {
                                         NativeTabBridge.publishTabBarVisible(true)
                                     }
                                 }
                             }
                         },
-                        onAddProfileRequested = onSwitchProfile,
+                        onAddProfileRequested = { onSwitchProfile?.invoke() },
                     )
                 }
                 entry<DetailRoute> { route ->

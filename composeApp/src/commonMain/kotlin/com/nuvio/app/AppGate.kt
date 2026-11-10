@@ -95,9 +95,18 @@ internal fun AppGate(
             onRootContentReady = appGateController?.let { controller ->
                 controller::reportMainContentReady
             },
-            onSwitchProfile = appGateController?.let { controller ->
-                controller::requestProfileSelection
-            } ?: {},
+            // A bypassing host (iOS Settings cover, detail screens) cannot show the picker itself: route
+            // to the gate-owning host, or hide the row rather than leave a dead tap.
+            onSwitchProfile = when (
+                ProfileGateRouting.switchRequestRoute(
+                    hasGateController = appGateController != null,
+                    hasNativeSwitcher = nativeProfileSwitcherController != null,
+                )
+            ) {
+                ProfileGateRouting.SwitchRequestRoute.GateController -> appGateController!!::requestProfileSelection
+                ProfileGateRouting.SwitchRequestRoute.NativeSwitcher -> nativeProfileSwitcherController!!::requestManageProfiles
+                ProfileGateRouting.SwitchRequestRoute.None -> null
+            },
         )
         return
     }
@@ -195,22 +204,29 @@ internal fun AppGate(
         }
     }
 
-    LaunchedEffect(appGateController, renderMainContent) {
-        if (renderMainContent) return@LaunchedEffect
-        appGateController?.profileSelectionRequests?.collect {
-            autoSkipProfileSelection = false
-            profileSelectionLoading = false
-            profileSelectionTransitionActive = false
-            skipProfileSelectionEnterAnimation = true
-            gateScreen = AppGateScreen.ProfileSelection.name
-        }
+    fun showProfileSelection() {
+        autoSkipProfileSelection = false
+        profileSelectionLoading = false
+        profileSelectionTransitionActive = false
+        skipProfileSelectionEnterAnimation = true
+        gateScreen = AppGateScreen.ProfileSelection.name
     }
 
-    LaunchedEffect(nativeProfileSwitcherController, appGateController, renderMainContent) {
-        if (renderMainContent || appGateController == null) return@LaunchedEffect
-        nativeProfileSwitcherController?.requestedManageProfiles?.collect {
-            appGateController.requestProfileSelection()
-        }
+    LaunchedEffect(appGateController, renderMainContent) {
+        if (renderMainContent) return@LaunchedEffect
+        appGateController?.profileSelectionRequests?.collect { showProfileSelection() }
+    }
+
+    // This host owns the gate whenever it is not a bypassing one. On iOS the Home host renders its own
+    // Main content with no AppGateController, so the native switcher (avatar popover, Settings cover's
+    // Switch profile) must be heard here — gating on a controller left every request unheard.
+    val listensForNativeSwitcher = ProfileGateRouting.listensForNativeSwitcher(
+        bypassAppGate = bypassAppGate,
+        hasNativeSwitcher = nativeProfileSwitcherController != null,
+    )
+    LaunchedEffect(nativeProfileSwitcherController, listensForNativeSwitcher) {
+        if (!listensForNativeSwitcher) return@LaunchedEffect
+        nativeProfileSwitcherController?.requestedManageProfiles?.collect { showProfileSelection() }
     }
 
     LaunchedEffect(externalMainContentReady, renderMainContent) {
@@ -261,8 +277,8 @@ internal fun AppGate(
         gateScreen = AppGateScreen.ProfileSwitching.name
     }
 
-    LaunchedEffect(nativeProfileSwitcherController, appGateController, renderMainContent) {
-        if (renderMainContent || appGateController == null) return@LaunchedEffect
+    LaunchedEffect(nativeProfileSwitcherController, listensForNativeSwitcher) {
+        if (!listensForNativeSwitcher) return@LaunchedEffect
         nativeProfileSwitcherController?.selectedProfileIndices?.collect { profileIndex ->
             if (profileIndex == ProfileRepository.state.value.activeProfile?.profileIndex) return@collect
             val profile = ProfileRepository.state.value.profiles
