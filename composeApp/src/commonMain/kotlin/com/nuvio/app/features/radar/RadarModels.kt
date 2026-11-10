@@ -154,7 +154,13 @@ data class RadarFixture(
 
     /** The best available backdrop image for the spotlight hero — wide banner, else the event thumb. */
     val heroImage: String?
-        get() = banner?.takeIf { it.isNotBlank() } ?: thumb?.takeIf { it.isNotBlank() }
+        get() = if (!home.isNullOrBlank() && !away.isNullOrBlank()) {
+            // B234: provider team art is composed away-left, but the hero row is home-left — the backdrop's
+            // big left crest would be the wrong team. Two-sided fixtures get the neutral brand gradient.
+            null
+        } else {
+            banner?.takeIf { it.isNotBlank() } ?: thumb?.takeIf { it.isNotBlank() }
+        }
 
     val displayTitle: String
         get() = when {
