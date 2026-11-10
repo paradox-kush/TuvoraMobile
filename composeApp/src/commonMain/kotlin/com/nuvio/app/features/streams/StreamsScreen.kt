@@ -1181,10 +1181,26 @@ private fun EmptyStateBlock(
         addonsEnabled = AppFeaturePolicy.addonsEnabled,
         hasAnyIptvPlaylist = hasAnyIptvPlaylist,
     )
+    val managedNotice by com.nuvio.app.features.servers.ManagedAddonBridge.notice.collectAsStateWithLifecycle()
+    val managedExplanation = com.nuvio.app.features.servers.ManagedBridgeEmptyStatePolicy
+        .explanation(AppFeaturePolicy.addonStreamSourcesEnabled, managedNotice)
+    // Opening an empty list is a user event: ask the bridge once whether it is ready now (never a timer).
+    LaunchedEffect(Unit) {
+        if (com.nuvio.app.features.servers.ManagedBridgeEmptyStatePolicy
+                .shouldRefreshOnEmpty(AppFeaturePolicy.addonStreamSourcesEnabled, managedNotice)
+        ) {
+            com.nuvio.app.features.servers.ManagedAddonBridge.refresh(
+                com.nuvio.app.features.profiles.ProfileRepository.activeProfileId,
+            )
+        }
+    }
     val title: String
     val message: String
 
-    when (reason) {
+    if (managedExplanation != null && (reason == StreamsEmptyStateReason.NoAddonsInstalled || reason == StreamsEmptyStateReason.NoStreamsFound || reason == null)) {
+        title = stringResource(Res.string.compose_player_no_streams_found)
+        message = stringResource(com.nuvio.app.features.settings.managedNoticeText(managedExplanation))
+    } else when (reason) {
         // Store builds hide the addon system, so point at IPTV setup — unless a playlist is already
         // there and simply has no match for this title (M3U playlists have no TMDB match lane) (UX38).
         StreamsEmptyStateReason.NoAddonsInstalled -> when (noAddonsCard) {

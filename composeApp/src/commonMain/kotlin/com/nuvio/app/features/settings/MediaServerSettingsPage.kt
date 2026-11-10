@@ -317,7 +317,7 @@ internal fun ServerConnection.status(failure: ServerFailure?): Pair<String, Colo
     }
 }
 
-private fun managedNoticeText(notice: com.nuvio.app.features.servers.ManagedBridgeNotice) = when (notice) {
+internal fun managedNoticeText(notice: com.nuvio.app.features.servers.ManagedBridgeNotice) = when (notice) {
     com.nuvio.app.features.servers.ManagedBridgeNotice.Preparing -> Res.string.servers_managed_preparing
     is com.nuvio.app.features.servers.ManagedBridgeNotice.Failed -> when (notice.code) {
         "provisioning_timeout" -> Res.string.servers_managed_failed_slow

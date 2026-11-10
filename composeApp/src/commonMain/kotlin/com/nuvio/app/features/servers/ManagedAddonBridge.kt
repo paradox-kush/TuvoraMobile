@@ -46,7 +46,7 @@ internal object ManagedAddonBridge {
                 // here is what turned every bridge hiccup into a silent "no sources".
                 ManagedBridgeDecision.Preparing -> { setNotice(ManagedBridgeNotice.Preparing); return }
                 is ManagedBridgeDecision.Failed -> { setNotice(ManagedBridgeNotice.Failed(decision.code)); return }
-                ManagedBridgeDecision.Ready -> Unit
+                ManagedBridgeDecision.Ready -> setNotice(null) // a stale Failed/Preparing must not outlive a ready bridge
             }
             if (status == null) return
             val id = status["id"]?.jsonPrimitive?.content ?: return
@@ -116,4 +116,15 @@ internal object ManagedBridgePolicy {
 
     fun validId(value: String): Boolean = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").matches(value)
     fun validAddress(id: String, address: String): Boolean = validId(id) && address == "https://addon.thekush.dev/jellyfin/$id"
+}
+
+/** What the empty Streams screen says about the managed (Tuvora Connect) bridge on store builds. */
+internal object ManagedBridgeEmptyStatePolicy {
+    /** The bridge problem to explain, or null when the generic empty state is the honest one. */
+    fun explanation(streamSourcesEnabled: Boolean, notice: ManagedBridgeNotice?): ManagedBridgeNotice? =
+        notice.takeUnless { streamSourcesEnabled }
+
+    /** Opening an empty list is a user event: re-ask once if the bridge was last seen not ready. Never a timer. */
+    fun shouldRefreshOnEmpty(streamSourcesEnabled: Boolean, notice: ManagedBridgeNotice?): Boolean =
+        explanation(streamSourcesEnabled, notice) != null
 }
