@@ -154,6 +154,12 @@ import com.nuvio.app.core.telemetry.api.ReportSurface
 import com.nuvio.app.core.telemetry.ui.rememberReportSender
 import nuvio.composeapp.generated.resources.report_send
 import nuvio.composeapp.generated.resources.compose_livetv_error_tap_retry
+import nuvio.composeapp.generated.resources.compose_livetv_error_reason_connections
+import nuvio.composeapp.generated.resources.compose_livetv_error_reason_link
+import nuvio.composeapp.generated.resources.compose_livetv_error_reason_network
+import nuvio.composeapp.generated.resources.compose_livetv_error_reason_provider_down
+import nuvio.composeapp.generated.resources.compose_livetv_error_reason_refused
+import nuvio.composeapp.generated.resources.compose_livetv_error_reason_unsupported
 import nuvio.composeapp.generated.resources.compose_livetv_exit_fullscreen
 import nuvio.composeapp.generated.resources.compose_livetv_fullscreen
 import nuvio.composeapp.generated.resources.compose_livetv_live_badge
@@ -923,6 +929,18 @@ fun LiveTvScreen(
             }
         }
         val hasError = resolveError || playbackError != null || startupFailed || reconnectGaveUp || replayRetry != null || replayStartupFailed
+        // UX191: the failure's code, and why it failed in terms the viewer can act on. Only our own fixed
+        // sentence or the reason code ever leaves the policy: never the engine's text (it can carry a host).
+        val baseFailureCode = when {
+            resolveError -> "resolve_failed"
+            startupFailed -> "startup_failed"
+            reconnectGaveUp -> "reconnect_gave_up"
+            replayStartupFailed || replayRetry != null -> "replay_failed"
+            playbackError != null -> "playback_error"
+            else -> null
+        }
+        val failureReason = if (hasError && !isCatchUp) LiveTvFailureReasonPolicy.classify(baseFailureCode, playbackError)
+        else LiveTvFailureReasonPolicy.Reason.UNKNOWN
 
         fun setFullscreen(enabled: Boolean) {
             if (LiveTvFullscreenFollowsWindowAspect) manualOrientation = enabled
@@ -1181,14 +1199,8 @@ fun LiveTvScreen(
                     hasError -> Box(Modifier.fillMaxSize(), Alignment.Center) {
                         ErrorPill(
                             colors.danger, onRetry,
-                            failureCode = when {
-                                resolveError -> "resolve_failed"
-                                startupFailed -> "startup_failed"
-                                reconnectGaveUp -> "reconnect_gave_up"
-                                replayStartupFailed || replayRetry != null -> "replay_failed"
-                                playbackError != null -> "playback_error"
-                                else -> null
-                            },
+                            reason = liveFailureReasonText(failureReason),
+                            failureCode = LiveTvFailureReasonPolicy.telemetryCode(baseFailureCode, failureReason),
                             message = when {
                                 replayFailure == StalkerReplayFailure.SESSION_LIMIT -> stringResource(Res.string.compose_livetv_catchup_stalker_limit)
                                 replayFailure == StalkerReplayFailure.NOTHING_TO_PLAY -> stringResource(Res.string.compose_livetv_catchup_stalker_nothing)
@@ -1264,6 +1276,7 @@ fun LiveTvScreen(
                         danger = colors.danger,
                         accent = colors.accent,
                         isCatchUp = isCatchUp,
+                        showLiveBadge = LiveTvFailureReasonPolicy.showsLiveBadge(failed = hasError),
                         behindLiveMs = shiftedPause?.behindLiveMs,
                         onGoLive = pause::goLive,
                         onPlayPause = onPlayPause,
@@ -1479,6 +1492,7 @@ private fun DockedPlayerOverlay(
     danger: Color,
     accent: Color,
     isCatchUp: Boolean,
+    showLiveBadge: Boolean,
     behindLiveMs: Long?,
     onGoLive: () -> Unit,
     onPlayPause: () -> Unit,
@@ -1494,7 +1508,7 @@ private fun DockedPlayerOverlay(
         ) {
             OverlayIconButton(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(Res.string.action_back), onBack)
             Spacer(Modifier.width(NuvioTokens.Space.s8))
-            if (isCatchUp) CatchUpBadge(accent) else LiveBadge(danger, behindLiveMs, onGoLive)
+            if (isCatchUp) CatchUpBadge(accent) else if (showLiveBadge) LiveBadge(danger, behindLiveMs, onGoLive)
             Spacer(Modifier.weight(1f))
             OverlayIconButton(Icons.Filled.Fullscreen, stringResource(Res.string.compose_livetv_fullscreen), onEnterFullscreen)
         }
@@ -1638,7 +1652,18 @@ internal fun LiveBadge(danger: Color, behindLiveMs: Long? = null, onGoLive: (() 
 }
 
 @Composable
-private fun ErrorPill(danger: Color, onRetry: () -> Unit, message: String? = null, failureCode: String? = null) {
+private fun liveFailureReasonText(reason: LiveTvFailureReasonPolicy.Reason): String? = when (reason) {
+    LiveTvFailureReasonPolicy.Reason.PROVIDER_REFUSED -> stringResource(Res.string.compose_livetv_error_reason_refused)
+    LiveTvFailureReasonPolicy.Reason.TOO_MANY_CONNECTIONS -> stringResource(Res.string.compose_livetv_error_reason_connections)
+    LiveTvFailureReasonPolicy.Reason.PROVIDER_DOWN -> stringResource(Res.string.compose_livetv_error_reason_provider_down)
+    LiveTvFailureReasonPolicy.Reason.LINK_UNAVAILABLE -> stringResource(Res.string.compose_livetv_error_reason_link)
+    LiveTvFailureReasonPolicy.Reason.NETWORK -> stringResource(Res.string.compose_livetv_error_reason_network)
+    LiveTvFailureReasonPolicy.Reason.UNSUPPORTED -> stringResource(Res.string.compose_livetv_error_reason_unsupported)
+    LiveTvFailureReasonPolicy.Reason.UNKNOWN -> null
+}
+
+@Composable
+private fun ErrorPill(danger: Color, onRetry: () -> Unit, message: String? = null, failureCode: String? = null, reason: String? = null) {
     val sender = rememberReportSender()
     Row(
         horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8),
@@ -1655,12 +1680,22 @@ private fun ErrorPill(danger: Color, onRetry: () -> Unit, message: String? = nul
             horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8),
         ) {
             Icon(Icons.Filled.Refresh, contentDescription = null, tint = danger)
-            Text(
-                // A replay that never started explains itself; every other failure keeps the short tap-to-retry line.
-                text = message ?: stringResource(Res.string.compose_livetv_error_tap_retry),
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White,
-            )
+            Column {
+                Text(
+                    // A replay that never started explains itself; every other failure keeps the short tap-to-retry line.
+                    text = message ?: stringResource(Res.string.compose_livetv_error_tap_retry),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White,
+                )
+                // UX191: why, when the failure says so (a provider refusal is not an app bug).
+                if (message == null && reason != null) {
+                    Text(
+                        text = reason,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White.copy(alpha = 0.75f),
+                    )
+                }
+            }
         }
         Row(
             modifier = Modifier

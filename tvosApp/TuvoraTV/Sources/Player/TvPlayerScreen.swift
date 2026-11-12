@@ -558,6 +558,9 @@ private struct PlayerChrome: View {
                 VStack(spacing: dp(10)) {
                     Text("Playback failed").font(NuvioType.titleLarge).foregroundStyle(colors.textPrimary)
                     Text(error).font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary).multilineTextAlignment(.center)
+                    if state.isLive, let reason = TvLiveFailureReason.shared.of(message: error) {
+                        Text(reason).font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary).multilineTextAlignment(.center)
+                    }
                     Text("Press Play/Pause to try again").font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary)
                     // Retry is the primary action and keeps initial focus; Send report is the next focusable to its right.
                     HStack(spacing: dp(12)) {
@@ -613,7 +616,10 @@ private struct PlayerChrome: View {
                 Text(ui: subtitle).font(NuvioType.titleMedium).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
             }
             if state.isLive {
-                LiveStatus(session: session, view: state.livePause, onActivity: onActivity)
+                // A channel that failed is not live: the error card owns the screen, so no LIVE badge beside it.
+                if state.errorMessage == nil {
+                    LiveStatus(session: session, view: state.livePause, onActivity: onActivity)
+                }
             } else {
                 SeekBar(positionMs: scrubMs ?? state.barPositionMs, bufferedMs: state.bufferedMs, durationMs: state.barDurationMs,
                         scrubbing: scrubMs != nil, onSeek: { session.seekBy(offsetMs: $0); onActivity() },

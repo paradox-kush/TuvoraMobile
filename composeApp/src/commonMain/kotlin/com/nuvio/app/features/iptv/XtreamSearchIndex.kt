@@ -21,9 +21,9 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 
 /**
  * Xtream has no search API. Movies + series are served from the persistent SQLite match
@@ -37,7 +37,14 @@ object XtreamSearchIndex {
     private val channelJobs = mutableMapOf<String, Deferred<List<XtreamChannel>>>()
     /** "accountId|type" -> category names, read only when the overlay hides some category (F01). */
     private val categoryNameCache = mutableMapOf<String, List<IptvHiddenItemsPolicy.NamedCategory>>()
-    private val mutex = Mutex()
+    /**
+     * Guards the three caches above. B213: a SynchronizedObject, not a coroutine Mutex — every critical
+     * section is a few map operations that never suspend, and [resetForProfile] (called from plain,
+     * non-suspending code on whichever thread saved a playlist edit) must take the same lock as the
+     * lineup fetch landing on another worker. It used to clear the maps with no lock at all: two threads
+     * mutating one HashMap, which Kotlin/Native turns into an abort.
+     */
+    private val cacheLock = SynchronizedObject()
     private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     // a cold index build (huge catalogs) shouldn't stall a keystroke forever; an already
@@ -205,9 +212,9 @@ object XtreamSearchIndex {
      * playlist would read as "no channels"); this one trusts only a non-empty cache and otherwise asks again, throwing.
      */
     private suspend fun ensureChannelsStrict(account: XtreamAccount): List<XtreamChannel> {
-        mutex.withLock { channelCache[account.id] }?.takeIf { it.isNotEmpty() }?.let { return it }
+        synchronized(cacheLock) { channelCache[account.id] }?.takeIf { it.isNotEmpty() }?.let { return it }
         val channels = IptvClient.forAccount(account).liveChannels(account).getOrThrow()
-        if (channels.isNotEmpty()) mutex.withLock { channelCache[account.id] = channels }
+        if (channels.isNotEmpty()) synchronized(cacheLock) { channelCache[account.id] = channels }
         return channels
     }
 
@@ -229,9 +236,9 @@ object XtreamSearchIndex {
     private suspend fun hiddenCategoryIds(account: XtreamAccount, type: String, overlay: Map<String, CategoryOverlay>): Set<String> {
         if (overlay.values.none { it.hidden }) return emptySet()
         val key = "${account.id}|$type"
-        val names = mutex.withLock { categoryNameCache[key] }
+        val names = synchronized(cacheLock) { categoryNameCache[key] }
             ?: IptvHiddenItems.categoryNames(account, type).also { fetched ->
-                if (fetched.isNotEmpty()) mutex.withLock { categoryNameCache[key] = fetched }
+                if (fetched.isNotEmpty()) synchronized(cacheLock) { categoryNameCache[key] = fetched }
             }
         return IptvHiddenItemsPolicy.hiddenCategoryIds(account.id, type, names, overlay)
     }
@@ -270,12 +277,12 @@ object XtreamSearchIndex {
      * the search job can't abort the fetch.
      */
     private suspend fun ensureChannels(account: XtreamAccount): List<XtreamChannel> {
-        val job = mutex.withLock {
+        val job = synchronized(cacheLock) {
             channelJobs.getOrPut(account.id) {
                 bgScope.async {
                     val result = IptvClient.forAccount(account).liveChannels(account)
                     val channels = result.getOrDefault(emptyList())
-                    mutex.withLock {
+                    synchronized(cacheLock) {
                         channelCache[account.id] = channels
                         // A FAILED fetch must not poison the whole session ("live search dead
                         // until restart") — drop the job so a later search retries. A
@@ -287,7 +294,7 @@ object XtreamSearchIndex {
             }
         }
         job.await()
-        return mutex.withLock { channelCache[account.id] } ?: emptyList()
+        return synchronized(cacheLock) { channelCache[account.id] } ?: emptyList()
     }
 
     /** All live channels of one account from the session cache (fetching on first use) — the
@@ -295,10 +302,24 @@ object XtreamSearchIndex {
     suspend fun liveChannelsFor(account: XtreamAccount): List<XtreamChannel> = ensureChannels(account)
 
     fun resetForProfile() {
-        channelCache.clear()
-        channelJobs.clear()
-        categoryNameCache.clear()
+        synchronized(cacheLock) {
+            channelCache.clear()
+            channelJobs.clear()
+            categoryNameCache.clear()
+        }
     }
+
+    /** Test seam (B213): put [channels] in the session cache as a finished lineup fetch would. */
+    internal fun seedChannelsForTest(accountId: String, channels: List<XtreamChannel>) {
+        synchronized(cacheLock) { channelCache[accountId] = channels }
+    }
+
+    /** Test seam (B213): the cached lineup of [accountId], read under the cache lock. */
+    internal fun cachedChannelsForTest(accountId: String): List<XtreamChannel>? =
+        synchronized(cacheLock) { channelCache[accountId] }
+
+    /** Test seam (B213): runs [block] holding the cache lock, as an in-flight lineup fetch does when it lands. */
+    internal fun <T> underCacheLockForTest(block: () -> T): T = synchronized(cacheLock) { block() }
 
     /**
      * Drops one account's cached channel list so the next search re-fetches it fresh. Used by the P3
@@ -306,7 +327,7 @@ object XtreamSearchIndex {
      * "refreshing" just means invalidating the session cache + re-warming it).
      */
     suspend fun invalidate(accountId: String) {
-        mutex.withLock {
+        synchronized(cacheLock) {
             channelCache.remove(accountId)
             channelJobs.remove(accountId)?.cancel()
             categoryNameCache.keys.removeAll { it.startsWith("$accountId|") }

@@ -1400,14 +1400,19 @@ object WatchedRepository {
         if (items.isEmpty()) return WatchedPushOutcome(nuvioSyncSucceeded = true)
         var nuvioSyncSucceeded = false
         val succeededTrackerProviderIds = linkedSetOf<TrackingProviderId>()
-        if (source.providerId == null) {
+        // B216: signed out -> no call at all; the keys stay dirty for pushPendingToServer().
+        if (WatchedNuvioPushPolicy.shouldPushToNuvioSync(source.providerId == null, SyncSession.canPush())) {
             try {
                 syncAdapter.push(profileId = profileId, items = items)
                 nuvioSyncSucceeded = true
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                log.e(error) { "Failed to push watched items to Nuvio Sync" }
+                if (WatchedNuvioPushPolicy.isExpectedSignedOutRefusal(error)) {
+                    log.d { "Deferred watched-items push — session lapsed" }
+                } else {
+                    log.e(error) { "Failed to push watched items to Nuvio Sync" }
+                }
             }
         }
 
@@ -1437,13 +1442,17 @@ object WatchedRepository {
         val (serverItems, items) = items.partition(ServerWatched::isServerItem)
         ServerWatched.apply(serverItems, played = false)
         if (items.isEmpty()) return
-        if (source.providerId == null) {
+        if (WatchedNuvioPushPolicy.shouldPushToNuvioSync(source.providerId == null, SyncSession.canPush())) {
             try {
                 syncAdapter.delete(profileId = profileId, items = items)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                log.e(error) { "Failed to delete watched items from Nuvio Sync" }
+                if (WatchedNuvioPushPolicy.isExpectedSignedOutRefusal(error)) {
+                    log.d { "Deferred watched-items delete — session lapsed" }
+                } else {
+                    log.e(error) { "Failed to delete watched items from Nuvio Sync" }
+                }
             }
         }
 

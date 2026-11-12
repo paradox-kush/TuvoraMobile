@@ -261,6 +261,17 @@ internal object XtreamMatchIndex {
     private fun now(): Long = TraktPlatformClock.nowEpochMs()
 
     /**
+     * Test seam: close and forget the process-wide connection so the next test opens a fresh store from
+     * its own `MatchDbDriver.openForTests`. Without it the FIRST test's connection (and every row a
+     * background build wrote into it) is reused by every later test in the JVM (B230).
+     */
+    internal suspend fun resetForTests() = mutex.withLock {
+        runCatching { conn?.close() }
+        conn = null
+        _buildProgress.value = emptyMap()
+    }
+
+    /**
      * Drops EVERYTHING stored for one provider (index + local mapping mirror) — account
      * removed. The Supabase copy of the mappings survives for other devices / a re-add.
      */

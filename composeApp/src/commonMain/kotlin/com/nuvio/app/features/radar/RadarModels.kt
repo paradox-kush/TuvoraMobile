@@ -152,9 +152,34 @@ data class RadarFixture(
 ) {
     val startEpochMs: Long? get() = radarTimestampToEpochMs(ts)
 
+    /**
+     * Tennis / golf / cycling rows carry a DATE only: TheSportsDB's strTime is "00:00:00" and
+     * there are no home/away teams, so `ts` is midnight UTC of the match day, not a start time
+     * (B142). Such a fixture is relevant for the whole local day, not for 4 h after midnight UTC.
+     */
+    val isDateOnly: Boolean
+        get() {
+            if (sport?.lowercase() !in DAY_LONG_SPORTS) return false
+            val time = ts?.trim()?.replace(' ', 'T')?.substringAfter('T', "")?.removeSuffix("Z").orEmpty()
+            return time.isEmpty() || time.all { it == '0' || it == ':' || it == '.' }
+        }
+
+    /** True while the fixture still belongs in "upcoming": a kick-off reads that for 4 h, a date-only day for the full local day (UTC-12..UTC+14 slack). */
+    fun isUpcomingWindow(nowMs: Long): Boolean {
+        val start = startEpochMs ?: return false
+        val holdMs = if (isDateOnly) DATE_ONLY_HOLD_MS else UPCOMING_GRACE_MS
+        return nowMs < start + holdMs
+    }
+
     /** The best available backdrop image for the spotlight hero — wide banner, else the event thumb. */
     val heroImage: String?
-        get() = banner?.takeIf { it.isNotBlank() } ?: thumb?.takeIf { it.isNotBlank() }
+        get() = if (!home.isNullOrBlank() && !away.isNullOrBlank()) {
+            // B234: provider team art is composed away-left, but the hero row is home-left — the backdrop's
+            // big left crest would be the wrong team. Two-sided fixtures get the neutral brand gradient.
+            null
+        } else {
+            banner?.takeIf { it.isNotBlank() } ?: thumb?.takeIf { it.isNotBlank() }
+        }
 
     val displayTitle: String
         get() = when {
@@ -165,7 +190,8 @@ data class RadarFixture(
 
     /** "Round of 32" style label from TheSportsDB's intRound conventions, or null. */
     val roundLabel: String?
-        get() = when (round?.trim()) {
+        // Tennis' intRound is the tour week (e.g. "57"), not a knockout round: never label it.
+        get() = if (sport.equals("Tennis", ignoreCase = true)) null else when (round?.trim()) {
             null, "", "0" -> null
             "125" -> "Quarter-final"
             "150" -> "Semi-final"
@@ -440,3 +466,7 @@ data class SportsProgramme(
     val startMs: Long,
     val endMs: Long,
 )
+
+private val DAY_LONG_SPORTS = setOf("tennis", "golf", "cycling")
+private const val UPCOMING_GRACE_MS = 4L * 60 * 60 * 1000
+private const val DATE_ONLY_HOLD_MS = 36L * 60 * 60 * 1000

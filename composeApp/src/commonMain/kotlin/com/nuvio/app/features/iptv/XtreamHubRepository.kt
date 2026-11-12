@@ -91,7 +91,8 @@ object XtreamHubRepository {
     // recompose the whole hub. Fetched lazily as channel tiles scroll into view.
     private val _epg = MutableStateFlow<Map<String, ChannelEpg>>(emptyMap())
     val epg: StateFlow<Map<String, ChannelEpg>> = _epg.asStateFlow()
-    private val epgFetched = mutableSetOf<String>()
+    /** Touched from the UI thread (ensureEpg), tile eviction, XMLTV ingest and the Save reset: must be thread-safe. */
+    private val epgFetched = SynchronizedStringSet()
 
     /**
      * Bumped every time new guide data lands ([onGuideDataChanged]). Open guide surfaces (docked

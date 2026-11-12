@@ -84,4 +84,27 @@ class PlaybackErrorMessagesTest {
             error.toDisplayMessage(),
         )
     }
+
+    // UX191 (main) appends a host-free hint so the Live TV pill can say why; upstream's message already
+    // names an HTTP status, so the hint must not repeat it.
+    @Test
+    fun failureHintIsNotRepeatedWhenTheMessageAlreadyNamesTheStatus() {
+        assertEquals(
+            "HTTP 403 Forbidden [ERROR_CODE_IO_BAD_HTTP_STATUS]",
+            withFailureHint("HTTP 403 Forbidden [ERROR_CODE_IO_BAD_HTTP_STATUS]", " (HTTP 403)"),
+        )
+    }
+
+    @Test
+    fun failureHintIsAppendedWhenTheMessageDoesNotSayWhy() {
+        assertEquals(
+            "Source error (network error)",
+            withFailureHint("Source error", " (network error)"),
+        )
+    }
+
+    @Test
+    fun noHintLeavesTheMessageUntouched() {
+        assertEquals("Source error", withFailureHint("Source error", ""))
+    }
 }

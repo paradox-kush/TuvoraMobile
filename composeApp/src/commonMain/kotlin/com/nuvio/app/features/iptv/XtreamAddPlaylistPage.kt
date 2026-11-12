@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.rounded.Lock
 import nuvio.composeapp.generated.resources.Res
@@ -58,6 +59,7 @@ import com.nuvio.app.features.settings.SettingsGroup
 import com.nuvio.app.features.settings.SettingsSwitchRow
 import com.nuvio.app.features.settings.SettingsSection
 import com.nuvio.app.features.settings.SettingsSecretTextField
+import kotlinx.coroutines.launch
 
 /**
  * Which playlist the "Add Playlist" form is editing — set right before navigating to
@@ -146,11 +148,17 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
     onOpenSetupPreview: () -> Unit = {},
 ) {
     item {
+        // B213: XtreamRepository reports a save from its Dispatchers.Default worker, and onDone pops the
+        // navigation — on the iPhone a @MainActor SwiftUI NavigationStack (TabNavigationCoordinator.pop), which
+        // must never be mutated off the main thread. Deliver it on the UI thread; if the page already left
+        // composition the scope is cancelled and nothing is popped (no stale pop of whatever page is now on top).
+        val uiScope = rememberCoroutineScope()
+        val onSaved: () -> Unit = { uiScope.launch { onDone() } }
         val editing = XtreamAddPage.editId?.let { id -> state.accounts.firstOrNull { it.id == id } }
         // Step 2: a managed playlist's Edit is a name-only screen with the rest locked.
         val managedInfo = editing?.let { ManagedInfoRepository.infoFor(com.nuvio.app.features.profiles.ProfileRepository.activeProfileId, it.id) }
         if (editing != null && managedInfo != null) {
-            ManagedEditContent(isTablet = isTablet, state = state, account = editing, info = managedInfo, onDone = onDone)
+            ManagedEditContent(isTablet = isTablet, state = state, account = editing, info = managedInfo, onDone = onSaved)
             return@item
         }
         val startOnCode = remember { XtreamAddPage.consumeStartWithCode() }
@@ -389,9 +397,9 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
                     )
                     val editId = XtreamAddPage.editId
                     if (editId != null) {
-                        XtreamRepository.editFromForm(editId, input) { ok -> if (ok) onDone() }
+                        XtreamRepository.editFromForm(editId, input) { ok -> if (ok) onSaved() }
                     } else {
-                        XtreamRepository.addFromForm(input) { ok -> if (ok) onDone() }
+                        XtreamRepository.addFromForm(input) { ok -> if (ok) onSaved() }
                     }
                 },
             )

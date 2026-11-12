@@ -4,16 +4,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import co.touchlab.kermit.Logger
+
+private val revertLog = Logger.withTag("EffectScope")
 
 /**
- * The sink a failed/late revert reports to. Default is a no-op so a screen composed outside the
- * wiring (a preview, an early frame) degrades quietly; FeatureWiring provides the real telemetry
- * sink at the root (Rule 1). Loud beats silent for MISSING wiring, but a failed revert is already an
- * error being reported — its default must never itself throw.
+ * Where a failed/late revert is reported when nothing is provided: the log. iOS / Apple TV never wrap
+ * their UI in `installFeatures` (only Android's MainActivity and the desktop window do), so a no-op
+ * default silently dropped every teardown failure there (B232). Logging is the floor; FeatureWiring
+ * provides the same function explicitly. It must never throw — a failed revert is already an error.
  */
-val LocalRevertFailureSink = staticCompositionLocalOf<(Throwable) -> Unit> {
-    { /* no-op; FeatureWiring provides the telemetry sink */ }
+fun logRevertFailure(t: Throwable) {
+    revertLog.w(t) { "revert failed during teardown" }
 }
+
+val LocalRevertFailureSink = staticCompositionLocalOf<(Throwable) -> Unit> { ::logRevertFailure }
 
 /**
  * A composition-scoped [EffectScope] that disposes (LIFO) when [keys] change or the composable

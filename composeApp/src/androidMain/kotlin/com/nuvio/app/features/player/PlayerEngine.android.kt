@@ -971,7 +971,7 @@ private fun ExoPlayerSurface(
                 return
             }
             latestOnError.value(
-                runBlocking { error.toDisplayMessage() },
+                withFailureHint(runBlocking { error.toDisplayMessage() }, error.failureHint()),
                 error.isLinkAuthFailure(),
             )
         }
@@ -3418,6 +3418,27 @@ private fun PlaybackException.isLinkAuthFailure(): Boolean {
         current = current.cause
     }
     return false
+}
+
+/**
+ * A short, host-free suffix naming the cause the engine's own text drops ("Source error" says nothing
+ * about a 403): `(HTTP 403)` for a refused link, `(network error)` for a connection that never got an
+ * answer. The Live TV error pill reads it to say why a channel did not play (UX191); it carries only a
+ * status code, never a URL or header.
+ */
+private fun PlaybackException.failureHint(): String {
+    var current: Throwable? = cause
+    while (current != null) {
+        if (current is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+            return " (HTTP ${current.responseCode})"
+        }
+        current = current.cause
+    }
+    return when (errorCode) {
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> " (network error)"
+        else -> ""
+    }
 }
 
 private fun PlaybackException.isDecoderFailure(): Boolean =

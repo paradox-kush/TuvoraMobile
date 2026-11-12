@@ -50,6 +50,16 @@ internal suspend fun mpvNonHttpExplanationText(fileError: String?, logLine: Stri
 internal fun PlaybackException.findInvalidResponseCodeException(): HttpDataSource.InvalidResponseCodeException? =
     findCause<HttpDataSource.InvalidResponseCodeException>()
 
+/**
+ * Appends [hint] (the host-free "(HTTP 403)" / "(network error)" suffix the Live TV error pill reads, UX191)
+ * to an error [message], unless the message already says it: upstream's text names the HTTP status itself.
+ */
+internal fun withFailureHint(message: String, hint: String): String {
+    if (hint.isEmpty()) return message
+    val cause = hint.trim().trim('(', ')')
+    return if (message.contains(cause, ignoreCase = true)) message else message + hint
+}
+
 /** The error screen text for an ExoPlayer failure. */
 @OptIn(UnstableApi::class)
 internal suspend fun PlaybackException.toDisplayMessage(): String {

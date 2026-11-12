@@ -3,6 +3,8 @@ package com.nuvio.app.features.iptv
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.nuvio.app.features.iptv.content.IptvContentDbDriver
 import com.nuvio.app.features.iptv.match.MatchDbDriver
+import com.nuvio.app.features.iptv.match.XtreamMatchIndex
+import com.nuvio.app.features.iptv.match.XtreamTmdbResolver
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.awaitCancellation
@@ -62,6 +64,8 @@ class XtreamHubBoundedLoadTest {
 
     @BeforeTest
     fun setUp() {
+        // Background index builds and the match index's connection are process-wide: start cold (B230).
+        runBlocking { XtreamTmdbResolver.resetForTests(); XtreamMatchIndex.resetForTests() }
         BoundedLoad.stallOverrideMsForTests = 400L
         IptvTransport.current = provider
         IptvContentDbDriver.openForTests = { BundledSQLiteDriver().open(":memory:") }
@@ -73,6 +77,7 @@ class XtreamHubBoundedLoadTest {
 
     @AfterTest
     fun tearDown() {
+        runBlocking { XtreamTmdbResolver.resetForTests(); XtreamMatchIndex.resetForTests() }
         BoundedLoad.stallOverrideMsForTests = null
         IptvTransport.current = IptvTransport.Platform
         PlaylistServerFailover.resetForTest()
