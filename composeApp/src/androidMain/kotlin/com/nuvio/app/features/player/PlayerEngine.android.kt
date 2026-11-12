@@ -95,10 +95,12 @@ import com.nuvio.app.core.analytics.MpvVideoOutputSignal
 import com.nuvio.app.core.contracts.MemoryPortAccess
 import com.nuvio.app.core.contracts.MemoryTier
 import com.nuvio.app.features.streams.normalizeStreamType
+import `is`.xyz.mpv.BaseMPVView
 import `is`.xyz.mpv.MPV
 import `is`.xyz.mpv.MPVNode
 import `is`.xyz.mpv.Utils
 import com.nuvio.tv.libass.media.widget.AssSubtitleSurfaceView
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlin.math.roundToInt
@@ -109,7 +111,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URI
 import java.net.URL
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -1010,7 +1011,7 @@ private fun ExoPlayerSurface(
                     )
                     preserveAudioSelectionForReload("stall resume")
                     playbackResumeGeneration = stallSession.resumeGeneration
-                    latestOnError.value(null)
+                    latestOnError.value(null, false)
                     return
                 }
 

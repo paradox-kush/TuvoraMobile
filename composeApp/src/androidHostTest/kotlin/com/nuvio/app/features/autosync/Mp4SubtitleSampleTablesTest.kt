@@ -212,13 +212,23 @@ class Mp4SubtitleSampleTablesTest {
     /** What the loader used to do: Media3's moov tree with only its text traks, then BoxParser. */
     private fun media3Tables(moovBytes: ByteArray): List<TrackSampleTable> {
         val moov = toMedia3Container(moovBytes, 0, moovBytes.size)
-        return BoxParser.parseTraks(moov, GaplessInfoHolder(), C.TIME_UNSET, null, false, false) { track ->
-            track?.takeIf {
-                it.type == C.TRACK_TYPE_TEXT &&
-                    (it.format.sampleMimeType == MimeTypes.APPLICATION_TX3G ||
-                        it.format.sampleMimeType == MimeTypes.APPLICATION_MP4VTT)
-            }
-        }
+        // Fork media3 engine (1.11.0): parseTraks takes the track modifier, then a trailing Boolean.
+        return BoxParser.parseTraks(
+            moov,
+            GaplessInfoHolder(),
+            C.TIME_UNSET,
+            null,
+            false,
+            false,
+            { track ->
+                track?.takeIf {
+                    it.type == C.TRACK_TYPE_TEXT &&
+                        (it.format.sampleMimeType == MimeTypes.APPLICATION_TX3G ||
+                            it.format.sampleMimeType == MimeTypes.APPLICATION_MP4VTT)
+                }
+            },
+            false,
+        )
     }
 
     private val containerTypes = setOf("moov", "trak", "mdia", "minf", "stbl", "edts").map(::fourCc).toSet()
