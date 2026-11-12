@@ -83,6 +83,9 @@ val tvosExcludedCommon = listOf(
     "com/nuvio/app/features/player/PlayerAutoSyncAdapter.kt",
     "com/nuvio/app/features/player/PlayerRuntimeAutoSync.kt",
     "com/nuvio/app/features/settings/AutoSyncPlaybackSettings.kt",
+    // 15th sync (2026-11-12): upstream moved the AutoSync engine to commonMain and added an mpv coordinator
+    // that wraps the Compose PlayerEngineController (iPhone libmpv). Same Apple TV gap as above.
+    "com/nuvio/app/features/autosync/AutoSyncMpvCoordinator.kt",
 )
 val tvosExcludedIos = listOf(
     // iPhone-only APIs; Apple TV supplies its own actual in tvosCore/src/tvosMain (named gaps).
@@ -92,6 +95,7 @@ val tvosExcludedIos = listOf(
     "com/nuvio/app/features/livetv/LiveTvOrientation.ios.kt",        // device orientation
     "com/nuvio/app/features/updater/**",                              // in-app APK updater
     "com/nuvio/app/core/storage/AppleDataDirectory.ios.kt",          // tvOS writes only to Caches
+    "com/nuvio/app/features/autosync/AutoSyncMpvPlatform.ios.kt",    // iPhone libmpv AutoSync glue (Apple TV: AutoSync gap)
 )
 
 fun uiFiles(sourceSet: String): List<String> {

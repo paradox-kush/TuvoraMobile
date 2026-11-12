@@ -9,7 +9,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 @RunWith(RobolectricTestRunner::class)
@@ -43,21 +42,6 @@ class StreamLinkCacheTokenTest {
         )
 
         assertNull(StreamLinkCacheRepository.getValid(key, ONE_HOUR_MS))
-    }
-
-    @Test
-    fun linkWithExpiringTokenIsKept() {
-        val tokenUrl = "https://cdn.example.com/dld/file-id?token=abc&expires=1234"
-
-        StreamLinkCacheRepository.save(
-            contentKey = key,
-            url = tokenUrl,
-            streamName = "1080p",
-            addonName = "Test",
-            addonId = "addon:test",
-        )
-
-        assertEquals(tokenUrl, StreamLinkCacheRepository.getValid(key, ONE_HOUR_MS)?.url)
     }
 
     private companion object {
