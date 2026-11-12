@@ -24,6 +24,7 @@ internal actual object PlayerTrackPreferenceStorage {
     private const val zoomScaleYKey = "zoom_scale_y"
     private const val zoomPanXKey = "zoom_pan_x"
     private const val zoomPanYKey = "zoom_pan_y"
+    private const val audioDelayMsKey = "audio_delay_ms"
 
     private var preferences: SharedPreferences? = null
 
@@ -105,6 +106,26 @@ internal actual object PlayerTrackPreferenceStorage {
             ?.edit()
             ?.putInt(scopedKey(subtitleDelayMsKey, id), delayMs.coerceIn(SUBTITLE_DELAY_MIN_MS, SUBTITLE_DELAY_MAX_MS))
             ?.apply()
+    }
+
+    actual fun loadAudioDelayMs(audioOutputKey: String): Int? {
+        val id = audioOutputKey.normalizedStorageId() ?: return null
+        val key = scopedKey(audioDelayMsKey, id)
+        return preferences?.let { prefs ->
+            if (prefs.contains(key)) prefs.getInt(key, 0) else null
+        }
+    }
+
+    actual fun saveAudioDelayMs(audioOutputKey: String, delayMs: Int) {
+        val id = audioOutputKey.normalizedStorageId() ?: return
+        val key = scopedKey(audioDelayMsKey, id)
+        preferences?.edit()?.apply {
+            if (delayMs == 0) {
+                remove(key)
+            } else {
+                putInt(key, delayMs.coerceIn(AUDIO_DELAY_MIN_MS, AUDIO_DELAY_MAX_MS))
+            }
+        }?.apply()
     }
 
     private fun loadString(field: String, contentId: String): String? =

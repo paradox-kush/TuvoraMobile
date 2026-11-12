@@ -12,6 +12,7 @@ import com.nuvio.app.features.streams.PlaybackTlsClass
 import com.nuvio.app.features.streams.PlaybackTlsPolicy
 import io.ktor.http.Url
 import okhttp3.Call
+import com.nuvio.app.core.network.NetworkErrorInterceptor
 import okhttp3.OkHttpClient
 import java.net.HttpURLConnection
 import java.net.URL
@@ -58,6 +59,7 @@ internal object PlayerPlaybackNetworking {
             .followRedirects(true)
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
+            .addInterceptor(NetworkErrorInterceptor())
             .addInterceptor(SentryNetworkBreadcrumbInterceptor())
 
     /** Normal system validation and hostname verification: what every host gets unless the policy says otherwise. */

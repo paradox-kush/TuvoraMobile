@@ -91,6 +91,7 @@ internal fun PlayerDestination(
         launchId = route.launchId,
         sourceFilename = launch.sourceFilename,
         stream = launch.stream,
+        sourceFromLinkCache = launch.sourceFromLinkCache,
         onBack = onBack,
         // Fork: only offered when this device has an external player it can hand off to.
         onOpenInExternalPlayer = if (externalPlayerId == null) null else { request ->

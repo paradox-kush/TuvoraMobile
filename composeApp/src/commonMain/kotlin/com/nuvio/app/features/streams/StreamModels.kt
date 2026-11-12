@@ -36,6 +36,8 @@ data class StreamItem(
     /** Provenance for device choices, retained when a deferred or cached stream is resolved. */
     val deviceSourceKind: String? = null,
     val deviceSourceRef: String? = null,
+    /** True when [url] was produced by Nuvio's own debrid resolver, not returned by the add-on. */
+    val debridResolved: Boolean = false,
 ) {
     val availableOnDevice: Boolean get() {
         if (!com.nuvio.app.core.sources.DeviceSources.isActive) return true

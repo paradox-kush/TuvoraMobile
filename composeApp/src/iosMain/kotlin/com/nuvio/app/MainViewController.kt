@@ -10,6 +10,7 @@ import com.nuvio.app.core.ui.NativeProfileSwitcherController
 import com.nuvio.app.core.contracts.MemoryPortAccess
 import com.nuvio.app.core.contracts.MemoryTierPolicy
 import com.nuvio.app.features.common.lifecycle.FeatureRegistry
+import com.nuvio.app.features.autosync.AutoSyncPreferencesIos
 import com.nuvio.app.navigation.AppRoute
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.native.setUnhandledExceptionHook
@@ -86,6 +87,7 @@ private fun nuvioComposeViewController(
     content: @androidx.compose.runtime.Composable () -> Unit,
 ): UIViewController {
     ensureIosRuntimeBootstrapped()
+    AutoSyncPreferencesIos.initialize()
     return ComposeUIViewController(
         configure = { onFocusBehavior = OnFocusBehavior.DoNothing },
         content = { CompositionLocalProvider(LocalVerticalBarPadding provides verticalBar.padding, LocalFold provides hinge.fold, content = content) },

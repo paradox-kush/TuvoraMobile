@@ -67,6 +67,14 @@ internal val PlayerScreenRuntime.activePlaybackKey: PlaybackKey
         playbackEngine = playbackEngineOverride,
     )
 
+internal val PlayerScreenRuntime.sourcePlaybackKey: PlaybackKey
+    get() = PlaybackKey(
+        sourceIdentity = activePlaybackIdentity,
+        videoId = activeVideoId,
+        seasonNumber = activeSeasonNumber,
+        episodeNumber = activeEpisodeNumber,
+    )
+
 internal val PlayerScreenRuntime.playbackSession: WatchProgressPlaybackSession
     get() = WatchProgressPlaybackSession(
         profileId = profileId,
@@ -128,6 +136,16 @@ internal fun PlayerScreenRuntime.currentLaunch(launch: PlayerLaunch): PlayerLaun
 }
 
 internal fun PlayerScreenRuntime.resetIdentityStateIfNeeded() {
+    val sourceIdentity = sourcePlaybackKey
+    if (lastResetSourcePlaybackIdentity != sourceIdentity) {
+        lastResetSourcePlaybackIdentity = sourceIdentity
+        engineFailoverTriggered = false
+        engineFailoverDisarmed = false
+        engineFailoverSourceIdentity = null
+        playbackEngineOverride = null
+        autoFetchedAddonSubtitlesForKey = null
+    }
+
     val identity = activePlaybackKey
     if (lastResetPlaybackIdentity != identity) {
         lastResetPlaybackIdentity = identity
@@ -141,7 +159,6 @@ internal fun PlayerScreenRuntime.resetIdentityStateIfNeeded() {
         lastProgressPersistEpochMs = 0L
         previousIsPlaying = false
         pendingSeekScrobbleRestart = false
-        autoFetchedAddonSubtitlesForKey = null
         trackPreferenceRestoreApplied = false
         preferredAudioSelectionApplied = false
         appliedAudioPreferences = null
@@ -161,6 +178,14 @@ internal fun PlayerScreenRuntime.resetIdentityStateIfNeeded() {
         hasSentCompletionScrobbleForCurrentItem = false
         currentTrackingMedia = null
     }
+}
+
+internal fun PlayerScreenRuntime.resetAddonSubtitlesIfSourceChanged() {
+    val sourceIdentity = sourcePlaybackKey
+    if (lastAddonSubtitleSourceIdentity == sourceIdentity) return
+    lastAddonSubtitleSourceIdentity = sourceIdentity
+    SubtitleRepository.clear()
+    autoFetchedAddonSubtitlesForKey = null
 }
 
 internal fun PlayerScreenRuntime.currentPlaybackProgressPercent(
@@ -542,7 +567,8 @@ internal fun PlayerScreenRuntime.maybeFailoverPlaybackEngine(
     // recovery is the credential refresh's fresh mint, and once that is exhausted, the error.
     if (!LiveLinkReconnectPolicy.allowsEngineFailover(LiveLinkReconnectPolicy.modeFor(singleUseLink))) return false
     if (engineFailoverDisarmed) return false
-    if (engineFailoverTriggered) return false
+    val sourceIdentity = activePlaybackIdentity
+    if (engineFailoverSourceIdentity == sourceIdentity) return false
 
     val current = playerController?.playbackEngine
         ?: playbackEngineOverride
@@ -555,6 +581,7 @@ internal fun PlayerScreenRuntime.maybeFailoverPlaybackEngine(
     }
 
     engineFailoverTriggered = true
+    engineFailoverSourceIdentity = sourceIdentity
     // Same rule as a manual switch (B59-H1): before the first frame the snapshot still reads 0 while
     // the engine seeks to the resume point, so keep the requested target instead of failing over to 0:00.
     val swapStart = sourceSwapStart()

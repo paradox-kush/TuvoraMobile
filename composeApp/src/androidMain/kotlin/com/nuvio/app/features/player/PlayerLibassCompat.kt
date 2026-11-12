@@ -15,6 +15,7 @@ import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.mkv.MatroskaExtractor
 import androidx.media3.extractor.text.SubtitleParser
+import com.nuvio.app.features.autosync.AutoSyncLibassSubtitles
 import com.nuvio.tv.libass.media.AssHandler
 import com.nuvio.tv.libass.media.extractor.AssMatroskaExtractor
 import com.nuvio.tv.libass.media.parser.AssSubtitleParserFactory
@@ -34,6 +35,7 @@ internal fun ExoPlayer.Builder.buildWithAssSupportCompat(
     extractorsFactory: ExtractorsFactory = DefaultExtractorsFactory(),
     renderersFactory: RenderersFactory = DefaultRenderersFactory(context),
     allowLoadRetry: Boolean = true,
+    audioDelayUsProvider: () -> Long = { 0L },
 ): ExoPlayer {
     val assHandler = AssHandler()
     val assSubtitleParserFactory = CompatAssSubtitleParserFactory(assHandler)
@@ -52,7 +54,7 @@ internal fun ExoPlayer.Builder.buildWithAssSupportCompat(
     // NoSampleRenderer-based position fallback for tunneled playback.
     val assRenderersFactory = AssRenderersFactory(assHandler, renderersFactory)
     val player = this
-        .setMediaSourceFactory(mediaSourceFactory)
+        .setMediaSourceFactory(AudioDelayMediaSourceFactory(mediaSourceFactory, audioDelayUsProvider))
         .setRenderersFactory(assRenderersFactory)
         .build()
 
@@ -108,7 +110,8 @@ private class CompatAssSubtitleParserFactory(
     }
 
     override fun create(format: Format): SubtitleParser {
-        return delegate.create(normalizeSsaFormat(format))
+        val normalized = normalizeSsaFormat(format)
+        return AutoSyncLibassSubtitles.wrapParser(assHandler, normalized, delegate.create(normalized)) // AutoSync hook
     }
 
     private fun normalizeSsaFormat(format: Format): Format {

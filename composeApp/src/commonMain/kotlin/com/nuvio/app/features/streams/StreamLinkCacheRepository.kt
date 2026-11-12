@@ -68,20 +68,15 @@ object StreamLinkCacheRepository {
         addonLogo: String? = null,
         streamDescription: String? = null,
     ) {
-        if (url.isNotBlank() && url.hasLikelyExpiringPlaybackCredentials()) {
+        // Upstream 3d70db683 dropped the old "skip links with expiring credentials" rule so tokenized
+        // add-on/debrid links (TorBox) are reused; the error path refreshes them when they expire.
+        // Own-source links (IPTV/Stalker, media servers) still never enter the cache: a panel can
+        // renumber its whole VOD catalog overnight (observed live — "synced movie index: +6249 -6253"),
+        // stranding the cached stream id (401), and Stalker create_link URLs are single-use.
+        if (!StreamLinkReusePolicy.mayReuse(addonId)) {
             remove(contentKey)
             return
         }
-        // An IPTV link is only valid for as long as the provider's catalog stands still, and it
-        // does not: a panel can renumber its whole VOD catalog overnight (observed live —
-        // "synced movie index: +6249 -6253"), after which the cached stream id is gone and the
-        // panel answers the replayed URL with 401. Stalker links are worse still: single-use.
-        // Re-resolving costs one catalog lookup the matcher performs anyway, so never cache these.
-        if (isIptvAddon(addonId)) {
-            remove(contentKey)
-            return
-        }
-
         val entry = CachedStreamLink(
             url = url,
             streamName = streamName,
@@ -124,13 +119,9 @@ object StreamLinkCacheRepository {
             StreamLinkCacheStorage.removeEntry(hashedKey(contentKey))
             return null
         }
-        if (entry.url.isNotBlank() && entry.url.hasLikelyExpiringPlaybackCredentials()) {
-            StreamLinkCacheStorage.removeEntry(hashedKey(contentKey))
-            return null
-        }
-        // Also drop IPTV entries written by an earlier build, so an upgrade doesn't keep replaying
-        // a link whose stream id the provider has since renumbered away.
-        if (isIptvAddon(entry.addonId)) {
+        // Also drop own-source (IPTV) entries written by an earlier build, so an upgrade never
+        // replays a single-use or renumbered link as a "cached" one.
+        if (!StreamLinkReusePolicy.mayReuse(entry.addonId)) {
             StreamLinkCacheStorage.removeEntry(hashedKey(contentKey))
             return null
         }

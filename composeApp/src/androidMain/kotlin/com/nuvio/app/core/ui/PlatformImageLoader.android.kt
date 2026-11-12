@@ -13,6 +13,7 @@ import com.nuvio.app.core.contracts.MemoryPortAccess
 import com.nuvio.app.core.contracts.MemoryTierPolicy
 import com.nuvio.app.addSharedImageComponents
 import com.nuvio.app.core.network.IPv4FirstDns
+import com.nuvio.app.core.network.NetworkErrorInterceptor
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import okhttp3.OkHttpClient
@@ -31,6 +32,8 @@ internal actual fun ImageLoader.Builder.configurePlatformImageLoader(context: Pl
                     engine {
                         preconfigured = OkHttpClient.Builder()
                             .dns(IPv4FirstDns())
+                            // upstream d534d14e9: an SSL setup RuntimeException becomes a failed load, not a crash
+                            .addInterceptor(NetworkErrorInterceptor())
                             .followRedirects(true)
                             .build()
                     }

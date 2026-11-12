@@ -125,6 +125,10 @@ actual fun rememberIsInPictureInPicture(): Boolean {
     return inPip
 }
 
+// The iOS player has no audio delay control yet.
+@Composable
+internal actual fun rememberAudioOutputKey(enabled: Boolean): String? = null
+
 @Composable
 internal actual fun rememberPlatformPlayerGestureController(): PlayerGestureController? {
     val controller = remember { IOSPlayerGestureController() }
