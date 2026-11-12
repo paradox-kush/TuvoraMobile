@@ -65,4 +65,13 @@ class TelemetrySendPolicyTest {
         assertTrue(TelemetrySendPolicy.attachesTrail("app_uncaught_exception_ios", emptyMap()))
         assertFalse(TelemetrySendPolicy.attachesTrail("simkl_sync", mapOf("outcome" to "ok")))
     }
+
+    @Test
+    fun `addon_bridge_state counts the healthy states and sends the failing ones`() {
+        assertEquals(SendDecision.COUNT, decide("addon_bridge_state", "state" to "none"))
+        assertEquals(SendDecision.COUNT, decide("addon_bridge_state", "state" to "ready"))
+        for (bad in listOf("preparing", "failed", "disconnected", "unreachable")) {
+            assertEquals(SendDecision.SEND, decide("addon_bridge_state", "state" to bad))
+        }
+    }
 }

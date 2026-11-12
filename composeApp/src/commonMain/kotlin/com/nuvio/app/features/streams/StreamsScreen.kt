@@ -1193,6 +1193,10 @@ private fun EmptyStateBlock(
                 com.nuvio.app.features.profiles.ProfileRepository.activeProfileId,
             )
         }
+        // Once per opening (and once per state+reason per session, see the policy): which bridge state users hit.
+        com.nuvio.app.features.servers.ManagedBridgeTelemetryPolicy.session
+            .nextReport(AppFeaturePolicy.addonStreamSourcesEnabled, com.nuvio.app.features.servers.ManagedAddonBridge.notice.value)
+            ?.let { runCatching { com.nuvio.app.core.telemetry.api.TelemetryAccess.current().emit(com.nuvio.app.features.servers.ManagedBridgeTelemetryPolicy.EVENT, it) } }
     }
     val title: String
     val message: String

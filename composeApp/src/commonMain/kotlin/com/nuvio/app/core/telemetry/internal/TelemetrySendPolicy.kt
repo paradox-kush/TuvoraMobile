@@ -26,6 +26,8 @@ internal object TelemetrySendPolicy {
         event == SCREEN_EVENT -> SendDecision.RECORD_ONLY
         event in countedAlways -> SendDecision.COUNT
         event in countedUnlessFailed -> if (isFailure(props)) SendDecision.SEND else SendDecision.COUNT
+        // Healthy/none states are a count in session_health; a not-ready bridge is sent (once per state+reason per session).
+        event == "addon_bridge_state" -> if (props["state"] in setOf("none", "ready")) SendDecision.COUNT else SendDecision.SEND
         event == "app_exit" -> decideExit(props)
         else -> SendDecision.SEND
     }

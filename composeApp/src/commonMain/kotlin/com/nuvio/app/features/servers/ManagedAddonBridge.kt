@@ -128,3 +128,54 @@ internal object ManagedBridgeEmptyStatePolicy {
     fun shouldRefreshOnEmpty(streamSourcesEnabled: Boolean, notice: ManagedBridgeNotice?): Boolean =
         explanation(streamSourcesEnabled, notice) != null
 }
+
+/**
+ * `addon_bridge_state` telemetry: which managed-bridge state a store-build user meets on the empty Streams screen.
+ * Codes only (no hosts, URLs, add-on names or message text); the server's reason is collapsed to a closed vocabulary.
+ * Volume: the caller asks once per Streams opening, and each (state, reason) pair passes once per app session.
+ */
+internal class ManagedBridgeTelemetryPolicy {
+    private val reported = HashSet<String>()
+
+    /** The event properties to emit now, or null (full build, or this (state, reason) already went out this session). */
+    fun nextReport(streamSourcesEnabled: Boolean, notice: ManagedBridgeNotice?): Map<String, Any>? {
+        if (streamSourcesEnabled) return null
+        val state = stateOf(notice)
+        val reason = reasonOf(notice)
+        if (!reported.add("$state|$reason")) return null
+        return mapOf("state" to state, "reason" to reason, "surface" to SURFACE)
+    }
+
+    companion object {
+        const val EVENT = "addon_bridge_state"
+        const val SURFACE = "streams_empty"
+        private val knownReasons = setOf(
+            "provisioning_timeout", "no_supported_addons", "no_playback_addons", "addon_selection_changed",
+            "connection_reprovisioning", "connection_not_ready", "connection_changed",
+        )
+        private val httpReason = Regex("http_[0-9]{3}")
+
+        /** The notice is null when the bridge is ready or there is none (the two are not distinguished client-side). */
+        fun stateOf(notice: ManagedBridgeNotice?): String = when (notice) {
+            null -> "none"
+            ManagedBridgeNotice.Preparing -> "preparing"
+            is ManagedBridgeNotice.Failed -> when (notice.code) {
+                "unreachable" -> "unreachable"
+                "disconnected" -> "disconnected"
+                else -> "failed"
+            }
+        }
+
+        fun reasonOf(notice: ManagedBridgeNotice?): String {
+            val code = (notice as? ManagedBridgeNotice.Failed)?.code ?: return ""
+            return when {
+                code in knownReasons || httpReason.matches(code) -> code
+                code == "unreachable" || code == "disconnected" -> ""
+                else -> "other"
+            }
+        }
+
+        /** Process-wide session instance used by the Streams screen. */
+        val session = ManagedBridgeTelemetryPolicy()
+    }
+}

@@ -36,6 +36,7 @@ internal class SessionHealth(private var windowStartMs: Long, private val maxKey
             when (event) {
                 "iptv_load" -> { (props["surface"] as? String)?.let(::add); (props["outcome"] as? String)?.let(::add) }
                 "epg_ingest" -> { (props["source"] as? String)?.let(::add); (props["outcome"] as? String)?.let(::add) }
+                "addon_bridge_state" -> (props["state"] as? String)?.let(::add)
                 "epg_mapping" -> (props["outcome"] as? String)?.let(::add)
                 "playback_started" -> { (props["engine"] as? String)?.let(::add); (props["kind"] as? String)?.let(::add) }
                 "app_exit" -> (props["reason"] as? String)?.let(::add)

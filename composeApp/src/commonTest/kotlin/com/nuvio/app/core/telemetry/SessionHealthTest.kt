@@ -16,7 +16,9 @@ class SessionHealthTest {
         h.countEvent("iptv_load", mapOf("surface" to "hub_categories", "outcome" to "loaded"))
         h.countEvent("playback_started", mapOf("engine" to "exo", "kind" to "live"))
         h.countEvent("epg_ingest", mapOf("source" to "mirror", "outcome" to "ok"))
+        h.countEvent("addon_bridge_state", mapOf("state" to "none", "reason" to "", "surface" to "streams_empty"))
         val s = h.snapshot(61_000L)!!.payload
+        assertEquals(1, s["n_addon_bridge_state_none"])
         assertEquals(2, s["n_iptv_load_hub_categories_loaded"])
         assertEquals(1, s["n_playback_started_exo_live"])
         assertEquals(1, s["n_epg_ingest_mirror_ok"])
