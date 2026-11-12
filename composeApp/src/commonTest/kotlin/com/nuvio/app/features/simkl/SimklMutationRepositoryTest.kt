@@ -202,6 +202,39 @@ class SimklMutationRepositoryTest {
         assertEquals(1, committed)
     }
 
+    // B174: Simkl answers 409 to any re-stop of the same item within an hour, not only to a
+    // finished one. A stop at a few percent that hits that window must stay a paused playback;
+    // reading the 409 as "scrobbled" marked the title watched locally after a few minutes.
+    @Test
+    fun `duplicate stop below the watched threshold stays a pause - B174`() = runBlocking {
+        val engine = RecordingEngine(
+            response(
+                status = 409,
+                body = """{"watched_at":"2026-05-14T23:46:29Z","expires_at":"2026-05-15T00:46:29Z"}""",
+            ),
+        )
+        val service = SimklMutationService(
+            client = SimklApiClient(
+                engine = engine,
+                accessToken = { "token" },
+                onUnauthorized = {},
+                nowEpochMs = { 0L },
+                sleep = {},
+                retryJitterMs = { 0L },
+            ),
+            onMutationCommitted = {},
+        )
+
+        val scrobbleResult = service.scrobble(
+            action = TrackingScrobbleAction.STOP,
+            event = TrackingScrobbleEvent(movie(), progressPercent = 6.0),
+        )
+
+        assertEquals(SimklScrobbleOutcome.PAUSE, scrobbleResult.outcome, "a 409 at 6 percent is not a completion")
+        assertEquals(6.0, scrobbleResult.progress)
+        assertNull(scrobbleResult.watchedAt, "the 409 watched_at belongs to an earlier watch")
+    }
+
     @Test
     fun `history response exposes resolved status catalog and anime subtype`() = runBlocking {
         val engine = RecordingEngine(
