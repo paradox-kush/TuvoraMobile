@@ -60,7 +60,7 @@ class StreamSourcePresentationPolicyTest {
     // --- readiness -------------------------------------------------------------------------------
 
     @Test
-    fun `an add-on whose manifest is still loading is pending, not missing`() {
+    fun `an add-on whose manifest is still loading is pending not missing`() {
         assertEquals(AddonLaneReadiness.Pending, StreamSourcePresentationPolicy.readiness(pending()))
         assertEquals(AddonLaneReadiness.Failed, StreamSourcePresentationPolicy.readiness(failed()))
         assertEquals(AddonLaneReadiness.Ready, StreamSourcePresentationPolicy.readiness(ready()))
@@ -107,7 +107,7 @@ class StreamSourcePresentationPolicyTest {
     }
 
     @Test
-    fun `an add-on that failed to load is a failure, never no compatible add-on`() {
+    fun `an add-on that failed to load is a failure and never no compatible add-on`() {
         assertEquals(
             NoLaneOutcome.AddonsFailed,
             StreamSourcePresentationPolicy.noLaneOutcome(AddonReadinessCounts(ready = 1, failed = 1), manifestWaitElapsed = false),
@@ -144,12 +144,12 @@ class StreamSourcePresentationPolicyTest {
     }
 
     @Test
-    fun `a list that is not for this request yet is loading, not empty`() {
+    fun `a list that is not for this request yet is loading not empty`() {
         assertEquals(StreamsBody.Loading, body(forThisRequest = false, hasGroups = false))
     }
 
     @Test
-    fun `a request nobody has decided yet is loading, not empty`() {
+    fun `a request nobody has decided yet is loading not empty`() {
         assertEquals(StreamsBody.Loading, body(hasGroups = false, reason = null))
     }
 

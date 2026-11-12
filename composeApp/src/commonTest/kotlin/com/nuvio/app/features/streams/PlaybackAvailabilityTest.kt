@@ -40,7 +40,7 @@ class PlaybackAvailabilityTest {
     }
 
     @Test
-    fun `play is available while an addon manifest is still loading (B162)`() {
+    fun `play is available while an addon manifest is still loading B162`() {
         // The "Playback unavailable" label used to show for the minutes an add-on's manifest was still loading.
         val loading = ManagedAddon(manifestUrl = "https://example.com/slow/manifest.json", isRefreshing = true)
         assertTrue(PlaybackAvailability(addons = listOf(loading), plugins = PluginsUiState(pluginsEnabled = false)).canStream("movie", "tt123"))
