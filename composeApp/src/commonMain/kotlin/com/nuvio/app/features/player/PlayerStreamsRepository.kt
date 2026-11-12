@@ -25,6 +25,8 @@ import com.nuvio.app.features.streams.StreamBadgeSettingsRepository
 import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.streams.StreamLoadCompletion
 import com.nuvio.app.features.streams.StreamParser
+import com.nuvio.app.features.streams.NoLaneOutcome
+import com.nuvio.app.features.streams.StreamSourcePresentationPolicy
 import com.nuvio.app.features.streams.StreamsUiState
 import com.nuvio.app.features.streams.asDirectSourceGroup
 import com.nuvio.app.features.streams.SourceLaneGuard
@@ -46,6 +48,7 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
@@ -204,6 +207,7 @@ object PlayerStreamsRepository {
         setRequestKey: (String?) -> Unit,
         jobHolder: () -> Job?,
         setJob: (Job) -> Unit,
+        manifestWaitElapsed: Boolean = false,
     ) {
         val streamProvider = com.nuvio.app.core.contracts.StreamSourceAccess.current()
         val pluginUiState = if (AppFeaturePolicy.pluginsEnabled) {
@@ -337,10 +341,44 @@ object PlayerStreamsRepository {
             }
 
         if (streamAddons.isEmpty() && pluginProviderGroups.isEmpty() && xtreamSourceGroups.isEmpty() && serverSources.isEmpty()) {
-            stateFlow.value = StreamsUiState(
-                isAnyLoading = false,
-                emptyStateReason = com.nuvio.app.features.streams.StreamsEmptyStateReason.NoCompatibleAddons,
-            )
+            // B162: add-ons still loading their manifests are not "no compatible add-on"; failed ones are not "empty".
+            val addonCounts = StreamSourcePresentationPolicy.counts(installedAddons)
+            when (StreamSourcePresentationPolicy.noLaneOutcome(addonCounts, manifestWaitElapsed)) {
+                NoLaneOutcome.WaitForAddons -> {
+                    stateFlow.value = StreamsUiState(isAnyLoading = true)
+                    setJob(
+                        scope.launch {
+                            StreamSourcePresentationPolicy.awaitAddonsSettled(AddonRepository.uiState.map { it.addons })
+                            ensureActive()
+                            setRequestKey(null)
+                            fetchStreams(
+                                type = type,
+                                videoId = videoId,
+                                season = season,
+                                episode = episode,
+                                forceRefresh = false,
+                                forceMintIptv = forceMintIptv,
+                                stateFlow = stateFlow,
+                                requestKeyHolder = requestKeyHolder,
+                                setRequestKey = setRequestKey,
+                                jobHolder = jobHolder,
+                                setJob = setJob,
+                                manifestWaitElapsed = true,
+                            )
+                        },
+                    )
+                }
+
+                NoLaneOutcome.AddonsFailed -> stateFlow.value = StreamsUiState(
+                    isAnyLoading = false,
+                    emptyStateReason = com.nuvio.app.features.streams.StreamsEmptyStateReason.StreamFetchFailed,
+                )
+
+                NoLaneOutcome.NoCompatibleAddons -> stateFlow.value = StreamsUiState(
+                    isAnyLoading = false,
+                    emptyStateReason = com.nuvio.app.features.streams.StreamsEmptyStateReason.NoCompatibleAddons,
+                )
+            }
             return
         }
 

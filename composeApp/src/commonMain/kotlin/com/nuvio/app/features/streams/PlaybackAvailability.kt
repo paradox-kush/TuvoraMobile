@@ -38,9 +38,23 @@ internal class PlaybackAvailability(
      * source like a scraper, so an IPTV-only user can still play catalog titles.
      */
     private val iptvSourceTypes: Set<String> = emptySet(),
+    /** Store builds never use add-ons as sources, so a pending or failed add-on proves nothing there. */
+    private val addonSourcesEnabled: Boolean = true,
 ) {
+    /**
+     * B162: an add-on whose manifest is still loading (or failed to load) is not proof that nothing can
+     * play. Play stays enabled and the source list says what is happening, instead of "Playback unavailable"
+     * for the minutes the manifest takes.
+     */
+    private val addonReadiness = StreamSourcePresentationPolicy.counts(addons)
+
     fun canStream(type: String, videoId: String): Boolean =
         isIptvId(videoId) ||
+            StreamSourcePresentationPolicy.canAttemptPlayback(
+                hasUsableSource = false,
+                counts = addonReadiness,
+                addonSourcesEnabled = addonSourcesEnabled,
+            ) ||
             type in iptvSourceTypes ||
             hasCompatiblePlaybackSource(addons, plugins, type, videoId) ||
             MetaDetailsRepository.findEmbeddedStreams(videoId).isNotEmpty() ||
@@ -75,6 +89,7 @@ internal class PlaybackAvailability(
                 PluginsUiState(pluginsEnabled = false)
             },
             iptvSourceTypes = IptvCatalogAccess.catalogOrNull?.servedStreamTypes?.value.orEmpty(),
+            addonSourcesEnabled = AppFeaturePolicy.addonStreamSourcesEnabled,
         )
     }
 }
@@ -106,6 +121,6 @@ internal fun rememberPlaybackAvailability(): PlaybackAvailability {
         ServerRepository.uiState
     }.collectAsStateWithLifecycle()
     return remember(addons, plugins, downloads, iptvSourceTypes, servers.revision) {
-        PlaybackAvailability(addons.addons, plugins, iptvSourceTypes)
+        PlaybackAvailability(addons.addons, plugins, iptvSourceTypes, AppFeaturePolicy.addonStreamSourcesEnabled)
     }
 }

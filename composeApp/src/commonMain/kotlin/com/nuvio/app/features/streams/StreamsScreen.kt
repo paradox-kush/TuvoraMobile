@@ -136,7 +136,17 @@ fun StreamsScreen(
     modifier: Modifier = Modifier,
 ) {
     val useNativeNavigation = LocalUseNativeNavigation.current
-    val uiState by StreamsRepository.uiState.collectAsStateWithLifecycle()
+    val repositoryState by StreamsRepository.uiState.collectAsStateWithLifecycle()
+    // The repository is a singleton: until this screen's own load has published, its state belongs to the
+    // previous title (or to nothing). That is "still loading", never this title's empty message (B162).
+    val uiState = if (
+        repositoryState.requestToken != StreamsRepository.requestToken(type, videoId, seasonNumber, episodeNumber, manualSelection) &&
+        !repositoryState.hasAnyStreams
+    ) {
+        StreamsUiState(isAnyLoading = true)
+    } else {
+        repositoryState
+    }
     val streamDisplaySettings by remember {
         StreamBadgeSettingsRepository.ensureLoaded()
         StreamBadgeSettingsRepository.uiState
@@ -734,6 +744,16 @@ internal fun StreamList(
     val hasGroups = filteredGroups.isNotEmpty()
     val hasAnyStreams = filteredGroups.any { it.streams.isNotEmpty() }
     val anyLoading = filteredGroups.any { it.isLoading }
+    val failedLanes = remember(uiState.groups, uiState.isAnyLoading) {
+        if (uiState.isAnyLoading) emptyList() else StreamSourcePresentationPolicy.failedLanes(uiState.groups)
+    }
+    val body = StreamSourcePresentationPolicy.body(
+        hasAnyStreams = hasAnyStreams,
+        anyLoading = anyLoading || uiState.isAnyLoading,
+        hasGroups = hasGroups,
+        emptyReason = uiState.emptyStateReason,
+        isForThisRequest = true,
+    )
     val torrentNotSupportedText = stringResource(Res.string.streams_torrent_not_supported)
     val fetchingText = stringResource(Res.string.streams_fetching)
     val findingStreamsText = stringResource(Res.string.streams_finding_streams)
@@ -776,20 +796,23 @@ internal fun StreamList(
                 }
             }
         }
-        when {
-            hasGroups && anyLoading && !hasAnyStreams -> {
+        when (body) {
+            StreamsBody.Loading -> {
                 item {
                     LoadingStateBlock(findingStreamsText = findingStreamsText)
                 }
             }
 
-            !hasAnyStreams && !uiState.isAnyLoading -> {
+            StreamsBody.Empty -> {
                 item {
                     EmptyStateBlock(reason = uiState.emptyStateReason)
                 }
+                if (failedLanes.isNotEmpty()) {
+                    item(key = "failed_sources") { FailedSourcesNote(failedLanes) }
+                }
             }
 
-            else -> {
+            StreamsBody.Streams -> {
                 filteredGroups.forEachIndexed { groupIndex, group ->
                     streamSection(
                         sectionKey = streamSectionRenderKey(groupIndex = groupIndex, group = group),
@@ -812,6 +835,9 @@ internal fun StreamList(
                     item {
                         FooterLoadingBlock(checkingMoreAddonsText = checkingMoreAddonsText)
                     }
+                }
+                if (failedLanes.isNotEmpty()) {
+                    item(key = "failed_sources") { FailedSourcesNote(failedLanes) }
                 }
                 item {
                     Spacer(modifier = Modifier.height(nuvioSafeBottomPadding(80.dp)))
@@ -1238,6 +1264,22 @@ private fun EmptyStateBlock(
             textAlign = TextAlign.Center,
         )
     }
+}
+
+/** B186: a source that failed or timed out is named, next to the results the other sources returned. */
+@Composable
+private fun FailedSourcesNote(
+    failedLanes: List<FailedLane>,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = stringResource(Res.string.streams_failed_sources_note, failedLanes.joinToString(", ") { it.name }),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

@@ -537,6 +537,10 @@ struct StreamPickerScreen: View {
                 // StreamsEmptyStateReason, decided in commonMain), so never claim "No sources found".
                 NuvioStateMessage(title: "Your playlist is still loading",
                                   message: "It hasn't finished loading its catalog on this Apple TV yet, so this title couldn't be checked. Try again in a minute.")
+            } else if streams?.emptyStateReason == .streamFetchFailed {
+                // Every source that could serve this title failed to load: a failure is never "no sources" (B162/B186).
+                NuvioStateMessage(title: "Couldn't load sources",
+                                  message: "Your sources didn't answer. Go back and open this title again in a moment.")
             } else {
                 NuvioStateMessage(title: "No sources found", message: StoreCopy.noSourcesMessage)
             }

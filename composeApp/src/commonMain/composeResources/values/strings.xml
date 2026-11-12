@@ -1694,6 +1694,7 @@
     <string name="resume_prompt_action">Resume</string>
     <string name="streams_active_scrapers">Active scrapers</string>
     <string name="streams_checking_more_addons">Checking more addons…</string>
+    <string name="streams_failed_sources_note">Could not load: %1$s</string>
     <string name="streams_copy_link">Copy stream link</string>
     <string name="streams_download_file">Download file</string>
     <string name="streams_open_external_player">Open in external player</string>

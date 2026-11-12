@@ -17,6 +17,7 @@ import com.nuvio.app.features.plugins.pluginContentId
 import com.nuvio.app.features.plugins.PluginsUiState
 import com.nuvio.app.features.servers.ServerStreams
 import com.nuvio.app.features.servers.loadBounded
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,6 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
@@ -41,6 +43,14 @@ object StreamsRepository {
 
     private var activeJob: Job? = null
     private var activeRequestKey: String? = null
+
+    /**
+     * Watches add-ons whose manifests were still loading when this list opened (B162). While it runs the
+     * list is "still loading", never "no add-on / no streams": [addonManifestsPending] keeps `isAnyLoading` up.
+     */
+    private var manifestWaitJob: Job? = null
+    @Volatile
+    private var addonManifestsPending = false
 
     fun requestToken(
         type: String,
@@ -77,7 +87,16 @@ object StreamsRepository {
         )
     }
 
-    private fun load(type: String, videoId: String, parentMetaId: String?, season: Int?, episode: Int?, manualSelection: Boolean, forceRefresh: Boolean) {
+    private fun load(
+        type: String,
+        videoId: String,
+        parentMetaId: String?,
+        season: Int?,
+        episode: Int?,
+        manualSelection: Boolean,
+        forceRefresh: Boolean,
+        manifestWaitElapsed: Boolean = false,
+    ) {
         val streamProvider = com.nuvio.app.core.contracts.StreamSourceAccess.current()
         val pluginUiState = if (AppFeaturePolicy.pluginsEnabled) {
             PluginRepository.initialize()
@@ -105,6 +124,8 @@ object StreamsRepository {
 
         activeRequestKey = requestKey
         activeJob?.cancel()
+        manifestWaitJob?.cancel()
+        addonManifestsPending = false
         _uiState.value = StreamsUiState(requestToken = requestToken)
 
         PlayerSettingsRepository.ensureLoaded()
@@ -283,13 +304,49 @@ object StreamsRepository {
 
         log.d { "Found ${streamAddons.size} addons for stream type=$type id=$videoId" }
 
-        if (streamAddons.isEmpty() && pluginProviderGroups.isEmpty() && xtreamSourceGroups.isEmpty() && serverSources.isEmpty()) {
-            _uiState.value = StreamsUiState(
-                requestToken = requestToken,
-                isAnyLoading = false,
-                emptyStateReason = StreamsEmptyStateReason.NoCompatibleAddons,
-                autoPlayDecided = true,
+        // B162: an add-on contributes a lane only once its manifest has loaded. One that is still loading is
+        // not "missing", and one that failed to load is not "empty": decide through the policy.
+        val addonCounts = StreamSourcePresentationPolicy.counts(installedAddons)
+        val waitForManifests = addonCounts.pending > 0 && !manifestWaitElapsed
+        val reloadAfterManifests = {
+            load(
+                type = type,
+                videoId = videoId,
+                parentMetaId = parentMetaId,
+                season = season,
+                episode = episode,
+                manualSelection = manualSelection,
+                forceRefresh = false,
+                manifestWaitElapsed = true,
             )
+        }
+
+        if (streamAddons.isEmpty() && pluginProviderGroups.isEmpty() && xtreamSourceGroups.isEmpty() && serverSources.isEmpty()) {
+            when (StreamSourcePresentationPolicy.noLaneOutcome(addonCounts, manifestWaitElapsed)) {
+                NoLaneOutcome.WaitForAddons -> {
+                    addonManifestsPending = true
+                    _uiState.value = StreamsUiState(
+                        requestToken = requestToken,
+                        isAnyLoading = true,
+                        autoPlayDecided = true,
+                    )
+                    watchPendingManifests(reloadAfterManifests)
+                }
+
+                NoLaneOutcome.AddonsFailed -> _uiState.value = StreamsUiState(
+                    requestToken = requestToken,
+                    isAnyLoading = false,
+                    emptyStateReason = StreamsEmptyStateReason.StreamFetchFailed,
+                    autoPlayDecided = true,
+                )
+
+                NoLaneOutcome.NoCompatibleAddons -> _uiState.value = StreamsUiState(
+                    requestToken = requestToken,
+                    isAnyLoading = false,
+                    emptyStateReason = StreamsEmptyStateReason.NoCompatibleAddons,
+                    autoPlayDecided = true,
+                )
+            }
             return
         }
 
@@ -317,7 +374,8 @@ object StreamsRepository {
                 isLoading = true,
             )
         } + serverSources.map { it.loadingGroup() }, installedAddonOrder, preferredGroupIds)
-        val isInitiallyLoading = initialGroups.any { it.isLoading }
+        addonManifestsPending = waitForManifests
+        val isInitiallyLoading = initialGroups.any { it.isLoading } || addonManifestsPending
         _uiState.value = StreamsUiState(
             requestToken = requestToken,
             groups = initialGroups,
@@ -329,7 +387,35 @@ object StreamsRepository {
             showDirectAutoPlayOverlay = isDirectAutoPlayFlow,
         )
 
+        if (waitForManifests) watchPendingManifests(reloadAfterManifests)
+
+        // Add-ons that never became a lane (manifest failed, or still pending after the wait) are named as
+        // failed instead of silently missing from the list (B186).
+        val unavailableAddons = installedAddons.filter { addon ->
+            when (StreamSourcePresentationPolicy.readiness(addon)) {
+                AddonLaneReadiness.Failed -> true
+                AddonLaneReadiness.Pending -> manifestWaitElapsed
+                else -> false
+            }
+        }
+
         activeJob = scope.launch {
+            if (unavailableAddons.isNotEmpty()) {
+                val unavailableMessage = SourceLaneTimeoutException(StreamSourcePresentationPolicy.MANIFEST_WAIT_MS).laneFailureMessage()
+                _uiState.update { current ->
+                    current.copy(
+                        groups = current.groups + unavailableAddons.map { addon ->
+                            AddonStreamGroup(
+                                addonName = addon.displayTitle,
+                                addonId = "addon-unavailable:${addon.manifestUrl}",
+                                streams = emptyList(),
+                                isLoading = false,
+                                error = addon.errorMessage?.takeIf { it.isNotBlank() } ?: unavailableMessage,
+                            )
+                        },
+                    )
+                }
+            }
             val completions = Channel<StreamLoadCompletion>(capacity = Channel.BUFFERED)
             val pluginRemainingByAddonId = pluginProviderGroups
                 .associate { it.addonId to it.scrapers.size }
@@ -465,7 +551,7 @@ object StreamsRepository {
                         installedOrder = installedAddonOrder,
                         preferredGroupIds = preferredGroupIds,
                     )
-                    val anyLoading = updated.any { it.isLoading }
+                    val anyLoading = updated.any { it.isLoading } || addonManifestsPending
                     current.copy(
                         groups = updated,
                         isAnyLoading = anyLoading,
@@ -547,6 +633,27 @@ object StreamsRepository {
                 }
             } else {
                 null
+            }
+
+            // The list's own backstop (B186): a lane that ignores every lane-level bound (a plugin runtime that
+            // never returns) must not hold the screen on "loading" forever. The screen stops waiting, names the
+            // lane as timed out and shows what it has; a late completion can still land afterwards.
+            val backstopJob = launch {
+                delay(StreamSourcePresentationPolicy.LIST_BACKSTOP_MS)
+                val stalledMessage = SourceLaneTimeoutException(StreamSourcePresentationPolicy.LIST_BACKSTOP_MS).laneFailureMessage()
+                    ?: "This source did not answer in time."
+                log.w { "Stream list backstop reached for type=$type id=$videoId; ending stalled lanes" }
+                _uiState.update { current ->
+                    val ended = StreamSourcePresentationPolicy.endStalledLanes(current.groups, stalledMessage)
+                    current.copy(
+                        groups = ended,
+                        isAnyLoading = addonManifestsPending,
+                        emptyStateReason = ended.toEmptyStateReason(addonManifestsPending),
+                    )
+                }
+                if (isDirectAutoPlayFlow && !autoSelectTriggered) {
+                    settleAutoPlay(evaluateAutoPlay())
+                }
             }
 
             // B63: the IPTV match lanes wait past their budget only while these addon/plugin loads
@@ -684,7 +791,7 @@ object StreamsRepository {
                                 installedOrder = installedAddonOrder,
                                 preferredGroupIds = preferredGroupIds,
                             )
-                            val anyLoading = updated.any { it.isLoading }
+                            val anyLoading = updated.any { it.isLoading } || addonManifestsPending
                             current.copy(
                                 groups = updated,
                                 isAnyLoading = anyLoading,
@@ -729,6 +836,32 @@ object StreamsRepository {
                 settleAutoPlay(evaluateAutoPlay())
             }
             timeoutJob?.cancel()
+            backstopJob.cancel()
+        }
+    }
+
+    /**
+     * Waits (bounded) for add-ons whose manifests were still loading when the list opened. A list that already
+     * has streams just stops claiming to load; one that has none runs again with the add-ons that arrived.
+     */
+    private fun watchPendingManifests(reload: () -> Unit) {
+        manifestWaitJob?.cancel()
+        manifestWaitJob = scope.launch {
+            StreamSourcePresentationPolicy.awaitAddonsSettled(AddonRepository.uiState.map { it.addons })
+            ensureActive()
+            addonManifestsPending = false
+            if (_uiState.value.hasAnyStreams) {
+                _uiState.update { current ->
+                    val anyLoading = current.groups.any { it.isLoading }
+                    current.copy(
+                        isAnyLoading = anyLoading,
+                        emptyStateReason = current.groups.toEmptyStateReason(anyLoading),
+                    )
+                }
+            } else {
+                activeRequestKey = null
+                reload()
+            }
         }
     }
 
@@ -773,6 +906,9 @@ object StreamsRepository {
         PluginRepository.setLocalPluginSearchPaused(true)
         activeJob?.cancel()
         activeJob = null
+        manifestWaitJob?.cancel()
+        manifestWaitJob = null
+        addonManifestsPending = false
         _uiState.update { current ->
             if (!current.isAnyLoading && current.groups.none { it.isLoading }) {
                 current
@@ -797,6 +933,9 @@ object StreamsRepository {
         PluginRepository.setLocalPluginSearchPaused(true)
         activeJob?.cancel()
         activeJob = null
+        manifestWaitJob?.cancel()
+        manifestWaitJob = null
+        addonManifestsPending = false
         activeRequestKey = null
         _uiState.value = StreamsUiState()
     }
