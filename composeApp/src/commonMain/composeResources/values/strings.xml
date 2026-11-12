@@ -2623,6 +2623,12 @@
     <string name="compose_livetv_catchup_start_over">Start over</string>
     <string name="compose_livetv_catchup_watch">Watch</string>
     <string name="compose_livetv_catchup_watch_live">Watch live</string>
+    <string name="compose_livetv_error_reason_refused">Your provider refused this stream. The subscription may have expired, or this device is blocked.</string>
+    <string name="compose_livetv_error_reason_connections">Your provider allows fewer connections than you are using. Close another device and retry.</string>
+    <string name="compose_livetv_error_reason_provider_down">The provider's server had a problem. Try again in a moment.</string>
+    <string name="compose_livetv_error_reason_link">The provider did not give a stream link for this channel.</string>
+    <string name="compose_livetv_error_reason_network">Couldn't reach the provider. Check your connection.</string>
+    <string name="compose_livetv_error_reason_unsupported">This device can't read this stream.</string>
     <string name="compose_livetv_error_tap_retry">Can't play this channel · Tap to retry</string>
     <string name="compose_livetv_exit_fullscreen">Exit fullscreen</string>
     <string name="compose_livetv_previous_channel">Previous channel</string>
