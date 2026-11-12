@@ -34,6 +34,12 @@ internal object LiveTvFailureReasonPolicy {
         /** This device could not reach the provider: DNS, timeout, reset, offline. */
         NETWORK("network"),
 
+        /**
+         * UX343: the device itself has no connectivity (the shared [com.nuvio.app.core.network.NetworkStatusRepository]
+         * reads NoInternet), so no provider advice applies. The pill says "No network connection" and nothing more.
+         */
+        OFFLINE("offline"),
+
         /** The stream arrived but this device cannot read it: unknown container or codec. */
         UNSUPPORTED("unsupported"),
 
@@ -48,12 +54,26 @@ internal object LiveTvFailureReasonPolicy {
         UNKNOWN("unknown"),
     }
 
-    fun classify(failureCode: String?, message: String?): Reason {
-        if (failureCode == "resolve_failed") return Reason.LINK_UNAVAILABLE
-        val named = classifyMessage(message)
+    /**
+     * [offline] is the device's own connectivity (fed by the platform-neutral network status, never an OS API
+     * emulated here). It explains every failure that does not prove the provider answered; an HTTP status, a
+     * refusal text or an unreadable stream means the device did reach the provider, so a stale offline flag
+     * never hides those.
+     */
+    fun classify(failureCode: String?, message: String?, offline: Boolean = false): Reason {
+        val named = if (failureCode == "resolve_failed") Reason.LINK_UNAVAILABLE else classifyMessage(message)
+        if (offline && named !in PROVED_REACHABLE) return Reason.OFFLINE
+        if (failureCode == "resolve_failed") return named
         // Only a first open that never started may say so; a channel that played and then dropped did start.
         return if (named == Reason.UNKNOWN && failureCode == "startup_failed") Reason.NOT_STARTED else named
     }
+
+    private val PROVED_REACHABLE = setOf(
+        Reason.PROVIDER_REFUSED,
+        Reason.TOO_MANY_CONNECTIONS,
+        Reason.PROVIDER_DOWN,
+        Reason.UNSUPPORTED,
+    )
 
     private fun classifyMessage(message: String?): Reason {
         val m = message?.lowercase().orEmpty()
@@ -77,8 +97,21 @@ internal object LiveTvFailureReasonPolicy {
         if (failureCode == null || reason == Reason.UNKNOWN || reason == Reason.NOT_STARTED) failureCode
         else "${failureCode}_${reason.code}"
 
-    /** Whether the LIVE badge still means something: it must not sit on a channel that failed. */
-    fun showsLiveBadge(failed: Boolean): Boolean = !failed
+    /** The chip on the docked player's top row. */
+    enum class Badge { LIVE, CONNECTING, NONE }
+
+    /**
+     * UX344: LIVE means the channel is on air for this viewer. It must not sit on a failed channel, nor on one that
+     * has not started: while loading, or while a retry has not resolved its source yet (the old snapshot is idle
+     * then, which used to flash LIVE before the next failure). A viewer pause or a time-shifted channel is
+     * still live.
+     */
+    fun badge(failed: Boolean, sourceReady: Boolean, loading: Boolean, playing: Boolean, timeShifted: Boolean): Badge = when {
+        failed -> Badge.NONE
+        timeShifted -> Badge.LIVE
+        !sourceReady || (loading && !playing) -> Badge.CONNECTING
+        else -> Badge.LIVE
+    }
 
     // Anchored on the word that introduces a status so a stray number (a port, a channel id) never counts.
     private val STATUS = Regex("""(?:response code|http(?: error| status| status code)?|status(?: code)?|returned)\s*[:=]?\s*(\d{3})\b""")

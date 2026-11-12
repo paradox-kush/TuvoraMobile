@@ -68,6 +68,8 @@ import coil3.compose.AsyncImage
 import com.nuvio.app.core.ui.NuvioModalBottomSheet
 import com.nuvio.app.core.ui.NuvioSheetActionButton
 import com.nuvio.app.core.ui.NuvioTokens
+import com.nuvio.app.core.network.NetworkCondition
+import com.nuvio.app.core.network.NetworkStatusRepository
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.core.ui.nuvioSafeBottomPadding
@@ -164,6 +166,8 @@ import nuvio.composeapp.generated.resources.compose_livetv_error_reason_unsuppor
 import nuvio.composeapp.generated.resources.compose_livetv_exit_fullscreen
 import nuvio.composeapp.generated.resources.compose_livetv_fullscreen
 import nuvio.composeapp.generated.resources.compose_livetv_live_badge
+import nuvio.composeapp.generated.resources.compose_livetv_connecting_badge
+import nuvio.composeapp.generated.resources.compose_livetv_error_reason_offline
 import nuvio.composeapp.generated.resources.compose_livetv_no_programme_info
 import nuvio.composeapp.generated.resources.compose_livetv_play_pause
 import org.jetbrains.compose.resources.stringResource
@@ -943,8 +947,16 @@ fun LiveTvScreen(
             playbackError != null -> "playback_error"
             else -> null
         }
-        val failureReason = if (hasError && !isCatchUp) LiveTvFailureReasonPolicy.classify(baseFailureCode, playbackError ?: startupFailureMessage)
-        else LiveTvFailureReasonPolicy.Reason.UNKNOWN
+        // UX343: the device's own connectivity (the same probe Home and Details use); re-asked once per failure,
+        // never on a timer, so a failed channel with no network says so instead of blaming the playlist.
+        val networkStatus by NetworkStatusRepository.uiState.collectAsState()
+        LaunchedEffect(hasError) { if (hasError) NetworkStatusRepository.requestRefresh(force = true) }
+        val failureReason = if (hasError && !isCatchUp) {
+            LiveTvFailureReasonPolicy.classify(
+                baseFailureCode, playbackError ?: startupFailureMessage,
+                offline = networkStatus.condition == NetworkCondition.NoInternet,
+            )
+        } else LiveTvFailureReasonPolicy.Reason.UNKNOWN
 
         fun setFullscreen(enabled: Boolean) {
             if (LiveTvFullscreenFollowsWindowAspect) manualOrientation = enabled
@@ -1281,7 +1293,13 @@ fun LiveTvScreen(
                         danger = colors.danger,
                         accent = colors.accent,
                         isCatchUp = isCatchUp,
-                        showLiveBadge = LiveTvFailureReasonPolicy.showsLiveBadge(failed = hasError),
+                        badge = LiveTvFailureReasonPolicy.badge(
+                            failed = hasError,
+                            sourceReady = source != null,
+                            loading = snapshot.isLoading,
+                            playing = snapshot.isPlaying,
+                            timeShifted = shiftedPause != null,
+                        ),
                         behindLiveMs = shiftedPause?.behindLiveMs,
                         onGoLive = pause::goLive,
                         onPlayPause = onPlayPause,
@@ -1497,7 +1515,7 @@ private fun DockedPlayerOverlay(
     danger: Color,
     accent: Color,
     isCatchUp: Boolean,
-    showLiveBadge: Boolean,
+    badge: LiveTvFailureReasonPolicy.Badge,
     behindLiveMs: Long?,
     onGoLive: () -> Unit,
     onPlayPause: () -> Unit,
@@ -1513,7 +1531,11 @@ private fun DockedPlayerOverlay(
         ) {
             OverlayIconButton(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(Res.string.action_back), onBack)
             Spacer(Modifier.width(NuvioTokens.Space.s8))
-            if (isCatchUp) CatchUpBadge(accent) else if (showLiveBadge) LiveBadge(danger, behindLiveMs, onGoLive)
+            if (isCatchUp) CatchUpBadge(accent) else when (badge) {
+                LiveTvFailureReasonPolicy.Badge.LIVE -> LiveBadge(danger, behindLiveMs, onGoLive)
+                LiveTvFailureReasonPolicy.Badge.CONNECTING -> ConnectingBadge()
+                LiveTvFailureReasonPolicy.Badge.NONE -> Unit
+            }
             Spacer(Modifier.weight(1f))
             OverlayIconButton(Icons.Filled.Fullscreen, stringResource(Res.string.compose_livetv_fullscreen), onEnterFullscreen)
         }
@@ -1656,6 +1678,21 @@ internal fun LiveBadge(danger: Color, behindLiveMs: Long? = null, onGoLive: (() 
     }
 }
 
+/** UX344: the neutral stand-in for LIVE until the channel actually plays. */
+@Composable
+private fun ConnectingBadge() {
+    Text(
+        text = stringResource(Res.string.compose_livetv_connecting_badge),
+        style = MaterialTheme.typography.labelSmall,
+        color = Color.White,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(NuvioTokens.Radius.xs))
+            .background(Color.White.copy(alpha = 0.22f))
+            .padding(horizontal = NuvioTokens.Space.s8, vertical = NuvioTokens.Space.s2),
+    )
+}
+
 @Composable
 private fun liveFailureReasonText(reason: LiveTvFailureReasonPolicy.Reason): String? = when (reason) {
     LiveTvFailureReasonPolicy.Reason.PROVIDER_REFUSED -> stringResource(Res.string.compose_livetv_error_reason_refused)
@@ -1663,6 +1700,7 @@ private fun liveFailureReasonText(reason: LiveTvFailureReasonPolicy.Reason): Str
     LiveTvFailureReasonPolicy.Reason.PROVIDER_DOWN -> stringResource(Res.string.compose_livetv_error_reason_provider_down)
     LiveTvFailureReasonPolicy.Reason.LINK_UNAVAILABLE -> stringResource(Res.string.compose_livetv_error_reason_link)
     LiveTvFailureReasonPolicy.Reason.NETWORK -> stringResource(Res.string.compose_livetv_error_reason_network)
+    LiveTvFailureReasonPolicy.Reason.OFFLINE -> stringResource(Res.string.compose_livetv_error_reason_offline)
     LiveTvFailureReasonPolicy.Reason.UNSUPPORTED -> stringResource(Res.string.compose_livetv_error_reason_unsupported)
     LiveTvFailureReasonPolicy.Reason.NOT_STARTED -> stringResource(Res.string.compose_livetv_error_reason_not_started)
     LiveTvFailureReasonPolicy.Reason.UNKNOWN -> null

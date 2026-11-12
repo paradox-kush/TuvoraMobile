@@ -1,10 +1,10 @@
 package com.nuvio.app.features.livetv
 
+import com.nuvio.app.features.livetv.LiveTvFailureReasonPolicy.Badge
 import com.nuvio.app.features.livetv.LiveTvFailureReasonPolicy.Reason
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 
 class LiveTvFailureReasonPolicyTest {
     private fun reason(message: String?, code: String? = "playback_error") = LiveTvFailureReasonPolicy.classify(code, message)
@@ -89,8 +89,66 @@ class LiveTvFailureReasonPolicyTest {
         )
     }
 
-    @Test fun `the live badge is hidden while the channel is failed`() {
-        assertFalse(LiveTvFailureReasonPolicy.showsLiveBadge(failed = true))
-        assertTrue(LiveTvFailureReasonPolicy.showsLiveBadge(failed = false))
+    private fun offlineReason(message: String?, code: String? = "playback_error") =
+        LiveTvFailureReasonPolicy.classify(code, message, offline = true)
+
+    // UX343: with no connectivity the stream cannot start, and the playlist advice sent people to fix the wrong thing.
+    @Test fun `a failure with no connectivity reads as offline whatever the engine said`() {
+        assertEquals(Reason.OFFLINE, offlineReason(null, "startup_failed"))
+        assertEquals(Reason.OFFLINE, offlineReason("[mpv] loading failed", "startup_failed"))
+        assertEquals(Reason.OFFLINE, offlineReason("Source error (network error)"))
+        assertEquals(Reason.OFFLINE, offlineReason(null, "resolve_failed"))
+        assertEquals(Reason.OFFLINE, offlineReason(null, "reconnect_gave_up"))
+        assertEquals(Reason.OFFLINE, offlineReason(null, null))
     }
+
+    @Test fun `an answer from the provider proves the device was online`() {
+        assertEquals(Reason.PROVIDER_REFUSED, offlineReason("Source error (HTTP 403)"), "a stale offline flag must not hide a refusal")
+        assertEquals(Reason.TOO_MANY_CONNECTIONS, offlineReason("Source error (HTTP 458)"))
+        assertEquals(Reason.PROVIDER_DOWN, offlineReason("Source error (HTTP 503)"))
+        assertEquals(Reason.UNSUPPORTED, offlineReason("Decoder init failed"))
+    }
+
+    @Test fun `online classification is unchanged`() {
+        assertEquals(Reason.NOT_STARTED, LiveTvFailureReasonPolicy.classify("startup_failed", null, offline = false))
+        assertEquals(Reason.NOT_STARTED, reason(null, "startup_failed"))
+    }
+
+    @Test fun `offline telemetry code carries the offline reason`() {
+        assertEquals("startup_failed_offline", LiveTvFailureReasonPolicy.telemetryCode("startup_failed", Reason.OFFLINE))
+    }
+
+    @Test fun `a failed channel shows no badge`() {
+        assertEquals(Badge.NONE, badge(failed = true, loading = false, playing = false))
+        assertEquals(Badge.NONE, badge(failed = true, loading = true, playing = false))
+    }
+
+    // UX344: LIVE must not sit on a channel that has not started, nor on the retry that follows a failure.
+    @Test fun `a channel still loading shows connecting`() {
+        assertEquals(Badge.CONNECTING, badge(loading = true, playing = false))
+    }
+
+    @Test fun `a retry that has not resolved a source shows connecting even if the old snapshot is idle`() {
+        assertEquals(Badge.CONNECTING, badge(sourceReady = false, loading = false, playing = false))
+    }
+
+    @Test fun `a playing channel shows live`() {
+        assertEquals(Badge.LIVE, badge(loading = false, playing = true))
+    }
+
+    @Test fun `a viewer paused channel stays live`() {
+        assertEquals(Badge.LIVE, badge(loading = false, playing = false))
+    }
+
+    @Test fun `a time shifted channel stays live`() {
+        assertEquals(Badge.LIVE, badge(loading = true, playing = false, timeShifted = true))
+    }
+
+    private fun badge(
+        failed: Boolean = false,
+        sourceReady: Boolean = true,
+        loading: Boolean,
+        playing: Boolean,
+        timeShifted: Boolean = false,
+    ) = LiveTvFailureReasonPolicy.badge(failed, sourceReady, loading, playing, timeShifted)
 }

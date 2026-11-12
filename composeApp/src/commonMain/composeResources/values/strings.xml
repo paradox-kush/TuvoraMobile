@@ -2662,6 +2662,8 @@
     <string name="compose_livetv_guide_earlier">Earlier</string>
     <string name="compose_livetv_guide_later">Later</string>
     <string name="compose_livetv_live_badge">LIVE</string>
+    <string name="compose_livetv_connecting_badge">Connecting</string>
+    <string name="compose_livetv_error_reason_offline">No network connection</string>
     <string name="compose_livetv_pause_preparing">Starting pause buffer…</string>
     <string name="compose_livetv_pause_retry">Retry</string>
     <string name="compose_livetv_pause_go_live">Go live</string>
