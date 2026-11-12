@@ -46,6 +46,8 @@ object M3UParser {
      */
     class StreamingParser(private val onEntry: (Entry) -> Unit) {
         private var pendingExtInf: String? = null
+        /** `#EXTGRP:` folder for the NEXT entry only (VLC semantics); a `group-title` on the entry wins. */
+        private var pendingExtGrp: String? = null
         private var catchUpHeader: Map<String, String> = emptyMap()
 
         /**
@@ -66,12 +68,16 @@ object M3UParser {
                     captureHeaderCatchUp(line)
                 }
                 line.startsWith("#EXTINF", ignoreCase = true) -> pendingExtInf = line
-                line.startsWith("#") -> Unit // #EXTGRP, #KODIPROP, etc. — ignored
+                line.startsWith("#EXTGRP:", ignoreCase = true) ->
+                    // B135: folder-style exports name the group here, not in group-title.
+                    pendingExtGrp = line.substring("#EXTGRP:".length).trim().ifBlank { null }
+                line.startsWith("#") -> Unit // #KODIPROP, #EXTVLCOPT, etc. — ignored
                 else -> {
                     val ext = pendingExtInf
                     if (ext != null) {
-                        parseEntry(ext, line, catchUpHeader)?.let(onEntry)
+                        parseEntry(ext, line, catchUpHeader, pendingExtGrp)?.let(onEntry)
                         pendingExtInf = null
+                        pendingExtGrp = null
                     }
                     // A bare URL with no preceding #EXTINF is skipped (can't classify/name it well).
                 }
@@ -120,13 +126,18 @@ object M3UParser {
     }
 
     /** Builds an [Entry] from one `#EXTINF` header line + its stream URL. Public for unit tests. */
-    fun parseEntry(extInf: String, url: String, catchUpHeader: Map<String, String> = emptyMap()): Entry? {
+    fun parseEntry(
+        extInf: String,
+        url: String,
+        catchUpHeader: Map<String, String> = emptyMap(),
+        extGrp: String? = null,
+    ): Entry? {
         val cleanUrl = url.trim()
         if (cleanUrl.isBlank() || cleanUrl.startsWith("#")) return null
         val attrs = parseAttributes(extInf)
         val displayName = extInf.substringAfter(',', "").trim()
             .ifBlank { attrs["tvg-name"] ?: cleanUrl.substringAfterLast('/') }
-        val group = attrs["group-title"]?.ifBlank { null }
+        val group = attrs["group-title"]?.ifBlank { null } ?: extGrp
         val ext = extensionOf(cleanUrl)
         val kind = classify(cleanUrl, ext, group)
         return if (kind == M3UKind.SERIES) {
