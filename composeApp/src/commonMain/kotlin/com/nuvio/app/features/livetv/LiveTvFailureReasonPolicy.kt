@@ -37,12 +37,25 @@ internal object LiveTvFailureReasonPolicy {
         /** The stream arrived but this device cannot read it: unknown container or codec. */
         UNSUPPORTED("unsupported"),
 
+        /**
+         * The channel's first open failed and nothing names the cause. libmpv (the phone default on Android and
+         * the iOS engine) ends a failed open with END_FILE "loading failed" and no status, so this is the common
+         * case there; the pill then says only what is known: the stream did not start.
+         */
+        NOT_STARTED("not_started"),
+
         /** Nothing in the failure says why: keep the generic line. */
         UNKNOWN("unknown"),
     }
 
     fun classify(failureCode: String?, message: String?): Reason {
         if (failureCode == "resolve_failed") return Reason.LINK_UNAVAILABLE
+        val named = classifyMessage(message)
+        // Only a first open that never started may say so; a channel that played and then dropped did start.
+        return if (named == Reason.UNKNOWN && failureCode == "startup_failed") Reason.NOT_STARTED else named
+    }
+
+    private fun classifyMessage(message: String?): Reason {
         val m = message?.lowercase().orEmpty()
         if (m.isEmpty()) return Reason.UNKNOWN
 
@@ -58,9 +71,11 @@ internal object LiveTvFailureReasonPolicy {
         }
     }
 
-    /** The failure code with the reason appended (`playback_error_provider_refused`); unchanged when the reason is unknown. */
+    /** The failure code with the reason appended (`playback_error_provider_refused`); unchanged when the reason adds nothing. */
     fun telemetryCode(failureCode: String?, reason: Reason): String? =
-        if (failureCode == null || reason == Reason.UNKNOWN) failureCode else "${failureCode}_${reason.code}"
+        // NOT_STARTED only restates startup_failed, so it adds nothing to the code.
+        if (failureCode == null || reason == Reason.UNKNOWN || reason == Reason.NOT_STARTED) failureCode
+        else "${failureCode}_${reason.code}"
 
     /** Whether the LIVE badge still means something: it must not sit on a channel that failed. */
     fun showsLiveBadge(failed: Boolean): Boolean = !failed
