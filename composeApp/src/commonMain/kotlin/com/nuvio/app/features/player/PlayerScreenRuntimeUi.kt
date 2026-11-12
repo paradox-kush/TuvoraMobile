@@ -196,6 +196,18 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                 isLive = isLiveStream,
             ) == LiveLinkReconnectPolicy.Mode.SINGLE_USE
         }
+        // AutoSync reads the stream URL itself (Range requests): never for an own-source (IPTV/Stalker/
+        // Xtream), live or catch-up link (a catch-up replay stays streamType "live" here), which a side
+        // request can spend or drop.
+        val autoSyncMayProbeSource = remember(activeVideoId, activeProviderAddonId, activeStreamType, contentType, singleUseLink) {
+            com.nuvio.app.features.autosync.AutoSyncSourcePolicy.mayProbe(
+                activeVideoId = activeVideoId,
+                providerAddonId = activeProviderAddonId,
+                streamType = activeStreamType,
+                contentType = contentType,
+                singleUseLink = singleUseLink,
+            )
+        }
         val freezeReconnector = remember { LivePlaybackReconnector(freezeReporter) }
         // The ladder belongs to the channel: a zap or the viewer's Retry starts it over; the
         // pipeline's own reconnects and re-mints (a new URL every time) never do.
@@ -291,6 +303,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                     // A live Stalker create_link is spent after its first open: the engine must not
                     // re-open it after a drop; the credential refresh mints a fresh one.
                     singleUseLink = singleUseLink,
+                    autoSyncMayProbeSource = autoSyncMayProbeSource,
                     playbackSurface = LIVE_FREEZE_SURFACE_PLAYER,
                     modifier = videoModifier,
                     playWhenReady = shouldPlay,

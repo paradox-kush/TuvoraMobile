@@ -24,11 +24,12 @@ internal fun rememberLibmpvAutoSyncCoordinator(
     sourceHeaders: Map<String, String>,
     externalSubtitles: List<StreamSubtitle>,
     preferredSubtitleLanguage: String?,
+    mayProbeSource: Boolean,
 ): AutoSyncMpvCoordinator {
     val context = LocalContext.current
     val latestExternalSubtitles = rememberUpdatedState(externalSubtitles)
     val latestPreferredLanguage = rememberUpdatedState(preferredSubtitleLanguage)
-    val coordinator = remember(sourceUrl, sourceHeaders, scope) {
+    val coordinator = remember(sourceUrl, sourceHeaders, scope, mayProbeSource) {
         AutoSyncMpvCoordinator(
             scope = scope,
             sourceUrl = sourceUrl,
@@ -41,6 +42,7 @@ internal fun rememberLibmpvAutoSyncCoordinator(
             },
             getPreferredLanguage = { latestPreferredLanguage.value },
             platform = AndroidAutoSyncMpvPlatform(context.applicationContext),
+            mayProbeSource = mayProbeSource,
         )
     }
     DisposableEffect(coordinator) {

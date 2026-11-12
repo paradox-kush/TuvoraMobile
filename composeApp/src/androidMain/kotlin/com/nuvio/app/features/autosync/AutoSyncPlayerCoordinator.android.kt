@@ -39,6 +39,8 @@ internal class AutoSyncPlayerCoordinator(
     private val getPreferredLanguage: () -> String?,
     private val onMimeTypeSelected: (String) -> Unit,
     private val onSubtitleDelayChanged: (Int) -> Unit,
+    /** [AutoSyncSourcePolicy.mayProbe] for this source; false = never touch the stream URL. */
+    private val mayProbeSource: Boolean,
 ) {
     private var job: Job? = null
     private var selectedBodyJob: Job? = null
@@ -100,6 +102,11 @@ internal class AutoSyncPlayerCoordinator(
         cancel()
         forgetLibassCopies()
         val token = operationToken
+        // An own-source / live / catch-up link must not be range-probed: attach the original subtitle.
+        if (!mayProbeSource) {
+            fallbackAttach(url)
+            return
+        }
         AutoSyncPreferencesRepository.ensureLoaded()
         if (decideAutoSyncStart(AutoSyncPreferencesRepository.preferredSubtitleAutoSyncOnStart.value) ==
             AutoSyncStartAction.ATTACH_ORIGINAL ||

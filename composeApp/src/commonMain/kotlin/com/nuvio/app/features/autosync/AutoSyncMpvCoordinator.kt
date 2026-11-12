@@ -41,6 +41,8 @@ internal class AutoSyncMpvCoordinator(
     private val getSubtitleHeaders: (String) -> Map<String, String>,
     private val getPreferredLanguage: () -> String?,
     private val platform: AutoSyncMpvPlatform,
+    /** [AutoSyncSourcePolicy.mayProbe] for this source; false = never touch the stream URL. */
+    private val mayProbeSource: Boolean,
 ) {
     private var job: Job? = null
     private var operationToken = 0L
@@ -92,6 +94,8 @@ internal class AutoSyncMpvCoordinator(
         cancel()
         val token = operationToken
         base.setSubtitleUri(url)
+        // An own-source / live / catch-up link must not be range-probed: keep the original subtitle.
+        if (!mayProbeSource) return
         AutoSyncPreferencesRepository.ensureLoaded()
         if (decideAutoSyncStart(AutoSyncPreferencesRepository.preferredSubtitleAutoSyncOnStart.value) ==
             AutoSyncStartAction.ATTACH_ORIGINAL ||

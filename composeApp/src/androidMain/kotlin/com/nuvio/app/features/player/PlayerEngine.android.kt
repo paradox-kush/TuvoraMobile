@@ -150,6 +150,7 @@ actual fun PlatformPlayerSurface(
     streamType: String?,
     isCatchUpPlayback: Boolean,
     singleUseLink: Boolean,
+    autoSyncMayProbeSource: Boolean,
     playbackSurface: String?,
     useYoutubeChunkedPlayback: Boolean,
     modifier: Modifier,
@@ -185,6 +186,7 @@ actual fun PlatformPlayerSurface(
         streamType = streamType,
         isCatchUpPlayback = isCatchUpPlayback,
         singleUseLink = singleUseLink,
+        autoSyncMayProbeSource = autoSyncMayProbeSource,
         playbackSurface = playbackSurface,
         useYoutubeChunkedPlayback = useYoutubeChunkedPlayback,
         modifier = modifier,
@@ -214,6 +216,7 @@ private fun PlatformPlayerSurfaceInner(
     streamType: String?,
     isCatchUpPlayback: Boolean,
     singleUseLink: Boolean,
+    autoSyncMayProbeSource: Boolean,
     playbackSurface: String?,
     useYoutubeChunkedPlayback: Boolean,
     modifier: Modifier,
@@ -289,6 +292,7 @@ private fun PlatformPlayerSurfaceInner(
     when (activeEngine) {
         ResolvedAndroidPlaybackEngine.ExoPlayer -> ExoPlayerSurface(
             sourceUrl = sourceUrl,
+            autoSyncMayProbeSource = autoSyncMayProbeSource,
             sourceAudioUrl = sourceAudioUrl,
             sourceHeaders = sourceHeaders,
             sourceResponseHeaders = sourceResponseHeaders,
@@ -335,6 +339,7 @@ private fun PlatformPlayerSurfaceInner(
         ResolvedAndroidPlaybackEngine.Libmpv -> {
             LibmpvPlayerSurface(
                 sourceUrl = sourceUrl,
+                autoSyncMayProbeSource = autoSyncMayProbeSource,
                 sourceAudioUrl = sourceAudioUrl,
                 sourceHeaders = sourceHeaders,
                 externalSubtitles = externalSubtitles,
@@ -389,6 +394,8 @@ private fun AndroidPlaybackEngine.initialAndroidEngine(): ResolvedAndroidPlaybac
 @Composable
 private fun ExoPlayerSurface(
     sourceUrl: String,
+    /** [com.nuvio.app.features.autosync.AutoSyncSourcePolicy.mayProbe]: false = AutoSync never reads [sourceUrl]. */
+    autoSyncMayProbeSource: Boolean,
     sourceAudioUrl: String?,
     sourceHeaders: Map<String, String>,
     sourceResponseHeaders: Map<String, String>,
@@ -917,6 +924,7 @@ private fun ExoPlayerSurface(
         preferredSubtitleLanguage = playerSettings.preferredSubtitleLanguage,
         onMimeTypeSelected = { selectedExternalSubtitleMimeType = it },
         onSubtitleDelayChanged = { subtitleDelayMs = it },
+        mayProbeSource = autoSyncMayProbeSource,
     )
 
     fun syncPlayerViewKeepScreenOn() {
@@ -1616,6 +1624,8 @@ private fun ExoPlayerSurface(
 @Composable
 private fun LibmpvPlayerSurface(
     sourceUrl: String,
+    /** [com.nuvio.app.features.autosync.AutoSyncSourcePolicy.mayProbe]: false = AutoSync never reads [sourceUrl]. */
+    autoSyncMayProbeSource: Boolean,
     sourceAudioUrl: String?,
     sourceHeaders: Map<String, String>,
     externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
@@ -1659,6 +1669,7 @@ private fun LibmpvPlayerSurface(
         sourceHeaders = sanitizedSourceHeaders,
         externalSubtitles = externalSubtitles,
         preferredSubtitleLanguage = preferredSubtitleLanguage,
+        mayProbeSource = autoSyncMayProbeSource,
     )
     var playerViewRef by remember { mutableStateOf<NuvioLibmpvView?>(null) }
     val nowPlayingController = remember(context, playerViewRef) {

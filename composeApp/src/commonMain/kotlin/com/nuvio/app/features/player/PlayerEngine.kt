@@ -153,6 +153,13 @@ expect fun PlatformPlayerSurface(
      */
     singleUseLink: Boolean = false,
     /**
+     * Subtitle AutoSync may read this source's URL itself (HTTP Range requests for the container's
+     * subtitle index): [com.nuvio.app.features.autosync.AutoSyncSourcePolicy.mayProbe] for the playing
+     * item. False (the default) attaches add-on subtitles unchanged and never touches the URL, so an
+     * own-source, live or catch-up link is never spent by a side request.
+     */
+    autoSyncMayProbeSource: Boolean = false,
+    /**
      * Which screen is hosting this surface — one of [LIVE_FREEZE_SURFACE_DOCKED] /
      * [LIVE_FREEZE_SURFACE_PLAYER], the same vocabulary freeze reporting already uses.
      *

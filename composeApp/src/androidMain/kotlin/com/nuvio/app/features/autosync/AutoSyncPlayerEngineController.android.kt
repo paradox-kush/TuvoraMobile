@@ -28,12 +28,13 @@ internal fun rememberAutoSyncCoordinator(
     preferredSubtitleLanguage: String?,
     onMimeTypeSelected: (String) -> Unit,
     onSubtitleDelayChanged: (Int) -> Unit,
+    mayProbeSource: Boolean,
 ): AutoSyncPlayerCoordinator {
     val context = LocalContext.current
     val latestExternalSubtitles = rememberUpdatedState(externalSubtitles)
     val latestUseLibass = rememberUpdatedState(useLibass)
     val latestPreferredLanguage = rememberUpdatedState(preferredSubtitleLanguage)
-    val coordinator = remember(playerSourceKey, player, sidecar, scope) {
+    val coordinator = remember(playerSourceKey, player, sidecar, scope, mayProbeSource) {
         AutoSyncPlayerCoordinator(
             context = context,
             scope = scope,
@@ -51,6 +52,7 @@ internal fun rememberAutoSyncCoordinator(
             getPreferredLanguage = { latestPreferredLanguage.value },
             onMimeTypeSelected = onMimeTypeSelected,
             onSubtitleDelayChanged = onSubtitleDelayChanged,
+            mayProbeSource = mayProbeSource,
         )
     }
     DisposableEffect(coordinator) {

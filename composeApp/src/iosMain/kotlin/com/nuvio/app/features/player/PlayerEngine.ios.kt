@@ -57,6 +57,7 @@ actual fun PlatformPlayerSurface(
     streamType: String?,
     isCatchUpPlayback: Boolean,
     singleUseLink: Boolean,
+    autoSyncMayProbeSource: Boolean,
     // Accepted for signature parity; iOS renders through the Swift MPVPlayerBridge, which has no
     // Android SurfaceTexture stage and therefore none of the per-frame fence leak this drives.
     @Suppress("UNUSED_PARAMETER") playbackSurface: String?,
@@ -95,6 +96,7 @@ actual fun PlatformPlayerSurface(
         streamType = streamType,
         isCatchUpPlayback = isCatchUpPlayback,
         singleUseLink = singleUseLink,
+        autoSyncMayProbeSource = autoSyncMayProbeSource,
         playbackSurface = playbackSurface,
         useYoutubeChunkedPlayback = useYoutubeChunkedPlayback,
         modifier = modifier,
@@ -123,6 +125,7 @@ private fun PlatformPlayerSurfaceInner(
     streamType: String?,
     isCatchUpPlayback: Boolean,
     singleUseLink: Boolean,
+    autoSyncMayProbeSource: Boolean,
     // Accepted for signature parity; iOS renders through the Swift MPVPlayerBridge, which has no
     // Android SurfaceTexture stage and therefore none of the per-frame fence leak this drives.
     @Suppress("UNUSED_PARAMETER") playbackSurface: String?,
@@ -410,7 +413,7 @@ private fun PlatformPlayerSurfaceInner(
     val coroutineScope = rememberCoroutineScope()
     val latestExternalSubtitles = rememberUpdatedState(externalSubtitles)
     val sanitizedSourceHeaders = remember(sourceHeaders) { sanitizePlaybackHeaders(sourceHeaders) }
-    val autoSyncCoordinator = remember(sourceUrl, sanitizedSourceHeaders, coroutineScope) {
+    val autoSyncCoordinator = remember(sourceUrl, sanitizedSourceHeaders, coroutineScope, autoSyncMayProbeSource) {
         AutoSyncMpvCoordinator(
             scope = coroutineScope,
             sourceUrl = sourceUrl,
@@ -423,6 +426,8 @@ private fun PlatformPlayerSurfaceInner(
             },
             getPreferredLanguage = { latestPlayerSettings.value.preferredSubtitleLanguage },
             platform = IosAutoSyncMpvPlatform,
+            // AutoSyncSourcePolicy: an own-source / live / catch-up link is never range-probed.
+            mayProbeSource = autoSyncMayProbeSource,
         )
     }
     DisposableEffect(autoSyncCoordinator) {
