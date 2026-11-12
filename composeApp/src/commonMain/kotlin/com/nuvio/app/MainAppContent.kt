@@ -5,7 +5,7 @@ import com.nuvio.app.navigation.CalendarRoute
 import com.nuvio.app.navigation.SettingsPageRequest
 import com.nuvio.app.features.home.PosterShape
 import com.nuvio.app.features.player.ImmersivePlaybackGate
-import com.nuvio.app.features.player.LiveChannelLaunchPolicy
+import com.nuvio.app.features.player.LiveChannelLauncher
 import com.nuvio.app.features.player.LiveReplayLaunch
 import com.nuvio.app.navigation.wantsPlayerChrome
 import com.nuvio.app.navigation.analyticsNameOf
@@ -797,13 +797,14 @@ internal fun MainAppContent(
     val activePlaybackProfileId = profileState.activeProfile?.profileIndex ?: ProfileRepository.activeProfileId
 
     // Fork: shared launch for an IPTV LIVE channel (hub, Library, Search, Sports). Opens the docked
-    // Live TV screen, which resolves + switches channels itself; the URL is resolved here so the
-    // placeholder payload is well-formed and the screen's own resolve step is warm.
+    // Live TV screen, which resolves + switches channels itself — the payload's [sourceUrl] is never
+    // played. It is blank for a single-use (Stalker) channel: the screen's resolve is that tune's one
+    // create_link (B257, LiveChannelLaunchPolicy.Plan).
     fun launchLiveChannel(
         contentId: String,
         name: String,
         logo: String?,
-        resolvedUrl: String,
+        sourceUrl: String,
         replay: LiveReplayLaunch? = null,
     ) {
         // Live TV always needs the network. With no internet the player would open, fail, and tear
@@ -816,7 +817,7 @@ internal fun MainAppContent(
         val liveLaunch = PlayerLaunch(
             profileId = activePlaybackProfileId,
             title = name,
-            sourceUrl = resolvedUrl,
+            sourceUrl = sourceUrl,
             streamTitle = name,
             streamType = "live",
             providerName = com.nuvio.app.core.contracts.LivePlaybackAccess.current().accountNameFor(contentId) ?: "IPTV",
@@ -838,25 +839,17 @@ internal fun MainAppContent(
         url: String?,
         replay: LiveReplayLaunch? = null,
     ) {
-        // A BLANK url is a placeholder, not a real stream: M3U keeps the URL only in the content DB,
-        // and Stalker resolves a fresh single-use create_link at play time. Both fall through to the
-        // async resolve — treating "" as present would hand mpv an empty URL.
-        val livePlayback = com.nuvio.app.core.contracts.LivePlaybackAccess.current()
-        val immediate = url?.takeIf { it.isNotBlank() } ?: livePlayback.liveStreamUrlFor(contentId)
-        if (immediate != null) {
-            launchLiveChannel(contentId, name, logo, immediate, replay)
-            return
-        }
-        coroutineScope.launch {
-            val resolved = livePlayback.liveStreamUrlForAsync(contentId)
-            // The picker is already gone, so a failed resolve must say so rather than return silently.
-            when (val outcome = LiveChannelLaunchPolicy.resolutionOutcome(resolved)) {
-                is LiveChannelLaunchPolicy.Outcome.Launch ->
-                    launchLiveChannel(contentId, name, logo, outcome.url, replay)
-                LiveChannelLaunchPolicy.Outcome.Feedback ->
-                    NuvioToastController.show(liveChannelUnavailableText)
-            }
-        }
+        // A BLANK url is a placeholder, not a real stream: M3U keeps the URL only in the content DB, and
+        // Stalker mints a single-use create_link at play time. M3U resolves here (the unavailable toast);
+        // Stalker does NOT — the Live TV screen's resolve is the tune's one mint (B257).
+        LiveChannelLauncher.tune(
+            provider = com.nuvio.app.core.contracts.LivePlaybackAccess.current(),
+            contentId = contentId,
+            knownUrl = url,
+            scope = coroutineScope,
+            onLaunch = { sourceUrl -> launchLiveChannel(contentId, name, logo, sourceUrl, replay) },
+            onUnavailable = { NuvioToastController.show(liveChannelUnavailableText) },
+        )
     }
 
     fun openPosterOrPlayLive(id: String, type: String, name: String, logo: String?) {

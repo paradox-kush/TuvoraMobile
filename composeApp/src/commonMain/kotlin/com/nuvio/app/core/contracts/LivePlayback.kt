@@ -35,6 +35,11 @@ interface LivePlaybackProvider {
     fun liveStreamUrlFor(contentId: String): String?
     suspend fun liveStreamUrlForAsync(contentId: String): String?
     /**
+     * True when resolving [contentId] spends a single-use link (a Stalker `create_link`): the launch must not
+     * resolve it ahead of the Live TV screen, whose own resolve is the one this tune plays (B257).
+     */
+    fun liveLinkIsSingleUse(contentId: String): Boolean = false
+    /**
      * name/logo/poster/streamUrl for a channel id: the registered one, else what a saved recent /
      * favourite knows (streamUrl null — resolved at play), or null.
      */
@@ -48,6 +53,7 @@ object LivePlaybackAccess {
         override fun accountNameFor(contentId: String): String? = null
         override fun liveStreamUrlFor(contentId: String): String? = null
         override suspend fun liveStreamUrlForAsync(contentId: String): String? = null
+        override fun liveLinkIsSingleUse(contentId: String): Boolean = false
         override fun channelInfoFor(contentId: String): LiveChannelInfo? = null
         override fun recordingPreview(contentId: String): MetaPreview? = null
     }

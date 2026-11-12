@@ -21,6 +21,11 @@ internal object XtreamLivePlaybackProvider : LivePlaybackProvider {
     override suspend fun liveStreamUrlForAsync(contentId: String): String? =
         XtreamItemRegistry.liveStreamUrlForAsync(contentId)
 
+    override fun liveLinkIsSingleUse(contentId: String): Boolean {
+        val accountId = XtreamItemRegistry.parseId(contentId)?.accountId ?: return false
+        return XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId }?.sourceType == SOURCE_TYPE_STALKER
+    }
+
     override fun channelInfoFor(contentId: String): LiveChannelInfo? {
         val registered = XtreamItemRegistry.get(contentId)?.let {
             LiveChannelInfo(name = it.name, logo = it.logo, poster = it.poster, streamUrl = it.streamUrl)
