@@ -195,6 +195,9 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayContro
     }
     func selectSubtitleTrack(trackId: Int32) { playerVC?.selectSubtitle(Int(trackId)) }
     func setSubtitleUrl(url: String) { playerVC?.addSubtitleUrl(url) }
+    // Upstream AutoSync's swap-in of a re-timed subtitle file (sync 15). Apple TV has no AutoSync (named gap:
+    // tvosCore excludes the AutoSync runtime), so nothing calls this here.
+    func replaceExternalSubtitle(replacedUrl: String, path: String) {}
     func clearExternalSubtitle() { playerVC?.removeExternalSubtitles() }
     func clearExternalSubtitleAndSelect(trackId: Int32) { playerVC?.removeExternalSubtitlesAndSelect(Int(trackId)) }
     func setSubtitleDelayMs(delayMs: Int32) { playerVC?.setSubtitleDelayMs(Int(delayMs)) }
