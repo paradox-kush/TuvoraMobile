@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -360,14 +361,18 @@ class TelemetryServiceTest {
         val h1 = FakeTelemetryHost(store = store)
         newService(h1).handleCrash("main", IllegalStateException("x"))
         val h2 = FakeTelemetryHost(store = store)
-        val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+        // A clock of its own, NOT runTest's testScheduler: sendPendingCrash hops to Dispatchers.Default, and while
+        // the test body is suspended there runTest auto-advances its own scheduler, which would skip the 90 s
+        // confirm delay and delete the record before the first assertion (a timing-dependent flake).
+        val clock = TestCoroutineScheduler()
+        val scope = CoroutineScope(StandardTestDispatcher(clock))
         val s2 = TelemetryService(h2, scope = scope)
         s2.sendPendingCrash()
         assertEquals(1, h2.sent.size)
         assertTrue("pending_crash.json" in store.files, "flush alone must not delete the record")
-        testScheduler.advanceTimeBy(89_000L); testScheduler.runCurrent()
+        clock.advanceTimeBy(89_000L); clock.runCurrent()
         assertTrue("pending_crash.json" in store.files)
-        testScheduler.advanceTimeBy(2_000L); testScheduler.runCurrent()
+        clock.advanceTimeBy(2_000L); clock.runCurrent()
         assertFalse("pending_crash.json" in store.files, "deleted once the confirm window passed")
         assertTrue(h2.flushes >= 2, "flushed again at confirmation")
     }
