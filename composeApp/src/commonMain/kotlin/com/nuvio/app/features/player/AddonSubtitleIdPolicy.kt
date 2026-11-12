@@ -27,9 +27,18 @@ object AddonSubtitleIdPolicy {
      * The hash reads the first and last bytes of the stream URL; an IPTV or media-server URL can be a
      * single-use link, so probing it can burn the link the player is about to use. A live channel or a
      * catch-up replay ([isLivePlayback]) has no stable file to hash and its link may be single-use too.
+     *
+     * B255: the VIDEO id is not enough. A matched IPTV copy opened from a TMDB title carries a public
+     * `tt…` id, so the stream is also checked by its provider ([providerAddonId]): an own-source
+     * (IPTV / Stalker / Xtream / media server) stream is never probed.
      */
-    fun allowsStreamHashProbe(activeVideoId: String?, isLivePlayback: Boolean = false): Boolean =
-        !isLivePlayback && !isProviderScoped(activeVideoId)
+    fun allowsStreamHashProbe(
+        activeVideoId: String?,
+        isLivePlayback: Boolean = false,
+        providerAddonId: String? = null,
+        isOwnProviderId: (String?) -> Boolean = com.nuvio.app.core.contracts.OwnSourcePolicy::isOwnProviderId,
+    ): Boolean =
+        !isLivePlayback && !isProviderScoped(activeVideoId) && !isOwnProviderId(providerAddonId)
 
     /** Live channels and catch-up replays (which stay `streamType = "live"`) are never range-probed. */
     fun isLivePlayback(streamType: String?, contentType: String?): Boolean =

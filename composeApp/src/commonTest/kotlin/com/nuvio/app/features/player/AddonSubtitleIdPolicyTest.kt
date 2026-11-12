@@ -102,4 +102,22 @@ class AddonSubtitleIdPolicyTest {
         )
         assertTrue(AddonSubtitleIdPolicy.allowsStreamHashProbe("tt0133093", isLivePlayback = false), "vod still hashed")
     }
+
+    @Test
+    fun aMatchedOwnSourceStreamUnderAPublicIdIsNeverProbedForAnOpenSubtitlesHash() {
+        // B255: an IPTV copy opened from a TMDB title has a public tt id, but its provider is an own source.
+        val own: (String?) -> Boolean = { it == "iptv.provider" }
+        assertFalse(
+            AddonSubtitleIdPolicy.allowsStreamHashProbe("tt0133093", providerAddonId = "iptv.provider", isOwnProviderId = own),
+            "own-source provider under a public id must not be probed",
+        )
+        assertTrue(
+            AddonSubtitleIdPolicy.allowsStreamHashProbe("tt0133093", providerAddonId = "some.addon", isOwnProviderId = own),
+            "an ordinary add-on stream is still hashed",
+        )
+        assertTrue(
+            AddonSubtitleIdPolicy.allowsStreamHashProbe("tt0133093", providerAddonId = null, isOwnProviderId = own),
+            "no provider known: the video-id rule alone decides",
+        )
+    }
 }

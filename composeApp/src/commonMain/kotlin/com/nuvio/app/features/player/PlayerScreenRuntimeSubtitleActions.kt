@@ -24,6 +24,7 @@ internal fun PlayerScreenRuntime.fetchAddonSubtitlesForActiveItem() {
     if (extras?.videoHash == null && AddonSubtitleIdPolicy.allowsStreamHashProbe(
             activeVideoId,
             isLivePlayback = AddonSubtitleIdPolicy.isLivePlayback(activeStreamType, contentType),
+            providerAddonId = activeProviderAddonId,
         ) && hashableUrl.isNotBlank() &&
         (hashableUrl.startsWith("http://", true) || hashableUrl.startsWith("https://", true))
     ) {
