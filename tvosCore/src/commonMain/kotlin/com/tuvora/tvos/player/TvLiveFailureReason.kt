@@ -17,6 +17,7 @@ object TvLiveFailureReason {
         Reason.LINK_UNAVAILABLE -> "The provider did not give a stream link for this channel."
         Reason.NETWORK -> "Couldn't reach the provider. Check your connection."
         Reason.UNSUPPORTED -> "This device can't read this stream."
-        Reason.UNKNOWN -> null
+        // Only a startup failure code yields NOT_STARTED; Apple TV classifies by message alone, so it never arrives.
+        Reason.NOT_STARTED, Reason.UNKNOWN -> null
     }
 }

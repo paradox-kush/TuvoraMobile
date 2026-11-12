@@ -50,6 +50,29 @@ class LiveTvFailureReasonPolicyTest {
         assertEquals(Reason.UNKNOWN, reason("Source error"))
     }
 
+    // Regression (UX191 on the phone): Android and iOS libmpv end a failed open with END_FILE "loading failed" and
+    // no message at all, so a startup failure reached the policy as (startup_failed, null) and the pill showed no line.
+    @Test fun `a channel that never started says so when nothing names the cause`() {
+        assertEquals(Reason.NOT_STARTED, reason(null, "startup_failed"))
+        assertEquals(Reason.NOT_STARTED, reason("", "startup_failed"))
+        assertEquals(Reason.NOT_STARTED, reason("[mpv] loading failed", "startup_failed"))
+    }
+
+    @Test fun `a startup failure that names its cause keeps the specific reason`() {
+        assertEquals(Reason.PROVIDER_REFUSED, reason("Source error (HTTP 403)", "startup_failed"))
+        assertEquals(Reason.NETWORK, reason("Source error (network error)", "startup_failed"))
+    }
+
+    @Test fun `only a startup failure claims the stream did not start`() {
+        assertEquals(Reason.UNKNOWN, reason(null, "reconnect_gave_up"), "it played before it dropped")
+        assertEquals(Reason.UNKNOWN, reason(null, "playback_error"))
+        assertEquals(Reason.UNKNOWN, reason(null, null))
+    }
+
+    @Test fun `not started adds nothing to the telemetry code`() {
+        assertEquals("startup_failed", LiveTvFailureReasonPolicy.telemetryCode("startup_failed", Reason.NOT_STARTED))
+    }
+
     @Test fun `a bare number is not a status`() {
         assertEquals(Reason.UNKNOWN, reason("channel 403 stopped"))
     }

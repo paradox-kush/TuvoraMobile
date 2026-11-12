@@ -157,6 +157,7 @@ import nuvio.composeapp.generated.resources.compose_livetv_error_tap_retry
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_connections
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_link
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_network
+import nuvio.composeapp.generated.resources.compose_livetv_error_reason_not_started
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_provider_down
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_refused
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_unsupported
@@ -900,6 +901,9 @@ fun LiveTvScreen(
             LivePlaybackStartupPolicy(recoveringPlayedChannel = freezeReporter.isArmed)
         }
         var startupFailed by remember(startupPolicy) { mutableStateOf(false) }
+        // UX191: the engine's text for a failed first open, kept ONLY to classify the reason line. It is not
+        // playbackError on purpose: that one drives the mid-playback token-refresh path a startup failure stays out of.
+        var startupFailureMessage by remember(startupPolicy) { mutableStateOf<String?>(null) }
         val lifecycleOwner = LocalLifecycleOwner.current
         LaunchedEffect(startupPolicy, lifecycleOwner, startupFailed, pauseSurface) {
             // A pause owns the surface: no live picture is expected until Live, so the startup deadline stands down.
@@ -939,7 +943,7 @@ fun LiveTvScreen(
             playbackError != null -> "playback_error"
             else -> null
         }
-        val failureReason = if (hasError && !isCatchUp) LiveTvFailureReasonPolicy.classify(baseFailureCode, playbackError)
+        val failureReason = if (hasError && !isCatchUp) LiveTvFailureReasonPolicy.classify(baseFailureCode, playbackError ?: startupFailureMessage)
         else LiveTvFailureReasonPolicy.Reason.UNKNOWN
 
         fun setFullscreen(enabled: Boolean) {
@@ -1154,6 +1158,7 @@ fun LiveTvScreen(
                             )) {
                             // ExoPlayer reports a failed open as IDLE, not ENDED. Keep it out
                             // of the mid-playback token-refresh path just like mpv END_FILE.
+                            startupFailureMessage = message
                             startupFailed = true
                             snapshot = snapshot.copy(isLoading = false, isPlaying = false)
                             controller = null
@@ -1659,6 +1664,7 @@ private fun liveFailureReasonText(reason: LiveTvFailureReasonPolicy.Reason): Str
     LiveTvFailureReasonPolicy.Reason.LINK_UNAVAILABLE -> stringResource(Res.string.compose_livetv_error_reason_link)
     LiveTvFailureReasonPolicy.Reason.NETWORK -> stringResource(Res.string.compose_livetv_error_reason_network)
     LiveTvFailureReasonPolicy.Reason.UNSUPPORTED -> stringResource(Res.string.compose_livetv_error_reason_unsupported)
+    LiveTvFailureReasonPolicy.Reason.NOT_STARTED -> stringResource(Res.string.compose_livetv_error_reason_not_started)
     LiveTvFailureReasonPolicy.Reason.UNKNOWN -> null
 }
 
@@ -1670,8 +1676,10 @@ private fun ErrorPill(danger: Color, onRetry: () -> Unit, message: String? = nul
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Retry stays the primary action and keeps its place first; Send report is the quieter second pill.
+        // Weighted (not filled) so a wrapping reason line shrinks this pill instead of pushing Send report off the dock.
         Row(
             modifier = Modifier
+                .weight(1f, fill = false)
                 .clip(RoundedCornerShape(NuvioTokens.Radius.md))
                 .background(Color.Black.copy(alpha = 0.6f))
                 .clickable(onClick = onRetry)
