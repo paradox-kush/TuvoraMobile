@@ -108,14 +108,6 @@ object RadarChannelMatcher {
         "se", "sweden", "fi", "finland", "dk", "denmark", "ch", "at", "hd",
     )
 
-    // Channel-name markers of generic sports channels — weak candidates that the EPG stage
-    // can confirm even when no league keyword appears in the channel name.
-    // Compared against normalize()d names — punctuation is already stripped.
-    private val GENERIC_SPORT_MARKERS = listOf(
-        "sport", "espn", "bein", "dazn", "eurosport", "supersport", "fox sports",
-        "sky sports", "tnt sports", "arena", "setanta", "premier sports",
-    )
-
     private val STOP_TOKENS = setOf("fc", "cf", "sc", "afc", "rc", "cd", "ac", "de", "the", "club", "los", "las")
 
     /**
@@ -162,9 +154,10 @@ object RadarChannelMatcher {
         val resolved = local.filter { it.via == MatchVia.EPG && it.confidence == MatchConfidence.CONFIRMED }
             .map { it.channel.contentId }.toSet()
         // Generic sports channels are probe candidates only. They never pad displayed results.
-        val probeCandidates = (named.map { it.channel } + candidates.filter { c ->
-            GENERIC_SPORT_MARKERS.any { marker -> normalize(c.name).contains(marker) }
-        }).distinctBy { it.contentId }.filterNot { it.contentId in resolved }.take(EPG_PROBE_CAP)
+        // B141: one normalisation per channel (was one per marker, per channel, per fixture open).
+        val probeCandidates = (named.map { it.channel } +
+            SportsGenericChannelPolicy.genericSportChannels(candidates, { it.name })
+        ).distinctBy { it.contentId }.filterNot { it.contentId in resolved }.take(EPG_PROBE_CAP)
         val probed = if (fixture.startEpochMs == null || resolved.isNotEmpty()) emptyList() else coroutineScope {
             val semaphore = Semaphore(EPG_CONCURRENCY)
             probeCandidates.map { c -> async {
