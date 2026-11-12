@@ -48,7 +48,9 @@ private val EmptyDeviceSources = kotlinx.coroutines.flow.MutableStateFlow<List<c
 
 /** Compose provision (root-provided in FeatureWiring). */
 val LocalIptvCatalog = staticCompositionLocalOf<IptvCatalog> {
-    error("IptvCatalog not provided — wire it in FeatureWiring.installFeatures")
+    // Resolves the process-registered catalog, so a UI tree nobody wrapped in installFeatures (iOS / Apple TV)
+    // still gets it; only a read before app-init (a real wiring bug) throws.
+    IptvCatalogAccess.catalog
 }
 
 /**
