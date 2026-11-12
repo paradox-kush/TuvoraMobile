@@ -44,6 +44,12 @@ class AndroidLivePauseCaptureTest {
     @AfterTest
     fun tearDown() {
         handles.forEach { it.dispose() }
+        // dispose() deletes each capture directory on a background job. Deleting root while that job is still
+        // walking the same tree races it: Kotlin's FileTreeWalk asserts "rootDir must be verified to be directory
+        // beforehand" when a directory vanishes mid-walk (Gradle runs tests with -ea). Wait for the cleanups first.
+        runBlocking {
+            withTimeout(10_000) { handles.forEach { (it as? AndroidLivePauseCapture.Handle)?.cleanup?.join() } }
+        }
         runCatching { server.shutdown() }
         root.deleteRecursively()
     }
