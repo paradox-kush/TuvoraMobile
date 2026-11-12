@@ -156,9 +156,12 @@ class PlayerPreferenceMemoryTest {
         ),
     ).apply {
         scope = this@PlayerPreferenceMemoryTest.scope
+        // No audio tracks here, so the forced-subtitles default (ON since upstream a6065c8b1) would hold
+        // back the automatic pick; same fixture change upstream made in PlayerSubtitleRestoreTest.
         playerSettingsUiState = PlayerSettingsUiState(
             preferredSubtitleLanguage = "en",
             rememberPlayerPreferences = remember,
+            subtitleStyle = SubtitleStyleState(useForcedSubtitles = false),
         )
         addonSubtitles = listOf(episodeOneSubtitle)
         playerController = RecordingController()
