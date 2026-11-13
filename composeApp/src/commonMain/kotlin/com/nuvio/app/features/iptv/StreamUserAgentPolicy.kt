@@ -19,6 +19,13 @@ object StreamUserAgentPolicy {
     /** The override to send as the stream's User-Agent, or null to use the player default. Never blank. */
     fun resolve(account: XtreamAccount): String? =
         account.userAgent?.trim()?.takeIf { it.isNotEmpty() }
+
+    /** [headers] with the account's User-Agent override as the request UA (replacing any UA already there); unchanged when none. */
+    fun headersFor(account: XtreamAccount, headers: Map<String, String>): Map<String, String> {
+        val ua = resolve(account) ?: return headers
+        return headers.filterKeys { !it.equals("User-Agent", ignoreCase = true) } + ("User-Agent" to ua)
+    }
+
     fun applyTo(stream: com.nuvio.app.features.streams.StreamItem, account: XtreamAccount): com.nuvio.app.features.streams.StreamItem {
         val ua = resolve(account) ?: return stream
         val old = stream.behaviorHints.proxyHeaders

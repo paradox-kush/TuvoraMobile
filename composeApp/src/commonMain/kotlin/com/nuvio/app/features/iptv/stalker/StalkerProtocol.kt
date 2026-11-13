@@ -124,6 +124,14 @@ object StalkerProtocol {
     /** MAC url-encoding for the Cookie header: only the colons become %3A (MAG convention). */
     fun encodeMacForCookie(mac: String): String = mac.trim().replace(":", "%3A")
 
+    /** The device cookie a portal request (and a portal-owned stream) carries: mac, language, timezone, serial. */
+    fun identityCookie(mac: String, serialNumber: String): String = buildString {
+        append("mac=").append(encodeMacForCookie(mac))
+        append("; stb_lang=en; timezone=Europe/London")
+        append("; sn=").append(serialNumber)
+        append("; PHPSESSID=null")
+    }
+
     fun md5Hex(input: String): String = StalkerCrypto.md5Hex(input)
     fun sha256Hex(input: String): String = StalkerCrypto.sha256Hex(input)
 

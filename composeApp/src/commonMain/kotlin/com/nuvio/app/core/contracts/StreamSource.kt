@@ -50,6 +50,12 @@ interface StreamSourceProvider {
 
     /** Mint the real play URL for a deferred [url], or null. [forceMint] bypasses static-cmd reuse. */
     suspend fun resolveDeferredUrl(url: String, forceMint: Boolean): String?
+
+    /**
+     * [stream] (still carrying its deferred url) re-pointed at [mintedUrl] from [resolveDeferredUrl], with any
+     * request headers the source needs for THAT url (a Stalker link's portal identity depends on its host, B259).
+     */
+    fun withMintedUrl(stream: StreamItem, mintedUrl: String): StreamItem = stream.copy(url = mintedUrl)
 }
 
 /**
@@ -116,6 +122,10 @@ class CompositeStreamSourceProvider(
 
     override suspend fun resolveDeferredUrl(url: String, forceMint: Boolean): String? =
         providers().firstOrNull { it.isDeferredUrl(url) }?.resolveDeferredUrl(url, forceMint)
+
+    override fun withMintedUrl(stream: StreamItem, mintedUrl: String): StreamItem =
+        providers().firstOrNull { it.isDeferredUrl(stream.playableDirectUrl) }?.withMintedUrl(stream, mintedUrl)
+            ?: stream.copy(url = mintedUrl)
 }
 
 /** Thin read facade (call sites do not churn): the combined view of [StreamSourceRegistry]. */

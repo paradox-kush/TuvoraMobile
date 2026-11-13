@@ -111,26 +111,59 @@ internal object PlayerPlaybackNetworking {
         requestHeaders: Map<String, String>,
         loopback: Boolean,
         retryConnectionFailures: Boolean,
+        /** Lower-case names, beyond Cookie/Authorization, that must not leave the original host (B259 origin-bound set). */
+        extraOriginBoundNames: Set<String> = emptySet(),
     ): Call.Factory {
         val authorization = requestHeaders.headerValue("Authorization")
+        val scopedNames = PlaybackCredentialScope.CREDENTIAL_HEADERS + extraOriginBoundNames
+        val carriesCredentials = requestHeaders.keys.any { it.lowercase() in scopedNames }
         return playbackCallFactory {
             if (!retryConnectionFailures) retryOnConnectionFailure(false)
             if (loopback) loopbackConfigure()(this)
-            authorization?.let { value ->
+            if (carriesCredentials) {
                 addNetworkInterceptor { chain ->
                     val request = chain.request()
-                    // Re-inject only on the original host. OkHttp deliberately drops Authorization on
-                    // a cross-host redirect; re-adding it there would leak the credential to a foreign
-                    // host (e.g. a subtitle/segment URL that 30x-es away).
-                    val sameHost = request.url.host.equals(chain.call().request().url.host, ignoreCase = true)
-                    if (sameHost && request.header("Authorization") == null) {
-                        chain.proceed(request.newBuilder().header("Authorization", value).build())
-                    } else {
-                        chain.proceed(request)
+                    // Credentials ride only to a credential-safe hop of the original request (same host, no
+                    // https -> http downgrade: PlaybackCredentialScope). OkHttp itself drops only Authorization on
+                    // a cross-host redirect and forwards a Cookie set as a default header to ANY redirect target,
+                    // so both are stripped here on an unsafe hop, with every other origin-bound header the caller
+                    // named (B259: a Stalker portal's Referer/Origin too; its mac cookie and token must never reach
+                    // the CDN its portal redirects to). On a safe hop a dropped Authorization is re-injected, as before.
+                    val safeHop = PlaybackCredentialScope.isCredentialSafe(
+                        chain.call().request().url.toString(), request.url.toString(),
+                    )
+                    val scoped = when {
+                        !safeHop -> request.newBuilder().also { b -> request.headers.names().filter { it.lowercase() in scopedNames }.forEach { b.removeHeader(it) } }.build()
+                        authorization != null && request.header("Authorization") == null ->
+                            request.newBuilder().header("Authorization", authorization).build()
+                        else -> request
                     }
+                    chain.proceed(scoped)
                 }
             }
         }
+    }
+
+    /**
+     * The stream's call stack and the default request headers it is opened with: [defaultHeaders] plus the
+     * origin-bound ones, whose names the hop interceptor strips on any hop that is not credential-safe. Split out so
+     * a host test drives exactly what the Media3 data source uses.
+     */
+    internal fun streamRequestSetup(
+        defaultHeaders: Map<String, String>,
+        originBoundHeaders: Map<String, String>,
+        useLongReadTimeout: Boolean,
+        retryConnectionFailures: Boolean,
+    ): Pair<Call.Factory, Map<String, String>> {
+        val bound = sanitizeHeaders(originBoundHeaders)
+        val requestHeaders = sanitizeHeaders(defaultHeaders + bound)
+        val client = playerCallFactory(
+            requestHeaders,
+            loopback = useLongReadTimeout,
+            retryConnectionFailures = retryConnectionFailures,
+            extraOriginBoundNames = bound.keys.map { it.lowercase() }.toSet(),
+        )
+        return client to requestHeaders
     }
 
     fun createHttpDataSourceFactory(
@@ -138,9 +171,14 @@ internal object PlayerPlaybackNetworking {
         useLongReadTimeout: Boolean = false,
         /** False for a single-use link (LiveLinkReconnectPolicy): a silent OkHttp re-send would re-open a spent URL. */
         retryConnectionFailures: Boolean = true,
+        /**
+         * B259: credentials bound to the stream's origin (a Stalker portal's Cookie / Bearer / Referer / Origin). Sent on
+         * the first request and on every credential-safe redirect hop; the interceptor strips all of them on a hop that
+         * leaves the host or downgrades https -> http.
+         */
+        originBoundHeaders: Map<String, String> = emptyMap(),
     ): DataSource.Factory {
-        val requestHeaders = sanitizeHeaders(defaultHeaders)
-        val client = playerCallFactory(requestHeaders, loopback = useLongReadTimeout, retryConnectionFailures = retryConnectionFailures)
+        val (client, requestHeaders) = streamRequestSetup(defaultHeaders, originBoundHeaders, useLongReadTimeout, retryConnectionFailures)
 
         return OkHttpDataSource.Factory(client).apply {
             setDefaultRequestProperties(requestHeaders)

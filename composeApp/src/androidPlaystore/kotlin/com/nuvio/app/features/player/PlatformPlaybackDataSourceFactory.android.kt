@@ -15,11 +15,17 @@ internal object PlatformPlaybackDataSourceFactory {
         externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle> = emptyList(),
         /** False for a single-use link (LiveLinkReconnectPolicy): OkHttp must not re-send the stream request. */
         retryConnectionFailures: Boolean = true,
+        /**
+         * B259: origin-bound credentials for the STREAM data source only (never the subtitle path, never YouTube).
+         * Its interceptor drops them on any redirect hop that leaves the host or downgrades.
+         */
+        originBoundRequestHeaders: Map<String, String> = emptyMap(),
     ): DataSource.Factory {
         val httpFactory = PlayerPlaybackNetworking.createHttpDataSourceFactory(
             defaultRequestHeaders,
             useLongReadTimeout,
             retryConnectionFailures = retryConnectionFailures,
+            originBoundHeaders = originBoundRequestHeaders,
         )
         // Clean client with no stream default headers — subtitle fetches get only policy-scoped ones.
         val subtitleNetworkFactory = PlayerPlaybackNetworking.createHttpDataSourceFactory(

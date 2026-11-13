@@ -238,9 +238,16 @@ object XtreamItemRegistry {
     fun streamItemFor(contentId: String): StreamItem? {
         val item = get(contentId) ?: return null
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == item.accountId }
+        // B259: a Stalker VOD/episode link opens with the PUBLIC part of its header set (the MAG UA pair on the portal's
+        // host, a player profile elsewhere; the playlist UA wins). A StreamItem reaches every engine, libmpv included,
+        // so the origin-bound secrets never ride on it. Null = no identity yet (UA only, as before).
+        val stalkerHeaders = account
+            ?.takeIf { it.sourceType == SOURCE_TYPE_STALKER }
+            ?.let { acc -> item.streamUrl?.takeIf { it.isNotBlank() }?.let { com.nuvio.app.features.iptv.stalker.StalkerClient.streamHeadersFor(acc, it)?.public } }
         return item.toStreamItem(
             accountName = account?.name ?: "Xtream",
             userAgent = account?.let { StreamUserAgentPolicy.resolve(it) },
+            requestHeaders = stalkerHeaders,
         )
     }
 
@@ -278,15 +285,17 @@ data class XtreamResolvedItem(
     val streamType: String? = null,
 )
 
-fun XtreamResolvedItem.toStreamItem(accountName: String, userAgent: String? = null): StreamItem? {
+/** [requestHeaders], when given, is the whole request header set (it already carries any UA override); else [userAgent] alone. */
+fun XtreamResolvedItem.toStreamItem(accountName: String, userAgent: String? = null, requestHeaders: Map<String, String>? = null): StreamItem? {
     // Blank == a Stalker placeholder (create_link not yet resolved) -> treat as "no direct item" so the
     // streams flow rebuilds it fresh via ensureXtreamStreamRegistered. A real URL is never blank.
     val url = streamUrl?.takeIf { it.isNotBlank() } ?: return null
     IptvPanelHosts.note(url)
     // A per-playlist stream UA rides the Stremio proxyHeaders the player already honors, so an
     // honest IPTV-client UA can get past a provider WAF that 456s the spoofed-browser default.
-    val behaviorHints = userAgent
-        ?.let { StreamBehaviorHints(proxyHeaders = StreamProxyHeaders(request = mapOf("User-Agent" to it))) }
+    val request = requestHeaders?.takeIf { it.isNotEmpty() } ?: userAgent?.let { mapOf("User-Agent" to it) }
+    val behaviorHints = request
+        ?.let { StreamBehaviorHints(proxyHeaders = StreamProxyHeaders(request = it)) }
         ?: StreamBehaviorHints()
     return StreamItem(
         name = "Direct",

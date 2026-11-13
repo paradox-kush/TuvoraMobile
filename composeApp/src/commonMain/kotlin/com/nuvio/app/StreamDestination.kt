@@ -532,7 +532,7 @@ internal fun StreamDestination(
                 if (!hasNext) NuvioToastController.show(providerResolveFailureMessage)
                 return@LaunchedEffect
             }
-            stream.copy(url = minted)
+            streamSources.withMintedUrl(stream, minted)
         } else {
             stream
         }
@@ -699,6 +699,7 @@ internal fun StreamDestination(
                     StreamsRepository.cancelLoading()
                     NuvioToastController.show(providerResolveFailureMessage)
                 },
+                repoint = { deferred, minted -> com.nuvio.app.core.contracts.StreamSourceAccess.current().withMintedUrl(deferred, minted) },
             )
             return
         }

@@ -128,6 +128,7 @@ import com.nuvio.app.features.player.PlayerPreferencePolicy
 import com.nuvio.app.features.player.PictureChoice
 import com.nuvio.app.features.player.PersistedPlayerTrackPreference
 import com.nuvio.app.features.trakt.TraktPlatformClock
+import com.nuvio.app.features.player.LiveRemintSpacingPolicy
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
@@ -160,6 +161,8 @@ import nuvio.composeapp.generated.resources.compose_livetv_error_reason_connecti
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_link
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_network
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_not_started
+import nuvio.composeapp.generated.resources.compose_livetv_error_reason_provider_no_data
+import nuvio.composeapp.generated.resources.compose_livetv_error_reason_connection_held
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_provider_down
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_refused
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_unsupported
@@ -218,6 +221,14 @@ fun LiveTvScreen(
     var streamInfo by remember { mutableStateOf(PlayerStreamInfo()) }
     var showStreamInfo by remember { mutableStateOf(false) }
     var retryTick by remember { mutableStateOf(0) }
+    // B259: when the last connection to the provider failed or was let go (TraktPlatformClock ms; null = none since
+    // the current source resolved). A single-use (Stalker) re-mint inside LiveRemintSpacingPolicy's window meets the
+    // provider still holding that connection, so automatic re-mints wait it out; the viewer's Retry never waits.
+    var connectionEndedAtMs by remember { mutableStateOf<Long?>(null) }
+    // The viewer's Retry landed inside that window: if this attempt fails to start, the reason line says so.
+    var retriedInsideConnectionWindow by remember { mutableStateOf(false) }
+    // The automatic re-mint waiting out the window (cancelled by a zap, the viewer's Retry or a manual retune).
+    var pendingRemint by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     // Live channels can wedge with no error at all, which no existing report path can see.
     // Survives channel switches (this composable stays alive), so the reporter is re-armed
@@ -230,6 +241,10 @@ fun LiveTvScreen(
     LaunchedEffect(currentContentId) {
         freezeReconnector.onChannelChanged()
         autoRefreshGuard.reset()
+        pendingRemint?.cancel()
+        pendingRemint = null
+        connectionEndedAtMs = null
+        retriedInsideConnectionWindow = false
     }
     // Keyed on the channel: fires on a channel switch and on leaving the screen, which are the
     // two ways a viewer escapes a frozen picture.
@@ -449,7 +464,7 @@ fun LiveTvScreen(
                 forceMint = retryTick > 0,
             )
         }.valueOrNull()
-        if (resolved == null) resolveError = true else source = resolved
+        if (resolved == null) resolveError = true else { source = resolved; connectionEndedAtMs = null }
     }
 
     // Each attempt the dialect walk hands back becomes a real playback try — never an out-of-band
@@ -483,6 +498,8 @@ fun LiveTvScreen(
     // reResolve is also the freeze watcher's automatic reconnect, so it never touches the recovery
     // budgets; only [onRetry] (the viewer's Retry) starts them over.
     val reResolve: () -> Unit = {
+        pendingRemint?.cancel()
+        pendingRemint = null
         LiveTvData.resetPanelGuard(currentContentId)
         reconnectGaveUp = false
         source = null
@@ -490,7 +507,34 @@ fun LiveTvScreen(
         snapshot = PlayerPlaybackSnapshot()
         retryTick++
     }
+    // B259: an AUTOMATIC re-mint (the one-shot re-resolve after an error, the freeze reconnect). For a single-use link
+    // inside the provider's one-connection window it lets go of the dead connection now and mints once the window has
+    // passed (LiveRemintSpacingPolicy); otherwise it mints at once. Only spaces attempts: the budgets still decide.
+    fun spacedAutomaticReMint(mint: () -> Unit) {
+        val now = TraktPlatformClock.nowEpochMs()
+        val waitMs = LiveRemintSpacingPolicy.automaticDelayMs(source?.singleUseLink == true, connectionEndedAtMs ?: now, now)
+        retriedInsideConnectionWindow = false
+        if (waitMs <= 0L) { mint(); return }
+        val scheduledFor = currentContentId
+        controller = null
+        snapshot = PlayerPlaybackSnapshot()
+        source = null
+        playbackError = null
+        pendingRemint?.cancel()
+        pendingRemint = scope.launch {
+            delay(waitMs)
+            pendingRemint = null
+            // A zap or a replay since then owns the screen: this re-mint no longer applies.
+            if (currentContentId == scheduledFor && !isCatchUp) mint()
+        }
+    }
     val onRetry: () -> Unit = {
+        // The viewer asked for it now: never delayed, but remembered for the reason line if it lands in the window.
+        retriedInsideConnectionWindow = LiveRemintSpacingPolicy.userRetryInsideWindow(
+            source?.singleUseLink == true, connectionEndedAtMs, TraktPlatformClock.nowEpochMs(),
+        )
+        pendingRemint?.cancel()
+        pendingRemint = null
         freezeReconnector.onUserRetry()
         autoRefreshGuard.reset()
         val reopen = replayRetry
@@ -530,9 +574,10 @@ fun LiveTvScreen(
     LaunchedEffect(playbackError) {
         if (isCatchUp) return@LaunchedEffect
         if (source?.url == null) return@LaunchedEffect
-        if (playbackError != null && autoRefreshGuard.admit(snapshot.positionMs)) {
-            retryTick++
-        }
+        if (playbackError == null) return@LaunchedEffect
+        // B259: the stream's connection ended with this error: the provider's one-connection window starts now.
+        connectionEndedAtMs = TraktPlatformClock.nowEpochMs()
+        if (autoRefreshGuard.admit(snapshot.positionMs)) spacedAutomaticReMint { retryTick++ }
     }
 
     // Defence in depth for CatchUpPlayback.sessionSurvivesChannel: whatever moved the channel — a
@@ -951,10 +996,17 @@ fun LiveTvScreen(
         // never on a timer, so a failed channel with no network says so instead of blaming the playlist.
         val networkStatus by NetworkStatusRepository.uiState.collectAsState()
         LaunchedEffect(hasError) { if (hasError) NetworkStatusRepository.requestRefresh(force = true) }
+        // B259: the provider connection ended with this failure (the one-connection window starts now).
+        LaunchedEffect(startupFailed, reconnectGaveUp) {
+            if (startupFailed || reconnectGaveUp) connectionEndedAtMs = TraktPlatformClock.nowEpochMs()
+        }
         val failureReason = if (hasError && !isCatchUp) {
             LiveTvFailureReasonPolicy.classify(
                 baseFailureCode, playbackError ?: startupFailureMessage,
                 offline = networkStatus.condition == NetworkCondition.NoInternet,
+                // B259: a resolved single-use (Stalker create_link) source: the portal gave a link.
+                singleUseLinkMinted = source?.singleUseLink == true,
+                retriedInsideConnectionWindow = retriedInsideConnectionWindow,
             )
         } else LiveTvFailureReasonPolicy.Reason.UNKNOWN
 
@@ -1155,7 +1207,7 @@ fun LiveTvScreen(
                                 // Re-resolve rather than controller.retry(): live links carry
                                 // expiring tokens, so replaying the same URL can reconnect to a
                                 // link the provider has already invalidated.
-                                reconnect = reResolve,
+                                reconnect = { spacedAutomaticReMint(reResolve) },
                                 // Video-only freeze: the stream is still delivering audio, so reset
                                 // the decoder before spending a live link on a re-resolve.
                                 resetVideo = { controller?.resetVideoPipeline() == true },
@@ -1628,6 +1680,8 @@ private fun LivePlayerSurface(
         PlatformPlayerSurface(
             sourceUrl = current.url,
             sourceHeaders = current.headers,
+            // B259: the Stalker portal's Cookie/Bearer/Referer/Origin; only Android Media3 sends them (hop-scoped).
+            originBoundHeaders = current.originBoundHeaders,
             // A replay stays streamType "live": the archive arrives down the same pipe and the
             // Android engine selection depends on it. What makes it different is the flag beside
             // it, which every live-only behaviour reads.
@@ -1703,6 +1757,8 @@ private fun liveFailureReasonText(reason: LiveTvFailureReasonPolicy.Reason): Str
     LiveTvFailureReasonPolicy.Reason.OFFLINE -> stringResource(Res.string.compose_livetv_error_reason_offline)
     LiveTvFailureReasonPolicy.Reason.UNSUPPORTED -> stringResource(Res.string.compose_livetv_error_reason_unsupported)
     LiveTvFailureReasonPolicy.Reason.NOT_STARTED -> stringResource(Res.string.compose_livetv_error_reason_not_started)
+    LiveTvFailureReasonPolicy.Reason.PROVIDER_NO_DATA -> stringResource(Res.string.compose_livetv_error_reason_provider_no_data)
+    LiveTvFailureReasonPolicy.Reason.CONNECTION_HELD -> stringResource(Res.string.compose_livetv_error_reason_connection_held)
     LiveTvFailureReasonPolicy.Reason.UNKNOWN -> null
 }
 

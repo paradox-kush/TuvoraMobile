@@ -50,6 +50,19 @@ internal object LiveTvFailureReasonPolicy {
          */
         NOT_STARTED("not_started"),
 
+        /**
+         * B259: a single-use (Stalker create_link) channel whose link WAS minted, then failed to start with no named
+         * cause. The portal handed out a link, so the app's side worked; the provider's stream server then sent no
+         * video (probe: TCP accepted, 0 bytes; an immediate second request got an empty 200).
+         */
+        PROVIDER_NO_DATA("provider_no_data"),
+
+        /**
+         * The viewer's own Retry landed inside the single-use connection window ([com.nuvio.app.features.player.LiveRemintSpacingPolicy])
+         * and that attempt failed to start with no named cause: the provider may still be holding the previous connection.
+         */
+        CONNECTION_HELD("connection_held"),
+
         /** Nothing in the failure says why: keep the generic line. */
         UNKNOWN("unknown"),
     }
@@ -59,13 +72,31 @@ internal object LiveTvFailureReasonPolicy {
      * emulated here). It explains every failure that does not prove the provider answered; an HTTP status, a
      * refusal text or an unreadable stream means the device did reach the provider, so a stale offline flag
      * never hides those.
+     *
+     * [singleUseLinkMinted]: the failed source is a single-use (Stalker create_link) link the portal DID hand out, so
+     * a startup failure with no named cause is the provider's stream server sending nothing ([Reason.PROVIDER_NO_DATA]),
+     * or, when [retriedInsideConnectionWindow] (the viewer's Retry came inside the window an automatic re-mint waits
+     * out), the provider still holding the previous connection ([Reason.CONNECTION_HELD]). A named cause and offline win.
      */
-    fun classify(failureCode: String?, message: String?, offline: Boolean = false): Reason {
+    fun classify(
+        failureCode: String?,
+        message: String?,
+        offline: Boolean = false,
+        singleUseLinkMinted: Boolean = false,
+        retriedInsideConnectionWindow: Boolean = false,
+    ): Reason {
         val named = if (failureCode == "resolve_failed") Reason.LINK_UNAVAILABLE else classifyMessage(message)
         if (offline && named !in PROVED_REACHABLE) return Reason.OFFLINE
         if (failureCode == "resolve_failed") return named
         // Only a first open that never started may say so; a channel that played and then dropped did start.
-        return if (named == Reason.UNKNOWN && failureCode == "startup_failed") Reason.NOT_STARTED else named
+        if (named != Reason.UNKNOWN || failureCode != "startup_failed") return named
+        // B259: a single-use link was minted (the portal's side worked) and the stream server then sent nothing.
+        // A Retry that landed inside the provider's one-connection window is the likelier cause, so it says that.
+        return when {
+            singleUseLinkMinted && retriedInsideConnectionWindow -> Reason.CONNECTION_HELD
+            singleUseLinkMinted -> Reason.PROVIDER_NO_DATA
+            else -> Reason.NOT_STARTED
+        }
     }
 
     private val PROVED_REACHABLE = setOf(

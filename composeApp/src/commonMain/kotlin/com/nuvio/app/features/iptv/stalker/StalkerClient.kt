@@ -774,11 +774,38 @@ object StalkerClient : IptvClient {
 
     // --- Fresh play-time resolution (create_link) -----------------------------
 
+    // B259: the portal identity each playlist's latest play link was resolved under (cookie, MAG UA pair, token),
+    // keyed by playlist id. Read without suspending by the stream-item builders, so it is a snapshot map under a
+    // plain lock (Kotlin/Native: one lock per collection). Never logged: it holds the mac cookie and the token.
+    private val streamIdentityLock = SynchronizedObject()
+    private val streamIdentities = mutableMapOf<String, StalkerStreamIdentity>()
+
+    private suspend fun rememberStreamIdentity(acc: XtreamAccount) {
+        val identity = playbackSession(acc).streamIdentity()
+        synchronized(streamIdentityLock) { streamIdentities[acc.id] = identity }
+    }
+
+    /**
+     * The request headers to open [streamUrl] (as resolved, before any DNS host rewrite) of playlist [acc] with
+     * ([StalkerStreamHeaderPolicy]), split: [StalkerStreamHeaders.public] for every engine, and the portal secrets in
+     * [StalkerStreamHeaders.originBound], for the hop-scoping Media3 lane ONLY. The playlist's User-Agent wins. Null
+     * when no link of this playlist was resolved in this process (callers keep the UA-only headers then).
+     */
+    fun streamHeadersFor(acc: XtreamAccount, streamUrl: String): StalkerStreamHeaders? {
+        val identity = synchronized(streamIdentityLock) { streamIdentities[acc.id] } ?: return null
+        return StalkerStreamHeaderPolicy.headersFor(
+            identity, streamUrl, com.nuvio.app.features.iptv.StreamUserAgentPolicy.resolve(acc),
+        )
+    }
+
     /**
      * [forceMint] is the one-shot 401/403/410 refresh ladder's entry: it bypasses the static
      * verdict so a static play that died still gets exactly one fresh create_link.
      */
-    suspend fun resolveLiveUrl(acc: XtreamAccount, streamId: Int, forceMint: Boolean = false): String? {
+    suspend fun resolveLiveUrl(acc: XtreamAccount, streamId: Int, forceMint: Boolean = false): String? =
+        mintLiveUrl(acc, streamId, forceMint)?.also { rememberStreamIdentity(acc) }
+
+    private suspend fun mintLiveUrl(acc: XtreamAccount, streamId: Int, forceMint: Boolean): String? {
         val cmd = liveCmd(acc, streamId) ?: return null
         staticUrlOrNull(acc, "itv", streamId, cmd, forceMint)?.let { return it }
         return createLink(acc, "itv", cmd)
@@ -786,7 +813,10 @@ object StalkerClient : IptvClient {
 
     /** [nameHint] lets a cold-start play (Library/Continue Watching) find the row via the portal's own
      *  search instead of scanning a 63k-item catalog — pass the registered title when you have it. */
-    suspend fun resolveMovieUrl(acc: XtreamAccount, streamId: Int, nameHint: String? = null, forceMint: Boolean = false): String? {
+    suspend fun resolveMovieUrl(acc: XtreamAccount, streamId: Int, nameHint: String? = null, forceMint: Boolean = false): String? =
+        mintMovieUrl(acc, streamId, nameHint, forceMint)?.also { rememberStreamIdentity(acc) }
+
+    private suspend fun mintMovieUrl(acc: XtreamAccount, streamId: Int, nameHint: String?, forceMint: Boolean): String? {
         val cmd = vodCmd(acc, streamId, nameHint)
         if (!forceMint && cmd != null) {
             staticUrlOrNull(acc, "vod", streamId, cmd, false)?.let { return it }
@@ -836,7 +866,10 @@ object StalkerClient : IptvClient {
      * Episodes ALWAYS mint: the `series={n}` parameter is create_link's argument — the season cmd
      * is a container reference, not a playable address, so the static-cmd policy never applies.
      */
-    suspend fun resolveEpisodeUrl(acc: XtreamAccount, seriesId: Int, season: Int?, episodeNum: Int): String? {
+    suspend fun resolveEpisodeUrl(acc: XtreamAccount, seriesId: Int, season: Int?, episodeNum: Int): String? =
+        mintEpisodeUrl(acc, seriesId, season, episodeNum)?.also { rememberStreamIdentity(acc) }
+
+    private suspend fun mintEpisodeUrl(acc: XtreamAccount, seriesId: Int, season: Int?, episodeNum: Int): String? {
         // Season cmd resolution, cheapest first: this session's cache -> the write-through rows
         // (cold-start Continue Watching plays with ZERO portal requests before create_link) ->
         // the portal's season fetch.
@@ -1074,7 +1107,10 @@ object StalkerClient : IptvClient {
     suspend fun createArchiveLink(acc: XtreamAccount, programmeId: String): StalkerArchiveAnswer {
         val js = playbackSession(acc).request(StalkerArchiveLink.params(programmeId)) as? JsonObject
         val url = StalkerProtocol.extractStreamUrl(js?.str("cmd"))
-        if (url != null) return StalkerArchiveAnswer(url, StalkerArchiveLink.LinkError.NONE)
+        if (url != null) {
+            rememberStreamIdentity(acc)
+            return StalkerArchiveAnswer(url, StalkerArchiveLink.LinkError.NONE)
+        }
         playbackLog.w { "create_link (archive) failed: no playable command" }
         // The raw answer is only read for the error field; it is never logged (it can echo play tokens).
         return StalkerArchiveAnswer(null, StalkerArchiveLink.linkErrorOf(js?.toString()))

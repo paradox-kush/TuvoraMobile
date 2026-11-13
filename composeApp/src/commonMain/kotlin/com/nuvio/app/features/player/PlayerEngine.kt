@@ -134,6 +134,13 @@ expect fun PlatformPlayerSurface(
     sourceUrl: String,
     sourceAudioUrl: String? = null,
     sourceHeaders: Map<String, String> = emptyMap(),
+    /**
+     * B259: credentials bound to the stream's origin (a Stalker portal's Cookie, Bearer token, Referer/Origin). Sent
+     * ONLY by an engine that re-checks every redirect hop and drops them on one that leaves the host or downgrades:
+     * Android Media3 (its OkHttp interceptor). libmpv/FFmpeg re-sends custom headers on every redirect to any host,
+     * so every libmpv lane ignores this; [sourceHeaders] is what they get. Never log.
+     */
+    originBoundHeaders: Map<String, String> = emptyMap(),
     sourceResponseHeaders: Map<String, String> = emptyMap(),
     externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle> = emptyList(),
     streamType: String? = null,

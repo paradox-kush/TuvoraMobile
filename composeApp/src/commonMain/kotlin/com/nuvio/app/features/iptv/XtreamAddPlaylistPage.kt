@@ -286,6 +286,8 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
                 XtreamSourceType.CODE -> Unit
                 XtreamSourceType.STALKER -> StalkerFieldsSection(
                     isTablet = isTablet,
+                    userAgent = userAgent,
+                    onUserAgentChange = { userAgent = it },
                     portalUrl = server,
                     onPortalUrlChange = { server = it },
                     mac = mac,
@@ -529,6 +531,8 @@ private fun XtreamFieldsSection(
 @Composable
 private fun StalkerFieldsSection(
     isTablet: Boolean,
+    userAgent: String,
+    onUserAgentChange: (String) -> Unit,
     portalUrl: String,
     onPortalUrlChange: (String) -> Unit,
     mac: String,
@@ -573,6 +577,12 @@ private fun StalkerFieldsSection(
                 onValueChange = onMacChange,
                 label = "MAC Address",
                 placeholder = "00:1A:79:xx:xx:xx",
+            )
+            FormOutlinedField(
+                value = userAgent,
+                onValueChange = onUserAgentChange,
+                label = "User-Agent (optional)",
+                placeholder = "e.g. VLC/3.0.20 LibVLC/3.0.20",
             )
             FormOutlinedField(
                 value = name,

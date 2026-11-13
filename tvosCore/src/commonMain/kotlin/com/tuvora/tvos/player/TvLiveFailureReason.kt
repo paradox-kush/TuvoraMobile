@@ -24,6 +24,11 @@ object TvLiveFailureReason {
         Reason.OFFLINE -> "No network connection"
         Reason.NETWORK -> "Couldn't reach the provider. Check your connection."
         Reason.UNSUPPORTED -> "This device can't read this stream."
+        // B259: the same sentences as the phone/desktop strings. Like NOT_STARTED they need the startup + minted-link
+        // facts, which the Apple TV player card does not pass yet (it classifies by message alone), so today they
+        // never arrive here; worded so a later wiring cannot fall back to a blank line.
+        Reason.PROVIDER_NO_DATA -> "The provider's server sent no video. Try again later, or check with your provider."
+        Reason.CONNECTION_HELD -> "Your provider may still be holding the previous connection. Wait a few seconds, then try again."
         // Only a startup failure code yields NOT_STARTED; Apple TV classifies by message alone, so it never arrives.
         Reason.NOT_STARTED, Reason.UNKNOWN -> null
     }

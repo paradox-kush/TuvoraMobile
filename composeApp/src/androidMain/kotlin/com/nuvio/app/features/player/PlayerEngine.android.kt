@@ -145,6 +145,7 @@ actual fun PlatformPlayerSurface(
     sourceUrl: String,
     sourceAudioUrl: String?,
     sourceHeaders: Map<String, String>,
+    originBoundHeaders: Map<String, String>,
     sourceResponseHeaders: Map<String, String>,
     externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
     streamType: String?,
@@ -181,6 +182,8 @@ actual fun PlatformPlayerSurface(
         sourceUrl = pinned.url,
         sourceAudioUrl = sourceAudioUrl,
         sourceHeaders = sourceHeaders,
+        // A relayed source is opened on loopback: origin-bound credentials have no origin to stay on there.
+        originBoundHeaders = if (pinned.isRelayed) emptyMap() else originBoundHeaders,
         sourceResponseHeaders = sourceResponseHeaders,
         externalSubtitles = engineSubtitles,
         streamType = streamType,
@@ -211,6 +214,8 @@ private fun PlatformPlayerSurfaceInner(
     sourceUrl: String,
     sourceAudioUrl: String?,
     sourceHeaders: Map<String, String>,
+    /** Media3 only: the libmpv branch below never receives these (FFmpeg forwards headers across redirects). */
+    originBoundHeaders: Map<String, String>,
     sourceResponseHeaders: Map<String, String>,
     externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
     streamType: String?,
@@ -295,6 +300,7 @@ private fun PlatformPlayerSurfaceInner(
             autoSyncMayProbeSource = autoSyncMayProbeSource,
             sourceAudioUrl = sourceAudioUrl,
             sourceHeaders = sourceHeaders,
+            originBoundHeaders = originBoundHeaders,
             sourceResponseHeaders = sourceResponseHeaders,
             externalSubtitles = externalSubtitles,
             streamType = streamType,
@@ -398,6 +404,12 @@ private fun ExoPlayerSurface(
     autoSyncMayProbeSource: Boolean,
     sourceAudioUrl: String?,
     sourceHeaders: Map<String, String>,
+    /**
+     * B259: origin-bound credentials, sent ONLY on the stream's own data source, whose OkHttp interceptor drops them on
+     * any redirect hop that is not credential-safe. Never on AutoSync, the MIME probe (HttpURLConnection follows
+     * redirects with every header) or subtitle requests.
+     */
+    originBoundHeaders: Map<String, String>,
     sourceResponseHeaders: Map<String, String>,
     externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
     streamType: String?,
@@ -442,6 +454,9 @@ private fun ExoPlayerSurface(
     }
     val sanitizedSourceResponseHeaders = remember(sourceResponseHeaders) {
         sanitizePlaybackResponseHeaders(sourceResponseHeaders)
+    }
+    val sanitizedOriginBoundHeaders = remember(originBoundHeaders) {
+        sanitizePlaybackHeaders(originBoundHeaders)
     }
     val normalizedStreamType = remember(streamType) {
         normalizeStreamType(streamType)
@@ -533,6 +548,7 @@ private fun ExoPlayerSurface(
         context,
         sourceUrl,
         sanitizedSourceHeaders,
+        sanitizedOriginBoundHeaders,
         sanitizedSourceResponseHeaders,
         useYoutubeChunkedPlayback,
         externalSubtitles,
@@ -548,6 +564,7 @@ private fun ExoPlayerSurface(
             context = context,
             streamUrl = sourceUrl,
             defaultRequestHeaders = sanitizedSourceHeaders,
+            originBoundRequestHeaders = sanitizedOriginBoundHeaders,
             defaultResponseHeaders = sanitizedSourceResponseHeaders,
             useYoutubeChunkedPlayback = useYoutubeChunkedPlayback,
             useLongReadTimeout = loopbackSource,

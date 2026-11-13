@@ -42,7 +42,36 @@ data class LiveChannelSource(
      * after a drop; recovery mints a fresh one. See [com.nuvio.app.features.player.LiveLinkReconnectPolicy].
      */
     val singleUseLink: Boolean = false,
+    /**
+     * B259: the Stalker portal identity (Cookie, Bearer token, portal Referer/Origin) for a portal-owned stream. ONLY the
+     * Android Media3 lane may send these: its OkHttp interceptor drops them on any redirect hop that leaves the host
+     * or downgrades. libmpv/FFmpeg re-sends custom headers on every redirect to any host, so the mpv lanes (Android
+     * mpv, iOS, Apple TV, desktop) never receive them: [headers] alone is what every engine gets. Never log.
+     */
+    val originBoundHeaders: Map<String, String> = emptyMap(),
 )
+
+/** A live stream's request headers, split by where they may go (see [LiveChannelSource.originBoundHeaders]). */
+data class LiveStreamHeaders(
+    /** For every engine and every redirect hop: never a credential. */
+    val engine: Map<String, String>,
+    /** For the hop-scoping Media3 lane only. */
+    val originBound: Map<String, String> = emptyMap(),
+) {
+    override fun toString(): String = "LiveStreamHeaders(engine=${engine.keys}, originBound=${originBound.keys})"
+
+    companion object {
+        /**
+         * [split] over the DNS-rewrite [dnsHeaders]: the public part replaces same-named DNS headers case-insensitively
+         * (the DNS `Host` stays); the origin-bound part stays apart. Pure.
+         */
+        fun merge(dnsHeaders: Map<String, String>, split: com.nuvio.app.features.iptv.stalker.StalkerStreamHeaders): LiveStreamHeaders =
+            LiveStreamHeaders(
+                engine = dnsHeaders.filterKeys { key -> split.public.keys.none { it.equals(key, ignoreCase = true) } } + split.public,
+                originBound = split.originBound,
+            )
+    }
+}
 
 /** A single channel row in the guide. */
 data class LiveGuideChannel(
@@ -123,7 +152,8 @@ object LiveTvData {
             immediate, dnsProvider,
             followRedirects = LiveLinkReconnectPolicy.allowsRedirectProbe(LiveLinkReconnectPolicy.modeFor(singleUse)),
         )
-        return LiveChannelSource(url = playback.url, headers = playback.headers, singleUseLink = singleUse)
+        val headers = streamHeaders(contentId, immediate, playback.headers)
+        return LiveChannelSource(url = playback.url, headers = headers.engine, singleUseLink = singleUse, originBoundHeaders = headers.originBound)
     }
 
     /**
@@ -144,8 +174,25 @@ object LiveTvData {
      */
     fun withStreamUserAgent(contentId: String, headers: Map<String, String>): Map<String, String> {
         val account = accountFor(contentId)?.first ?: return headers
-        val ua = com.nuvio.app.features.iptv.StreamUserAgentPolicy.resolve(account) ?: return headers
-        return headers.filterKeys { !it.equals("User-Agent", ignoreCase = true) } + ("User-Agent" to ua)
+        return com.nuvio.app.features.iptv.StreamUserAgentPolicy.headersFor(account, headers)
+    }
+
+    /**
+     * The request headers for [contentId]'s stream at [resolvedUrl] (the URL as the provider gave it, BEFORE a DNS
+     * host rewrite: the credential check is about the provider's host, not the IP we dial), over the DNS-rewrite
+     * [dnsHeaders] (its `Host` stays). A Stalker channel gets [com.nuvio.app.features.iptv.stalker.StalkerStreamHeaderPolicy]'s
+     * set (B259: the portal identity on a portal-owned stream, a credential-free player profile elsewhere); every
+     * other source, and a Stalker channel with no identity snapshot, gets the playlist User-Agent only. The
+     * playlist's User-Agent wins in every case. The portal secrets come back apart ([LiveStreamHeaders.originBound]).
+     */
+    fun streamHeaders(contentId: String, resolvedUrl: String, dnsHeaders: Map<String, String>): LiveStreamHeaders {
+        val account = accountFor(contentId)?.first ?: return LiveStreamHeaders(dnsHeaders)
+        if (account.sourceType != com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER) {
+            return LiveStreamHeaders(com.nuvio.app.features.iptv.StreamUserAgentPolicy.headersFor(account, dnsHeaders))
+        }
+        val stalker = com.nuvio.app.features.iptv.stalker.StalkerClient.streamHeadersFor(account, resolvedUrl)
+            ?: return LiveStreamHeaders(com.nuvio.app.features.iptv.StreamUserAgentPolicy.headersFor(account, dnsHeaders))
+        return LiveStreamHeaders.merge(dnsHeaders, stalker)
     }
 
     fun resetPanelGuard(contentId: String) {
@@ -389,7 +436,8 @@ object LiveTvData {
             url, dnsProvider,
             followRedirects = LiveLinkReconnectPolicy.allowsRedirectProbe(LiveLinkReconnectPolicy.modeFor(singleUse)),
         )
-        return LiveChannelSource(url = playback.url, headers = playback.headers, singleUseLink = singleUse)
+        val headers = streamHeaders(contentId, url, playback.headers)
+        return LiveChannelSource(url = playback.url, headers = headers.engine, singleUseLink = singleUse, originBoundHeaders = headers.originBound)
     }
 
     /** Whether [contentId] belongs to a Stalker portal (its replays are minted per programme, never walked). */

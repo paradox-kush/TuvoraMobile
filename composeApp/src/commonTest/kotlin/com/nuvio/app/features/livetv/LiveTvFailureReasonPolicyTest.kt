@@ -144,6 +144,50 @@ class LiveTvFailureReasonPolicyTest {
         assertEquals(Badge.LIVE, badge(loading = true, playing = false, timeShifted = true))
     }
 
+    private fun stalker(message: String?, code: String? = "startup_failed", offline: Boolean = false, insideWindow: Boolean = false) =
+        LiveTvFailureReasonPolicy.classify(code, message, offline = offline, singleUseLinkMinted = true, retriedInsideConnectionWindow = insideWindow)
+
+    // B259: create_link succeeded every time, then mpv ended with "loading failed": the provider's stream server sent
+    // nothing. The pill said "The stream did not start. Try again or check your playlist", blaming the playlist.
+    @Test fun `a minted single use link that never started reads as the provider sending no data`() {
+        assertEquals(Reason.PROVIDER_NO_DATA, stalker(null))
+        assertEquals(Reason.PROVIDER_NO_DATA, stalker(""))
+        assertEquals(Reason.PROVIDER_NO_DATA, stalker("[mpv] loading failed"))
+    }
+
+    @Test fun `a named cause still wins over provider no data`() {
+        assertEquals(Reason.PROVIDER_REFUSED, stalker("Source error (HTTP 401)"))
+        assertEquals(Reason.TOO_MANY_CONNECTIONS, stalker("Source error (HTTP 458)"))
+        assertEquals(Reason.NETWORK, stalker("Source error (network error)"))
+        assertEquals(Reason.UNSUPPORTED, stalker("Decoder init failed"))
+    }
+
+    @Test fun `offline still wins over provider no data`() {
+        assertEquals(Reason.OFFLINE, stalker(null, offline = true))
+        assertEquals(Reason.OFFLINE, stalker(null, offline = true, insideWindow = true))
+    }
+
+    @Test fun `provider no data needs a startup failure`() {
+        assertEquals(Reason.LINK_UNAVAILABLE, stalker(null, code = "resolve_failed"), "no link was minted")
+        assertEquals(Reason.UNKNOWN, stalker(null, code = "reconnect_gave_up"), "it played before it dropped")
+        assertEquals(Reason.UNKNOWN, stalker(null, code = "playback_error"))
+    }
+
+    @Test fun `a reusable link that never started keeps the generic line`() {
+        assertEquals(Reason.NOT_STARTED, LiveTvFailureReasonPolicy.classify("startup_failed", null, singleUseLinkMinted = false))
+        assertEquals(Reason.NOT_STARTED, LiveTvFailureReasonPolicy.classify("startup_failed", null, singleUseLinkMinted = false, retriedInsideConnectionWindow = true))
+    }
+
+    @Test fun `a retry inside the connection window that never started says the provider may hold the old connection`() {
+        assertEquals(Reason.CONNECTION_HELD, stalker(null, insideWindow = true))
+        assertEquals(Reason.PROVIDER_REFUSED, stalker("Source error (HTTP 403)", insideWindow = true), "a named cause still wins")
+    }
+
+    @Test fun `the new reasons reach telemetry as codes only`() {
+        assertEquals("startup_failed_provider_no_data", LiveTvFailureReasonPolicy.telemetryCode("startup_failed", Reason.PROVIDER_NO_DATA))
+        assertEquals("startup_failed_connection_held", LiveTvFailureReasonPolicy.telemetryCode("startup_failed", Reason.CONNECTION_HELD))
+    }
+
     private fun badge(
         failed: Boolean = false,
         sourceReady: Boolean = true,

@@ -1153,8 +1153,11 @@ internal fun PlayerScreenRuntime.tryRefreshExpiredLinkAfterError(message: String
             stopActiveP2pStream()
             activeSourceUrl = refreshedUrl
             activeSourceAudioUrl = null
-            activeSourceHeaders = sanitizePlaybackHeaders(stream.behaviorHints.proxyHeaders?.request)
-            activeSourceResponseHeaders = sanitizePlaybackResponseHeaders(stream.behaviorHints.proxyHeaders?.response)
+            // B259: a freshly minted deferred (Stalker) link opens with the headers its host gets, not the listing's.
+            val headerHints = (if (streamProvider.isDeferredUrl(stream.playableDirectUrl)) streamProvider.withMintedUrl(stream, refreshedUrl) else stream)
+                .behaviorHints.proxyHeaders
+            activeSourceHeaders = sanitizePlaybackHeaders(headerHints?.request)
+            activeSourceResponseHeaders = sanitizePlaybackResponseHeaders(headerHints?.response)
             activeStreamType = stream.streamType
             activeStreamTitle = stream.streamLabel
             activeStreamSubtitle = stream.streamSubtitle

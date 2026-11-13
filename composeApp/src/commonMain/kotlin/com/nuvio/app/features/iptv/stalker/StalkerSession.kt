@@ -1,5 +1,6 @@
 package com.nuvio.app.features.iptv.stalker
 
+import kotlin.concurrent.Volatile
 import com.nuvio.app.features.addons.EmptyResponseBodyException
 import com.nuvio.app.features.addons.httpGetTextWithHeaders
 import com.nuvio.app.features.addons.httpStreamLines
@@ -85,7 +86,8 @@ internal class StalkerSession(
     // tests drive it with their own clock; production shares the process-wide instance.
     private val panelGuard: PanelHostGuard = IptvPanelGuard.guard,
 ) {
-    private var token: String? = null
+    // Volatile: [streamIdentity] reads it from the playback path while auth may be swapping it.
+    @Volatile private var token: String? = null
     /**
      * UX147: whether the portal's `get_modules` answer lists `series` as off (null = never asked, or an
      * answer we do not recognise). Only the module-gated bootstrap asks, so unknown is the common case.
@@ -99,7 +101,7 @@ internal class StalkerSession(
      * [StalkerMagPresets.LADDER] (never away from a pinned identity). Session-scoped: a
      * relaunch re-walks it, which costs one rejected request on the minority of portals that need it.
      */
-    private var magPreset: StalkerMagPreset = StalkerMagPresets.initial(account.stbModel, account.hwVersion)
+    @Volatile private var magPreset: StalkerMagPreset = StalkerMagPresets.initial(account.stbModel, account.hwVersion)
     /** When a re-auth ran and the retry STILL came back empty (another device holds the MAC). */
     private var lastFailedReauthAtMs: Long = 0L
 
@@ -128,6 +130,23 @@ internal class StalkerSession(
 
     private val referer: String
         get() = StalkerProtocol.refererFor(baseUrl, resolvedEndpoint ?: StalkerProtocol.ENDPOINT_CANDIDATES.first())
+
+    /** The device cookie every portal request sends; a portal-owned STREAM sends the same one ([streamIdentity]). */
+    private val identityCookie: String
+        get() = StalkerProtocol.identityCookie(account.macAddress, identity.serialNumber)
+
+    /**
+     * B259: this session's identity for a stream request ([StalkerStreamHeaderPolicy]) - the same cookie, MAG
+     * User-Agent pair and token the API calls send, read as they stand (no I/O, no handshake). A snapshot: the token
+     * a just-minted link was issued under.
+     */
+    fun streamIdentity(): StalkerStreamIdentity = StalkerStreamIdentity(
+        portalBaseUrl = baseUrl,
+        cookie = identityCookie,
+        magUserAgent = magPreset.userAgent,
+        xUserAgent = magPreset.xUserAgent,
+        token = token,
+    )
 
     /**
      * Authenticated Stalker GET. [params] are the JsHttpRequest query params (type/action/…); the
@@ -269,12 +288,7 @@ internal class StalkerSession(
             "${k.encodeURLParameter()}=${v.encodeURLParameter()}"
         }
         val url = "$baseUrl$endpointPath?$query"
-        val cookie = buildString {
-            append("mac=").append(StalkerProtocol.encodeMacForCookie(account.macAddress))
-            append("; stb_lang=en; timezone=Europe/London")
-            append("; sn=").append(identity.serialNumber)
-            append("; PHPSESSID=null")
-        }
+        val cookie = identityCookie
         val headers = buildMap {
             put("User-Agent", magPreset.userAgent)
             put("X-User-Agent", magPreset.xUserAgent)
@@ -593,12 +607,7 @@ internal class StalkerSession(
         val url = "$baseUrl$endpointPath?$query"
 
         val bearer = tokenOverride ?: token
-        val cookie = buildString {
-            append("mac=").append(StalkerProtocol.encodeMacForCookie(account.macAddress))
-            append("; stb_lang=en; timezone=Europe/London")
-            append("; sn=").append(identity.serialNumber)
-            append("; PHPSESSID=null")
-        }
+        val cookie = identityCookie
         val headers = buildMap {
             put("User-Agent", magPreset.userAgent)
             put("X-User-Agent", magPreset.xUserAgent)

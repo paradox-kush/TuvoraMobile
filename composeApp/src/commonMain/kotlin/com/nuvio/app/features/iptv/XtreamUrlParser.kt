@@ -174,6 +174,7 @@ internal fun stalkerAccountFromForm(input: XtreamFormInput): XtreamAccount? {
         dnsProvider = input.dnsProvider,
         autoRefreshHours = input.autoRefreshHours,
         macAddress = mac,
+        userAgent = input.userAgent?.trim()?.takeIf { it.isNotEmpty() },
         stalkerUsername = input.stalkerUsername?.trim()?.takeIf { it.isNotEmpty() },
         stalkerPassword = input.stalkerPassword?.trim()?.takeIf { it.isNotEmpty() },
         serialNumber = input.serialNumber?.trim()?.takeIf { it.isNotEmpty() },

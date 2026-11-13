@@ -340,7 +340,7 @@ internal fun PlayerScreenRuntime.mintDeferredStreamThen(
             NuvioToastController.show(resolveText(Res.string.provider_source_resolve_failed))
             return@launch
         }
-        onMinted(stream.copy(url = minted))
+        onMinted(sources.withMintedUrl(stream, minted))
     }
     return true
 }

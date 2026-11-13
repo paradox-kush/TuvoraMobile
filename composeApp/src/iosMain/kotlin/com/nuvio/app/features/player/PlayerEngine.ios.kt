@@ -52,6 +52,9 @@ actual fun PlatformPlayerSurface(
     sourceUrl: String,
     sourceAudioUrl: String?,
     sourceHeaders: Map<String, String>,
+    // B259: never sent here. iOS plays through libmpv/FFmpeg, which re-sends custom headers on every redirect hop to
+    // any host, so origin-bound credentials (a Stalker portal's Cookie / Bearer) would leak; [sourceHeaders] only.
+    @Suppress("UNUSED_PARAMETER") originBoundHeaders: Map<String, String>,
     sourceResponseHeaders: Map<String, String>,
     externalSubtitles: List<com.nuvio.app.features.streams.StreamSubtitle>,
     streamType: String?,
