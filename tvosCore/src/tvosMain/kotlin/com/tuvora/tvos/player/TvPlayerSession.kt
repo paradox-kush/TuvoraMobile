@@ -195,8 +195,8 @@ class TvPlayerSession(
 
     /**
      * B259 follow-up: the tune's Stalker header-profile fallback (null = not a Stalker live channel). A portal-host
-     * stream the provider refuses at open for the MAG User-Agent is re-minted once, at once, with the NEUTRAL
-     * profile; the re-resolver reads [StalkerStreamFallback.profile]. Kept off the constructor like [bindServer].
+     * stream the provider refuses at open is re-minted once, at once, with the other header profile; the re-resolver
+     * reads [StalkerStreamFallback.profile]. Kept off the constructor like [bindServer].
      */
     private var identityFallback: StalkerStreamFallback? = null
 
@@ -966,7 +966,7 @@ class TvPlayerSession(
             ServerPlayback.onPlaybackSnapshot(it, snapshot.positionMs, snapshot.isPlaying, snapshot.isLoading, snapshot.isEnded)
         }
         val lane = _state.value.lane
-        // A frame showed: this tune's header profile is proven (a NEUTRAL one is remembered for the playlist).
+        // A frame showed: this tune's header profile is proven (an IDENTITY trial is remembered for the playlist).
         if (liveTune && LivePlaybackStartupPolicy.hasStarted(snapshot)) identityFallback?.onFirstFrame()
         if (error != null && handleFailure(lane, error)) return
         if (snapshot.isPlaying && snapshot.positionMs > 0L) TvLaneMemory.put(progressKey, lane)

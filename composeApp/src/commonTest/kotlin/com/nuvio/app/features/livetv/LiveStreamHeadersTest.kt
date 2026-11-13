@@ -68,4 +68,26 @@ class LiveStreamHeadersTest {
         assertEquals(emptyMap(), neutral.originBound, "nothing origin-bound")
         assertTrue(neutral.profileFallback, "a neutral portal-host open may still try identity")
     }
+
+    @Test
+    fun `a live tune opens with the pre 1_20_3 request by default`() {
+        // Before 1.20.3 the KMP apps sent a Stalker stream the DNS headers and at most the playlist UA: never the MAG
+        // User-Agent, X-User-Agent, cookie, token, Referer or Origin. The default live profile restores that shape.
+        val profile = com.nuvio.app.features.iptv.stalker.StalkerStreamFallback(
+            "p1", com.nuvio.app.features.iptv.stalker.StalkerStreamProfileMemory(),
+        ).profile
+        val h = LiveStreamHeaders.merge(
+            mapOf("Host" to "portal.example"),
+            StalkerStreamHeaderPolicy.headersFor(identity, "http://portal.example/play/live.php?stream=1", null, profile),
+        )
+        assertEquals(mapOf("Host" to "portal.example", "User-Agent" to "libmpv", "Accept" to "*/*"), h.engine, "no MAG pair")
+        assertEquals(emptyMap(), h.originBound, "no secret for any engine")
+        assertFalse((h.engine.keys + h.originBound.keys).any { it.lowercase() in secrets + "x-user-agent" }, "no identity header")
+        assertFalse(h.engine.values.any { "MAG" in it }, "no MAG user agent")
+        val overridden = LiveStreamHeaders.merge(
+            emptyMap(),
+            StalkerStreamHeaderPolicy.headersFor(identity, "http://portal.example/play/live.php?stream=1", "IBOPlayer/1.0", profile),
+        )
+        assertEquals("IBOPlayer/1.0", overridden.engine["User-Agent"], "the playlist UA still wins")
+    }
 }

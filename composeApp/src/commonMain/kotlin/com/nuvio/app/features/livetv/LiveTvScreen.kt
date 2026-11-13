@@ -240,8 +240,8 @@ fun LiveTvScreen(
     val freezeReconnector = remember { LivePlaybackReconnector(freezeReporter) }
     // The one automatic re-resolve after a playback error, per tune (never per URL: see the guard).
     val autoRefreshGuard = remember { LiveTvAutoRefreshGuard() }
-    // B259 follow-up: a portal-host Stalker stream the provider 401s for the MAG User-Agent is re-minted once per tune
-    // with the NEUTRAL header profile (StalkerStreamIdentityPolicy). A zap is a new tune, so a new fallback.
+    // B259 follow-up: a live Stalker tune opens NEUTRAL (the pre-1.20.3 request); a portal-host stream refused before its
+    // first frame is re-minted once with the other header profile (StalkerStreamIdentityPolicy). A zap is a new tune.
     val stalkerFallback = remember(currentContentId) {
         StalkerStreamFallback(LiveTvData.playlistIdOf(currentContentId))
     }
@@ -523,7 +523,7 @@ fun LiveTvScreen(
     // B259: an AUTOMATIC re-mint (the one-shot re-resolve after an error, the freeze reconnect). For a single-use link
     // inside the provider's one-connection window it lets go of the dead connection now and mints once the window has
     // passed (LiveRemintSpacingPolicy); otherwise it mints at once. Only spaces attempts: the budgets still decide.
-    // [switchingProfile]: the NEUTRAL fallback's re-mint, which never waits (StalkerStreamIdentityPolicy.remintDelayMs).
+    // [switchingProfile]: the header-profile fallback's re-mint, which never waits (StalkerStreamIdentityPolicy.remintDelayMs).
     fun spacedAutomaticReMint(switchingProfile: Boolean = false, mint: () -> Unit) {
         val now = TraktPlatformClock.nowEpochMs()
         val waitMs = StalkerStreamIdentityPolicy.remintDelayMs(

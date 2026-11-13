@@ -72,21 +72,6 @@ internal object XtreamStreamSourceProvider : StreamSourceProvider {
     override suspend fun resolveDeferredUrl(url: String, forceMint: Boolean): String? =
         XtreamStreamSource.resolveDeferredUrl(url, forceMint = forceMint).also { IptvPanelHosts.note(it) }
 
-    /**
-     * B259: a minted Stalker link opens with the PUBLIC part of [com.nuvio.app.features.iptv.stalker.StalkerStreamHeaderPolicy]'s
-     * set for its host. A StreamItem reaches every engine (libmpv re-sends headers across redirects), so no secrets.
-     */
-    override fun withMintedUrl(stream: StreamItem, mintedUrl: String): StreamItem {
-        val repointed = stream.copy(url = mintedUrl)
-        val accountId = XtreamStreamSource.parseDeferred(stream.playableDirectUrl.orEmpty())?.accountId ?: return repointed
-        val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == accountId } ?: return repointed
-        val headers = com.nuvio.app.features.iptv.stalker.StalkerClient.streamHeadersFor(account, mintedUrl)?.public ?: return repointed
-        val old = repointed.behaviorHints.proxyHeaders
-        val kept = old?.request.orEmpty().filterKeys { key -> headers.keys.none { it.equals(key, ignoreCase = true) } }
-        return repointed.copy(
-            behaviorHints = repointed.behaviorHints.copy(
-                proxyHeaders = com.nuvio.app.features.streams.StreamProxyHeaders(request = kept + headers, response = old?.response),
-            ),
-        )
-    }
+    // A minted Stalker VOD link keeps the stream's own headers (the playlist UA override), as before 1.20.3: the
+    // interface default re-points the url and nothing else (StalkerStreamIdentityPolicy).
 }

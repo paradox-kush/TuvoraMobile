@@ -238,16 +238,11 @@ object XtreamItemRegistry {
     fun streamItemFor(contentId: String): StreamItem? {
         val item = get(contentId) ?: return null
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == item.accountId }
-        // B259: a Stalker VOD/episode link opens with the PUBLIC part of its header set (the MAG UA pair on the portal's
-        // host, a player profile elsewhere; the playlist UA wins). A StreamItem reaches every engine, libmpv included,
-        // so the origin-bound secrets never ride on it. Null = no identity yet (UA only, as before).
-        val stalkerHeaders = account
-            ?.takeIf { it.sourceType == SOURCE_TYPE_STALKER }
-            ?.let { acc -> item.streamUrl?.takeIf { it.isNotBlank() }?.let { com.nuvio.app.features.iptv.stalker.StalkerClient.streamHeadersFor(acc, it)?.public } }
+        // A Stalker VOD/episode link opens as it did before 1.20.3: the playlist User-Agent override alone, else the
+        // engine default. The MAG identity regressed a provider that 401s it (StalkerStreamIdentityPolicy).
         return item.toStreamItem(
             accountName = account?.name ?: "Xtream",
             userAgent = account?.let { StreamUserAgentPolicy.resolve(it) },
-            requestHeaders = stalkerHeaders,
         )
     }
 

@@ -27,7 +27,7 @@ class StalkerOpenFailureGateTest {
         assertEquals(StalkerOpenFailureGate.Step.Wait(null), gate.onEndedAtOpen(), "later ended ticks keep waiting, no second timer")
         assertEquals(StalkerOpenFailureGate.Step.Proceed, gate.onErrorText("[ffmpeg] http: HTTP error 404 Not Found"), "404: today's failure path")
         assertEquals(StalkerOpenFailureGate.Step.None, gate.onGraceElapsed(), "the text already decided")
-        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile, "no switch")
+        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile, "no switch")
     }
 
     @Test
@@ -35,7 +35,7 @@ class StalkerOpenFailureGateTest {
         val (gate, fallback) = gate()
         gate.onEndedAtOpen()
         assertEquals(StalkerOpenFailureGate.Step.Switch, gate.onErrorText("[ffmpeg] http: HTTP error 401 Unauthorized"))
-        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile)
+        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile)
         assertEquals(StalkerOpenFailureGate.Step.None, gate.onGraceElapsed())
     }
 
@@ -44,7 +44,7 @@ class StalkerOpenFailureGateTest {
         val (gate, fallback) = gate()
         gate.onEndedAtOpen()
         assertEquals(StalkerOpenFailureGate.Step.Switch, gate.onGraceElapsed(), "Android libmpv never sends text")
-        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile)
+        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile)
     }
 
     @Test

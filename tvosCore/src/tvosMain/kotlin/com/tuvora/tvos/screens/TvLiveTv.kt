@@ -64,7 +64,7 @@ object TvIptvBrowse {
      * address (the phone's LiveChannelLaunchPolicy "unavailable" outcome) — the screen says so.
      */
     suspend fun playChannel(contentId: String, name: String, logo: String?): TvPlayerSession? {
-        // B259 follow-up: one tune's Stalker header profile (identity by default, neutral after a refused open).
+        // B259 follow-up: one tune's Stalker header profile (neutral by default as before 1.20.3, the identity after a refused open).
         val fallback = com.nuvio.app.features.iptv.stalker.StalkerStreamFallback(LiveTvData.playlistIdOf(contentId))
         val source = LiveTvData.resolveSource(contentId, name, logo, stalkerProfile = fallback.profile) ?: return null
         fallback.onOpened(source.profileFallback)

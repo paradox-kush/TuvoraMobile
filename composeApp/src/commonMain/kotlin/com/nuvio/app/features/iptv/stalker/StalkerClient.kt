@@ -790,8 +790,8 @@ object StalkerClient : IptvClient {
      * ([StalkerStreamHeaderPolicy]), split: [StalkerStreamHeaders.public] for every engine, and the portal secrets in
      * [StalkerStreamHeaders.originBound], for the hop-scoping Media3 lane ONLY. The playlist's User-Agent wins. Null
      * when no link of this playlist was resolved in this process (callers keep the UA-only headers then).
-     * [profile] is IDENTITY for VOD, series and catch-up; only a live tune passes its own
-     * ([StalkerStreamFallback.profile], which starts on what the playlist learned live).
+     * Only a live tune calls this, with its own [profile] ([StalkerStreamFallback.profile]: NEUTRAL unless the playlist
+     * learned IDENTITY); VOD, series, catch-up and recordings send no Stalker header set (as before 1.20.3).
      */
     fun streamHeadersFor(
         acc: XtreamAccount,

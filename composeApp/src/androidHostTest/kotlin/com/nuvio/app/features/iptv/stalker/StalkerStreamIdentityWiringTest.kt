@@ -88,22 +88,21 @@ class StalkerStreamIdentityWiringTest {
     }
 
     @Test
-    fun `vod and catch up keep the portal identity after live learned neutral`() = runBlocking {
-        val acc = account("wiring-learned-neutral")
-        StalkerStreamProfileMemory.Process.rememberNeutral(acc.id)
+    fun `a live tune opens a minted portal link without the MAG identity until it learns it`() = runBlocking {
+        val acc = account("wiring-live-default")
+        StalkerClient.vodMovies(acc, null).getOrThrow()
+        val url = assertNotNull(StalkerClient.resolveMovieUrl(acc, 3))
+        val tune = StalkerStreamFallback(acc.id)
+        val split = assertNotNull(StalkerClient.streamHeadersFor(acc, url, tune.profile))
+        assertEquals(StalkerStreamHeaderPolicy.PLAYER_USER_AGENT, split.public["User-Agent"], "pre-1.20.3: no MAG UA")
+        assertNull(split.public["X-User-Agent"], "no X-User-Agent")
+        assertEquals(emptyMap(), split.originBound, "no cookie, token, Referer or Origin")
+        StalkerStreamProfileMemory.Process.rememberIdentity(acc.id)
         try {
-            StalkerClient.vodMovies(acc, null).getOrThrow()
-            val url = assertNotNull(StalkerClient.resolveMovieUrl(acc, 3))
-            val split = assertNotNull(StalkerClient.streamHeadersFor(acc, url), "the default profile is the VOD/catch-up one")
-            assertEquals(apiHeaders.last()["User-Agent"], split.public["User-Agent"], "VOD still sends the MAG UA")
-            assertEquals("Bearer T", split.originBound["Authorization"], "Media3 catch-up/VOD keeps the token")
-            assertEquals(
-                StalkerStreamHeaderPolicy.PLAYER_USER_AGENT,
-                StalkerClient.streamHeadersFor(acc, url, StalkerStreamProfile.NEUTRAL)?.public?.get("User-Agent"),
-                "only a live tune asks for neutral",
-            )
+            val learned = assertNotNull(StalkerClient.streamHeadersFor(acc, url, StalkerStreamFallback(acc.id).profile))
+            assertEquals(apiHeaders.last()["User-Agent"], learned.public["User-Agent"], "a playlist that proved it needs MAG gets it")
         } finally {
-            StalkerStreamProfileMemory.Process.forgetNeutral(acc.id)
+            StalkerStreamProfileMemory.Process.forgetIdentity(acc.id)
         }
     }
 

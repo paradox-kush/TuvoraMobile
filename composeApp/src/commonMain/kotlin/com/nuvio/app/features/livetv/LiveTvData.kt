@@ -132,7 +132,7 @@ object LiveTvData {
      * [forceMint] = this resolve is a RETRY after a playback failure: a Stalker static-cmd verdict
      * would replay the dead URL, so the retry demands a fresh create_link instead.
      * [stalkerProfile] = the live tune's header profile ([com.nuvio.app.features.iptv.stalker.StalkerStreamFallback.profile]);
-     * null = IDENTITY.
+     * null = no Stalker header set at all (the pre-1.20.3 request: the playlist UA override alone).
      */
     suspend fun resolveSource(
         contentId: String,
@@ -154,9 +154,8 @@ object LiveTvData {
     suspend fun resolveForRecording(contentId: String, forceMint: Boolean): LiveChannelSource? {
         // An alarm can start the process with no screen: the playlists must be read before the registry is asked.
         runCatching { XtreamRepository.ensureLoaded() }
-        // A recording is live: it opens with the profile the playlist learned live (never a tune's trial).
-        val learned = com.nuvio.app.features.iptv.stalker.StalkerStreamProfileMemory.Process.profileFor(playlistIdOf(contentId))
-        val source = resolvePlayable(contentId, forceMint, learned) ?: return null
+        // As before 1.20.3: the DNS headers and the playlist User-Agent override, no Stalker header set.
+        val source = resolvePlayable(contentId, forceMint) ?: return null
         return source.copy(headers = withStreamUserAgent(contentId, source.headers))
     }
 
@@ -212,7 +211,7 @@ object LiveTvData {
      * set (B259: the portal identity on a portal-owned stream, a credential-free player profile elsewhere); every
      * other source, and a Stalker channel with no identity snapshot, gets the playlist User-Agent only. The
      * playlist's User-Agent wins in every case. The portal secrets come back apart ([LiveStreamHeaders.originBound]).
-     * [stalkerProfile]: see [resolveSource]; catch-up passes none, so it keeps the portal identity.
+     * [stalkerProfile]: see [resolveSource]. Catch-up and recordings pass none: they open as before 1.20.3.
      */
     fun streamHeaders(
         contentId: String,
@@ -224,10 +223,10 @@ object LiveTvData {
         if (account.sourceType != com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER) {
             return LiveStreamHeaders(com.nuvio.app.features.iptv.StreamUserAgentPolicy.headersFor(account, dnsHeaders))
         }
-        val stalker = (
-            if (stalkerProfile == null) com.nuvio.app.features.iptv.stalker.StalkerClient.streamHeadersFor(account, resolvedUrl)
-            else com.nuvio.app.features.iptv.stalker.StalkerClient.streamHeadersFor(account, resolvedUrl, stalkerProfile)
-            )
+        // Catch-up and recordings (no profile): exactly the pre-1.20.3 request, the DNS headers alone (a recording
+        // adds the playlist UA itself, withStreamUserAgent, as it always did).
+        if (stalkerProfile == null) return LiveStreamHeaders(dnsHeaders)
+        val stalker = com.nuvio.app.features.iptv.stalker.StalkerClient.streamHeadersFor(account, resolvedUrl, stalkerProfile)
             ?: return LiveStreamHeaders(com.nuvio.app.features.iptv.StreamUserAgentPolicy.headersFor(account, dnsHeaders))
         return LiveStreamHeaders.merge(dnsHeaders, stalker)
     }

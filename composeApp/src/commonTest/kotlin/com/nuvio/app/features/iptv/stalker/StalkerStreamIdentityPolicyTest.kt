@@ -10,9 +10,9 @@ import kotlin.test.assertTrue
  * commonTest (kotlin.test) - `assertEquals(expected, actual, message)`.
  *
  * B259 follow-up: a real provider answers HTTP 401 at the first hop of a portal-host stream whenever the request
- * carries the MAG set-top-box User-Agent, and 200 + video for any other UA. Other providers still need the MAG
- * identity, so the identity stays the default and a portal-host stream that is rejected before its first frame is
- * re-minted once with the other profile (a one-shot trial); a trial's first frame is what the playlist learns.
+ * carries the MAG set-top-box User-Agent, and 200 + video for any other UA. Before 1.20.3 the KMP apps never sent the
+ * MAG identity to a stream, so NEUTRAL is the default again; a portal-host live stream rejected before its first frame
+ * is re-minted once with the other profile (a one-shot trial), and a trial's first frame is what the playlist learns.
  */
 class StalkerStreamIdentityPolicyTest {
     private val portal = "http://portal.example"
@@ -34,17 +34,17 @@ class StalkerStreamIdentityPolicyTest {
         tune(memory, playlist).also { it.onOpened(profileFallbackEligible = true) }
 
     @Test
-    fun `a playlist opens with the portal identity by default`() {
+    fun `a playlist opens neutral by default as before 1_20_3`() {
         val memory = StalkerStreamProfileMemory()
-        assertEquals(StalkerStreamProfile.IDENTITY, memory.profileFor("p1"), "nothing learned yet")
-        assertEquals(StalkerStreamProfile.IDENTITY, tune(memory).profile, "a fresh tune")
+        assertEquals(StalkerStreamProfile.NEUTRAL, memory.profileFor("p1"), "nothing learned yet")
+        assertEquals(StalkerStreamProfile.NEUTRAL, tune(memory).profile, "a fresh tune")
     }
 
     @Test
-    fun `an auth rejection before the first frame switches to neutral and re-mints at once`() {
+    fun `an auth rejection before the first frame tries the identity and re-mints at once`() {
         val fallback = opened()
-        assertTrue(fallback.onOpenFailure(unauthorized), "a 401 at open on the identity profile switches")
-        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile, "the next attempt of this tune is neutral")
+        assertTrue(fallback.onOpenFailure(unauthorized), "a 401 at open on the neutral profile switches")
+        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile, "the next attempt of this tune carries the MAG identity")
         // The switch re-mint skips the one-connection spacing: the provider refused the request, it holds nothing.
         assertEquals(
             0L,
@@ -70,8 +70,8 @@ class StalkerStreamIdentityPolicyTest {
     fun `an open failure that names another cause does not switch`() {
         for (message in listOf("Source error (HTTP 404)", "Source error (HTTP 503)", "Connection timed out", "unsupported codec")) {
             val fallback = opened()
-            assertFalse(fallback.onOpenFailure(message), "$message is not the identity being refused")
-            assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile, "$message keeps the identity")
+            assertFalse(fallback.onOpenFailure(message), "$message is not the profile being refused")
+            assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile, "$message keeps the default")
         }
     }
 
@@ -80,40 +80,39 @@ class StalkerStreamIdentityPolicyTest {
         val fallback = opened()
         assertFalse(fallback.onOpenFailure("[ffmpeg] http: HTTP error 404 Not Found"), "404 is not a refusal")
         assertFalse(fallback.onOpenFailure(null), "the same attempt's ended snapshot must not switch after the text")
-        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile)
+        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile)
     }
 
     @Test
-    fun `a neutral first frame is remembered for that playlist only`() {
+    fun `an identity first frame is remembered for that playlist only`() {
         val memory = StalkerStreamProfileMemory()
         val fallback = opened(memory, playlist = "p1")
         assertTrue(fallback.onOpenFailure(unauthorized))
-        assertEquals(StalkerStreamProfile.IDENTITY, memory.profileFor("p1"), "nothing remembered before a frame")
+        assertEquals(StalkerStreamProfile.NEUTRAL, memory.profileFor("p1"), "nothing remembered before a frame")
         fallback.onOpened(profileFallbackEligible = true)
         fallback.onFirstFrame()
-        assertEquals(StalkerStreamProfile.NEUTRAL, memory.profileFor("p1"), "the neutral profile played")
-        assertEquals(StalkerStreamProfile.NEUTRAL, tune(memory, playlist = "p1").profile, "the next tune opens neutral")
-        assertEquals(StalkerStreamProfile.IDENTITY, memory.profileFor("p2"), "another playlist keeps the identity")
-        assertEquals(StalkerStreamProfile.IDENTITY, tune(memory, playlist = "p2").profile, "another playlist tune")
+        assertEquals(StalkerStreamProfile.IDENTITY, memory.profileFor("p1"), "the identity played")
+        assertEquals(StalkerStreamProfile.IDENTITY, tune(memory, playlist = "p1").profile, "the next tune opens with the identity")
+        assertEquals(StalkerStreamProfile.NEUTRAL, memory.profileFor("p2"), "another playlist keeps the default")
+        assertEquals(StalkerStreamProfile.NEUTRAL, tune(memory, playlist = "p2").profile, "another playlist tune")
     }
 
     @Test
-    fun `an identity first frame remembers nothing`() {
+    fun `a neutral first frame remembers nothing`() {
         val memory = StalkerStreamProfileMemory()
         opened(memory).onFirstFrame()
-        assertEquals(StalkerStreamProfile.IDENTITY, memory.profileFor("p1"))
+        assertEquals(StalkerStreamProfile.NEUTRAL, memory.profileFor("p1"))
     }
 
     @Test
-    fun `a neutral trial that fails goes back to the starting profile`() {
+    fun `an identity trial that fails goes back to neutral`() {
         val memory = StalkerStreamProfileMemory()
         val fallback = opened(memory)
         assertTrue(fallback.onOpenFailure(unauthorized))
         fallback.onOpened(profileFallbackEligible = true)
-        assertFalse(fallback.onOpenFailure(unauthorized), "neutral failing takes the normal failure path")
-        // A provider that needs MAG and 401'd once must not have its whole reconnect ladder stuck on neutral.
-        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile, "the trial is one shot: later re-mints use identity")
-        assertEquals(StalkerStreamProfile.IDENTITY, memory.profileFor("p1"), "a neutral that never played is not remembered")
+        assertFalse(fallback.onOpenFailure(unauthorized), "the identity failing takes the normal failure path")
+        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile, "the trial is one shot: later re-mints are neutral again")
+        assertEquals(StalkerStreamProfile.NEUTRAL, memory.profileFor("p1"), "an identity that never played is not remembered")
         fallback.onOpened(profileFallbackEligible = true)
         assertFalse(fallback.onOpenFailure(unauthorized), "and no second switch in the tune")
     }
@@ -123,21 +122,32 @@ class StalkerStreamIdentityPolicyTest {
         val fallback = opened()
         assertTrue(fallback.onOpenFailure(unauthorized))
         fallback.reset()
-        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile, "back to the learned profile")
+        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile, "back to the learned profile")
         fallback.onOpened(profileFallbackEligible = true)
         assertTrue(fallback.onOpenFailure(unauthorized), "the fresh tune may switch once again")
     }
 
     @Test
-    fun `a remembered neutral tries identity once when it fails before a frame`() {
-        val memory = StalkerStreamProfileMemory().apply { rememberNeutral("p1") }
+    fun `a remembered identity tries neutral once when it fails before a frame`() {
+        val memory = StalkerStreamProfileMemory().apply { rememberIdentity("p1") }
         val fallback = opened(memory)
-        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile, "the tune starts on the learned profile")
-        assertTrue(fallback.onOpenFailure(unauthorized), "neutral refused at open: try identity once")
-        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile)
+        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile, "the tune starts on the learned profile")
+        assertTrue(fallback.onOpenFailure(unauthorized), "identity refused at open: try neutral once")
+        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile)
         fallback.onOpened(profileFallbackEligible = true)
         fallback.onFirstFrame()
-        assertEquals(StalkerStreamProfile.IDENTITY, memory.profileFor("p1"), "an identity first frame forgets neutral")
+        assertEquals(StalkerStreamProfile.NEUTRAL, memory.profileFor("p1"), "a neutral first frame forgets the identity")
+    }
+
+    @Test
+    fun `a remembered identity whose neutral trial fails stays on the identity`() {
+        val memory = StalkerStreamProfileMemory().apply { rememberIdentity("p1") }
+        val fallback = opened(memory)
+        assertTrue(fallback.onOpenFailure(unauthorized))
+        fallback.onOpened(profileFallbackEligible = true)
+        assertFalse(fallback.onOpenFailure(unauthorized))
+        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile, "back to the starting profile")
+        assertEquals(StalkerStreamProfile.IDENTITY, memory.profileFor("p1"), "still learned")
     }
 
     @Test
@@ -147,7 +157,7 @@ class StalkerStreamIdentityPolicyTest {
         val fallback = tune()
         fallback.onOpened(profileFallbackEligible = split.profileFallback)
         assertFalse(fallback.onOpenFailure(unauthorized), "no switch with an override")
-        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile)
+        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile)
     }
 
     @Test
@@ -167,9 +177,9 @@ class StalkerStreamIdentityPolicyTest {
     fun `a failure after the first frame does not switch`() {
         val fallback = opened()
         fallback.onFirstFrame()
-        assertFalse(fallback.onOpenFailure("[mpv] loading failed"), "the channel played: a drop is not the identity")
+        assertFalse(fallback.onOpenFailure("[mpv] loading failed"), "the channel played: a drop is not the profile")
         assertFalse(fallback.onOpenFailure(unauthorized), "nor a later 401 once a frame showed")
-        assertEquals(StalkerStreamProfile.IDENTITY, fallback.profile)
+        assertEquals(StalkerStreamProfile.NEUTRAL, fallback.profile)
     }
 
     @Test

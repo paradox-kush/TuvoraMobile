@@ -5,34 +5,35 @@ import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
 /**
- * Which header profile a Stalker stream on the PORTAL'S OWN HOST opens with ([StalkerStreamHeaderPolicy]).
+ * Which header profile a live Stalker stream on the PORTAL'S OWN HOST opens with ([StalkerStreamHeaderPolicy]).
  *
- * [IDENTITY] (the default): the MAG User-Agent pair, plus the portal cookie / token / Referer / Origin on the Media3
- * lane. [NEUTRAL]: the credential-free player profile a foreign-host stream already gets (the playlist UA or
- * `libmpv`, and an Accept of any type; no X-User-Agent, nothing origin-bound).
+ * [IDENTITY]: the MAG User-Agent pair, plus the portal cookie / token / Referer / Origin on the Media3
+ * lane. [NEUTRAL] (the default, the pre-1.20.3 request shape): the credential-free player profile a foreign-host
+ * stream already gets (the playlist UA or `libmpv`, and an Accept of any type; no X-User-Agent, nothing origin-bound).
  */
 enum class StalkerStreamProfile { IDENTITY, NEUTRAL }
 
 /**
- * B259 follow-up: some providers 401 a portal-host stream at its first hop whenever the request carries the MAG
- * set-top-box User-Agent (proven on a real provider: any other UA, or none, gets 200 + video; cookie, token, Referer
- * and X-User-Agent make no difference). Other providers gate those same streams ON the MAG identity, so it stays the
- * default and the screen falls back once instead:
+ * B259 follow-up. Before 1.20.3 the phone, iOS, Apple TV and desktop apps never sent the MAG User-Agent, X-User-Agent
+ * or portal secrets to a Stalker stream, and a real provider played fine; 1.20.3 started sending the MAG identity to
+ * portal-host streams, and that provider 401s any request carrying the MAG User-Agent (any other UA, or none, gets
+ * 200 + video). So NEUTRAL is the default again, and IDENTITY is the one-shot fallback for providers that gate their
+ * streams on it:
  *
  *  - a LIVE portal-host stream (no playlist UA override: the viewer set that one on purpose) that fails AT OPEN,
  *    before its first frame, with an auth rejection or no named cause is re-minted at once (a create_link is
  *    single-use with a 5 s life) with the OTHER profile, once per tune, as a one-shot trial;
- *  - the trial's first frame is what the playlist learns (in memory, per process): a NEUTRAL frame remembers
- *    NEUTRAL, an IDENTITY frame forgets it. A playlist that learned NEUTRAL may so try IDENTITY again;
+ *  - the trial's first frame is what the playlist learns (in memory, per process): an IDENTITY frame remembers
+ *    IDENTITY, a NEUTRAL frame forgets it. A playlist that learned IDENTITY may so try NEUTRAL again;
  *  - a failed trial ends it: the tune goes back to its starting profile and the normal failure path (the reconnect
- *    ladder re-mints with the starting profile and its usual spacing), so a provider that needs MAG and refused one
- *    open is never stuck on NEUTRAL;
- *  - VOD, series and catch-up always open with IDENTITY: the fallback is a live-tune decision only.
+ *    ladder re-mints with the starting profile and its usual spacing);
+ *  - VOD, series, catch-up and recordings send no Stalker header set at all, exactly as before 1.20.3.
  *
  * Engines and the trigger. Media3 names the status ("Source error (HTTP 401)"), so a named 401/403 switches and any
  * other named cause (404, 5xx, network, codec) does not. libmpv ends a failed open with "loading failed" and no
  * status on the live lanes (Android mpv reports only an ended snapshot), so a failed open that names NO cause is
- * treated as the trigger too; it is still one switch per tune.
+ * treated as the trigger too ([StalkerOpenFailureGate] first waits briefly for the engine's text); it is still one
+ * switch per tune.
  *
  * Pure: no I/O, no logging.
  */
@@ -88,25 +89,25 @@ object StalkerStreamIdentityPolicy {
 }
 
 /**
- * The profile each playlist has PROVEN to play live with (a NEUTRAL trial's first frame; an IDENTITY trial's first
- * frame forgets it). In memory, per process: a provider that changes its mind is asked again on the next launch.
- * Shared by every live surface ([Process]); tests make their own. Never read by VOD, series or catch-up.
+ * The profile each playlist has PROVEN to play live with (an IDENTITY trial's first frame; a NEUTRAL trial's first
+ * frame forgets it). NEUTRAL until proven otherwise. In memory, per process: a provider that changes its mind is asked
+ * again on the next launch. Shared by every live surface ([Process]); tests make their own. Never read by VOD.
  */
 class StalkerStreamProfileMemory {
     // Read by the resolve path off the main thread: one plain lock (Kotlin/Native: one lock per collection).
     private val lock = SynchronizedObject()
-    private val neutral = mutableSetOf<String>()
+    private val identity = mutableSetOf<String>()
 
     fun profileFor(playlistId: String?): StalkerStreamProfile =
-        if (playlistId != null && synchronized(lock) { playlistId in neutral }) StalkerStreamProfile.NEUTRAL
-        else StalkerStreamProfile.IDENTITY
+        if (playlistId != null && synchronized(lock) { playlistId in identity }) StalkerStreamProfile.IDENTITY
+        else StalkerStreamProfile.NEUTRAL
 
-    fun rememberNeutral(playlistId: String) {
-        synchronized(lock) { neutral += playlistId }
+    fun rememberIdentity(playlistId: String) {
+        synchronized(lock) { identity += playlistId }
     }
 
-    fun forgetNeutral(playlistId: String) {
-        synchronized(lock) { neutral -= playlistId }
+    fun forgetIdentity(playlistId: String) {
+        synchronized(lock) { identity -= playlistId }
     }
 
     companion object {
@@ -172,7 +173,7 @@ class StalkerStreamFallback(
         )
         if (switch) {
             switched = true
-            trial = if (start == StalkerStreamProfile.IDENTITY) StalkerStreamProfile.NEUTRAL else StalkerStreamProfile.IDENTITY
+            trial = if (start == StalkerStreamProfile.NEUTRAL) StalkerStreamProfile.IDENTITY else StalkerStreamProfile.NEUTRAL
         }
         return switch
     }
@@ -183,8 +184,8 @@ class StalkerStreamFallback(
         started = true
         val id = playlistId ?: return
         when (trial) {
-            StalkerStreamProfile.NEUTRAL -> memory.rememberNeutral(id)
-            StalkerStreamProfile.IDENTITY -> memory.forgetNeutral(id)
+            StalkerStreamProfile.IDENTITY -> memory.rememberIdentity(id)
+            StalkerStreamProfile.NEUTRAL -> memory.forgetIdentity(id)
             null -> Unit
         }
     }
