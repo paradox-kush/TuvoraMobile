@@ -29,6 +29,12 @@ data class StalkerStreamIdentity(
 data class StalkerStreamHeaders(
     val public: Map<String, String>,
     val originBound: Map<String, String>,
+    /**
+     * A portal-host stream opened with the MAG identity ([StalkerStreamProfile.IDENTITY]) and no playlist UA
+     * override: if it is rejected before its first frame, the tune may fall back to [StalkerStreamProfile.NEUTRAL]
+     * once ([StalkerStreamFallback]). False for a foreign host, a NEUTRAL open, or an override.
+     */
+    val identityFallback: Boolean = false,
 ) {
     // Never print the secrets.
     override fun toString(): String = "StalkerStreamHeaders(public=${public.keys}, originBound=${originBound.keys})"
@@ -77,10 +83,19 @@ object StalkerStreamHeaderPolicy {
     /** Headers that carry the portal identity: never on a hop that is not credential-safe. Lower-case. */
     val CREDENTIAL_HEADERS: Set<String> get() = PlaybackCredentialScope.CREDENTIAL_HEADERS
 
-    /** The request headers for [streamUrl] (before any DNS host rewrite). [userAgentOverride] = the playlist's UA. */
-    fun headersFor(identity: StalkerStreamIdentity, streamUrl: String, userAgentOverride: String?): StalkerStreamHeaders {
+    /**
+     * The request headers for [streamUrl] (before any DNS host rewrite). [userAgentOverride] = the playlist's UA.
+     * [profile] NEUTRAL opens even a portal-host stream with the credential-free player profile
+     * ([StalkerStreamIdentityPolicy]: a provider that 401s the MAG User-Agent).
+     */
+    fun headersFor(
+        identity: StalkerStreamIdentity,
+        streamUrl: String,
+        userAgentOverride: String?,
+        profile: StalkerStreamProfile = StalkerStreamProfile.IDENTITY,
+    ): StalkerStreamHeaders {
         val override = userAgentOverride?.trim()?.takeIf { it.isNotEmpty() }
-        if (!isCredentialSafe(identity.portalBaseUrl, streamUrl)) {
+        if (profile == StalkerStreamProfile.NEUTRAL || !isCredentialSafe(identity.portalBaseUrl, streamUrl)) {
             return StalkerStreamHeaders(
                 public = linkedMapOf("User-Agent" to (override ?: PLAYER_USER_AGENT), "Accept" to "*/*"),
                 originBound = emptyMap(),
@@ -97,7 +112,7 @@ object StalkerStreamHeaderPolicy {
             put("Referer", origin)
             put("Origin", origin)
         }.filterValues { it.isNotBlank() }
-        return StalkerStreamHeaders(public = public, originBound = originBound)
+        return StalkerStreamHeaders(public = public, originBound = originBound, identityFallback = override == null)
     }
 
     /**

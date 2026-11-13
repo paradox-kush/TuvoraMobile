@@ -790,11 +790,17 @@ object StalkerClient : IptvClient {
      * ([StalkerStreamHeaderPolicy]), split: [StalkerStreamHeaders.public] for every engine, and the portal secrets in
      * [StalkerStreamHeaders.originBound], for the hop-scoping Media3 lane ONLY. The playlist's User-Agent wins. Null
      * when no link of this playlist was resolved in this process (callers keep the UA-only headers then).
+     * [profile] defaults to what the playlist has proven to play with ([StalkerStreamProfileMemory]); a live tune
+     * trying the NEUTRAL fallback passes its own ([StalkerStreamFallback.profile]).
      */
-    fun streamHeadersFor(acc: XtreamAccount, streamUrl: String): StalkerStreamHeaders? {
+    fun streamHeadersFor(
+        acc: XtreamAccount,
+        streamUrl: String,
+        profile: StalkerStreamProfile = StalkerStreamProfileMemory.Process.profileFor(acc.id),
+    ): StalkerStreamHeaders? {
         val identity = synchronized(streamIdentityLock) { streamIdentities[acc.id] } ?: return null
         return StalkerStreamHeaderPolicy.headersFor(
-            identity, streamUrl, com.nuvio.app.features.iptv.StreamUserAgentPolicy.resolve(acc),
+            identity, streamUrl, com.nuvio.app.features.iptv.StreamUserAgentPolicy.resolve(acc), profile,
         )
     }
 

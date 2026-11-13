@@ -49,6 +49,12 @@ data class LiveChannelSource(
      * mpv, iOS, Apple TV, desktop) never receive them: [headers] alone is what every engine gets. Never log.
      */
     val originBoundHeaders: Map<String, String> = emptyMap(),
+    /**
+     * A portal-host Stalker stream opened with the MAG identity and no playlist UA override: rejected before its
+     * first frame, the tune may re-mint it once with the NEUTRAL profile
+     * ([com.nuvio.app.features.iptv.stalker.StalkerStreamFallback]).
+     */
+    val identityFallback: Boolean = false,
 )
 
 /** A live stream's request headers, split by where they may go (see [LiveChannelSource.originBoundHeaders]). */
@@ -57,6 +63,8 @@ data class LiveStreamHeaders(
     val engine: Map<String, String>,
     /** For the hop-scoping Media3 lane only. */
     val originBound: Map<String, String> = emptyMap(),
+    /** See [LiveChannelSource.identityFallback]. */
+    val identityFallback: Boolean = false,
 ) {
     override fun toString(): String = "LiveStreamHeaders(engine=${engine.keys}, originBound=${originBound.keys})"
 
@@ -69,6 +77,7 @@ data class LiveStreamHeaders(
             LiveStreamHeaders(
                 engine = dnsHeaders.filterKeys { key -> split.public.keys.none { it.equals(key, ignoreCase = true) } } + split.public,
                 originBound = split.originBound,
+                identityFallback = split.identityFallback,
             )
     }
 }
@@ -123,9 +132,17 @@ object LiveTvData {
      *
      * [forceMint] = this resolve is a RETRY after a playback failure: a Stalker static-cmd verdict
      * would replay the dead URL, so the retry demands a fresh create_link instead.
+     * [stalkerProfile] = the tune's header profile ([com.nuvio.app.features.iptv.stalker.StalkerStreamFallback.profile]);
+     * null = what the playlist has proven to play with.
      */
-    suspend fun resolveSource(contentId: String, name: String, logo: String?, forceMint: Boolean = false): LiveChannelSource? {
-        val source = resolvePlayable(contentId, forceMint) ?: return null
+    suspend fun resolveSource(
+        contentId: String,
+        name: String,
+        logo: String?,
+        forceMint: Boolean = false,
+        stalkerProfile: com.nuvio.app.features.iptv.stalker.StalkerStreamProfile? = null,
+    ): LiveChannelSource? {
+        val source = resolvePlayable(contentId, forceMint, stalkerProfile) ?: return null
         XtreamLiveRecents.record(contentId, name, logo)
         return source
     }
@@ -142,7 +159,11 @@ object LiveTvData {
         return source.copy(headers = withStreamUserAgent(contentId, source.headers))
     }
 
-    private suspend fun resolvePlayable(contentId: String, forceMint: Boolean): LiveChannelSource? {
+    private suspend fun resolvePlayable(
+        contentId: String,
+        forceMint: Boolean,
+        stalkerProfile: com.nuvio.app.features.iptv.stalker.StalkerStreamProfile? = null,
+    ): LiveChannelSource? {
         val immediate = XtreamItemRegistry.liveStreamUrlFor(contentId)
             ?: XtreamItemRegistry.liveStreamUrlForAsync(contentId, forceMint)
             ?: return null
@@ -152,9 +173,15 @@ object LiveTvData {
             immediate, dnsProvider,
             followRedirects = LiveLinkReconnectPolicy.allowsRedirectProbe(LiveLinkReconnectPolicy.modeFor(singleUse)),
         )
-        val headers = streamHeaders(contentId, immediate, playback.headers)
-        return LiveChannelSource(url = playback.url, headers = headers.engine, singleUseLink = singleUse, originBoundHeaders = headers.originBound)
+        val headers = streamHeaders(contentId, immediate, playback.headers, stalkerProfile)
+        return LiveChannelSource(
+            url = playback.url, headers = headers.engine, singleUseLink = singleUse,
+            originBoundHeaders = headers.originBound, identityFallback = headers.identityFallback,
+        )
     }
+
+    /** The playlist [contentId] belongs to (keys the Stalker header profile memory); null when unparseable. */
+    fun playlistIdOf(contentId: String): String? = XtreamItemRegistry.parseId(contentId)?.accountId
 
     /**
      * USER-driven Live TV retry (WP6): clears the panel breaker for the channel's account so the
@@ -184,13 +211,22 @@ object LiveTvData {
      * set (B259: the portal identity on a portal-owned stream, a credential-free player profile elsewhere); every
      * other source, and a Stalker channel with no identity snapshot, gets the playlist User-Agent only. The
      * playlist's User-Agent wins in every case. The portal secrets come back apart ([LiveStreamHeaders.originBound]).
+     * [stalkerProfile]: see [resolveSource].
      */
-    fun streamHeaders(contentId: String, resolvedUrl: String, dnsHeaders: Map<String, String>): LiveStreamHeaders {
+    fun streamHeaders(
+        contentId: String,
+        resolvedUrl: String,
+        dnsHeaders: Map<String, String>,
+        stalkerProfile: com.nuvio.app.features.iptv.stalker.StalkerStreamProfile? = null,
+    ): LiveStreamHeaders {
         val account = accountFor(contentId)?.first ?: return LiveStreamHeaders(dnsHeaders)
         if (account.sourceType != com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER) {
             return LiveStreamHeaders(com.nuvio.app.features.iptv.StreamUserAgentPolicy.headersFor(account, dnsHeaders))
         }
-        val stalker = com.nuvio.app.features.iptv.stalker.StalkerClient.streamHeadersFor(account, resolvedUrl)
+        val stalker = (
+            if (stalkerProfile == null) com.nuvio.app.features.iptv.stalker.StalkerClient.streamHeadersFor(account, resolvedUrl)
+            else com.nuvio.app.features.iptv.stalker.StalkerClient.streamHeadersFor(account, resolvedUrl, stalkerProfile)
+            )
             ?: return LiveStreamHeaders(com.nuvio.app.features.iptv.StreamUserAgentPolicy.headersFor(account, dnsHeaders))
         return LiveStreamHeaders.merge(dnsHeaders, stalker)
     }

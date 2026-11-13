@@ -2,9 +2,11 @@ package com.nuvio.app.features.livetv
 
 import com.nuvio.app.features.iptv.stalker.StalkerStreamHeaderPolicy
 import com.nuvio.app.features.iptv.stalker.StalkerStreamIdentity
+import com.nuvio.app.features.iptv.stalker.StalkerStreamProfile
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * commonTest (kotlin.test) - `assertEquals(expected, actual, message)`.
@@ -51,5 +53,19 @@ class LiveStreamHeadersTest {
     fun `printing the headers never prints a secret`() {
         val text = merged("http://portal.example/x.ts").toString()
         assertFalse("TOKEN123" in text || "00%3A1A" in text, text)
+    }
+
+    @Test
+    fun `the fallback eligibility rides through the merge`() {
+        assertTrue(merged("http://portal.example/play/live.php?stream=1").identityFallback, "portal host, MAG identity")
+        assertFalse(merged("http://portal.example/play/live.php?stream=1", ua = "IBOPlayer/1.0").identityFallback, "override")
+        assertFalse(merged("http://edge.cdn.example/live/1.ts").identityFallback, "foreign host")
+        val neutral = LiveStreamHeaders.merge(
+            mapOf("Host" to "portal.example"),
+            StalkerStreamHeaderPolicy.headersFor(identity, "http://portal.example/x.ts", null, StalkerStreamProfile.NEUTRAL),
+        )
+        assertEquals(mapOf("Host" to "portal.example", "User-Agent" to "libmpv", "Accept" to "*/*"), neutral.engine, "neutral engine headers")
+        assertEquals(emptyMap(), neutral.originBound, "nothing origin-bound")
+        assertFalse(neutral.identityFallback, "nothing to fall back from")
     }
 }

@@ -7,6 +7,8 @@ import com.nuvio.app.core.contracts.PlaybackSessionState
 import com.nuvio.app.features.livetv.pause.LiveLink
 import com.nuvio.app.features.livetv.pause.LivePauseView
 import com.nuvio.app.features.player.LivePlaybackRejoinPolicy
+import com.nuvio.app.features.player.LivePlaybackStartupPolicy
+import com.nuvio.app.features.iptv.stalker.StalkerStreamFallback
 import com.nuvio.app.features.player.MpvStartPosition
 import com.nuvio.app.features.player.NuvioPlayerBridge
 import com.nuvio.app.features.player.NuvioPlayerBridgeCreator
@@ -188,6 +190,18 @@ class TvPlayerSession(
     /** Kept off the constructor for the same reason as [bindServer]. See [LiveLinkReconnectPolicy]. */
     internal fun bindSingleUseLink(singleUse: Boolean): TvPlayerSession {
         singleUseLink = singleUse
+        return this
+    }
+
+    /**
+     * B259 follow-up: the tune's Stalker header-profile fallback (null = not a Stalker live channel). A portal-host
+     * stream the provider refuses at open for the MAG User-Agent is re-minted once, at once, with the NEUTRAL
+     * profile; the re-resolver reads [StalkerStreamFallback.profile]. Kept off the constructor like [bindServer].
+     */
+    private var identityFallback: StalkerStreamFallback? = null
+
+    internal fun bindIdentityFallback(fallback: StalkerStreamFallback?): TvPlayerSession {
+        identityFallback = fallback
         return this
     }
 
@@ -588,6 +602,7 @@ class TvPlayerSession(
             // The reconnect itself goes through the monitor (sampled now), so it counts as the
             // ladder's first attempt and the next poll cannot mint a second link on top of it.
             monitor.onUserRetry()
+            identityFallback?.reset()
             poll()
         } else {
             bridge?.retry()
@@ -948,6 +963,8 @@ class TvPlayerSession(
             ServerPlayback.onPlaybackSnapshot(it, snapshot.positionMs, snapshot.isPlaying, snapshot.isLoading, snapshot.isEnded)
         }
         val lane = _state.value.lane
+        // A frame showed: this tune's header profile is proven (a NEUTRAL one is remembered for the playlist).
+        if (spentLinkAfterOpen && LivePlaybackStartupPolicy.hasStarted(snapshot)) identityFallback?.onFirstFrame()
         if (error != null && handleFailure(lane, error)) return
         if (snapshot.isPlaying && snapshot.positionMs > 0L) TvLaneMemory.put(progressKey, lane)
         applyLanguagePreferences(b)
@@ -1023,6 +1040,15 @@ class TvPlayerSession(
             ?.takeIf { !isLive || TvLiveRelinkPolicy.mayEscalateLane(spentLinkAfterOpen) }
         if (next == null) {
             if (isLive) {
+                // B259 follow-up: refused at open on the MAG identity: one immediate re-mint with the NEUTRAL profile.
+                // It skips the ladder's pacing (StalkerStreamIdentityPolicy.remintDelayMs: the provider refused the
+                // request, it holds no connection) and is not one of the ladder's attempts; NEUTRAL failing is the ladder's.
+                if (spentLinkAfterOpen && remintJob?.isActive != true && identityFallback?.onOpenFailure(error) == true) {
+                    log.i { "live open refused: re-minting with the neutral stream profile" }
+                    _state.value = _state.value.copy(isLoading = true)
+                    remint(spent = true)
+                    return true
+                }
                 // A live error is a stream that ended: same bounded reconnect ladder as a freeze.
                 val ended = snapshot.copy(isEnded = true, isPlaying = false, isLoading = false)
                 when (monitor.sample(clock.elapsedNow().inWholeMilliseconds, ended, wantsToPlay = true)) {

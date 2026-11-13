@@ -128,6 +128,8 @@ import com.nuvio.app.features.player.PlayerPreferencePolicy
 import com.nuvio.app.features.player.PictureChoice
 import com.nuvio.app.features.player.PersistedPlayerTrackPreference
 import com.nuvio.app.features.trakt.TraktPlatformClock
+import com.nuvio.app.features.iptv.stalker.StalkerStreamFallback
+import com.nuvio.app.features.iptv.stalker.StalkerStreamIdentityPolicy
 import com.nuvio.app.features.player.LiveRemintSpacingPolicy
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -237,6 +239,11 @@ fun LiveTvScreen(
     val freezeReconnector = remember { LivePlaybackReconnector(freezeReporter) }
     // The one automatic re-resolve after a playback error, per tune (never per URL: see the guard).
     val autoRefreshGuard = remember { LiveTvAutoRefreshGuard() }
+    // B259 follow-up: a portal-host Stalker stream the provider 401s for the MAG User-Agent is re-minted once per tune
+    // with the NEUTRAL header profile (StalkerStreamIdentityPolicy). A zap is a new tune, so a new fallback.
+    val identityFallback = remember(currentContentId) {
+        StalkerStreamFallback(LiveTvData.playlistIdOf(currentContentId))
+    }
     // A zap is a new tune: neither recovery budget carries over from the previous channel.
     LaunchedEffect(currentContentId) {
         freezeReconnector.onChannelChanged()
@@ -462,9 +469,14 @@ fun LiveTvScreen(
             LiveTvData.resolveSource(
                 currentContentId, currentTitle, currentLogo,
                 forceMint = retryTick > 0,
+                stalkerProfile = identityFallback.profile,
             )
         }.valueOrNull()
-        if (resolved == null) resolveError = true else { source = resolved; connectionEndedAtMs = null }
+        if (resolved == null) resolveError = true else {
+            identityFallback.onOpened(resolved.identityFallback)
+            source = resolved
+            connectionEndedAtMs = null
+        }
     }
 
     // Each attempt the dialect walk hands back becomes a real playback try — never an out-of-band
@@ -510,9 +522,12 @@ fun LiveTvScreen(
     // B259: an AUTOMATIC re-mint (the one-shot re-resolve after an error, the freeze reconnect). For a single-use link
     // inside the provider's one-connection window it lets go of the dead connection now and mints once the window has
     // passed (LiveRemintSpacingPolicy); otherwise it mints at once. Only spaces attempts: the budgets still decide.
-    fun spacedAutomaticReMint(mint: () -> Unit) {
+    // [switchingProfile]: the NEUTRAL fallback's re-mint, which never waits (StalkerStreamIdentityPolicy.remintDelayMs).
+    fun spacedAutomaticReMint(switchingProfile: Boolean = false, mint: () -> Unit) {
         val now = TraktPlatformClock.nowEpochMs()
-        val waitMs = LiveRemintSpacingPolicy.automaticDelayMs(source?.singleUseLink == true, connectionEndedAtMs ?: now, now)
+        val waitMs = StalkerStreamIdentityPolicy.remintDelayMs(
+            switchingProfile, source?.singleUseLink == true, connectionEndedAtMs ?: now, now,
+        )
         retriedInsideConnectionWindow = false
         if (waitMs <= 0L) { mint(); return }
         val scheduledFor = currentContentId
@@ -528,6 +543,20 @@ fun LiveTvScreen(
             if (currentContentId == scheduledFor && !isCatchUp) mint()
         }
     }
+    // B259 follow-up: the first open failed. On a portal-host Stalker stream opened with the MAG identity this tune
+    // switches to the NEUTRAL profile once and re-mints NOW (a create_link lives 5 s); true = handled, no error pill.
+    // An automatic re-mint: the panel guard (a viewer-only reset) is left alone.
+    fun switchStalkerProfileOnOpenFailure(message: String?): Boolean {
+        if (isCatchUp || !identityFallback.onOpenFailure(message)) return false
+        connectionEndedAtMs = TraktPlatformClock.nowEpochMs()
+        spacedAutomaticReMint(switchingProfile = true) {
+            controller = null
+            snapshot = PlayerPlaybackSnapshot()
+            source = null
+            retryTick++
+        }
+        return true
+    }
     val onRetry: () -> Unit = {
         // The viewer asked for it now: never delayed, but remembered for the reason line if it lands in the window.
         retriedInsideConnectionWindow = LiveRemintSpacingPolicy.userRetryInsideWindow(
@@ -537,6 +566,7 @@ fun LiveTvScreen(
         pendingRemint = null
         freezeReconnector.onUserRetry()
         autoRefreshGuard.reset()
+        identityFallback.reset()
         val reopen = replayRetry
         val session = catchUp
         when (ReplayRetryPolicy.stepFor(hasPendingReopen = reopen != null, session = session?.let { ReplayRetryPolicy.Session(it.singleUse) })) {
@@ -888,7 +918,9 @@ fun LiveTvScreen(
         },
         // The same live-resolve path the screen uses, forced to mint (the capture never re-opens a spent link).
         mint = {
-            val minted = LiveTvData.resolveSource(currentContentId, currentTitle, currentLogo, forceMint = true)
+            val minted = LiveTvData.resolveSource(
+                currentContentId, currentTitle, currentLogo, forceMint = true, stalkerProfile = identityFallback.profile,
+            )
                 ?: error("no link for $currentContentId")
             LiveLink(minted.url, LiveTvData.withStreamUserAgent(currentContentId, minted.headers))
         },
@@ -1117,6 +1149,8 @@ fun LiveTvScreen(
                         // The local buffer is not a live channel: none of the live recovery below applies to it.
                         if (pause.surface.value is LivePauseSurface.Local) return@onLiveSnapshot
                         if (!isCatchUp && startupPolicy.sample(it, elapsedMs = 0L)) {
+                            // An ended open (Android libmpv reports no error text for a live open at all).
+                            if (it.isEnded && switchStalkerProfileOnOpenFailure(null)) return@onLiveSnapshot
                             startupFailed = true
                             snapshot = it.copy(isLoading = false, isPlaying = false)
                             controller = null
@@ -1182,6 +1216,7 @@ fun LiveTvScreen(
                             }
                         }
                         if (LivePlaybackStartupPolicy.hasStarted(it)) autoRefreshGuard.onPlayback(it.positionMs)
+                        if (!isCatchUp && LivePlaybackStartupPolicy.hasStarted(it)) identityFallback.onFirstFrame()
                         if (!playbackStartRecorded.value && LivePlaybackStartupPolicy.hasStarted(it)) {
                             playbackStartRecorded.value = true
                             Breadcrumbs.playbackStarted(
@@ -1207,7 +1242,7 @@ fun LiveTvScreen(
                                 // Re-resolve rather than controller.retry(): live links carry
                                 // expiring tokens, so replaying the same URL can reconnect to a
                                 // link the provider has already invalidated.
-                                reconnect = { spacedAutomaticReMint(reResolve) },
+                                reconnect = { spacedAutomaticReMint(mint = reResolve) },
                                 // Video-only freeze: the stream is still delivering audio, so reset
                                 // the decoder before spending a live link on a re-resolve.
                                 resetVideo = { controller?.resetVideoPipeline() == true },
@@ -1216,12 +1251,13 @@ fun LiveTvScreen(
                             )
                         }
                     },
-                    onError = { message ->
+                    onError = PlayerSurfaceErrors@{ message ->
                         if (message != null && !isCatchUp && startupPolicy.sample(
                                 snapshot.copy(isEnded = true, isPlaying = false), elapsedMs = 0L,
                             )) {
                             // ExoPlayer reports a failed open as IDLE, not ENDED. Keep it out
                             // of the mid-playback token-refresh path just like mpv END_FILE.
+                            if (switchStalkerProfileOnOpenFailure(message)) return@PlayerSurfaceErrors
                             startupFailureMessage = message
                             startupFailed = true
                             snapshot = snapshot.copy(isLoading = false, isPlaying = false)
