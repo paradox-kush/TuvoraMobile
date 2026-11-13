@@ -19,11 +19,15 @@ enum class StalkerStreamProfile { IDENTITY, NEUTRAL }
  * and X-User-Agent make no difference). Other providers gate those same streams ON the MAG identity, so it stays the
  * default and the screen falls back once instead:
  *
- *  - a portal-host stream opened with the IDENTITY profile (and no playlist UA override: the viewer set that one on
- *    purpose) that fails AT OPEN, before its first frame, with an auth rejection is re-minted at once (a create_link
- *    is single-use with a 5 s life) and opened with the NEUTRAL profile;
- *  - when the NEUTRAL attempt draws a frame, NEUTRAL is remembered for that playlist (in memory, per process);
- *  - a NEUTRAL failure takes the normal failure path: each profile is tried at most once per tune.
+ *  - a LIVE portal-host stream (no playlist UA override: the viewer set that one on purpose) that fails AT OPEN,
+ *    before its first frame, with an auth rejection or no named cause is re-minted at once (a create_link is
+ *    single-use with a 5 s life) with the OTHER profile, once per tune, as a one-shot trial;
+ *  - the trial's first frame is what the playlist learns (in memory, per process): a NEUTRAL frame remembers
+ *    NEUTRAL, an IDENTITY frame forgets it. A playlist that learned NEUTRAL may so try IDENTITY again;
+ *  - a failed trial ends it: the tune goes back to its starting profile and the normal failure path (the reconnect
+ *    ladder re-mints with the starting profile and its usual spacing), so a provider that needs MAG and refused one
+ *    open is never stuck on NEUTRAL;
+ *  - VOD, series and catch-up always open with IDENTITY: the fallback is a live-tune decision only.
  *
  * Engines and the trigger. Media3 names the status ("Source error (HTTP 401)"), so a named 401/403 switches and any
  * other named cause (404, 5xx, network, codec) does not. libmpv ends a failed open with "loading failed" and no
@@ -60,9 +64,9 @@ object StalkerStreamIdentityPolicy {
     }
 
     /**
-     * Whether a failed open switches the tune to NEUTRAL. [eligible] = the attempt opened a portal-host stream with
-     * the IDENTITY profile and no UA override ([StalkerStreamHeaders.identityFallback]); [switchedThisTune] = the one
-     * switch is spent; [started] = this tune already drew a frame.
+     * Whether a failed open switches the tune to the other profile. [eligible] = the attempt opened a portal-host
+     * stream with no UA override ([StalkerStreamHeaders.profileFallback]) and no failure of it was classified yet;
+     * [switchedThisTune] = the one switch is spent; [started] = this tune already drew a frame.
      */
     fun shouldSwitch(eligible: Boolean, switchedThisTune: Boolean, started: Boolean, failure: OpenFailure): Boolean =
         eligible && !switchedThisTune && !started && failure != OpenFailure.OTHER
@@ -84,8 +88,9 @@ object StalkerStreamIdentityPolicy {
 }
 
 /**
- * The profile each playlist has PROVEN to play with (a NEUTRAL first frame). In memory, per process: a provider
- * that changes its mind is asked again on the next launch. Shared by every surface ([Process]); tests make their own.
+ * The profile each playlist has PROVEN to play live with (a NEUTRAL trial's first frame; an IDENTITY trial's first
+ * frame forgets it). In memory, per process: a provider that changes its mind is asked again on the next launch.
+ * Shared by every live surface ([Process]); tests make their own. Never read by VOD, series or catch-up.
  */
 class StalkerStreamProfileMemory {
     // Read by the resolve path off the main thread: one plain lock (Kotlin/Native: one lock per collection).
@@ -100,61 +105,149 @@ class StalkerStreamProfileMemory {
         synchronized(lock) { neutral += playlistId }
     }
 
+    fun forgetNeutral(playlistId: String) {
+        synchronized(lock) { neutral -= playlistId }
+    }
+
     companion object {
         val Process = StalkerStreamProfileMemory()
     }
 }
 
 /**
- * One tune's fallback state (a zap makes a new one; the viewer's Retry calls [reset]): the trial profile, whether the
- * one switch is spent, whether a frame showed, and whether the source on screen may fall back. Driven by the
- * docked Live screen (phone, desktop) and the Apple TV live session. Not thread-safe: one owner, its main thread.
+ * One live tune's fallback state (a zap makes a new one; the viewer's Retry calls [reset]): the starting profile
+ * (what the playlist learned), the one-shot trial, whether a frame showed, and whether the source on screen may
+ * still switch. Driven by the docked Live screen (phone, desktop; through [StalkerOpenFailureGate]) and the Apple TV
+ * live session. Not thread-safe: one owner, its main thread.
  */
 class StalkerStreamFallback(
     private val playlistId: String?,
     private val memory: StalkerStreamProfileMemory = StalkerStreamProfileMemory.Process,
 ) {
+    private var start: StalkerStreamProfile = memory.profileFor(playlistId)
     private var trial: StalkerStreamProfile? = null
     private var switched = false
     private var started = false
     private var eligible = false
+    private var opened = false
+    private var failureReported = false
 
     /** The profile the next resolve of this tune opens with. */
-    val profile: StalkerStreamProfile get() = trial ?: memory.profileFor(playlistId)
+    val profile: StalkerStreamProfile get() = trial ?: start
 
-    /** A source was resolved and handed to the engine; [identityFallbackEligible] = [StalkerStreamHeaders.identityFallback]. */
-    fun onOpened(identityFallbackEligible: Boolean) {
-        eligible = identityFallbackEligible
+    /** A failed open now could still switch (the gate waits for the engine's text only then). */
+    val canSwitch: Boolean get() = eligible && !switched && !started
+
+    /**
+     * This tune resolved a source and handed it to the engine; [profileFallbackEligible] =
+     * [StalkerStreamHeaders.profileFallback]. Until this runs, a frame belongs to the previous channel's surface.
+     */
+    fun onOpened(profileFallbackEligible: Boolean) {
+        opened = true
+        eligible = profileFallbackEligible
+        failureReported = false
     }
 
-    /** The first open failed. True: re-mint NOW (no spacing, [StalkerStreamIdentityPolicy.remintDelayMs]) with [profile]. */
+    /**
+     * The first open failed. True: re-mint NOW (no spacing, [StalkerStreamIdentityPolicy.remintDelayMs]) with
+     * [profile]. Any classified failure ends this source's eligibility; a failed trial ends the trial. Only the first
+     * report per opened source counts: an engine that keeps reporting the same error until the next load (the Apple TV
+     * poll loop) must not end the trial it just started.
+     */
     fun onOpenFailure(message: String?): Boolean {
+        if (failureReported) return false
+        failureReported = true
+        val wasEligible = eligible
+        eligible = false
+        if (switched) {
+            // The one-shot trial failed before a frame: back to the starting profile for the rest of the tune.
+            if (!started) trial = null
+            return false
+        }
         val switch = StalkerStreamIdentityPolicy.shouldSwitch(
-            eligible = eligible,
-            switchedThisTune = switched,
+            eligible = wasEligible,
+            switchedThisTune = false,
             started = started,
             failure = StalkerStreamIdentityPolicy.classify(message),
         )
         if (switch) {
             switched = true
-            eligible = false
-            trial = StalkerStreamProfile.NEUTRAL
+            trial = if (start == StalkerStreamProfile.IDENTITY) StalkerStreamProfile.NEUTRAL else StalkerStreamProfile.IDENTITY
         }
         return switch
     }
 
-    /** The tune drew a frame: a NEUTRAL that got here is remembered for the playlist. */
+    /** The tune drew a frame: a trial that got here is what the playlist learns. Ignored before [onOpened]. */
     fun onFirstFrame() {
-        if (started) return
+        if (started || !opened) return
         started = true
-        if (trial == StalkerStreamProfile.NEUTRAL && playlistId != null) memory.rememberNeutral(playlistId)
+        val id = playlistId ?: return
+        when (trial) {
+            StalkerStreamProfile.NEUTRAL -> memory.rememberNeutral(id)
+            StalkerStreamProfile.IDENTITY -> memory.forgetNeutral(id)
+            null -> Unit
+        }
     }
 
     /** The viewer's Retry: a fresh tune (the learned profile, one switch again). */
     fun reset() {
+        start = memory.profileFor(playlistId)
         trial = null
         switched = false
         started = false
         eligible = false
+        opened = false
+        failureReported = false
+    }
+}
+
+/**
+ * One attempt's failed open, as the docked Live screen sees it (a new gate per attempt). Engines report a failed
+ * open differently: Media3 sends the error text ("Source error (HTTP 401)"); the iOS poll loop reports the ended
+ * snapshot BEFORE the text in the same tick; Android libmpv sends no text for a live open at all. So an ended
+ * snapshot that could still switch waits [GRACE_MS] for the text before it counts as "no named cause", and the
+ * first decision wins: one call into [StalkerStreamFallback.onOpenFailure] per attempt.
+ */
+class StalkerOpenFailureGate(private val fallback: StalkerStreamFallback) {
+    sealed interface Step {
+        /** Nothing to do (already decided). */
+        data object None : Step
+
+        /** Take today's failure path (the error pill, the reason line). */
+        data object Proceed : Step
+
+        /** Re-mint now with [StalkerStreamFallback.profile]; no pill. */
+        data object Switch : Step
+
+        /** Hold the failure; [scheduleMs] non-null = start the grace timer (only the first time). */
+        data class Wait(val scheduleMs: Long?) : Step
+    }
+
+    private var waiting = false
+    private var decided = false
+
+    fun onEndedAtOpen(): Step = when {
+        decided -> Step.Proceed
+        waiting -> Step.Wait(null)
+        fallback.canSwitch -> { waiting = true; Step.Wait(GRACE_MS) }
+        else -> { decided = true; Step.Proceed }
+    }
+
+    fun onErrorText(message: String?): Step {
+        if (decided) return Step.Proceed
+        return decide(message)
+    }
+
+    fun onGraceElapsed(): Step = if (!waiting || decided) Step.None else decide(null)
+
+    private fun decide(message: String?): Step {
+        decided = true
+        waiting = false
+        return if (fallback.onOpenFailure(message)) Step.Switch else Step.Proceed
+    }
+
+    companion object {
+        /** More than one iOS poll tick (250 ms) and a desktop event hop; short next to the 20 s startup deadline. */
+        const val GRACE_MS = 750L
     }
 }

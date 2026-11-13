@@ -88,6 +88,26 @@ class StalkerStreamIdentityWiringTest {
     }
 
     @Test
+    fun `vod and catch up keep the portal identity after live learned neutral`() = runBlocking {
+        val acc = account("wiring-learned-neutral")
+        StalkerStreamProfileMemory.Process.rememberNeutral(acc.id)
+        try {
+            StalkerClient.vodMovies(acc, null).getOrThrow()
+            val url = assertNotNull(StalkerClient.resolveMovieUrl(acc, 3))
+            val split = assertNotNull(StalkerClient.streamHeadersFor(acc, url), "the default profile is the VOD/catch-up one")
+            assertEquals(apiHeaders.last()["User-Agent"], split.public["User-Agent"], "VOD still sends the MAG UA")
+            assertEquals("Bearer T", split.originBound["Authorization"], "Media3 catch-up/VOD keeps the token")
+            assertEquals(
+                StalkerStreamHeaderPolicy.PLAYER_USER_AGENT,
+                StalkerClient.streamHeadersFor(acc, url, StalkerStreamProfile.NEUTRAL)?.public?.get("User-Agent"),
+                "only a live tune asks for neutral",
+            )
+        } finally {
+            StalkerStreamProfileMemory.Process.forgetNeutral(acc.id)
+        }
+    }
+
+    @Test
     fun `nothing minted means no identity`() {
         assertNull(StalkerClient.streamHeadersFor(account("wiring-none"), "http://portal.test/live/1.ts"))
     }

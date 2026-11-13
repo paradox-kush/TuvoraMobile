@@ -205,6 +205,9 @@ class TvPlayerSession(
         return this
     }
 
+    /** A live channel tune (never a replay): the Stalker header-profile fallback applies, as on the phone. */
+    private val liveTune: Boolean get() = liveChannel && launch.liveReplay == null
+
     /** The playing address is spent after its first open: a live Stalker channel (never a replay). */
     private val spentLinkAfterOpen: Boolean get() = singleUseLink && liveChannel && launch.liveReplay == null
 
@@ -964,7 +967,7 @@ class TvPlayerSession(
         }
         val lane = _state.value.lane
         // A frame showed: this tune's header profile is proven (a NEUTRAL one is remembered for the playlist).
-        if (spentLinkAfterOpen && LivePlaybackStartupPolicy.hasStarted(snapshot)) identityFallback?.onFirstFrame()
+        if (liveTune && LivePlaybackStartupPolicy.hasStarted(snapshot)) identityFallback?.onFirstFrame()
         if (error != null && handleFailure(lane, error)) return
         if (snapshot.isPlaying && snapshot.positionMs > 0L) TvLaneMemory.put(progressKey, lane)
         applyLanguagePreferences(b)
@@ -1040,13 +1043,14 @@ class TvPlayerSession(
             ?.takeIf { !isLive || TvLiveRelinkPolicy.mayEscalateLane(spentLinkAfterOpen) }
         if (next == null) {
             if (isLive) {
-                // B259 follow-up: refused at open on the MAG identity: one immediate re-mint with the NEUTRAL profile.
-                // It skips the ladder's pacing (StalkerStreamIdentityPolicy.remintDelayMs: the provider refused the
-                // request, it holds no connection) and is not one of the ladder's attempts; NEUTRAL failing is the ladder's.
-                if (spentLinkAfterOpen && remintJob?.isActive != true && identityFallback?.onOpenFailure(error) == true) {
-                    log.i { "live open refused: re-minting with the neutral stream profile" }
+                // B259 follow-up: a portal-host Stalker open refused before its first frame: one immediate re-mint with
+                // the tune's other header profile (a one-shot trial). It skips the ladder's pacing
+                // (StalkerStreamIdentityPolicy.remintDelayMs: the provider refused the request, it holds no connection)
+                // and is not one of the ladder's attempts; a failed trial goes back to the starting profile and the ladder.
+                if (liveTune && remintJob?.isActive != true && identityFallback?.onOpenFailure(error) == true) {
+                    log.i { "live open refused: re-minting with the other stream profile" }
                     _state.value = _state.value.copy(isLoading = true)
-                    remint(spent = true)
+                    remint(spent = spentLinkAfterOpen)
                     return true
                 }
                 // A live error is a stream that ended: same bounded reconnect ladder as a freeze.

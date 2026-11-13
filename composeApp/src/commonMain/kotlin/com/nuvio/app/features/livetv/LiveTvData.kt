@@ -50,11 +50,10 @@ data class LiveChannelSource(
      */
     val originBoundHeaders: Map<String, String> = emptyMap(),
     /**
-     * A portal-host Stalker stream opened with the MAG identity and no playlist UA override: rejected before its
-     * first frame, the tune may re-mint it once with the NEUTRAL profile
-     * ([com.nuvio.app.features.iptv.stalker.StalkerStreamFallback]).
+     * A portal-host Stalker stream with no playlist UA override: rejected before its first frame, a live tune may
+     * re-mint it once with the other header profile ([com.nuvio.app.features.iptv.stalker.StalkerStreamFallback]).
      */
-    val identityFallback: Boolean = false,
+    val profileFallback: Boolean = false,
 )
 
 /** A live stream's request headers, split by where they may go (see [LiveChannelSource.originBoundHeaders]). */
@@ -63,8 +62,8 @@ data class LiveStreamHeaders(
     val engine: Map<String, String>,
     /** For the hop-scoping Media3 lane only. */
     val originBound: Map<String, String> = emptyMap(),
-    /** See [LiveChannelSource.identityFallback]. */
-    val identityFallback: Boolean = false,
+    /** See [LiveChannelSource.profileFallback]. */
+    val profileFallback: Boolean = false,
 ) {
     override fun toString(): String = "LiveStreamHeaders(engine=${engine.keys}, originBound=${originBound.keys})"
 
@@ -77,7 +76,7 @@ data class LiveStreamHeaders(
             LiveStreamHeaders(
                 engine = dnsHeaders.filterKeys { key -> split.public.keys.none { it.equals(key, ignoreCase = true) } } + split.public,
                 originBound = split.originBound,
-                identityFallback = split.identityFallback,
+                profileFallback = split.profileFallback,
             )
     }
 }
@@ -132,8 +131,8 @@ object LiveTvData {
      *
      * [forceMint] = this resolve is a RETRY after a playback failure: a Stalker static-cmd verdict
      * would replay the dead URL, so the retry demands a fresh create_link instead.
-     * [stalkerProfile] = the tune's header profile ([com.nuvio.app.features.iptv.stalker.StalkerStreamFallback.profile]);
-     * null = what the playlist has proven to play with.
+     * [stalkerProfile] = the live tune's header profile ([com.nuvio.app.features.iptv.stalker.StalkerStreamFallback.profile]);
+     * null = IDENTITY.
      */
     suspend fun resolveSource(
         contentId: String,
@@ -155,7 +154,9 @@ object LiveTvData {
     suspend fun resolveForRecording(contentId: String, forceMint: Boolean): LiveChannelSource? {
         // An alarm can start the process with no screen: the playlists must be read before the registry is asked.
         runCatching { XtreamRepository.ensureLoaded() }
-        val source = resolvePlayable(contentId, forceMint) ?: return null
+        // A recording is live: it opens with the profile the playlist learned live (never a tune's trial).
+        val learned = com.nuvio.app.features.iptv.stalker.StalkerStreamProfileMemory.Process.profileFor(playlistIdOf(contentId))
+        val source = resolvePlayable(contentId, forceMint, learned) ?: return null
         return source.copy(headers = withStreamUserAgent(contentId, source.headers))
     }
 
@@ -176,7 +177,7 @@ object LiveTvData {
         val headers = streamHeaders(contentId, immediate, playback.headers, stalkerProfile)
         return LiveChannelSource(
             url = playback.url, headers = headers.engine, singleUseLink = singleUse,
-            originBoundHeaders = headers.originBound, identityFallback = headers.identityFallback,
+            originBoundHeaders = headers.originBound, profileFallback = headers.profileFallback,
         )
     }
 
@@ -211,7 +212,7 @@ object LiveTvData {
      * set (B259: the portal identity on a portal-owned stream, a credential-free player profile elsewhere); every
      * other source, and a Stalker channel with no identity snapshot, gets the playlist User-Agent only. The
      * playlist's User-Agent wins in every case. The portal secrets come back apart ([LiveStreamHeaders.originBound]).
-     * [stalkerProfile]: see [resolveSource].
+     * [stalkerProfile]: see [resolveSource]; catch-up passes none, so it keeps the portal identity.
      */
     fun streamHeaders(
         contentId: String,

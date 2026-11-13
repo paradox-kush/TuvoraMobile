@@ -128,6 +128,7 @@ import com.nuvio.app.features.player.PlayerPreferencePolicy
 import com.nuvio.app.features.player.PictureChoice
 import com.nuvio.app.features.player.PersistedPlayerTrackPreference
 import com.nuvio.app.features.trakt.TraktPlatformClock
+import com.nuvio.app.features.iptv.stalker.StalkerOpenFailureGate
 import com.nuvio.app.features.iptv.stalker.StalkerStreamFallback
 import com.nuvio.app.features.iptv.stalker.StalkerStreamIdentityPolicy
 import com.nuvio.app.features.player.LiveRemintSpacingPolicy
@@ -241,7 +242,7 @@ fun LiveTvScreen(
     val autoRefreshGuard = remember { LiveTvAutoRefreshGuard() }
     // B259 follow-up: a portal-host Stalker stream the provider 401s for the MAG User-Agent is re-minted once per tune
     // with the NEUTRAL header profile (StalkerStreamIdentityPolicy). A zap is a new tune, so a new fallback.
-    val identityFallback = remember(currentContentId) {
+    val stalkerFallback = remember(currentContentId) {
         StalkerStreamFallback(LiveTvData.playlistIdOf(currentContentId))
     }
     // A zap is a new tune: neither recovery budget carries over from the previous channel.
@@ -469,11 +470,11 @@ fun LiveTvScreen(
             LiveTvData.resolveSource(
                 currentContentId, currentTitle, currentLogo,
                 forceMint = retryTick > 0,
-                stalkerProfile = identityFallback.profile,
+                stalkerProfile = stalkerFallback.profile,
             )
         }.valueOrNull()
         if (resolved == null) resolveError = true else {
-            identityFallback.onOpened(resolved.identityFallback)
+            stalkerFallback.onOpened(resolved.profileFallback)
             source = resolved
             connectionEndedAtMs = null
         }
@@ -543,11 +544,11 @@ fun LiveTvScreen(
             if (currentContentId == scheduledFor && !isCatchUp) mint()
         }
     }
-    // B259 follow-up: the first open failed. On a portal-host Stalker stream opened with the MAG identity this tune
-    // switches to the NEUTRAL profile once and re-mints NOW (a create_link lives 5 s); true = handled, no error pill.
+    // B259 follow-up: the attempt's StalkerOpenFailureGate decided the first open failed on a portal-host Stalker
+    // stream that may switch: re-mint NOW (a create_link lives 5 s) with the tune's other profile, no error pill.
     // An automatic re-mint: the panel guard (a viewer-only reset) is left alone.
-    fun switchStalkerProfileOnOpenFailure(message: String?): Boolean {
-        if (isCatchUp || !identityFallback.onOpenFailure(message)) return false
+    fun switchStalkerProfile() {
+        if (isCatchUp) return
         connectionEndedAtMs = TraktPlatformClock.nowEpochMs()
         spacedAutomaticReMint(switchingProfile = true) {
             controller = null
@@ -555,7 +556,6 @@ fun LiveTvScreen(
             source = null
             retryTick++
         }
-        return true
     }
     val onRetry: () -> Unit = {
         // The viewer asked for it now: never delayed, but remembered for the reason line if it lands in the window.
@@ -566,7 +566,7 @@ fun LiveTvScreen(
         pendingRemint = null
         freezeReconnector.onUserRetry()
         autoRefreshGuard.reset()
-        identityFallback.reset()
+        stalkerFallback.reset()
         val reopen = replayRetry
         val session = catchUp
         when (ReplayRetryPolicy.stepFor(hasPendingReopen = reopen != null, session = session?.let { ReplayRetryPolicy.Session(it.singleUse) })) {
@@ -919,7 +919,7 @@ fun LiveTvScreen(
         // The same live-resolve path the screen uses, forced to mint (the capture never re-opens a spent link).
         mint = {
             val minted = LiveTvData.resolveSource(
-                currentContentId, currentTitle, currentLogo, forceMint = true, stalkerProfile = identityFallback.profile,
+                currentContentId, currentTitle, currentLogo, forceMint = true, stalkerProfile = stalkerFallback.profile,
             )
                 ?: error("no link for $currentContentId")
             LiveLink(minted.url, LiveTvData.withStreamUserAgent(currentContentId, minted.headers))
@@ -985,6 +985,23 @@ fun LiveTvScreen(
         // UX191: the engine's text for a failed first open, kept ONLY to classify the reason line. It is not
         // playbackError on purpose: that one drives the mid-playback token-refresh path a startup failure stays out of.
         var startupFailureMessage by remember(startupPolicy) { mutableStateOf<String?>(null) }
+        // B259 follow-up: this attempt's failed open, decided once (StalkerOpenFailureGate): an ended snapshot that
+        // could still switch the Stalker header profile waits a short grace for the engine's error text first.
+        val openFailureGate = remember(startupPolicy) { StalkerOpenFailureGate(stalkerFallback) }
+        var openFailureGraceMs by remember(startupPolicy) { mutableStateOf<Long?>(null) }
+        LaunchedEffect(openFailureGate, openFailureGraceMs) {
+            val waitMs = openFailureGraceMs ?: return@LaunchedEffect
+            delay(waitMs)
+            when (openFailureGate.onGraceElapsed()) {
+                StalkerOpenFailureGate.Step.Switch -> switchStalkerProfile()
+                StalkerOpenFailureGate.Step.Proceed -> {
+                    startupFailed = true
+                    snapshot = snapshot.copy(isLoading = false, isPlaying = false)
+                    controller = null
+                }
+                else -> Unit
+            }
+        }
         val lifecycleOwner = LocalLifecycleOwner.current
         LaunchedEffect(startupPolicy, lifecycleOwner, startupFailed, pauseSurface) {
             // A pause owns the surface: no live picture is expected until Live, so the startup deadline stands down.
@@ -1149,8 +1166,16 @@ fun LiveTvScreen(
                         // The local buffer is not a live channel: none of the live recovery below applies to it.
                         if (pause.surface.value is LivePauseSurface.Local) return@onLiveSnapshot
                         if (!isCatchUp && startupPolicy.sample(it, elapsedMs = 0L)) {
-                            // An ended open (Android libmpv reports no error text for a live open at all).
-                            if (it.isEnded && switchStalkerProfileOnOpenFailure(null)) return@onLiveSnapshot
+                            // An ended open: the gate may hold it for the engine's text (iOS reports the end first;
+                            // Android libmpv reports no text for a live open at all).
+                            if (it.isEnded) when (val step = openFailureGate.onEndedAtOpen()) {
+                                is StalkerOpenFailureGate.Step.Wait -> {
+                                    step.scheduleMs?.let { ms -> openFailureGraceMs = ms }
+                                    return@onLiveSnapshot
+                                }
+                                StalkerOpenFailureGate.Step.Switch -> { switchStalkerProfile(); return@onLiveSnapshot }
+                                else -> Unit
+                            }
                             startupFailed = true
                             snapshot = it.copy(isLoading = false, isPlaying = false)
                             controller = null
@@ -1216,7 +1241,7 @@ fun LiveTvScreen(
                             }
                         }
                         if (LivePlaybackStartupPolicy.hasStarted(it)) autoRefreshGuard.onPlayback(it.positionMs)
-                        if (!isCatchUp && LivePlaybackStartupPolicy.hasStarted(it)) identityFallback.onFirstFrame()
+                        if (!isCatchUp && LivePlaybackStartupPolicy.hasStarted(it)) stalkerFallback.onFirstFrame()
                         if (!playbackStartRecorded.value && LivePlaybackStartupPolicy.hasStarted(it)) {
                             playbackStartRecorded.value = true
                             Breadcrumbs.playbackStarted(
@@ -1257,7 +1282,10 @@ fun LiveTvScreen(
                             )) {
                             // ExoPlayer reports a failed open as IDLE, not ENDED. Keep it out
                             // of the mid-playback token-refresh path just like mpv END_FILE.
-                            if (switchStalkerProfileOnOpenFailure(message)) return@PlayerSurfaceErrors
+                            if (openFailureGate.onErrorText(message) == StalkerOpenFailureGate.Step.Switch) {
+                                switchStalkerProfile()
+                                return@PlayerSurfaceErrors
+                            }
                             startupFailureMessage = message
                             startupFailed = true
                             snapshot = snapshot.copy(isLoading = false, isPlaying = false)

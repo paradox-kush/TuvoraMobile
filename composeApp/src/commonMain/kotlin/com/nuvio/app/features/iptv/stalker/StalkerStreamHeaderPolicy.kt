@@ -30,11 +30,11 @@ data class StalkerStreamHeaders(
     val public: Map<String, String>,
     val originBound: Map<String, String>,
     /**
-     * A portal-host stream opened with the MAG identity ([StalkerStreamProfile.IDENTITY]) and no playlist UA
-     * override: if it is rejected before its first frame, the tune may fall back to [StalkerStreamProfile.NEUTRAL]
-     * once ([StalkerStreamFallback]). False for a foreign host, a NEUTRAL open, or an override.
+     * A portal-host stream with no playlist UA override, opened with either profile: if it is rejected before its
+     * first frame, a live tune may try the other profile once ([StalkerStreamFallback]). False for a foreign host
+     * (always neutral) or an override (the viewer's choice is never second-guessed).
      */
-    val identityFallback: Boolean = false,
+    val profileFallback: Boolean = false,
 ) {
     // Never print the secrets.
     override fun toString(): String = "StalkerStreamHeaders(public=${public.keys}, originBound=${originBound.keys})"
@@ -95,10 +95,12 @@ object StalkerStreamHeaderPolicy {
         profile: StalkerStreamProfile = StalkerStreamProfile.IDENTITY,
     ): StalkerStreamHeaders {
         val override = userAgentOverride?.trim()?.takeIf { it.isNotEmpty() }
-        if (profile == StalkerStreamProfile.NEUTRAL || !isCredentialSafe(identity.portalBaseUrl, streamUrl)) {
+        val portalHost = isCredentialSafe(identity.portalBaseUrl, streamUrl)
+        if (profile == StalkerStreamProfile.NEUTRAL || !portalHost) {
             return StalkerStreamHeaders(
                 public = linkedMapOf("User-Agent" to (override ?: PLAYER_USER_AGENT), "Accept" to "*/*"),
                 originBound = emptyMap(),
+                profileFallback = portalHost && override == null,
             )
         }
         val origin = originOf(identity.portalBaseUrl)
@@ -112,7 +114,7 @@ object StalkerStreamHeaderPolicy {
             put("Referer", origin)
             put("Origin", origin)
         }.filterValues { it.isNotBlank() }
-        return StalkerStreamHeaders(public = public, originBound = originBound, identityFallback = override == null)
+        return StalkerStreamHeaders(public = public, originBound = originBound, profileFallback = override == null)
     }
 
     /**

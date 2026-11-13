@@ -67,7 +67,7 @@ object TvIptvBrowse {
         // B259 follow-up: one tune's Stalker header profile (identity by default, neutral after a refused open).
         val fallback = com.nuvio.app.features.iptv.stalker.StalkerStreamFallback(LiveTvData.playlistIdOf(contentId))
         val source = LiveTvData.resolveSource(contentId, name, logo, stalkerProfile = fallback.profile) ?: return null
-        fallback.onOpened(source.identityFallback)
+        fallback.onOpened(source.profileFallback)
         val launch = PlayerLaunch(
             profileId = ProfileRepository.activeProfileId,
             title = name,
@@ -85,9 +85,9 @@ object TvIptvBrowse {
         )
         return liveSession(launch, source.singleUseLink) {
             LiveTvData.resolveSource(contentId, name, logo, forceMint = true, stalkerProfile = fallback.profile)
-                ?.also { fallback.onOpened(it.identityFallback) }
+                ?.also { fallback.onOpened(it.profileFallback) }
                 ?.let { TvResolvedSource(it.url, it.headers) }
-        }.bindIdentityFallback(fallback.takeIf { source.singleUseLink })
+        }.bindIdentityFallback(fallback)
     }
 
     /**

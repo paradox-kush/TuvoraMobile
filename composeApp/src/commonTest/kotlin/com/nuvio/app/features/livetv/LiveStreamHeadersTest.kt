@@ -57,15 +57,15 @@ class LiveStreamHeadersTest {
 
     @Test
     fun `the fallback eligibility rides through the merge`() {
-        assertTrue(merged("http://portal.example/play/live.php?stream=1").identityFallback, "portal host, MAG identity")
-        assertFalse(merged("http://portal.example/play/live.php?stream=1", ua = "IBOPlayer/1.0").identityFallback, "override")
-        assertFalse(merged("http://edge.cdn.example/live/1.ts").identityFallback, "foreign host")
+        assertTrue(merged("http://portal.example/play/live.php?stream=1").profileFallback, "portal host, MAG identity")
+        assertFalse(merged("http://portal.example/play/live.php?stream=1", ua = "IBOPlayer/1.0").profileFallback, "override")
+        assertFalse(merged("http://edge.cdn.example/live/1.ts").profileFallback, "foreign host")
         val neutral = LiveStreamHeaders.merge(
             mapOf("Host" to "portal.example"),
             StalkerStreamHeaderPolicy.headersFor(identity, "http://portal.example/x.ts", null, StalkerStreamProfile.NEUTRAL),
         )
         assertEquals(mapOf("Host" to "portal.example", "User-Agent" to "libmpv", "Accept" to "*/*"), neutral.engine, "neutral engine headers")
         assertEquals(emptyMap(), neutral.originBound, "nothing origin-bound")
-        assertFalse(neutral.identityFallback, "nothing to fall back from")
+        assertTrue(neutral.profileFallback, "a neutral portal-host open may still try identity")
     }
 }
