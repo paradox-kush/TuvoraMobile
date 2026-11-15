@@ -58,7 +58,9 @@ import com.nuvio.app.features.sportsdetail.internal.ui.GameTabRow
 import com.nuvio.app.features.sportsdetail.internal.ui.GameTabsUi
 import com.nuvio.app.features.sportsdetail.internal.ui.LastPlayCard
 import com.nuvio.app.features.sportsdetail.internal.ui.LocalMoments
+import com.nuvio.app.features.sportsdetail.internal.ui.BasketballStrip
 import com.nuvio.app.features.sportsdetail.internal.ui.FootballFieldStrip
+import com.nuvio.app.features.sportsdetail.internal.ui.HockeyStrip
 import com.nuvio.app.features.sportsdetail.internal.ui.PitchLayout
 import com.nuvio.app.features.sportsdetail.internal.ui.PitchLineup
 import com.nuvio.app.features.sportsdetail.internal.ui.PlaysCard
@@ -223,6 +225,8 @@ private fun LoadedContent(
 private fun LazyListScope.stripItems(detail: GameDetail) {
     detail.blocks.filterIsInstance<FootballFieldBlock>().firstOrNull()?.let { f -> item(key = "field") { FootballFieldStrip(f, detail) } }
     detail.blocks.filterIsInstance<SoccerStripBlock>().firstOrNull()?.let { b -> item(key = "soccer") { SoccerStrip(b, detail) } }
+    detail.blocks.filterIsInstance<BasketballStripBlock>().firstOrNull()?.let { b -> item(key = "basketball") { BasketballStrip(b, detail) } }
+    detail.blocks.filterIsInstance<HockeyStripBlock>().firstOrNull()?.let { b -> item(key = "hockey") { HockeyStrip(b, detail) } }
 }
 
 /** Left pane of the wide layout: win chance, last play and the situation line. */
@@ -239,7 +243,7 @@ private fun LazyListScope.sectionItems(section: GameSection, detail: GameDetail,
     when (section) {
         GameSection.OVERVIEW -> {
             if (!wide) overviewLeft(detail)
-            items(blocks.filter { it !is WinProbabilityBlock && it !is SituationBlock && it !is FootballFieldBlock && it !is SoccerStripBlock }) { BlockContent(it, detail) }
+            items(blocks.filter { it !is WinProbabilityBlock && it !is SituationBlock && it !is FootballFieldBlock && it !is SoccerStripBlock && it !is BasketballStripBlock && it !is HockeyStripBlock }) { BlockContent(it, detail) }
         }
         GameSection.PLAYS -> blocks.forEach { b ->
             if (b is PlaysBlock) {

@@ -78,19 +78,20 @@ internal fun GameScoreboard(detail: GameDetail, modifier: Modifier = Modifier) {
 @Composable
 private fun SidesRow(a: Side, b: Side, aKey: String, bKey: String, palette: TeamPalette, detail: GameDetail, extras: SideExtras = SideExtras()) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        SideColumn(a, aKey, palette.home, extras.home, Modifier.weight(1f))
+        SideColumn(a, aKey, palette.home, extras.home, extras.possession == aKey, Modifier.weight(1f))
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = NuvioTokens.Space.s8)) {
             StatusLine(detail)
         }
-        SideColumn(b, bKey, palette.away, extras.away, Modifier.weight(1f))
+        SideColumn(b, bKey, palette.away, extras.away, extras.possession == bKey, Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun SideColumn(s: Side, key: String, teamColor: Color, extras: (@Composable () -> Unit)?, modifier: Modifier) {
+private fun SideColumn(s: Side, key: String, teamColor: Color, extras: (@Composable () -> Unit)?, hasBall: Boolean, modifier: Modifier) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
         TeamBadge(s.badgeUrl, 48)
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (hasBall) Box(Modifier.padding(end = NuvioTokens.Space.s4).size(6.dp).clip(CircleShape).background(teamColor))
             rankText(s.rank)?.let {
                 Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted, modifier = Modifier.padding(end = NuvioTokens.Space.s4))
             }
@@ -180,7 +181,7 @@ internal fun SlimScoreBar(detail: GameDetail, canPlay: Boolean, onPlay: () -> Un
 }
 
 /** Per-side extras under the score: soccer scorers, football timeout dots. Absent blocks add nothing. */
-internal class SideExtras(val home: (@Composable () -> Unit)? = null, val away: (@Composable () -> Unit)? = null)
+internal class SideExtras(val home: (@Composable () -> Unit)? = null, val away: (@Composable () -> Unit)? = null, val possession: String? = null)
 
 @Composable
 private fun rememberSideExtras(detail: GameDetail, palette: TeamPalette): SideExtras {
@@ -194,7 +195,9 @@ private fun rememberSideExtras(detail: GameDetail, palette: TeamPalette): SideEx
         }
     }
     fun dots(left: Int?, c: Color): (@Composable () -> Unit)? = left?.let { { CountDots(it, 3, c, Modifier.padding(top = NuvioTokens.Space.s4)) } }
+    val ball = detail.blocks.filterIsInstance<com.nuvio.app.features.sportsdetail.api.BasketballStripBlock>().firstOrNull()?.possession
     return SideExtras(
+        possession = ball,
         home = scorers(soccer?.homeScorers.orEmpty()) ?: dots(field?.homeTimeouts, palette.home),
         away = scorers(soccer?.awayScorers.orEmpty()) ?: dots(field?.awayTimeouts, palette.away),
     )
