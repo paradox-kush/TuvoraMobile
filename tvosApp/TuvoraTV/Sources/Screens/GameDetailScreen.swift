@@ -1,15 +1,22 @@
 import SwiftUI
 import TuvoraCore
 
-// Live game-detail screen (design approved 2026-11-07; research/mocks/sports-game-screen-design.html,
-// contract research/sports-mapping/BLOCK_CONTRACT.md). Data is the shared core through TvGameDetail:
-// header, live situation line + win probability, by-period linescore, latest plays and the watch row.
-// The screen fits one page on purpose: tvOS only scrolls to focusable views, so a taller page of
-// plain text would be unreachable. Refresh runs only while this cover is up and the app is active
-// (GameDetailRefreshPolicy decides the cadence in Kotlin); Menu/Back dismisses.
+// Live game-detail screen. Redesign 2026-11-14 (research/game-screen-redesign-2026-11/02-phase-a-frame.md A6; visual
+// target mocks/tv-four-sports-animated.html). Two columns like Android TV: the left column is the phone's Overview
+// (scoreboard with rank and colours, one-line last play, win-chance card, Play row); the right column is the section
+// chips + one panel. EVERY decision (capping, formatting, colours, what changed since the last snapshot) is made in
+// shared Kotlin (TvGameScreenModel); this file only lays out and animates. Nothing loops: each update animates the
+// net change once, and reduce motion sets the values without animation.
 //
-// Record is omitted: Apple TV has no recording surface. Lineups/stats/standings blocks are not
-// drawn yet (the TV layout of the mock keeps the "light" set).
+// The screen fits one page on purpose: tvOS only scrolls to focusable views. Refresh runs only while this cover is up
+// and the app is active (GameDetailRefreshPolicy decides the cadence in Kotlin); Menu/Back dismisses.
+//
+// Record is omitted: Apple TV has no recording surface.
+
+/// Focus targets of the screen: the Play row (default) and the section chip row are two focus sections.
+private enum GameFocus: Hashable {
+    case play, more, chip(Int)
+}
 
 struct GameDetailScreen: View {
     let fixture: RadarFixture
@@ -21,13 +28,21 @@ struct GameDetailScreen: View {
     @Environment(\.nuvio) private var colors
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var playback: PlaybackCoordinator
     @State private var model: TvGameDetailModel?
     @State private var state: TvGameDetailState = TvGameDetailStateLoading.shared
+    /// What the Loaded state draws; recomputed by Kotlin on each snapshot.
+    @State private var screen: TvGameScreenModel?
+    /// The snapshot before this one, so Kotlin can say what really changed. Nil on open and after a resume: no animation then.
+    @State private var previous: GameDetail?
+    @State private var selected = 0
+    @State private var pulseSide: String?
     @State private var matches: [RadarChannelMatcher.ChannelMatch] = []
     @State private var matching = true
     @State private var opening = false
     @State private var showSheet = false
+    @FocusState private var focus: GameFocus?
 
     var body: some View {
         Group {
@@ -36,6 +51,13 @@ struct GameDetailScreen: View {
                 VStack(spacing: dp(16)) {
                     ProgressView()
                     Text("Loading game…").font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary)
+                    // A focus target while loading: Menu still leaves, and the remote is never dead.
+                    Button { dismiss() } label: {
+                        Text("Back").font(NuvioType.labelLargeSemi).foregroundStyle(colors.textPrimary)
+                            .padding(.horizontal, dp(24)).padding(.vertical, dp(10))
+                            .background(Capsule().fill(colors.backgroundCard))
+                    }
+                    .buttonStyle(PlainNoChromeButtonStyle())
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .failed(let failed):
@@ -47,11 +69,17 @@ struct GameDetailScreen: View {
             case .empty:
                 Color.clear.onAppear { onNoData() }
             case .loaded(let loaded):
-                content(loaded.detail, stale: loaded.stale)
+                if let screen {
+                    content(screen, detail: loaded.detail)
+                } else {
+                    Color.clear
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(colors.background.ignoresSafeArea())
+        // New game, new identity (focus, selection, animation state all reset).
+        .id(fixture.id ?? "game")
         .onExitCommand { dismiss() }
         // The model is made once, here; the state collector follows it (no polling-for-nil loop).
         .task(id: scenePhase) {
@@ -64,9 +92,14 @@ struct GameDetailScreen: View {
             // backgrounding cancels this task and with it the loop. Cancellation is not swallowed.
             try? await model?.runWhileVisible()
         }
+        // The first snapshot after a resume is a fresh start: nothing animates for it.
+        .onChange(of: scenePhase) { _, _ in previous = nil }
         .task(id: model.map { ObjectIdentifier($0) }) {
             guard let model else { return }
-            for await next in model.state { state = next }
+            for await next in model.state {
+                state = next
+                if case .loaded(let l) = onEnum(of: next) { apply(l.detail, stale: l.stale) }
+            }
         }
         .task {
             matches = (try? await TvSports.shared.matchChannels(fixture: fixture, onPartial: { matches = $0 })) ?? matches
@@ -89,115 +122,92 @@ struct GameDetailScreen: View {
         return false
     }
 
+    // MARK: Snapshot -> screen
+
+    /// One snapshot: Kotlin builds the view-model and the moments; the change animates once (or not at all with reduce motion).
+    private func apply(_ detail: GameDetail, stale: Bool) {
+        let next = TvGameScreenModel.companion.from(
+            detail: detail, nowMs: TvSports.shared.nowMs(), hasPreview: false, previous: previous, stale: stale)
+        previous = detail
+        if reduceMotion || next.moments.isEmpty {
+            screen = next
+        } else {
+            withAnimation(NuvioTokens.Motion.medium) { screen = next }
+            for moment in next.moments where moment.kind == .scoreChange { pulse(moment.side) }
+        }
+        // Only a score change is announced, at most once per update.
+        if let line = next.announcement { UIAccessibility.post(notification: .announcement, argument: line) }
+        // The section that was showing may have disappeared: keep a valid selection, and a focus target.
+        if selected >= next.chips.count { selected = 0 }
+        if case .chip(let index) = focus, index >= next.chips.count { focus = .play }
+    }
+
+    /// The score pops once (scale + accent) and settles: one shot, never repeating.
+    private func pulse(_ side: String?) {
+        withAnimation(NuvioTokens.Motion.medium) { pulseSide = side }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            withAnimation(NuvioTokens.Motion.medium) { pulseSide = nil }
+        }
+    }
+
     // MARK: Loaded
 
-    private func content(_ detail: GameDetail, stale: Bool) -> some View {
-        VStack(alignment: .leading, spacing: dp(20)) {
-            headerView(detail)
-            if let situation = situation(detail) {
-                Text(situation).font(NuvioType.titleMediumSemi).foregroundStyle(colors.textPrimary).lineLimit(2)
+    private func content(_ screen: TvGameScreenModel, detail: GameDetail) -> some View {
+        VStack(alignment: .leading, spacing: dp(8)) {
+            topBar(screen.scoreboard)
+            HStack(alignment: .top, spacing: dp(18)) {
+                leftColumn(screen)
+                    .frame(width: dp(470), alignment: .topLeading)
+                rightColumn(screen)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            if let chance = TvSports.shared.winChance(detail: detail, nowMs: TvSports.shared.nowMs()) {
-                WinProbabilityBar(chance: chance, home: homeName(detail), away: awayName(detail))
-            }
-            if let ls = linescore(detail) { LinescoreTable(block: ls) }
-            watchRow(detail)
-            plays(detail)
-            Spacer(minLength: 0)
-            if let chip = updatedChip(detail, stale: stale) {
+            if let chip = screen.updatedLabel {
                 Text(chip).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary)
             }
         }
-        .padding(.horizontal, dp(52)).padding(.vertical, dp(32))
+        .padding(.horizontal, dp(40)).padding(.vertical, dp(22))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .focusSection()
     }
 
-    @ViewBuilder
-    private func headerView(_ detail: GameDetail) -> some View {
-        VStack(alignment: .leading, spacing: dp(8)) {
-            Text([detail.leagueName, detail.round].compactMap { $0 }.joined(separator: " · "))
-                .font(NuvioType.labelLarge).foregroundStyle(colors.textSecondary)
-            switch onEnum(of: detail.header) {
-            case .teamsHeader(let h):
-                HStack(alignment: .center, spacing: dp(24)) {
-                    sideView(h.home, trailing: false)
-                    Spacer(minLength: dp(16))
-                    statusText(detail)
-                    Spacer(minLength: dp(16))
-                    sideView(h.away, trailing: true)
-                }
-            case .versusHeader(let h):
-                HStack(alignment: .center, spacing: dp(24)) {
-                    sideView(h.a, trailing: false)
-                    Spacer(minLength: dp(16))
-                    statusText(detail)
-                    Spacer(minLength: dp(16))
-                    sideView(h.b, trailing: true)
-                }
-            case .eventHeader(let h):
-                Text(h.name).font(NuvioType.headlineSmall).foregroundStyle(colors.textPrimary)
-                if let s = h.session { Text(s).font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary) }
-                statusText(detail)
+    private func topBar(_ sb: TvScoreboard) -> some View {
+        HStack(spacing: dp(12)) {
+            Text(sb.leagueLine).font(NuvioType.labelLarge).foregroundStyle(colors.textSecondary)
+            if let venue = sb.venue {
+                Text("· \(venue)").font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary).lineLimit(1)
             }
-            if let venue = detail.venue, !venue.isEmpty {
-                Text(venue).font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary)
-            }
+            Spacer(minLength: 0)
         }
     }
 
-    private func sideView(_ side: Side, trailing: Bool) -> some View {
-        HStack(spacing: dp(16)) {
-            if trailing { score(side) }
-            VStack(alignment: trailing ? .trailing : .leading, spacing: dp(2)) {
-                Text(side.name).font(NuvioType.titleLarge).foregroundStyle(colors.textPrimary).lineLimit(2)
-                if let record = side.record { Text(record).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary) }
-            }
-            if !trailing { score(side) }
+    // MARK: Left column
+
+    private func leftColumn(_ screen: TvGameScreenModel) -> some View {
+        VStack(alignment: .leading, spacing: dp(7)) {
+            ScoreboardCard(board: screen.scoreboard, pulseSide: pulseSide, upcomingLabel: upcomingLabel)
+            if let play = screen.lastPlay { LastPlayCard(play: play) }
+            if let win = screen.winCard { WinChanceCard(card: win) }
+            Spacer(minLength: 0)
+            watchRow()
+                .focusSection()
         }
     }
 
-    @ViewBuilder
-    private func score(_ side: Side) -> some View {
-        if let s = side.score { Text(s).font(NuvioType.inter(36, .bold)).foregroundStyle(colors.textPrimary) }
-    }
+    private var upcomingLabel: String { SportsWhen.label(fixture, now: TvSports.shared.nowMs()) }
 
-    private func statusText(_ detail: GameDetail) -> some View {
-        VStack(spacing: dp(4)) {
-            switch detail.state {
-            case .live:
-                Text([detail.live?.periodLabel, detail.live?.clock].compactMap { $0 }.joined(separator: " ").nilIfEmpty ?? L("LIVE")).font(NuvioType.labelLargeSemi).foregroundStyle(colors.live)
-                if let d = detail.live?.detail { Text(d).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary) }
-            case .final: Text("Final").font(NuvioType.labelLargeSemi).foregroundStyle(colors.textSecondary)
-            case .postponed: Text("Postponed").font(NuvioType.labelLargeSemi).foregroundStyle(colors.textSecondary)
-            default: Text(SportsWhen.label(fixture, now: TvSports.shared.nowMs())).font(NuvioType.labelLargeSemi).foregroundStyle(colors.secondary)
-            }
-        }
-    }
-
-    /// "Updated 2 min ago" from the freshest source fetch, once it is older than ~20 s (or a refresh failed).
-    private func updatedChip(_ d: GameDetail, stale: Bool) -> String? {
-        guard let freshest = d.asOf.values.map({ $0.int64Value }).max() else { return stale ? L("Updating…") : nil }
-        let age = max(0, (TvSports.shared.nowMs() - freshest) / 1000)
-        guard age > 20 || stale else { return nil }
-        return age < 90 ? L("Updated \(age) s ago") : L("Updated \(age / 60) min ago")
-    }
-
-    // MARK: Watch row
-
-    private func watchRow(_ detail: GameDetail) -> some View {
+    private func watchRow() -> some View {
         // Watching (a live channel is already open) switches; browsing plays the best matched channel.
         let watching = playback.session?.session.title
         let best = matches.first
-        return HStack(spacing: dp(16)) {
+        return HStack(spacing: dp(10)) {
             if let watching {
-                GameActionButton(title: L("Switch"), subtitle: L("Now on \(watching)"), autoFocus: true) { showSheet = true }
+                GameActionButton(title: L("Switch"), subtitle: L("Now on \(watching)"), target: .play, focus: $focus) { showSheet = true }
             } else if let best {
-                GameActionButton(title: L("Play"), subtitle: best.channel.name, autoFocus: true) { play(best) }
+                GameActionButton(title: L("Play"), subtitle: best.channel.name, target: .play, focus: $focus) { play(best) }
                     .disabled(opening)
-                if matches.count > 1 { GameActionButton(title: L("More channels"), subtitle: nil, autoFocus: false) { showSheet = true } }
+                if matches.count > 1 { GameActionButton(title: L("More channels"), subtitle: nil, target: .more, focus: $focus) { showSheet = true } }
             } else {
-                GameActionButton(title: matching ? L("Finding channels…") : L("Find channels"), subtitle: nil, autoFocus: true) { showSheet = true }
+                GameActionButton(title: matching ? L("Finding channels…") : L("Find channels"), subtitle: nil, target: .play, focus: $focus) { showSheet = true }
             }
         }
     }
@@ -214,59 +224,494 @@ struct GameDetailScreen: View {
         }
     }
 
-    // MARK: Blocks
+    // MARK: Right column
 
-    private func situation(_ d: GameDetail) -> String? {
-        for b in d.blocks { if case .situationBlock(let s) = onEnum(of: b) { return s.line } }
-        return nil
-    }
-
-    private func linescore(_ d: GameDetail) -> LinescoreBlock? {
-        for b in d.blocks { if case .linescoreBlock(let l) = onEnum(of: b) { return l } }
-        return nil
-    }
-
-    private func homeName(_ d: GameDetail) -> String {
-        switch onEnum(of: d.header) {
-        case .teamsHeader(let h): return h.home.short ?? h.home.name
-        case .versusHeader(let h): return h.a.short ?? h.a.name
-        default: return ""
+    @ViewBuilder
+    private func rightColumn(_ screen: TvGameScreenModel) -> some View {
+        VStack(alignment: .leading, spacing: dp(8)) {
+            if !screen.chips.isEmpty {
+                chipRow(screen.chips)
+                panel(screen)
+                    .id(selected)
+                    .transition(.opacity)
+                    .animation(reduceMotion ? nil : NuvioTokens.Motion.fast, value: selected)
+            } else {
+                fallbackCards(screen)
+            }
+            Spacer(minLength: 0)
         }
     }
 
-    private func awayName(_ d: GameDetail) -> String {
-        switch onEnum(of: d.header) {
-        case .teamsHeader(let h): return h.away.short ?? h.away.name
-        case .versusHeader(let h): return h.b.short ?? h.b.name
-        default: return ""
+    private func chipRow(_ chips: [TvChip]) -> some View {
+        HStack(spacing: dp(8)) {
+            ForEach(Array(chips.enumerated()), id: \.offset) { index, chip in
+                SectionChip(title: chip.title, selected: selected == index, target: .chip(index), focus: $focus)
+            }
+        }
+        // Focusing a chip selects it (no OK press); OK does nothing.
+        .onChange(of: focus) { _, now in
+            if case .chip(let index) = now, index != selected { selected = index }
+        }
+        .focusSection()
+    }
+
+    @ViewBuilder
+    private func panel(_ screen: TvGameScreenModel) -> some View {
+        let chips = screen.chips
+        let section = chips.indices.contains(selected) ? chips[selected].section : chips[0].section
+        switch section {
+        case .plays: PlaysPanel(rows: screen.panels.plays)
+        case .stats: StatsPanel(rows: screen.panels.stats, byPeriod: screen.panels.byPeriod, board: screen.scoreboard, pulseSide: nil)
+        case .leaders: LeadersPanel(rows: screen.panels.leaders, form: screen.panels.form)
+        case .lineups: LineupsPanel(sides: screen.panels.lineups)
+        case .standings: StandingsPanel(groups: screen.panels.standings)
         }
     }
 
-    private func teamTag(_ side: String?, _ d: GameDetail) -> String? {
-        switch side {
-        case "home": return homeName(d)
-        case "away": return awayName(d)
-        default: return nil
+    /// No sections at all (F1, UFC, tennis today): the right column keeps the situation line and the by-period table.
+    @ViewBuilder
+    private func fallbackCards(_ screen: TvGameScreenModel) -> some View {
+        VStack(alignment: .leading, spacing: dp(12)) {
+            if let line = screen.situationLine {
+                Text(line).font(NuvioType.titleMediumSemi).foregroundStyle(colors.textPrimary).lineLimit(2)
+            }
+            if let table = screen.panels.byPeriod { ByPeriodTable(table: table) }
+        }
+    }
+}
+
+// MARK: - Left column pieces
+
+private func teamColor(_ hex: String?, fallback: Color) -> Color {
+    guard let hex, hex.count == 6, let v = UInt32(hex, radix: 16) else { return fallback }
+    return Color(argb: 0xFF00_0000 | v)
+}
+
+private struct ScoreboardCard: View {
+    let board: TvScoreboard
+    let pulseSide: String?
+    let upcomingLabel: String
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        VStack(spacing: dp(4)) {
+            if let home = board.home, let away = board.away {
+                HStack(alignment: .center, spacing: dp(8)) {
+                    sideView(home, side: "home", trailing: false)
+                    Spacer(minLength: dp(6))
+                    status
+                    Spacer(minLength: dp(6))
+                    sideView(away, side: "away", trailing: true)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: dp(4)) {
+                    if let name = board.eventName { Text(name).font(NuvioType.headlineSmall).foregroundStyle(colors.textPrimary) }
+                    if let s = board.eventSession { Text(s).font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary) }
+                    status
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, dp(12)).padding(.vertical, dp(8))
+        .background(RoundedRectangle(cornerRadius: dp(14)).fill(colors.backgroundCard))
+    }
+
+    private func sideView(_ s: TvScoreSide, side: String, trailing: Bool) -> some View {
+        let tint = teamColor(s.colorHex, fallback: trailing ? colors.textTertiary : colors.secondary)
+        let pulsing = pulseSide == side
+        return HStack(spacing: dp(8)) {
+            if trailing { scoreText(s, pulsing: pulsing) }
+            VStack(alignment: trailing ? .trailing : .leading, spacing: dp(2)) {
+                HStack(spacing: dp(4)) {
+                    if trailing == false { badge(s, tint: tint) }
+                    VStack(alignment: trailing ? .trailing : .leading, spacing: 0) {
+                        HStack(spacing: dp(3)) {
+                            if let rank = s.rank?.intValue {
+                                Text("\(rank)").font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary)
+                            }
+                            Text(s.shortName).font(NuvioType.titleMediumSemi).foregroundStyle(colors.textPrimary).lineLimit(1)
+                        }
+                        if let record = s.record { Text(record).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1) }
+                    }
+                    if trailing { badge(s, tint: tint) }
+                }
+            }
+            if !trailing { scoreText(s, pulsing: pulsing) }
+        }
+    }
+
+    private func badge(_ s: TvScoreSide, tint: Color) -> some View {
+        ZStack {
+            Circle().fill(tint)
+            if let url = s.badgeUrl.flatMap(URL.init(string:)) {
+                AsyncImage(url: url) { image in image.resizable().scaledToFit().padding(dp(4)) } placeholder: { Color.clear }
+            } else {
+                Text(String(s.shortName.prefix(3))).font(NuvioType.labelSmall).foregroundStyle(.white)
+            }
+        }
+        .frame(width: dp(34), height: dp(34))
+    }
+
+    @ViewBuilder
+    private func scoreText(_ s: TvScoreSide, pulsing: Bool) -> some View {
+        if let score = s.score {
+            Text(score)
+                .font(NuvioType.inter(34, .bold))
+                .foregroundStyle(pulsing ? colors.secondary : colors.textPrimary)
+                .contentTransition(.numericText())
+                .scaleEffect(pulsing ? 1.25 : 1)
+                .frame(minWidth: dp(34))
         }
     }
 
     @ViewBuilder
-    private func plays(_ d: GameDetail) -> some View {
-        let items: [TimelineItem] = d.blocks.compactMap { b in
-            if case .timelineBlock(let t) = onEnum(of: b) { return t.items }
-            return nil
-        }.first ?? []
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: dp(6)) {
-                Text("Latest plays").font(NuvioType.labelLargeSemi).foregroundStyle(colors.textSecondary)
-                // Newest last in the contract's order; show the five most recent, newest first.
-                ForEach(Array(items.suffix(5).reversed().enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: dp(12)) {
-                        Text(item.time).font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary).frame(width: dp(64), alignment: .leading)
-                        if let tag = teamTag(item.side, d) {
-                            Text(tag).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).frame(width: dp(56), alignment: .leading).lineLimit(1)
+    private var status: some View {
+        VStack(spacing: dp(2)) {
+            if let main = board.statusMain {
+                if board.isLive {
+                    Text(L("LIVE")).font(NuvioType.labelSmall).foregroundStyle(colors.live)
+                        .padding(.horizontal, dp(6)).padding(.vertical, dp(1))
+                        .background(Capsule().fill(colors.live.opacity(0.14)))
+                }
+                Text(main).font(NuvioType.labelLargeSemi).foregroundStyle(board.isLive ? colors.textPrimary : colors.textSecondary).lineLimit(1)
+                if let sub = board.statusSub { Text(sub).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).lineLimit(1) }
+            } else {
+                Text(upcomingLabel).font(NuvioType.labelLargeSemi).foregroundStyle(colors.secondary)
+            }
+        }
+    }
+}
+
+/// The newest play on one line. A new play fades and rises in once (the id changes with the play).
+private struct LastPlayCard: View {
+    let play: TvLastPlay
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        HStack(spacing: dp(6)) {
+            Text(play.time).font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary)
+            if let tag = play.tag { Text(tag).font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary) }
+            Text(play.text).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary).lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, dp(12)).padding(.vertical, dp(6))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: dp(12)).fill(colors.backgroundCard))
+        .id(play.key)
+        .transition(.opacity.combined(with: .offset(y: dp(8))))
+    }
+}
+
+/// Win chance as a market-implied probability, always credited (Polymarket's display condition): caption and the one extra
+/// line come from shared Kotlin. Bar and chart animate to the new value once per update. No odds, prices or links.
+private struct WinChanceCard: View {
+    let card: TvWinCard
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        let chance = card.chance
+        let home = Int(chance.homePercent), away = Int(chance.awayPercent), draw = chance.drawPercent?.intValue
+        let homeTint = teamColor(card.homeColorHex, fallback: colors.secondary)
+        let awayTint = teamColor(card.awayColorHex, fallback: colors.textTertiary)
+        VStack(alignment: .leading, spacing: dp(5)) {
+            HStack {
+                Text("WIN CHANCE").font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary)
+                Spacer(minLength: dp(8))
+                if let caption = chance.caption { Text(verbatim: caption).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).lineLimit(1) }
+            }
+            HStack(alignment: .firstTextBaseline) {
+                pct(card.homeName, home, leader: home >= away, tint: homeTint)
+                Spacer(minLength: 0)
+                if let draw {
+                    Text("Draw \(draw)%").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                    Spacer(minLength: 0)
+                }
+                pct(card.awayName, away, leader: away > home, tint: awayTint, trailing: true)
+            }
+            bar(home: home, draw: draw ?? 0, away: away, homeTint: homeTint, awayTint: awayTint)
+            if card.chart.count >= 2 {
+                WinChart(points: card.chart.map { $0.floatValue }, tint: home >= away ? homeTint : awayTint)
+                    .frame(height: dp(48))
+            }
+            if let line = chance.line {
+                Text(verbatim: line).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).lineLimit(1)
+            }
+            if let stale = chance.staleLabel {
+                Text(verbatim: stale).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, dp(12)).padding(.vertical, dp(8))
+        .background(RoundedRectangle(cornerRadius: dp(14)).fill(colors.backgroundCard))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func pct(_ name: String, _ value: Int, leader: Bool, tint: Color, trailing: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: dp(4)) {
+            if trailing { Text("\(value)%").font(leader ? NuvioType.inter(20, .bold) : NuvioType.labelLargeSemi).foregroundStyle(leader ? tint : colors.textSecondary).contentTransition(.numericText()) }
+            Text(name).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+            if !trailing { Text("\(value)%").font(leader ? NuvioType.inter(20, .bold) : NuvioType.labelLargeSemi).foregroundStyle(leader ? tint : colors.textSecondary).contentTransition(.numericText()) }
+        }
+    }
+
+    private func bar(home: Int, draw: Int, away: Int, homeTint: Color, awayTint: Color) -> some View {
+        GeometryReader { geo in
+            let total = max(1, CGFloat(home + draw + away))
+            let gap = dp(2)
+            HStack(spacing: gap) {
+                Capsule().fill(homeTint).frame(width: max(0, (geo.size.width - gap * 2) * CGFloat(home) / total))
+                if draw > 0 { Capsule().fill(colors.border).frame(width: max(0, (geo.size.width - gap * 2) * CGFloat(draw) / total)) }
+                Capsule().fill(awayTint).frame(maxWidth: .infinity)
+            }
+        }
+        .frame(height: dp(6))
+    }
+}
+
+/// Home's win chance over time. The newest segment draws itself in (animatable point count); everything else is static.
+private struct WinChart: View {
+    let points: [Float]
+    let tint: Color
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(colors.border).frame(height: 1).opacity(0.7)   // the 50 % line
+            ChartLine(points: points, shown: Double(points.count))
+                .stroke(tint, style: StrokeStyle(lineWidth: dp(2.5), lineCap: .round, lineJoin: .round))
+        }
+    }
+}
+
+private struct ChartLine: Shape {
+    let points: [Float]
+    /// How many points are drawn; a fractional value draws part of the newest segment.
+    var shown: Double
+    var animatableData: Double {
+        get { shown }
+        set { shown = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard points.count >= 2 else { return path }
+        func pt(_ i: Int) -> CGPoint {
+            CGPoint(x: rect.minX + rect.width * CGFloat(i) / CGFloat(points.count - 1), y: rect.maxY - rect.height * CGFloat(points[i]))
+        }
+        path.move(to: pt(0))
+        let whole = min(points.count - 1, Int(shown.rounded(.down)) - 1)
+        if whole >= 1 { for i in 1...whole { path.addLine(to: pt(i)) } }
+        let frac = shown - Double(whole + 1)
+        if whole + 1 < points.count, frac > 0 {
+            let a = pt(max(0, whole)), b = pt(whole + 1)
+            path.addLine(to: CGPoint(x: a.x + (b.x - a.x) * CGFloat(frac), y: a.y + (b.y - a.y) * CGFloat(frac)))
+        }
+        return path
+    }
+}
+
+// MARK: - Right column pieces
+
+private struct SectionChip: View {
+    let title: String
+    let selected: Bool
+    let target: GameFocus
+    var focus: FocusState<GameFocus?>.Binding
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        let focused = focus.wrappedValue == target
+        Button {} label: {
+            Text(title).font(NuvioType.labelLargeSemi)
+                .foregroundStyle(focused ? colors.primary : (selected ? colors.secondary : colors.textSecondary))
+                .padding(.horizontal, dp(14)).padding(.vertical, dp(6))
+                .background(Capsule().fill(focused ? colors.focusBackground : (selected ? colors.secondary.opacity(0.16) : colors.backgroundElevated)))
+                .overlay(Capsule().stroke(focused ? colors.focusRing : Color.clear, lineWidth: dp(2)))
+                .scaleEffect(focused ? NuvioTokens.Motion.focusScale : 1)
+                .animation(NuvioTokens.Motion.fast, value: focused)
+        }
+        .buttonStyle(PlainNoChromeButtonStyle())
+        .focused(focus, equals: target)
+        .reportsFocus(focused)
+    }
+}
+
+private struct PlaysPanel: View {
+    let rows: [TvPlayRow]
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.element.key) { index, row in
+                if let period = row.period, index == 0 || rows[index - 1].period != period {
+                    Text(period.uppercased()).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary)
+                        .padding(.top, index == 0 ? 0 : dp(8)).padding(.bottom, dp(2))
+                }
+                HStack(alignment: .firstTextBaseline, spacing: dp(8)) {
+                    Text(row.time).font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary).frame(width: dp(48), alignment: .leading)
+                    if let tag = row.tag { Text(tag).font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary) }
+                    Text(row.text).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let score = row.score { Text(score).font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary) }
+                }
+                .padding(.vertical, dp(3))
+                .transition(.opacity.combined(with: .offset(y: dp(8))))
+            }
+        }
+    }
+}
+
+private struct StatsPanel: View {
+    let rows: [TvStatRowView]
+    let byPeriod: TvByPeriod?
+    let board: TvScoreboard
+    let pulseSide: String?
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        let homeTint = teamColor(board.home?.colorHex, fallback: colors.secondary)
+        let awayTint = teamColor(board.away?.colorHex, fallback: colors.textTertiary)
+        VStack(alignment: .leading, spacing: dp(8)) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                VStack(spacing: dp(2)) {
+                    HStack {
+                        pill(row.home, leading: row.leader == "home", tint: homeTint)
+                        Spacer(minLength: 0)
+                        Text(row.label).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                        Spacer(minLength: 0)
+                        pill(row.away, leading: row.leader == "away", tint: awayTint)
+                    }
+                    if let fraction = row.homeFraction?.floatValue {
+                        GeometryReader { geo in
+                            HStack(spacing: dp(2)) {
+                                Capsule().fill(homeTint).frame(width: max(0, (geo.size.width - dp(2)) * CGFloat(fraction)))
+                                Capsule().fill(awayTint).frame(maxWidth: .infinity)
+                            }
                         }
-                        Text(item.text).font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary).lineLimit(1)
+                        .frame(height: dp(3))
+                    }
+                }
+            }
+            if let table = byPeriod { ByPeriodTable(table: table).padding(.top, dp(4)) }
+        }
+    }
+
+    private func pill(_ value: String, leading: Bool, tint: Color) -> some View {
+        Text(value).font(NuvioType.labelLargeSemi).foregroundStyle(leading ? Color.white : colors.textPrimary)
+            .padding(.horizontal, dp(8))
+            .background(Capsule().fill(leading ? tint : Color.clear))
+            .frame(minWidth: dp(40))
+    }
+}
+
+private struct ByPeriodTable: View {
+    let table: TvByPeriod
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: dp(3)) {
+            row(label: "", cells: table.columns, header: true)
+            ForEach(Array(table.rows.enumerated()), id: \.offset) { index, cells in
+                row(label: index < table.rowLabels.count ? table.rowLabels[index] : "", cells: cells, header: false)
+            }
+        }
+    }
+
+    private func row(label: String, cells: [String], header: Bool) -> some View {
+        HStack(spacing: 0) {
+            Text(label).frame(width: dp(60), alignment: .leading).lineLimit(1)
+            ForEach(Array(cells.enumerated()), id: \.offset) { _, c in Text(c).frame(minWidth: dp(32)) }
+            Spacer(minLength: 0)
+        }
+        .font(header ? NuvioType.labelMedium : NuvioType.labelLargeSemi)
+        .foregroundStyle(header ? colors.textTertiary : colors.textPrimary)
+    }
+}
+
+private struct LeadersPanel: View {
+    let rows: [TvLeaderRowView]
+    let form: TvFormView?
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: dp(4)) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: dp(8)) {
+                    Text(row.tag ?? "").font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary).frame(width: dp(40), alignment: .leading)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(row.athlete).font(NuvioType.labelLargeSemi).foregroundStyle(colors.textPrimary).lineLimit(1)
+                        Text(row.category).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Text(row.value).font(NuvioType.labelLargeSemi).foregroundStyle(colors.textPrimary)
+                }
+                .padding(.vertical, dp(2))
+            }
+            if let form {
+                HStack(spacing: dp(12)) {
+                    formLine(form.homeName, form.home)
+                    formLine(form.awayName, form.away)
+                }
+                .padding(.top, dp(6))
+            }
+        }
+    }
+
+    private func formLine(_ name: String, _ results: [String]) -> some View {
+        HStack(spacing: dp(4)) {
+            Text(name).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+            ForEach(Array(results.enumerated()), id: \.offset) { _, r in
+                Text(r).font(NuvioType.labelMedium).foregroundStyle(r == "W" ? colors.secondary : colors.textTertiary)
+            }
+        }
+    }
+}
+
+private struct LineupsPanel: View {
+    let sides: [TvLineupSideView]
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        HStack(alignment: .top, spacing: dp(16)) {
+            ForEach(Array(sides.enumerated()), id: \.offset) { _, side in
+                VStack(alignment: .leading, spacing: dp(3)) {
+                    Text([side.name, side.formation].compactMap { $0 }.joined(separator: " · "))
+                        .font(NuvioType.labelLargeSemi).foregroundStyle(colors.textPrimary)
+                    ForEach(Array(side.players.enumerated()), id: \.offset) { _, player in
+                        Text(player).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary).lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+private struct StandingsPanel: View {
+    let groups: [TvStandingsGroupView]
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: dp(8)) {
+            ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+                VStack(alignment: .leading, spacing: dp(2)) {
+                    HStack(spacing: 0) {
+                        Text(group.name).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).lineLimit(1)
+                        Spacer(minLength: 0)
+                        ForEach(Array(group.columns.enumerated()), id: \.offset) { _, c in
+                            Text(c).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).frame(width: dp(38))
+                        }
+                    }
+                    ForEach(Array(group.rows.enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: 0) {
+                            Text(row.name).font(row.isGameTeam ? NuvioType.labelLargeSemi : NuvioType.labelMedium)
+                                .foregroundStyle(row.isGameTeam ? colors.textPrimary : colors.textSecondary).lineLimit(1)
+                            Spacer(minLength: 0)
+                            ForEach(Array(row.cells.enumerated()), id: \.offset) { _, c in
+                                Text(c).font(NuvioType.labelMedium).foregroundStyle(row.isGameTeam ? colors.textPrimary : colors.textSecondary).frame(width: dp(38))
+                            }
+                        }
+                        .padding(.vertical, dp(2))
+                        .background(row.isGameTeam ? colors.secondary.opacity(0.14) : Color.clear)
                     }
                 }
             }
@@ -274,99 +719,39 @@ struct GameDetailScreen: View {
     }
 }
 
-// MARK: - Pieces
-
-/// Win chance as a market-implied probability, always credited (Polymarket's display condition): the caption and the
-/// single extra line come from shared Kotlin (TvWinChanceCard), so this view only draws them. No odds, prices or links.
-private struct WinProbabilityBar: View {
-    let chance: TvWinChance
-    let home: String
-    let away: String
-    @Environment(\.nuvio) private var colors
-
-    var body: some View {
-        let homePercent = Int(chance.homePercent)
-        VStack(alignment: .leading, spacing: dp(6)) {
-            HStack {
-                Text("\(home) \(homePercent)%").font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary)
-                Spacer()
-                Text("\(chance.awayPercent)% \(away)").font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary)
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(colors.backgroundCard)
-                    Capsule().fill(colors.secondary).frame(width: geo.size.width * CGFloat(max(0, min(100, homePercent))) / 100)
-                }
-            }
-            .frame(height: dp(8))
-            if chance.caption != nil || chance.staleLabel != nil {
-                HStack(spacing: dp(12)) {
-                    if let caption = chance.caption { Text(verbatim: caption) }
-                    Spacer(minLength: 0)
-                    if let stale = chance.staleLabel { Text(verbatim: stale) }
-                }
-                .font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).lineLimit(1)
-            }
-            if let line = chance.line {
-                Text(verbatim: line).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).lineLimit(1)
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
-private struct LinescoreTable: View {
-    let block: LinescoreBlock
-    @Environment(\.nuvio) private var colors
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: dp(4)) {
-            row(label: "", cells: block.columns, header: true)
-            ForEach(Array(block.rows.enumerated()), id: \.offset) { index, cells in
-                row(label: index < block.rowLabels.count ? block.rowLabels[index] : "", cells: cells, header: false)
-            }
-        }
-    }
-
-    private func row(label: String, cells: [String], header: Bool) -> some View {
-        HStack(spacing: 0) {
-            Text(label).frame(width: dp(140), alignment: .leading).lineLimit(1)
-            ForEach(Array(cells.enumerated()), id: \.offset) { _, c in Text(c).frame(minWidth: dp(44)) }
-            Spacer(minLength: 0)
-        }
-        .font(header ? NuvioType.labelMedium : NuvioType.bodyMedium)
-        .foregroundStyle(header ? colors.textTertiary : colors.textPrimary)
-    }
-}
+// MARK: - Buttons
 
 /// Primary / secondary action of the watch row: FocusBackground fill + FocusRing when focused.
 private struct GameActionButton: View {
     let title: String
     let subtitle: String?
-    let autoFocus: Bool
+    let target: GameFocus
+    var focus: FocusState<GameFocus?>.Binding
     let action: () -> Void
     @Environment(\.nuvio) private var colors
-    @FocusState private var focused: Bool
 
     var body: some View {
+        let focused = focus.wrappedValue == target
         Button(action: action) {
             VStack(alignment: .leading, spacing: dp(2)) {
                 Text(title).font(NuvioType.titleMediumSemi).foregroundStyle(focused ? colors.primary : colors.textPrimary)
                 if let subtitle { Text(subtitle).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary).lineLimit(1) }
             }
-            .padding(.horizontal, dp(20)).padding(.vertical, dp(12))
+            .padding(.horizontal, dp(16)).padding(.vertical, dp(10))
             .background(RoundedRectangle(cornerRadius: dp(12)).fill(focused ? colors.focusBackground : colors.backgroundElevated))
             .overlay(RoundedRectangle(cornerRadius: dp(12)).stroke(focused ? colors.focusRing : colors.border, lineWidth: focused ? dp(2) : dp(1)))
             .scaleEffect(focused ? NuvioTokens.Motion.focusScale : 1)
             .animation(NuvioTokens.Motion.fast, value: focused)
         }
         .buttonStyle(PlainNoChromeButtonStyle())
-        .focused($focused)
+        .focused(focus, equals: target)
         .reportsFocus(focused)
-        .onAppear { if autoFocus { DispatchQueue.main.async { focused = true } } }
+        // The primary action takes focus when it appears (Play is the first action on open).
+        // (Never from a chip: a channel list that lands late must not pull focus away from the user.)
+        .onAppear {
+            if target == .play {
+                DispatchQueue.main.async { if focus.wrappedValue == nil || focus.wrappedValue == .play { focus.wrappedValue = .play } }
+            }
+        }
     }
-}
-
-private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
