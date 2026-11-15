@@ -10,7 +10,6 @@ import com.nuvio.app.features.sportsdetail.api.StatRow
 import com.nuvio.app.features.sportsdetail.api.StatsBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.TimelineItem
-import com.nuvio.app.features.sportsdetail.api.WinPoint
 import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
 import com.nuvio.app.features.sportsdetail.internal.GameMomentTracker
 import com.nuvio.app.features.sportsdetail.internal.Moment
@@ -162,23 +161,6 @@ class GameUiHelpersTest {
         val b = t.accept(detail(blocks = listOf(PlaysBlock(listOf(TimelineItem("2:00", "1st", "home", "new", id = "2"))))))
         assertTrue(b.moments.any { it is Moment.NewPlay }, "new play moment")
     }
-
-    @Test fun `chart follows the leader so the line rises with the headline number`() {
-        val m = WinChanceModel.of(WinProbabilityBlock(homePercent = 1, awayPercent = 99), TeamsHeader(Side("A", "AAA"), Side("B", "BBB")))
-        assertEquals(listOf(0.8f, 0.99f), m.seriesFor(listOf(WinPoint(1, 20), WinPoint(2, 1))), "away leads so the home series is flipped")
-        val h = WinChanceModel.of(WinProbabilityBlock(homePercent = 70, awayPercent = 30), TeamsHeader(Side("A", "AAA"), Side("B", "BBB")))
-        assertEquals(listOf(0.2f, 0.7f), h.seriesFor(listOf(WinPoint(1, 20), WinPoint(2, 70))), "home leads so the series is as given")
-    }
-
-    @Test fun `three-way chart ends at the headline when away leads`() {
-        // home 30 / draw 30 / away 40: the last point is home's NON-draw share 30/70 = 43 with draw 30.
-        val m = WinChanceModel.of(WinProbabilityBlock(homePercent = 30, drawPercent = 30, awayPercent = 40), TeamsHeader(Side("A", "AAA"), Side("B", "BBB")))
-        val s = m.seriesFor(listOf(WinPoint(1, 50, 25), WinPoint(2, 43, 30)))
-        assertEquals(0.4f, s.last(), 0.011f, "line ends at the 40 percent headline (was ~57)")
-        assertEquals(0.375f, s.first(), 0.001f, "50 percent of the non-draw 75")
-        val home = WinChanceModel.of(WinProbabilityBlock(homePercent = 40, drawPercent = 30, awayPercent = 30), TeamsHeader(Side("A"), Side("B")))
-        assertEquals(0.4f, home.seriesFor(listOf(WinPoint(1, 57, 30))).last(), 0.011f, "home leads: ends at 40")
-    }
 }
 
 class SoccerUiHelpersTest {
@@ -201,22 +183,6 @@ class SoccerUiHelpersTest {
         assertEquals("■2", c.cardsText(2, 0), "yellow only")
         assertEquals("■2 ▮1", c.cardsText(2, 1), "with a red")
         assertEquals(44, c.awayPossession(56), "away share")
-    }
-}
-
-class MarkerViewTest {
-    private val view = com.nuvio.app.features.sportsdetail.internal.ui.MarkerView
-    private val m = com.nuvio.app.features.sportsdetail.internal.ChartMarker(0.5f, 0.7f, "G", "home")
-
-    @Test fun `marker y is read off the plotted series at its x`() {
-        assertEquals(0.4f, view.displayY(m, listOf(0.1f, 0.4f, 0.9f)), "middle point of the plotted line")
-        assertEquals(0.9f, view.displayY(com.nuvio.app.features.sportsdetail.internal.ChartMarker(1f, 0.1f, "G", "away"), listOf(0.1f, 0.4f, 0.9f)), "last point")
-        assertEquals(0.7f, view.displayY(m, emptyList()), "no series falls back to the marker's own y")
-    }
-
-    @Test fun `label goes above from fifty percent and below under it`() {
-        assertTrue(view.labelAbove(m, listOf(0.6f, 0.7f, 0.8f)), "70 percent above")
-        assertTrue(!view.labelAbove(m, listOf(0.6f, 0.3f, 0.8f)), "30 percent below")
     }
 }
 

@@ -6,11 +6,9 @@ import com.nuvio.app.features.sportsdetail.api.Header
 import com.nuvio.app.features.sportsdetail.api.StatsBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.TimelineItem
-import com.nuvio.app.features.sportsdetail.api.WinPoint
 import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import com.nuvio.app.features.sportsdetail.internal.GameSection
-import kotlin.math.roundToInt
 
 /** Pure view-models for the game screen: every decision a composable would otherwise make lives here and is unit-tested. */
 
@@ -108,17 +106,6 @@ internal data class WinChanceModel(
 ) {
     val leaderLabel: String get() = "$leaderName to win"
 
-    /**
-     * The leader's win chance per point, so the line ends where the big number is. A point's `home` is home's share of the NON-draw
-     * outcomes (h/(h+a)); with the point's draw percent d the full chances are home*(100-d)/100 and (100-home)*(100-d)/100.
-     */
-    fun seriesFor(points: List<WinPoint>): List<Float> = points.map { p ->
-        val home = p.home.coerceIn(0, 100)
-        val rest = (100 - (p.draw ?: 0).coerceIn(0, 100)) / 100f
-        val share = if (leaderSide == "home") home / 100f else (100 - home) / 100f
-        share * rest
-    }
-
     companion object {
         fun of(w: WinProbabilityBlock, header: Header?): WinChanceModel {
             val home = w.homePercent.coerceIn(0, 100)
@@ -195,16 +182,6 @@ internal data class StandingsFit(val visible: Int, val cellDp: Float) {
             return StandingsFit(visible, minOf(CELL_MAX_DP, room / visible).coerceAtLeast(CELL_MIN_DP))
         }
     }
-}
-
-/** A marker sits on the plotted line: its y is the PLOTTED series at the marker's x (never a re-derived flip of the home series). */
-internal object MarkerView {
-    fun displayY(m: com.nuvio.app.features.sportsdetail.internal.ChartMarker, series: List<Float>): Float {
-        if (series.isEmpty()) return m.y
-        val i = (m.x.coerceIn(0f, 1f) * (series.size - 1)).roundToInt().coerceIn(0, series.lastIndex)
-        return series[i]
-    }
-    fun labelAbove(m: com.nuvio.app.features.sportsdetail.internal.ChartMarker, series: List<Float>): Boolean = displayY(m, series) >= 0.5f
 }
 
 /**
