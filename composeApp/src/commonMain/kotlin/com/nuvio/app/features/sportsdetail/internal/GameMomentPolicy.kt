@@ -1,6 +1,8 @@
 package com.nuvio.app.features.sportsdetail.internal
 
+import com.nuvio.app.features.sportsdetail.api.BasketballStripBlock
 import com.nuvio.app.features.sportsdetail.api.FootballFieldBlock
+import com.nuvio.app.features.sportsdetail.api.HockeyStripBlock
 import com.nuvio.app.features.sportsdetail.api.GameDetail
 import com.nuvio.app.features.sportsdetail.api.SoccerStripBlock
 import com.nuvio.app.features.sportsdetail.api.GameState
@@ -21,6 +23,11 @@ internal sealed interface Moment {
     data class Touchdown(val side: String) : Moment
     data class PossessionChange(val to: String) : Moment
     data class SoccerMoment(val event: com.nuvio.app.features.sportsdetail.api.SoccerEvent) : Moment
+    // Phase C
+    data class PowerPlay(val side: String?, val started: Boolean) : Moment
+    data class FoulCount(val side: String, val to: Int) : Moment
+    data class BonusReached(val side: String) : Moment
+    data class TimeoutUsed(val side: String) : Moment
 }
 
 internal object GameMomentPolicy {
@@ -34,6 +41,8 @@ internal object GameMomentPolicy {
             winChance(prev, next)?.let(::add)
             fieldMove(prev, next)?.let(::add)
             soccer(prev, next)?.let(::add)
+            hockey(prev, next)?.let(::add)
+            addAll(basketball(prev, next))
             newPlay(prev, next)?.let(::add)
         }
     }
@@ -81,6 +90,31 @@ internal object GameMomentPolicy {
         val n = next.blocks.filterIsInstance<SoccerStripBlock>().firstOrNull()?.lastEvent ?: return null
         val p = prev.blocks.filterIsInstance<SoccerStripBlock>().firstOrNull()?.lastEvent
         return if (p == null || p.kind != n.kind || p.minute != n.minute || p.text != n.text) Moment.SoccerMoment(n) else null
+    }
+
+    /** The power play side changing: a side gained it (started) or it went back to even strength. The bar stepping is not a moment. */
+    private fun hockey(prev: GameDetail, next: GameDetail): Moment? {
+        val a = prev.blocks.filterIsInstance<HockeyStripBlock>().firstOrNull() ?: return null
+        val b = next.blocks.filterIsInstance<HockeyStripBlock>().firstOrNull() ?: return null
+        if (a.powerPlaySide == b.powerPlaySide) return null
+        return if (b.powerPlaySide != null) Moment.PowerPlay(b.powerPlaySide, started = true) else Moment.PowerPlay(null, started = false)
+    }
+
+    /** New team fouls, the bonus switching on, a timeout used. A new period resetting the fouls is not a moment. */
+    private fun basketball(prev: GameDetail, next: GameDetail): List<Moment> {
+        val a = prev.blocks.filterIsInstance<BasketballStripBlock>().firstOrNull() ?: return emptyList()
+        val b = next.blocks.filterIsInstance<BasketballStripBlock>().firstOrNull() ?: return emptyList()
+        return buildList {
+            for (side in listOf("home", "away")) {
+                val pf = if (side == "home") a.homeFouls else a.awayFouls
+                val nf = if (side == "home") b.homeFouls else b.awayFouls
+                if (pf != null && nf != null && nf > pf) add(Moment.FoulCount(side, nf))
+                if (!BasketballStripPolicy.inBonus(side, a) && BasketballStripPolicy.inBonus(side, b)) add(Moment.BonusReached(side))
+                val pt = if (side == "home") a.homeTimeouts else a.awayTimeouts
+                val nt = if (side == "home") b.homeTimeouts else b.awayTimeouts
+                if (pt != null && nt != null && nt < pt) add(Moment.TimeoutUsed(side))
+            }
+        }
     }
 
     private fun winChance(prev: GameDetail, next: GameDetail): Moment? {

@@ -19,7 +19,9 @@ internal enum class BlockType(val id: String) {
     /** Phase A: the full play list, and generic standings (any league's columns). */
     PLAYS("plays"), STANDINGS_TABLE("standingsTable"),
     /** Phase B: the football field strip and the soccer strip (both read the single-event scoreboard). */
-    FIELD("field"), SOCCER_STRIP("soccerStrip");
+    FIELD("field"), SOCCER_STRIP("soccerStrip"),
+    /** Phase C: basketball and hockey strips (both read the summary). */
+    BASKETBALL_STRIP("basketballStrip"), HOCKEY_STRIP("hockeyStrip");
 
     companion object {
         fun byId(id: String): BlockType? = entries.firstOrNull { it.id == id }
@@ -112,7 +114,11 @@ internal data class SportsMapping(
     val profiles: Map<String, ProfileSpec>,
     /** Optional per-block source order override: block id -> ["tsdb","espn"]. */
     val chain: Map<String, List<String>>,
+    /** Names of the remote UI switches that are ON (`uiSwitches` with a literal boolean true). A missing key or a non-boolean value = OFF. */
+    val uiSwitches: Set<String> = emptySet(),
 ) {
+    fun switchOn(name: String): Boolean = name in uiSwitches
+
     /** The manual ESPN-event pin for a TheSportsDB event: the raw numeric id (what the backend validates), else the legacy "tsdb:" key. */
     fun eventOverride(tsdbEventId: String?): String? =
         tsdbEventId?.let { eventOverrides[it] ?: eventOverrides["tsdb:$it"] }
@@ -253,6 +259,7 @@ internal object SportsMappingParser {
             ),
             profiles = profiles,
             chain = r["chain"].obj()?.mapNotNull { (k, v) -> (v as? JsonArray)?.let { a -> k to a.mapNotNull { it.s() } } }?.toMap().orEmpty(),
+            uiSwitches = r["uiSwitches"].obj()?.mapNotNull { (k, v) -> k.takeIf { (v as? JsonPrimitive)?.takeIf { p -> !p.isString }?.booleanOrNull == true } }?.toSet().orEmpty(),
         )
     }
 }

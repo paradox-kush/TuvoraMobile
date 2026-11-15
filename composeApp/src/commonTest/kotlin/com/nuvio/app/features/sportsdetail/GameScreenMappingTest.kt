@@ -66,7 +66,7 @@ class GameScreenMappingTest {
     @Test fun `existing blocks keep their order and the new ones are appended`() {
         val b = m.profiles["basketball"]!!.blocks
         assertEquals(listOf("header", "situation", "watch", "linescore", "stats", "leaders", "timeline", "highlights", "next"), b.take(9))
-        assertEquals(listOf("plays", "standingsTable"), b.drop(9))
+        assertEquals(listOf("plays", "standingsTable"), b.drop(9).take(2), "Phase A's blocks directly follow today's nine")
     }
 
     @Test fun `the bundled mapping validates and is still schema 1`() {
