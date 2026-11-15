@@ -42,10 +42,28 @@ import com.nuvio.app.core.ui.nuvioSafeBottomPadding
 import com.nuvio.app.features.sportsdetail.internal.GameDetailController
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiState
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.nuvio.app.features.sportsdetail.internal.GameMomentPolicy
+import com.nuvio.app.features.sportsdetail.internal.GameMomentTracker
+import com.nuvio.app.features.sportsdetail.internal.GameSection
+import com.nuvio.app.features.sportsdetail.internal.GameSectionsPolicy
 import com.nuvio.app.features.sportsdetail.internal.ui.BlockContent
+import com.nuvio.app.features.sportsdetail.internal.ui.GameScoreboard
+import com.nuvio.app.features.sportsdetail.internal.ui.GameTabRow
+import com.nuvio.app.features.sportsdetail.internal.ui.GameTabsUi
+import com.nuvio.app.features.sportsdetail.internal.ui.LastPlayCard
+import com.nuvio.app.features.sportsdetail.internal.ui.LocalMoments
+import com.nuvio.app.features.sportsdetail.internal.ui.PlaysCard
+import com.nuvio.app.features.sportsdetail.internal.ui.SituationLineCard
+import com.nuvio.app.features.sportsdetail.internal.ui.SlimScoreBar
+import com.nuvio.app.features.sportsdetail.internal.ui.WatchPrimary
+import com.nuvio.app.features.sportsdetail.internal.ui.WinChanceCard
 import com.nuvio.app.features.sportsdetail.internal.ui.GameBackButton
-import com.nuvio.app.features.sportsdetail.internal.ui.GameHeader
-import com.nuvio.app.features.sportsdetail.internal.ui.SituationCard
 import com.nuvio.app.features.sportsdetail.internal.ui.StaleChip
 import com.nuvio.app.features.sportsdetail.internal.ui.WatchCard
 import kotlin.time.Clock
@@ -78,8 +96,9 @@ fun GameDetailScreen(
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(service) { service.syncMapping() }
+    val tracker = remember(controller) { GameMomentTracker() }
     LaunchedEffect(controller, lifecycleOwner) {
-        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) { controller.run() }
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) { tracker.reset(); controller.run() }
     }
     val scope = rememberCoroutineScope()
     val raw by controller.state.collectAsStateWithLifecycle()
@@ -125,7 +144,7 @@ fun GameDetailScreen(
                 Spacer(Modifier.height(NuvioTokens.Space.s12))
                 NuvioPrimaryButton("Retry", onClick = controller::retry)
             }
-            is GameDetailUiState.Loaded -> LoadedContent(s, onPlayChannel, onAddPlaylist, onFindChannels, onRetryWatch = { scope.launch { controller.retryWatch() } })
+            is GameDetailUiState.Loaded -> LoadedContent(s, tracker, onPlayChannel, onAddPlaylist, onFindChannels, onRetryWatch = { scope.launch { controller.retryWatch() } })
         }
     }
 }
@@ -133,17 +152,19 @@ fun GameDetailScreen(
 @Composable
 private fun LoadedContent(
     s: GameDetailUiState.Loaded,
+    tracker: GameMomentTracker,
     onPlayChannel: (String) -> Unit,
     onAddPlaylist: () -> Unit,
     onFindChannels: () -> Unit,
     onRetryWatch: () -> Unit,
 ) {
     val detail = s.detail
-    val blocks = detail.blocks.filterNot(GameDetailUiPolicy::isEmpty)
-    val teams = detail.header as? TeamsHeader
-    val situation = blocks.filterIsInstance<SituationBlock>().firstOrNull()
-    val win = blocks.filterIsInstance<WinProbabilityBlock>().firstOrNull()
-    val rest = blocks.filter { it !is SituationBlock && it !is WinProbabilityBlock }
+    val batch = remember(detail) { tracker.accept(detail) }
+    val sections = remember(detail) { GameSectionsPolicy.sections(detail) }
+    var chosen by rememberSaveable { mutableStateOf(GameSection.OVERVIEW) }
+    val section = GameTabsUi.selected(sections, chosen)
+    val showTabs = GameSectionsPolicy.showsTabRow(detail)
+    val primary = WatchPrimary.offer(s.watch)
     val watchCard: @Composable () -> Unit = {
         WatchCard(
             ui = s.watch,
@@ -157,31 +178,62 @@ private fun LoadedContent(
     val gap = Arrangement.spacedBy(NuvioTokens.Space.s12)
     // Bottom inset: the last row must clear the floating bottom navigation.
     val pad = PaddingValues(start = NuvioTokens.Space.s16, end = NuvioTokens.Space.s16, top = NuvioTokens.Space.s8, bottom = nuvioSafeBottomPadding(NuvioTokens.Space.s16))
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        if (GameDetailUiPolicy.isWide(maxWidth.value.toInt())) {
-            Column(Modifier.fillMaxSize().padding(pad)) {
-                GameHeader(detail)
-                s.staleLabel?.let { Spacer(Modifier.height(NuvioTokens.Space.s8)); StaleChip(it) }
-                Spacer(Modifier.height(NuvioTokens.Space.s12))
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12)) {
-                    LazyColumn(Modifier.weight(1f), verticalArrangement = gap) {
-                        item { SituationCard(situation, win, teams?.home?.name.orEmpty(), teams?.away?.name.orEmpty(), detail) }
-                        item { watchCard() }
-                        items(rest.filter(GameDetailUiPolicy::isPrimaryColumn)) { BlockContent(it, detail) }
+    CompositionLocalProvider(LocalMoments provides batch) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            if (GameDetailUiPolicy.isWide(maxWidth.value.toInt())) {
+                Row(Modifier.fillMaxSize().padding(pad), horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12)) {
+                    LazyColumn(Modifier.weight(0.44f), verticalArrangement = gap) {
+                        item(key = "score") { GameScoreboard(detail) }
+                        s.staleLabel?.let { item(key = "stale") { StaleChip(it) } }
+                        item(key = "watch") { watchCard() }
+                        overviewLeft(detail)
                     }
-                    LazyColumn(Modifier.weight(1f), verticalArrangement = gap) {
-                        items(rest.filterNot(GameDetailUiPolicy::isPrimaryColumn)) { BlockContent(it, detail) }
+                    Column(Modifier.weight(0.56f)) {
+                        if (showTabs) GameTabRow(sections, section, { chosen = it })
+                        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = gap) { sectionItems(section, detail, wide = true) }
                     }
                 }
-            }
-        } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = pad, verticalArrangement = gap) {
-                item { GameHeader(detail) }
-                s.staleLabel?.let { item { StaleChip(it) } }
-                item { SituationCard(situation, win, teams?.home?.name.orEmpty(), teams?.away?.name.orEmpty(), detail) }
-                item { watchCard() }
-                items(rest) { BlockContent(it, detail) }
+            } else {
+                val listState = rememberLazyListState()
+                val slim by remember { derivedStateOf { listState.layoutInfo.visibleItemsInfo.none { it.key == "score" || it.key == "watch" } } }
+                LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = pad, verticalArrangement = gap) {
+                    item(key = "score") { GameScoreboard(detail) }
+                    s.staleLabel?.let { item(key = "stale") { StaleChip(it) } }
+                    item(key = "watch") { watchCard() }
+                    stickyHeader(key = "tabs") {
+                        Column {
+                            if (slim) SlimScoreBar(detail, canPlay = primary != null, onPlay = { primary?.let { onPlayChannel(it.channelId) } })
+                            if (showTabs) GameTabRow(sections, section, { chosen = it })
+                        }
+                    }
+                    sectionItems(section, detail, wide = false)
+                }
             }
         }
+    }
+}
+
+/** Left pane of the wide layout: win chance, last play and the situation line. */
+private fun LazyListScope.overviewLeft(detail: GameDetail) {
+    val blocks = GameSectionsPolicy.blocksFor(GameSection.OVERVIEW, detail)
+    blocks.filterIsInstance<WinProbabilityBlock>().firstOrNull()?.let { w -> item(key = "win") { WinChanceCard(w, detail) } }
+    GameMomentPolicy.newest(detail)?.let { p -> item(key = "last") { LastPlayCard(p, detail) } }
+    blocks.filterIsInstance<SituationBlock>().firstOrNull()?.let { sit -> item(key = "sit") { SituationLineCard(sit) } }
+}
+
+/** The selected section's cards. In the wide layout Overview omits what the left pane already shows. */
+private fun LazyListScope.sectionItems(section: GameSection, detail: GameDetail, wide: Boolean) {
+    val blocks = GameSectionsPolicy.blocksFor(section, detail)
+    when (section) {
+        GameSection.OVERVIEW -> {
+            if (!wide) overviewLeft(detail)
+            items(blocks.filter { it !is WinProbabilityBlock && it !is SituationBlock }) { BlockContent(it, detail) }
+        }
+        GameSection.PLAYS -> blocks.forEach { b ->
+            if (b is PlaysBlock) {
+                item(key = "plays") { PlaysCard(b, detail) }
+            } else item { BlockContent(b, detail) }
+        }
+        else -> items(blocks) { BlockContent(it, detail) }
     }
 }

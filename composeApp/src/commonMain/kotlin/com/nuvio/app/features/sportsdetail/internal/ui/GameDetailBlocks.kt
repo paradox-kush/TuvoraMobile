@@ -59,6 +59,7 @@ import com.nuvio.app.features.sportsdetail.api.LinescoreBlock
 import com.nuvio.app.features.sportsdetail.api.ResultsBlock
 import com.nuvio.app.features.sportsdetail.api.Side
 import com.nuvio.app.features.sportsdetail.api.SituationBlock
+import com.nuvio.app.features.sportsdetail.api.StandingsTableBlock
 import com.nuvio.app.features.sportsdetail.api.StatsBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.TimelineBlock
@@ -94,11 +95,6 @@ internal fun BlockCard(title: String, modifier: Modifier = Modifier, content: @C
 }
 
 @Composable
-private fun Badge(url: String?, size: Int = 40) {
-    if (url.isNullOrBlank()) Box(Modifier.size(size.dp)) else AsyncImage(model = url, contentDescription = null, modifier = Modifier.size(size.dp))
-}
-
-@Composable
 internal fun LivePill(text: String) {
     val danger = MaterialTheme.nuvio.colors.danger
     Row(
@@ -128,133 +124,11 @@ internal fun StaleChip(label: String) {
     )
 }
 
-/** Teams / versus / event header with the live or final status. */
+/** The feed's situation line (down & distance, count…); hidden by the caller when a field strip shows the same information. */
 @Composable
-internal fun GameHeader(detail: GameDetail, modifier: Modifier = Modifier) {
-    NuvioSurfaceCard(modifier = modifier) {
-        Text(
-            listOfNotNull(detail.leagueName.takeIf { it.isNotBlank() }, detail.round?.let { "Round $it" }, detail.venue).joinToString(" · "),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.nuvio.colors.textMuted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(NuvioTokens.Space.s8))
-        when (val h = detail.header) {
-            is TeamsHeader -> SidesRow(h.home, h.away, detail)
-            is VersusHeader -> SidesRow(h.a, h.b, detail)
-            is EventHeader -> Column {
-                Text(h.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.nuvio.colors.textPrimary)
-                h.session?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary) }
-                Spacer(Modifier.height(NuvioTokens.Space.s6))
-                StatusLine(detail)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SidesRow(a: Side, b: Side, detail: GameDetail) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        SideColumn(a, Modifier.weight(1f))
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = NuvioTokens.Space.s8)) {
-            StatusLine(detail)
-        }
-        SideColumn(b, Modifier.weight(1f))
-    }
-}
-
-@Composable
-private fun SideColumn(s: Side, modifier: Modifier) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
-        Badge(s.badgeUrl, 48)
-        Text(s.name, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.nuvio.colors.textPrimary)
-        s.record?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted) }
-        s.score?.let { Text(it, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.nuvio.colors.textPrimary) }
-    }
-}
-
-@Composable
-private fun StatusLine(detail: GameDetail) {
-    val live = detail.live
-    when (detail.state) {
-        GameState.LIVE -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            LivePill("LIVE")
-            Text(GameDetailUiPolicy.liveStatusText(live), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textSecondary)
-        }
-        GameState.FINAL -> Text(live?.detail?.takeIf { it.isNotBlank() } ?: "Final", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.nuvio.colors.textSecondary)
-        GameState.POSTPONED -> Text("Postponed", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.nuvio.colors.textSecondary)
-        GameState.UPCOMING -> Text(detail.startsAt.replace('T', ' ').removeSuffix("Z").take(16) + " UTC", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textSecondary)
-    }
-}
-
-@Composable
-internal fun SituationCard(situation: SituationBlock?, win: WinProbabilityBlock?, homeName: String, awayName: String, detail: GameDetail) {
-    if (situation == null && win == null) return
+internal fun SituationLineCard(situation: SituationBlock) {
     NuvioSurfaceCard {
-        situation?.let { Text(it.line, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary) }
-        if (situation != null && win != null) Spacer(Modifier.height(NuvioTokens.Space.s12))
-        win?.let { w ->
-            val home = w.homePercent.coerceIn(0, 100)
-            val draw = w.drawPercent?.coerceIn(0, 100)
-            val away = (w.awayPercent ?: (100 - home - (draw ?: 0))).coerceIn(0, 100)
-            Text("WIN CHANCE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textMuted)
-            Spacer(Modifier.height(NuvioTokens.Space.s6))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("$awayName $away%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textSecondary)
-                if (draw != null && draw > 0) Text("Draw $draw%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
-                Text("$homeName $home%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textSecondary)
-            }
-            Spacer(Modifier.height(NuvioTokens.Space.s4))
-            val awayPart = away
-            Row(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(percent = 50))) {
-                if (awayPart > 0) Box(Modifier.weight(awayPart.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.borderStrong))
-                if (draw != null && draw > 0) Box(Modifier.weight(draw.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.borderDefault))
-                if (home > 0) Box(Modifier.weight(home.toFloat()).height(6.dp).background(MaterialTheme.nuvio.colors.accent))
-            }
-            GameDetailUiPolicy.chartPoints(w.history)?.let { pts ->
-                Spacer(Modifier.height(NuvioTokens.Space.s12))
-                MomentumChart(pts, homeName)
-            }
-            val lines = GameDetailUiPolicy.storylineLines(GameDetailUiPolicy.visibleStorylines(w.storylines, detail.state, detail.live, detail.sport), detail.header)
-            val comeback = GameDetailUiPolicy.comebackWatch(w.history, w.homePercent, w.awayPercent ?: (100 - w.homePercent - (w.drawPercent ?: 0)), detail.state, w.asOfMs)?.let { c -> GameDetailUiPolicy.comebackText(c, detail.header) }
-            if (comeback != null || lines.isNotEmpty()) {
-                Spacer(Modifier.height(NuvioTokens.Space.s8))
-                comeback?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.accent) }
-                lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.nuvio.colors.textSecondary) }
-            }
-            GameDetailUiPolicy.winChanceCaption(w)?.let {
-                Spacer(Modifier.height(NuvioTokens.Space.s6))
-                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
-            }
-            if (w.extrasAttribution != null && (w.history.size >= 2 || w.storylines.isNotEmpty())) {
-                Text("Chart and storylines ${w.extrasAttribution}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
-            }
-            // The card's own staleness: a stale market value is not hidden behind a fresh ESPN fetch.
-            GameDetailUiPolicy.winChanceStaleLabel(w, detail.state, Clock.System.now().toEpochMilliseconds())?.let { StaleChip(it) }
-        }
-    }
-}
-
-/** A small momentum line of the home team's win chance (phone/iPad; TV keeps the bar). 50% is the faint midline. */
-@Composable
-private fun MomentumChart(points: List<Float>, homeName: String) {
-    val line = MaterialTheme.nuvio.colors.accent
-    val mid = MaterialTheme.nuvio.colors.borderSubtle
-    Column {
-        Canvas(Modifier.fillMaxWidth().height(56.dp)) {
-            val w = size.width
-            val h = size.height
-            drawLine(mid, Offset(0f, h / 2), Offset(w, h / 2), strokeWidth = 1f)
-            val path = Path()
-            points.forEachIndexed { i, v ->
-                val x = if (points.size == 1) 0f else w * i / (points.size - 1)
-                val y = h * (1f - v)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            drawPath(path, line, style = Stroke(width = 3f))
-        }
-        Text("$homeName win chance over time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
+        Text(situation.line, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary)
     }
 }
 
@@ -308,15 +182,6 @@ internal fun WatchCard(
     }
 }
 
-@Composable
-private fun LabeledRow(label: String, left: String, right: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = NuvioTokens.Space.s4), verticalAlignment = Alignment.CenterVertically) {
-        Text(left, modifier = Modifier.width(64.dp), textAlign = TextAlign.Start, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textPrimary)
-        Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textMuted)
-        Text(right, modifier = Modifier.width(64.dp), textAlign = TextAlign.End, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textPrimary)
-    }
-}
-
 /** One block's card. Titles follow the design mock; the sport picks "Match events" vs "Latest scoring". */
 @Composable
 internal fun BlockContent(block: GameBlock, detail: GameDetail) {
@@ -334,17 +199,15 @@ internal fun BlockContent(block: GameBlock, detail: GameDetail) {
                 }
             }
         }
-        is StatsBlock -> BlockCard("Team stats") {
-            block.rows.forEach { LabeledRow(it.label, it.home + (it.unit ?: ""), it.away + (it.unit ?: "")) }
-        }
-        is LeadersBlock -> BlockCard("Top performers") {
-            block.items.forEach { l ->
+        is StatsBlock -> StatsCard(block, detail)
+        is LeadersBlock -> LeadersCard(block, detail)
+        is StandingsTableBlock -> StandingsCards(block)
+        is com.nuvio.app.features.sportsdetail.api.StandingsBlock -> BlockCard("Standings") {
+            block.rows.forEach { r ->
                 Row(Modifier.fillMaxWidth().padding(vertical = NuvioTokens.Space.s4), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(l.athlete, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(listOfNotNull(GameDetailUiPolicy.teamTag(l.side, detail.header), l.category).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
-                    }
-                    Text(l.value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.nuvio.colors.textPrimary)
+                    Text(r.pos, modifier = Modifier.width(28.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textMuted)
+                    Text(r.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.nuvio.colors.textPrimary)
+                    Text(listOfNotNull(r.played, r.gd, r.points).joinToString("  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.nuvio.colors.textSecondary)
                 }
             }
         }
