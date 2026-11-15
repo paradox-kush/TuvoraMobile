@@ -28,7 +28,7 @@ import kotlinx.coroutines.sync.withLock
 internal object CatchUpEpgRepository {
 
     private val gate = Mutex()
-    private val inFlight = HashMap<String, CompletableDeferred<Unit>>()
+    private val inFlight = HashMap<String, CompletableDeferred<LoadStatus>>()
 
     /** `server_info` costs a whole panel round trip, so it is asked once per account per session. */
     private val clockOffsets = HashMap<String, Long?>()
@@ -62,41 +62,47 @@ internal object CatchUpEpgRepository {
      *
      * Cheap and idempotent: a channel fetched inside [CatchUpEpgPolicy.FETCH_GATE_MS] returns
      * without touching the network, and a fetch already running is JOINED rather than duplicated.
-     * A failure is swallowed — the guide falls back to now-and-next, which is what it showed
-     * before this existed.
+     * The fetch is a [BoundedLoad] ([LoadSurface.GUIDE_HISTORY]): it ends Loaded, Empty or Failed within its
+     * deadline and a failure is reported (`iptv_load`) and RETURNED as [LoadStatus.Failed] — never read as "this
+     * channel has no history". The guide still falls back to now-and-next and re-asks on its next travel step
+     * (a failure stamps nothing). [LoadStatus.Idle] = nothing was asked (not Xtream, or the stored table is fresh).
      */
-    suspend fun ensureHistory(account: XtreamAccount, streamId: Int) {
+    suspend fun ensureHistory(account: XtreamAccount, streamId: Int): LoadStatus {
         // A Stalker portal has no per-channel history call: its aired programmes (and the ids a replay is
         // addressed by) come from the ONE bulk guide, so "history is on disk" means that fetch has landed.
         // The window read that follows waits on it instead of racing it on a first open.
         if (account.sourceType == SOURCE_TYPE_STALKER) {
             GuideRead.softly(Unit) { ensureStalkerGuide(account) }
-            return
+            return LoadStatus.Idle
         }
-        if (!supportsCatchUp(account)) return
+        if (!supportsCatchUp(account)) return LoadStatus.Idle
         val channelId = streamId.toString()
         val nowMs = TraktPlatformClock.nowEpochMs()
 
         val fetchedAt = runCatching { IptvContentDb.epgChannelFetchedAt(account.id, channelId) }.getOrNull()
-        if (!CatchUpEpgPolicy.shouldFetch(fetchedAt, nowMs)) return
+        if (!CatchUpEpgPolicy.shouldFetch(fetchedAt, nowMs)) return LoadStatus.Idle
 
         val key = "${account.id}#$channelId"
         val (deferred, isOwner) = gate.withLock {
             inFlight[key]?.let { return@withLock it to false }
-            val d = CompletableDeferred<Unit>()
+            val d = CompletableDeferred<LoadStatus>()
             inFlight[key] = d
             d to true
         }
-        if (!isOwner) {
-            deferred.await()
-            return
-        }
+        if (!isOwner) return deferred.await()
+        var status: LoadStatus = LoadStatus.Failed(timedOut = false)
         try {
-            fetchChannel(account, streamId, channelId, nowMs)
+            val outcome = BoundedLoad.run(
+                surface = LoadSurface.GUIDE_HISTORY,
+                isEmpty = { rows: Int -> rows == 0 },
+                report = mapOf("source_type" to account.sourceType),
+            ) { fetchChannel(account, streamId, channelId, nowMs) }
+            status = outcome.status
         } finally {
             gate.withLock { inFlight.remove(key) }
-            deferred.complete(Unit)
+            deferred.complete(status)
         }
+        return status
     }
 
     private suspend fun fetchChannel(
@@ -104,10 +110,13 @@ internal object CatchUpEpgRepository {
         streamId: Int,
         channelId: String,
         nowMs: Long,
-    ) {
+    ): Int {
         val catchUpDays = 0   // per-channel windows are per-panel; an unknown window is permissive
         val rows = ArrayList<EpgProgrammeRow>()
-        val ok = runCatching {
+        // A throw means truncated or listings-less: it propagates (to the bounded load, which makes it Failed)
+        // and nothing is stamped, or the gate would hold a failed fetch shut for six hours and the channel
+        // would look like it has no guide.
+        run {
             XtreamClient.simpleDataTableInto(account, streamId, nowMs, catchUpDays) { programme ->
                 rows.add(
                     EpgProgrammeRow(
@@ -122,14 +131,12 @@ internal object CatchUpEpgRepository {
                     )
                 )
             }
-        }.isSuccess
-        // A throw means truncated or listings-less — do NOT stamp, or the gate would hold a
-        // failed fetch shut for six hours and the channel would look like it has no guide.
-        if (!ok) return
+        }
         runCatching {
             IptvContentDb.refillChannelEpg(account.id, channelId, rows, nowMs)
             IptvContentDb.pruneEpg(account.id, CatchUpEpgPolicy.pruneCutoffMs(nowMs, catchUpDays))
         }
+        return rows.size
     }
 
     /**

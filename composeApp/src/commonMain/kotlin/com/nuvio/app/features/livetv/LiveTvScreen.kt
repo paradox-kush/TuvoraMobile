@@ -139,6 +139,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import nuvio.composeapp.generated.resources.Res
+import nuvio.composeapp.generated.resources.compose_search_clear
+import nuvio.composeapp.generated.resources.compose_livetv_search_channels
+import nuvio.composeapp.generated.resources.compose_livetv_search_no_match
 import nuvio.composeapp.generated.resources.action_back
 import nuvio.composeapp.generated.resources.compose_iptv_hub_epg_next
 import nuvio.composeapp.generated.resources.compose_livetv_catchup_badge
@@ -1467,7 +1470,7 @@ fun LiveTvScreen(
                 )
                 if (guideQuery.isNotBlank() && shownChannels.isEmpty()) {
                     Text(
-                        text = "No channels match \u201C${guideQuery.trim()}\u201D",
+                        text = stringResource(Res.string.compose_livetv_search_no_match, guideQuery.trim()),
                         color = colors.textSecondary,
                         modifier = Modifier.weight(1f).fillMaxWidth().padding(NuvioTokens.Space.s12),
                     )
@@ -1554,14 +1557,14 @@ private fun GuideSearchField(query: String, onQueryChange: (String) -> Unit, mod
     com.nuvio.app.core.ui.NuvioInputField(
         value = query,
         onValueChange = onQueryChange,
-        placeholder = "Search channels",
+        placeholder = stringResource(Res.string.compose_livetv_search_channels),
         modifier = modifier,
         trailingContent = if (query.isEmpty()) null else {
             {
                 androidx.compose.material3.IconButton(onClick = { onQueryChange("") }) {
                     Icon(
                         imageVector = Icons.Filled.Close,
-                        contentDescription = "Clear search",
+                        contentDescription = stringResource(Res.string.compose_search_clear),
                     )
                 }
             }

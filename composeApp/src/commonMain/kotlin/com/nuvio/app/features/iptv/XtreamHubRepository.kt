@@ -143,6 +143,10 @@ object XtreamHubRepository {
     }
 
     init {
+        scope.launch {
+            _uiState.map { it.section to it.categoriesLoad }.distinctUntilChanged()
+                .collect { (section, load) -> advanceEntryIfEmpty(section, load) }
+        }
         // Lazily enriched posters (PosterEnricher) patch loaded rows in place — the DB row is
         // already updated, this just repaints cards that are on screen right now.
         scope.launch {
@@ -253,8 +257,20 @@ object XtreamHubRepository {
             parseHubSelection(XtreamAccountStorage.loadHubSelectionJson(com.nuvio.app.features.profiles.ProfileRepository.activeProfileId))
         } else null
         val selected = resolveStickyAccount(current.selectedAccountId, remembered?.accountId, all)
-        val wanted = remembered?.let { resolveStickySection(it.section, current.section) } ?: current.section
-        val section = clampSection(accounts.firstOrNull { it.id == selected }, wanted)
+        val selectedAccount = accounts.firstOrNull { it.id == selected }
+        val section = if (remembered != null) {
+            // UX389: the remembered tab is kept only while it is enabled and not known empty; otherwise the
+            // first tab with content, Live TV first. An entry tab that then proves empty hands over (below).
+            entryAdvancePending = true
+            entryTried.clear()
+            HubEntrySectionPolicy.initial(
+                remembered = XtreamHubSection.entries.firstOrNull { it.name == remembered.section },
+                enabled = enabledSections(selectedAccount),
+                knownEmpty = knownEmptySections(selectedAccount),
+            )
+        } else {
+            clampSection(selectedAccount, current.section)
+        }
         _uiState.update { it.copy(accounts = accounts, hasConfiguredAccounts = all.isNotEmpty(), accountsLoaded = true, selectedAccountId = selected, section = section) }
         if (selected != null) {
             showSection(selected, section)
@@ -294,8 +310,39 @@ object XtreamHubRepository {
             .collect { playlists -> if (hubNeedsAccountSync(_uiState.value, playlists)) ensureLoaded() }
     }
 
+    /**
+     * UX389: true from a restored entry until the viewer picks a tab or a playlist themselves. While it holds, an
+     * entry tab that proves empty ("Nothing here") hands over to the next tab with content, Live first; a tab the
+     * viewer chose is never moved. Event-driven off the state (never a poll).
+     */
+    @Volatile private var entryAdvancePending = false
+    private val entryTried = mutableSetOf<XtreamHubSection>()
+
+    private fun enabledSections(acc: XtreamAccount?): Set<XtreamHubSection> =
+        XtreamHubSection.entries.filter { acc == null || acc.typeEnabled(it.contentKey) }.toSet()
+
+    /** Positive evidence only: a portal that reported no series. "Not loaded yet" is never listed here. */
+    private fun knownEmptySections(acc: XtreamAccount?): Set<XtreamHubSection> =
+        if (acc != null && acc.id in _uiState.value.seriesUnavailableIds) setOf(XtreamHubSection.SERIES) else emptySet()
+
+    private fun advanceEntryIfEmpty(section: XtreamHubSection, load: LoadStatus) {
+        if (!entryAdvancePending || section == XtreamHubSection.LIVE) return
+        if (load !is LoadStatus.Empty) {
+            if (load is LoadStatus.Loaded) entryAdvancePending = false
+            return
+        }
+        entryTried += section
+        val st = _uiState.value
+        val accountId = st.selectedAccountId ?: return
+        val next = HubEntrySectionPolicy.advanceFrom(section, enabledSections(accountFor(accountId)), entryTried)
+        if (next == null) { entryAdvancePending = false; return }
+        _uiState.update { it.copy(section = next) }
+        showSection(accountId, next)
+    }
+
     fun selectAccount(accountId: String) {
         if (_uiState.value.selectedAccountId == accountId) return
+        entryAdvancePending = false
         // Whatever browse work the OLD provider still has queued belongs to a screen the user just
         // left — drop it rather than let it drain ahead of the new provider (which may share the
         // same throttled host; measured on-device: Xtream posters waiting minutes behind an
@@ -315,6 +362,7 @@ object XtreamHubRepository {
 
     fun selectSection(section: XtreamHubSection) {
         if (_uiState.value.section == section) return
+        entryAdvancePending = false
         val accountId = _uiState.value.selectedAccountId ?: return
         _uiState.update { it.copy(section = section) }
         rememberSelection()

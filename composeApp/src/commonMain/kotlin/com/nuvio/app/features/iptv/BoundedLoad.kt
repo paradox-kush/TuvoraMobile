@@ -54,6 +54,8 @@ enum class LoadSurface(val key: String, val stallMs: Long, val reportsEveryOutco
     PLAYLIST_REFRESH("playlist_refresh", 90_000L, reportsEveryOutcome = true),
     /** Live pause/rewind starting its buffer: first playable piece or Failed. Every start is worth a report. */
     LIVE_PAUSE("live_pause", 20_000L, reportsEveryOutcome = true),
+    /** The focused channel's catch-up history (get_simple_data_table) behind a past guide window. Failures only. */
+    GUIDE_HISTORY("guide_history", 20_000L, reportsEveryOutcome = false),
     /**
      * The Calendar's refresh (features/calendar). A STALL deadline restarted by each title fetched, so a big slate
      * behind the rate limiter keeps going while it makes progress; past it the screen shows Failed + Retry and the

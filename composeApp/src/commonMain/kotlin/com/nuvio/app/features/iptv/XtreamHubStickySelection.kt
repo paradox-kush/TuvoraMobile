@@ -69,3 +69,36 @@ internal fun resolveStickySection(remembered: String?, fallback: XtreamHubSectio
  */
 internal fun hubNeedsAccountSync(hub: XtreamHubUiState, playlists: List<XtreamAccount>): Boolean =
     !hub.accountsLoaded || hub.hasConfiguredAccounts != playlists.isNotEmpty() || hub.accounts != playlists.filter { it.availableOnDevice }
+
+/**
+ * UX389 (ported from the TV redesign): where the hub opens. A remembered tab used to be restored without
+ * asking whether it had anything, so a playlist with no series reopened on "Nothing here". Pure, so it
+ * tests without the repository.
+ */
+internal object HubEntrySectionPolicy {
+    /** Tab order, Live TV first. */
+    private val ORDER = listOf(XtreamHubSection.LIVE, XtreamHubSection.MOVIES, XtreamHubSection.SERIES)
+
+    /**
+     * The tab a fresh entry opens on: the remembered one while it is enabled and not known to be empty, else the
+     * first enabled tab not known to be empty, else the first enabled tab. [knownEmpty] holds only positive
+     * evidence (a portal that reported no series), never "not loaded yet".
+     */
+    fun initial(
+        remembered: XtreamHubSection?,
+        enabled: Set<XtreamHubSection>,
+        knownEmpty: Set<XtreamHubSection>,
+    ): XtreamHubSection {
+        remembered?.takeIf { it in enabled && it !in knownEmpty }?.let { return it }
+        return ORDER.firstOrNull { it in enabled && it !in knownEmpty }
+            ?: ORDER.firstOrNull { it in enabled }
+            ?: XtreamHubSection.LIVE
+    }
+
+    /** The tab to hand over to when the entry tab [current] proved empty; null once every enabled tab was [tried]. */
+    fun advanceFrom(
+        current: XtreamHubSection,
+        enabled: Set<XtreamHubSection>,
+        tried: Set<XtreamHubSection>,
+    ): XtreamHubSection? = ORDER.firstOrNull { it in enabled && it != current && it !in tried }
+}
