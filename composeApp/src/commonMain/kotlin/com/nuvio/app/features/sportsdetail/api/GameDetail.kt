@@ -158,7 +158,11 @@ data class StandingsGroup(val name: String, val columns: List<String>, val rows:
 data class StandingsTableBlock(val groups: List<StandingsGroup>, override val source: String = "") : GameBlock
 
 @Serializable
-data class LineupPlayer(val number: String, val name: String, val pos: String, val starter: Boolean)
+data class LineupPlayer(
+    val number: String, val name: String, val pos: String, val starter: Boolean,
+    /** ESPN `formationPlace` (1 = keeper, then the rows of the formation); null when the feed has none. Drives the pitch layout. */
+    val place: Int? = null,
+)
 
 @Serializable
 data class LineupSide(val side: String, val formation: String? = null, val players: List<LineupPlayer>)
@@ -217,6 +221,52 @@ data class WinProbabilityBlock(
     val extrasAttribution: String? = null,
     /** When the MARKET data of this block was valid (server time): the card shows its own staleness, not the screen's. */
     val asOfMs: Long? = null,
+) : GameBlock
+
+/**
+ * American football live field strip. [yardLine] is 0..100 yards from the HOME team's goal line, exactly as the feed gives it
+ * (verified 2026-11-14/15: "OKST 25" with OKST at home -> 25, "TTU 5" with TTU away -> 95). [possession] "home" | "away" | null
+ * (unknown -> no arrow, no drive shading). [line] is the feed's own text ("2nd & 5 at LSU 33"), never built by us.
+ */
+@Serializable @SerialName("field")
+data class FootballFieldBlock(
+    val yardLine: Int,
+    val possession: String? = null,
+    /** null / <= 0 in the feed = between plays. */
+    val down: Int? = null,
+    val distance: Int? = null,
+    val line: String? = null,
+    val redZone: Boolean = false,
+    val homeTimeouts: Int? = null,
+    val awayTimeouts: Int? = null,
+    val drive: FieldDrive? = null,
+    override val source: String = "",
+) : GameBlock
+
+/** [startYardLine] is home-based like the ball; [summary] is the feed's "3 plays, 26 yards, 0:54". */
+@Serializable
+data class FieldDrive(val startYardLine: Int? = null, val summary: String? = null)
+
+/** kind: goal | yellow | red | sub | corner | penalty | var | shot | offside | foul. [text] is the feed's own words. */
+@Serializable
+data class SoccerEvent(val kind: String, val side: String? = null, val minute: String? = null, val text: String)
+
+/** Soccer live strip: last real event, possession, corners, cards and scorers, all from the single-event scoreboard (+ summary commentary). */
+@Serializable @SerialName("soccerStrip")
+data class SoccerStripBlock(
+    val lastEvent: SoccerEvent? = null,
+    /** Home share, whole percent. */
+    val homePossession: Int? = null,
+    val homeCorners: Int? = null,
+    val awayCorners: Int? = null,
+    val homeYellow: Int = 0,
+    val awayYellow: Int = 0,
+    val homeRed: Int = 0,
+    val awayRed: Int = 0,
+    /** "Saka 23'", "Palmer 41' (pen)", "Dunk 60' (og)" - in time order, under the team that got the goal. */
+    val homeScorers: List<String> = emptyList(),
+    val awayScorers: List<String> = emptyList(),
+    override val source: String = "",
 ) : GameBlock
 
 /** Decoded from a block type this build does not know; dropped by [GameDetailCodec]. */

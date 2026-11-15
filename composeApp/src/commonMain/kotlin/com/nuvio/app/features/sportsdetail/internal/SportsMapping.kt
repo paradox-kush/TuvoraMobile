@@ -17,7 +17,9 @@ internal enum class BlockType(val id: String) {
     LEADERS("leaders"), TIMELINE("timeline"), LINEUP("lineup"), RESULTS("results"), STANDINGS("standings"),
     FORM("form"), HIGHLIGHTS("highlights"), NEXT("next"), WIN_PROBABILITY("winProbability"),
     /** Phase A: the full play list, and generic standings (any league's columns). */
-    PLAYS("plays"), STANDINGS_TABLE("standingsTable");
+    PLAYS("plays"), STANDINGS_TABLE("standingsTable"),
+    /** Phase B: the football field strip and the soccer strip (both read the single-event scoreboard). */
+    FIELD("field"), SOCCER_STRIP("soccerStrip");
 
     companion object {
         fun byId(id: String): BlockType? = entries.firstOrNull { it.id == id }
