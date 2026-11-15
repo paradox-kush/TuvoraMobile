@@ -210,6 +210,12 @@ fun LiveTvScreen(
     var currentTitle by remember { mutableStateOf(initialTitle) }
     var currentLogo by remember { mutableStateOf(initialLogo) }
 
+    // Publish the channel in the player to the game screen's Watch block ("watching" vs "browsing").
+    DisposableEffect(currentContentId, currentTitle) {
+        LiveNowWatching.set(currentContentId, currentTitle)
+        onDispose { LiveNowWatching.clear(currentContentId) }
+    }
+
     var source by remember { mutableStateOf<LiveChannelSource?>(null) }
     var resolveError by remember { mutableStateOf(false) }
     var playbackError by remember { mutableStateOf<String?>(null) }

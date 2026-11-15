@@ -21,6 +21,8 @@ fun initializeAndroidProcessStorage(context: Context) {
     // Calendar snapshot + settings: process-scoped so a Home that settles before MainActivity's startup tasks
     // never reads an empty store (and later saves over the real one).
     com.nuvio.app.features.calendar.api.CalendarAndroid.initialize(context)
+    // Game screen: the last good remote sports mapping (persisted so a bad network day keeps the newest good one).
+    com.nuvio.app.features.sportsdetail.api.SportsDetailAndroid.initialize(context)
 }
 
 /**

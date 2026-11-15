@@ -1,5 +1,6 @@
 package com.nuvio.app.features.sportsdetail.internal
 
+import co.touchlab.kermit.Logger
 import com.nuvio.app.core.analytics.AnalyticsSink
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
@@ -13,6 +14,7 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
 @OptIn(ExperimentalAtomicApi::class)
 internal object SportsDetailTelemetry {
     const val EVENT = "sports_detail"
+    private val log = Logger.withTag("SportsDetail")
     private const val MAX_NON_LOADED_PER_KEY = 10
     /** Copy-on-write under a CAS loop: sends can come from several screens' coroutines at once. */
     private val sent = AtomicReference<Map<String, Int>>(emptyMap())
@@ -27,6 +29,8 @@ internal object SportsDetailTelemetry {
 
     /** Production sink. Failure/empty outcomes are capped per key per process so a dead provider cannot flood. */
     fun send(props: Map<String, Any>) {
+        // Local breadcrumb for device passes (logcat / Xcode console, tag SportsDetail). Same payload as PostHog: no URLs, hosts or teams.
+        runCatching { log.i { "$EVENT $props" } }
         if (props["outcome"] != "loaded") {
             val key = "${props["sport"]}|${props["block"]}|${props["source"]}|${props["outcome"]}"
             while (true) {

@@ -40,6 +40,8 @@ data class RadarUiState(
     val teamFollows: List<RadarTeamFollow> = emptyList(),
     /** teamId -> that club's own schedule, from the team lane of radar-fixtures. */
     val fixturesByTeam: Map<String, List<RadarFixture>> = emptyMap(),
+    /** eventId -> the freshest known live state, reported by the game screen while it is open (beats the lagging feed). */
+    val freshStates: Map<String, FreshFixtureState> = emptyMap(),
 ) {
     val followedLeagueIds: Set<String> get() = follows.map { it.leagueId }.toSet()
     val followedTeamIds: Set<String> get() = teamFollows.map { it.teamId }.toSet()
@@ -90,6 +92,9 @@ data class RadarUiState(
         // set is — the strStatus the badge logic used to ignore (inventory T1/BK1: a Sunday NFL
         // game reading LIVE on Monday because its id lingered in the stale-served live set).
         if (fixture.isFinishedOrOff) return false
+        // The game screen's ESPN-backed state is fresher than the feed: a final one ends LIVE at once (sticky).
+        val fresh = LiveStatusPolicy.override(fixture.id?.let { freshStates[it] }, nowMs)
+        if (fresh == false) return false
         // Hard plausibility cap: even a feed-covered sport cannot read LIVE past a sport-typical
         // window plus grace — the backstop for a stale live-set entry whose finished status we
         // never received.
@@ -98,14 +103,31 @@ data class RadarUiState(
             // its id — feeds pre-populate the live set for imminent games. Symmetric to the
             // max-window cap; the grace absorbs feed/clock skew. B49 (unstarted games badged LIVE).
             if (nowMs < start - RADAR_PRE_KICKOFF_GRACE_MS) return false
-            if (nowMs >= start + fixture.maxLiveWindowMs()) return false
+            if (nowMs >= start + minOf(fixture.maxLiveWindowMs(), LiveStatusPolicy.displayMaxLiveMs(fixture.sport))) return false
         }
+        if (fresh == true) return true
         val feedConfirmed = fixture.id?.let { it in liveEventIds } == true
         val sport = fixture.sport?.lowercase()
         // Fresh feed coverage for this sport -> the feed decides; otherwise infer from kick-off.
         return if (sport != null && sport in livescoreSports) feedConfirmed
         else feedConfirmed || fixture.inferredLive(nowMs)
     }
+
+    /** The card's live score row: the feed's scores with the progress replaced by what [liveProgress] says (period, not elapsed minute). */
+    fun liveScoreFor(fixture: RadarFixture, nowMs: Long = RadarTime.nowMs()): RadarLiveScore? {
+        val raw = fixture.id?.let { liveScores[it] }
+        val progress = liveProgress(fixture, nowMs)
+        return when {
+            raw == null && progress == null -> null
+            raw == null -> RadarLiveScore(eventId = fixture.id, progress = progress)
+            else -> raw.copy(progress = progress)
+        }
+    }
+
+    /** The text after "LIVE" on a card: the period when freshly known (period sports), else the feed minute. */
+    fun liveProgress(fixture: RadarFixture, nowMs: Long): String? = LiveStatusPolicy.badgeProgress(
+        fixture.sport, fixture.id?.let { liveScores[it] }?.progress, fixture.id?.let { freshStates[it] }, nowMs,
+    )
 
     /** Finished/started fixtures of one league, most recent first (scores when the API has them). */
     fun recent(leagueId: String, nowMs: Long, cap: Int = 15): List<RadarFixture> =
@@ -374,6 +396,11 @@ object RadarRepository {
     // --- follows -------------------------------------------------------------
 
     fun isFollowed(leagueId: String): Boolean = _uiState.value.followedLeagueIds.contains(leagueId)
+
+    /** The game screen reports a fixture's freshest state (live with its period, or final): cards prefer it to the lagging feed. */
+    fun setFreshState(eventId: String, live: Boolean, periodLabel: String?, atMs: Long = RadarTime.nowMs()) {
+        _uiState.update { it.copy(freshStates = it.freshStates + (eventId to FreshFixtureState(live, periodLabel, atMs))) }
+    }
 
     fun toggleFollow(league: RadarLeague) {
         _uiState.update { state ->

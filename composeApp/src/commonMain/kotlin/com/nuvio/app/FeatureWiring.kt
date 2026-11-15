@@ -30,6 +30,12 @@ import com.nuvio.app.core.contracts.CalendarScreenContentAccess
 import com.nuvio.app.core.contracts.DetailsCalendarBellAccess
 import com.nuvio.app.core.contracts.HomeCalendarSectionAccess
 import com.nuvio.app.features.calendar.api.CalendarUiSlots
+import com.nuvio.app.features.livetv.LiveNowWatching
+import com.nuvio.app.features.radar.RadarGameWatch
+import com.nuvio.app.features.sportsdetail.api.LocalGameWatch
+import com.nuvio.app.features.sportsdetail.api.LocalSportsDetail
+import com.nuvio.app.features.sportsdetail.api.SportsDetailAccess
+import com.nuvio.app.features.sportsdetail.api.SportsDetail
 
 /**
  * THE one firewall exception (rules doc Rule 1 / R2b): the only non-fork file allowed to name fork
@@ -48,6 +54,9 @@ import com.nuvio.app.features.calendar.api.CalendarUiSlots
  * later seam adds its registration/provision line here — do NOT invent ports to fill it.
  */
 
+
+private val sportsDetailService by lazy { SportsDetail.createPersistent() }
+private val gameWatch by lazy { RadarGameWatch(LiveNowWatching.channel) }
 
 /**
  * Called ONCE per PROCESS from a genuinely once-per-process entry point:
@@ -77,6 +86,8 @@ fun registerFeatureContributions() {
     HomeCalendarSectionAccess.register(CalendarUiSlots.homeSection())
     DetailsCalendarBellAccess.register(CalendarUiSlots.detailsBell())
     CalendarScreenContentAccess.register(CalendarUiSlots.screen())
+    // Game screen: registered at process init so iOS (which never wraps its UI in installFeatures) finds it too.
+    SportsDetailAccess.register(sportsDetailService, gameWatch)
     FeatureRegistry.markInitialized()
 }
 
@@ -94,6 +105,9 @@ fun installFeatures(content: @Composable () -> Unit) {
         LocalRevertFailureSink provides ::logRevertFailure,
         LocalIptvCatalog provides XtreamRepository,   // S3a — stable object, safe in a static local
         LocalRecordings provides RecordingsAccess.current(),
+        // Game screen: ONE service (persistent mapping storage) and the Watch block's matcher + player-state port.
+        LocalSportsDetail provides sportsDetailService,
+        LocalGameWatch provides gameWatch,
         // Later seams add their ports here: LocalSportsData, LocalClock, …
     ) { content() }
 }

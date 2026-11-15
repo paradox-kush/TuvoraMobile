@@ -49,6 +49,8 @@ val tvosExcludedCommon = listOf(
     "com/nuvio/app/features/livetv/pause/LivePauseBinding.kt",
     // Calendar: the Compose slots and their string helpers; Apple TV draws the Calendar in SwiftUI (TvCalendar facade).
     "com/nuvio/app/features/calendar/api/CalendarUiSlots.kt", "com/nuvio/app/features/calendar/internal/CalendarUiText.kt",
+    // Game screen: the Compose locals (Apple TV draws its own game screen in SwiftUI over the shared core).
+    "com/nuvio/app/features/sportsdetail/api/SportsDetailLocals.kt",
     // Phone/desktop long-press channel menu (sheet + toast); Apple TV has its own SwiftUI context menu.
     "com/nuvio/app/features/iptv/IptvLiveChannelMenu.kt",
     // Phone/desktop shell hook for setup links and the empty-screen button; it opens the Add Playlist page
