@@ -278,6 +278,7 @@ internal class GameDetailSession(
                     espnAsOf?.let { put("espn", it) }
                     marketAsOf?.let { put("polymarket", it) }
                 },
+                uiSwitches = mapping.uiSwitches,
             ),
         )
     }
@@ -314,7 +315,7 @@ internal class GameDetailSession(
     /** What belongs on screen in each state: live-only blocks stay hidden after the whistle, score blocks before it. */
     private fun visible(type: BlockType, state: GameState): Boolean = when (state) {
         GameState.LIVE -> true
-        GameState.FINAL -> type != BlockType.SITUATION && type != BlockType.FIELD   // win chance: only the market's momentum history survives the whistle (see marketBlock)
+        GameState.FINAL -> type != BlockType.SITUATION && type != BlockType.FIELD && type != BlockType.BASKETBALL_STRIP && type != BlockType.HOCKEY_STRIP   // win chance: only the market's momentum history survives the whistle (see marketBlock)
         GameState.UPCOMING -> type in UPCOMING_BLOCKS
         GameState.POSTPONED -> false
     }
@@ -466,6 +467,8 @@ internal fun blockTypeOf(b: GameBlock): BlockType? = when (b) {
     is com.nuvio.app.features.sportsdetail.api.HighlightsBlock -> BlockType.HIGHLIGHTS
     is com.nuvio.app.features.sportsdetail.api.NextBlock -> BlockType.NEXT
     is com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock -> BlockType.WIN_PROBABILITY
+    is com.nuvio.app.features.sportsdetail.api.BasketballStripBlock -> BlockType.BASKETBALL_STRIP
+    is com.nuvio.app.features.sportsdetail.api.HockeyStripBlock -> BlockType.HOCKEY_STRIP
     is com.nuvio.app.features.sportsdetail.api.FootballFieldBlock -> BlockType.FIELD
     is com.nuvio.app.features.sportsdetail.api.SoccerStripBlock -> BlockType.SOCCER_STRIP
     is com.nuvio.app.features.sportsdetail.api.PlaysBlock -> BlockType.PLAYS

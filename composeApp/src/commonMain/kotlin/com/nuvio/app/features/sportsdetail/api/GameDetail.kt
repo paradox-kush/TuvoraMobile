@@ -79,6 +79,8 @@ data class GameDetail(
     val sources: Map<String, String> = emptyMap(),
     /** Per source, WHEN WE FETCHED it (epoch ms; never a provider timestamp). UI shows "Updated 2 min ago" past ~20 s. */
     val asOf: Map<String, Long> = emptyMap(),
+    /** The remote UI switches that are ON for this snapshot (mapping `uiSwitches`); e.g. "chartMarkers". A switch not listed is OFF. */
+    val uiSwitches: Set<String> = emptySet(),
 )
 
 /** One block of the screen. Every block says which source produced it. */
@@ -266,6 +268,49 @@ data class SoccerStripBlock(
     /** "Saka 23'", "Palmer 41' (pen)", "Dunk 60' (og)" - in time order, under the team that got the goal. */
     val homeScorers: List<String> = emptyList(),
     val awayScorers: List<String> = emptyList(),
+    override val source: String = "",
+) : GameBlock
+
+/** A run of unanswered points; [side] "home" | "away". Derived from the plays, so it exists only while the `basketballRun` switch is ON. */
+@Serializable
+data class ScoringRun(val side: String, val points: Int)
+
+/**
+ * Basketball live strip (summary, so it moves on the 60 s tick). Fouls, bonus and timeouts are DIRECT from ESPN's header competitors;
+ * [homeBonus]/[awayBonus] carry that competitor's own raw `bonusState` (the team that BENEFITS, see BasketballStripPolicy.inBonus).
+ */
+@Serializable @SerialName("basketballStrip")
+data class BasketballStripBlock(
+    /** `fouls.teamFoulsCurrent`: team fouls this period. */
+    val homeFouls: Int? = null,
+    val awayFouls: Int? = null,
+    val homeBonus: String? = null,
+    val awayBonus: String? = null,
+    /** `timeoutsRemaining`. */
+    val homeTimeouts: Int? = null,
+    val awayTimeouts: Int? = null,
+    /** "home" | "away" | null. */
+    val possession: String? = null,
+    /** Derived; null unless the `basketballRun` switch is ON and the run is at least 8 points. */
+    val run: ScoringRun? = null,
+    override val source: String = "",
+) : GameBlock
+
+/**
+ * Hockey live strip (summary, 60 s). [powerPlaySide] comes from the newest play's own `strength`; [powerPlaySecondsLeft] is DERIVED
+ * from penalty plays and exists only while the `hockeyPowerPlayClock` switch is ON and the situation is unambiguous.
+ */
+@Serializable @SerialName("hockeyStrip")
+data class HockeyStripBlock(
+    val powerPlaySide: String? = null,
+    val powerPlaySecondsLeft: Int? = null,
+    val homeShots: Int? = null,
+    val awayShots: Int? = null,
+    /** "goals/opportunities", e.g. "1/2". */
+    val homePowerPlay: String? = null,
+    val awayPowerPlay: String? = null,
+    val homeFaceoffs: Int? = null,
+    val awayFaceoffs: Int? = null,
     override val source: String = "",
 ) : GameBlock
 
