@@ -190,8 +190,15 @@ struct GameDetailScreen: View {
             Spacer(minLength: 0)
             watchRow()
                 .focusSection()
+                // The chips sit top-right, out of the focus engine's geometric reach from the bottom-left Play row:
+                // Up goes to the selected chip explicitly (Right also reaches them through the right section).
+                .onMoveCommand { direction in
+                    if direction == .up, !(screenChips.isEmpty) { focus = .chip(min(selected, screenChips.count - 1)) }
+                }
         }
     }
+
+    private var screenChips: [TvChip] { screen?.chips ?? [] }
 
     private var upcomingLabel: String { SportsWhen.label(fixture, now: TvSports.shared.nowMs()) }
 
@@ -240,6 +247,9 @@ struct GameDetailScreen: View {
             }
             Spacer(minLength: 0)
         }
+        // The whole column is one focus section (full height), so Right from the Play row lands on the chips.
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .focusSection()
     }
 
     private func chipRow(_ chips: [TvChip]) -> some View {
@@ -252,7 +262,8 @@ struct GameDetailScreen: View {
         .onChange(of: focus) { _, now in
             if case .chip(let index) = now, index != selected { selected = index }
         }
-        .focusSection()
+        // Down from any chip goes back to Play (nothing is below the chips in the right column).
+        .onMoveCommand { direction in if direction == .down { focus = .play } }
     }
 
     @ViewBuilder
