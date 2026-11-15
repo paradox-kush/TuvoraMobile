@@ -169,3 +169,26 @@ class GameUiHelpersTest {
         assertEquals(listOf(0.2f, 0.7f), h.seriesFor(listOf(0.2f, 0.7f)), "home leads so the series is as given")
     }
 }
+
+class SoccerUiHelpersTest {
+    @Test fun `scorers cap at three lines then a plus count`() {
+        val s = listOf("a 1'", "b 2'", "c 3'", "d 4'", "e 5'")
+        assertEquals(listOf("a 1'", "b 2'", "c 3'", "+2"), com.nuvio.app.features.sportsdetail.internal.ui.ScorerLines.of(s), "five scorers")
+        assertEquals(listOf("a 1'"), com.nuvio.app.features.sportsdetail.internal.ui.ScorerLines.of(listOf("a 1'")), "one scorer")
+    }
+
+    @Test fun `event chips pick label and tone`() {
+        val c = com.nuvio.app.features.sportsdetail.internal.ui.SoccerChips
+        assertEquals(com.nuvio.app.features.sportsdetail.internal.ui.EventTone.GOAL, c.chip("goal").tone, "goal filled")
+        assertEquals(com.nuvio.app.features.sportsdetail.internal.ui.EventTone.YELLOW, c.chip("yellow").tone, "yellow")
+        assertEquals(com.nuvio.app.features.sportsdetail.internal.ui.EventTone.RED, c.chip("red").tone, "red")
+        assertEquals(com.nuvio.app.features.sportsdetail.internal.ui.EventTone.NEUTRAL, c.chip("corner").tone, "neutral")
+    }
+
+    @Test fun `cards text shows reds only when present`() {
+        val c = com.nuvio.app.features.sportsdetail.internal.ui.SoccerChips
+        assertEquals("■2", c.cardsText(2, 0), "yellow only")
+        assertEquals("■2 ▮1", c.cardsText(2, 1), "with a red")
+        assertEquals(44, c.awayPossession(56), "away share")
+    }
+}

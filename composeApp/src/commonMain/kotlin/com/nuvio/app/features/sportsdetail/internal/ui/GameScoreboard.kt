@@ -63,7 +63,7 @@ internal fun GameScoreboard(detail: GameDetail, modifier: Modifier = Modifier) {
         Spacer(Modifier.height(NuvioTokens.Space.s8))
         val palette = rememberTeamPalette(detail.header)
         when (val h = detail.header) {
-            is TeamsHeader -> SidesRow(h.home, h.away, "home", "away", palette, detail)
+            is TeamsHeader -> SidesRow(h.home, h.away, "home", "away", palette, detail, extras = rememberSideExtras(detail, palette))
             is VersusHeader -> SidesRow(h.a, h.b, "home", "away", palette, detail)
             is EventHeader -> Column {
                 Text(h.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.nuvio.colors.textPrimary)
@@ -76,18 +76,18 @@ internal fun GameScoreboard(detail: GameDetail, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SidesRow(a: Side, b: Side, aKey: String, bKey: String, palette: TeamPalette, detail: GameDetail) {
+private fun SidesRow(a: Side, b: Side, aKey: String, bKey: String, palette: TeamPalette, detail: GameDetail, extras: SideExtras = SideExtras()) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        SideColumn(a, aKey, palette.home, Modifier.weight(1f))
+        SideColumn(a, aKey, palette.home, extras.home, Modifier.weight(1f))
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = NuvioTokens.Space.s8)) {
             StatusLine(detail)
         }
-        SideColumn(b, bKey, palette.away, Modifier.weight(1f))
+        SideColumn(b, bKey, palette.away, extras.away, Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun SideColumn(s: Side, key: String, teamColor: Color, modifier: Modifier) {
+private fun SideColumn(s: Side, key: String, teamColor: Color, extras: (@Composable () -> Unit)?, modifier: Modifier) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
         TeamBadge(s.badgeUrl, 48)
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -99,6 +99,7 @@ private fun SideColumn(s: Side, key: String, teamColor: Color, modifier: Modifie
         s.record?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted) }
         Box(Modifier.height(3.dp).width(28.dp).clip(CircleShape).background(teamColor))
         s.score?.let { AnimatedScore(it, key, large = true) }
+        extras?.invoke()
     }
 }
 
@@ -176,4 +177,25 @@ internal fun SlimScoreBar(detail: GameDetail, canPlay: Boolean, onPlay: () -> Un
             ) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = MaterialTheme.nuvio.colors.onAccent, modifier = Modifier.size(NuvioTokens.Icon.md)) }
         }
     }
+}
+
+/** Per-side extras under the score: soccer scorers, football timeout dots. Absent blocks add nothing. */
+internal class SideExtras(val home: (@Composable () -> Unit)? = null, val away: (@Composable () -> Unit)? = null)
+
+@Composable
+private fun rememberSideExtras(detail: GameDetail, palette: TeamPalette): SideExtras {
+    val soccer = detail.blocks.filterIsInstance<com.nuvio.app.features.sportsdetail.api.SoccerStripBlock>().firstOrNull()
+    val field = detail.blocks.filterIsInstance<com.nuvio.app.features.sportsdetail.api.FootballFieldBlock>().firstOrNull()
+    fun scorers(list: List<String>): (@Composable () -> Unit)? = list.takeIf { it.isNotEmpty() }?.let { l ->
+        {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                ScorerLines.of(l).forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+        }
+    }
+    fun dots(left: Int?, c: Color): (@Composable () -> Unit)? = left?.let { { CountDots(it, 3, c, Modifier.padding(top = NuvioTokens.Space.s4)) } }
+    return SideExtras(
+        home = scorers(soccer?.homeScorers.orEmpty()) ?: dots(field?.homeTimeouts, palette.home),
+        away = scorers(soccer?.awayScorers.orEmpty()) ?: dots(field?.awayTimeouts, palette.away),
+    )
 }

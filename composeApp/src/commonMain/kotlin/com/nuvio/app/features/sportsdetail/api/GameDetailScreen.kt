@@ -58,7 +58,11 @@ import com.nuvio.app.features.sportsdetail.internal.ui.GameTabRow
 import com.nuvio.app.features.sportsdetail.internal.ui.GameTabsUi
 import com.nuvio.app.features.sportsdetail.internal.ui.LastPlayCard
 import com.nuvio.app.features.sportsdetail.internal.ui.LocalMoments
+import com.nuvio.app.features.sportsdetail.internal.ui.FootballFieldStrip
+import com.nuvio.app.features.sportsdetail.internal.ui.PitchLayout
+import com.nuvio.app.features.sportsdetail.internal.ui.PitchLineup
 import com.nuvio.app.features.sportsdetail.internal.ui.PlaysCard
+import com.nuvio.app.features.sportsdetail.internal.ui.SoccerStrip
 import com.nuvio.app.features.sportsdetail.internal.ui.SituationLineCard
 import com.nuvio.app.features.sportsdetail.internal.ui.SlimScoreBar
 import com.nuvio.app.features.sportsdetail.internal.ui.WatchPrimary
@@ -185,6 +189,7 @@ private fun LoadedContent(
                     LazyColumn(Modifier.weight(0.44f), verticalArrangement = gap) {
                         item(key = "score") { GameScoreboard(detail) }
                         s.staleLabel?.let { item(key = "stale") { StaleChip(it) } }
+                        stripItems(detail)
                         item(key = "watch") { watchCard() }
                         overviewLeft(detail)
                     }
@@ -199,6 +204,7 @@ private fun LoadedContent(
                 LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = pad, verticalArrangement = gap) {
                     item(key = "score") { GameScoreboard(detail) }
                     s.staleLabel?.let { item(key = "stale") { StaleChip(it) } }
+                    stripItems(detail)
                     item(key = "watch") { watchCard() }
                     stickyHeader(key = "tabs") {
                         Column {
@@ -213,12 +219,18 @@ private fun LoadedContent(
     }
 }
 
+/** Sport strips pinned directly under the scoreboard (scrolling header, above the Watch row). */
+private fun LazyListScope.stripItems(detail: GameDetail) {
+    detail.blocks.filterIsInstance<FootballFieldBlock>().firstOrNull()?.let { f -> item(key = "field") { FootballFieldStrip(f, detail) } }
+    detail.blocks.filterIsInstance<SoccerStripBlock>().firstOrNull()?.let { b -> item(key = "soccer") { SoccerStrip(b, detail) } }
+}
+
 /** Left pane of the wide layout: win chance, last play and the situation line. */
 private fun LazyListScope.overviewLeft(detail: GameDetail) {
     val blocks = GameSectionsPolicy.blocksFor(GameSection.OVERVIEW, detail)
     blocks.filterIsInstance<WinProbabilityBlock>().firstOrNull()?.let { w -> item(key = "win") { WinChanceCard(w, detail) } }
     GameMomentPolicy.newest(detail)?.let { p -> item(key = "last") { LastPlayCard(p, detail) } }
-    blocks.filterIsInstance<SituationBlock>().firstOrNull()?.let { sit -> item(key = "sit") { SituationLineCard(sit) } }
+    if (blocks.none { it is FootballFieldBlock }) blocks.filterIsInstance<SituationBlock>().firstOrNull()?.let { sit -> item(key = "sit") { SituationLineCard(sit) } }
 }
 
 /** The selected section's cards. In the wide layout Overview omits what the left pane already shows. */
@@ -227,12 +239,15 @@ private fun LazyListScope.sectionItems(section: GameSection, detail: GameDetail,
     when (section) {
         GameSection.OVERVIEW -> {
             if (!wide) overviewLeft(detail)
-            items(blocks.filter { it !is WinProbabilityBlock && it !is SituationBlock }) { BlockContent(it, detail) }
+            items(blocks.filter { it !is WinProbabilityBlock && it !is SituationBlock && it !is FootballFieldBlock && it !is SoccerStripBlock }) { BlockContent(it, detail) }
         }
         GameSection.PLAYS -> blocks.forEach { b ->
             if (b is PlaysBlock) {
                 item(key = "plays") { PlaysCard(b, detail) }
             } else item { BlockContent(b, detail) }
+        }
+        GameSection.LINEUPS -> items(blocks) { b ->
+            if (b is LineupBlock && PitchLayout.canDraw(b)) PitchLineup(b, detail) else BlockContent(b, detail)
         }
         else -> items(blocks) { BlockContent(it, detail) }
     }

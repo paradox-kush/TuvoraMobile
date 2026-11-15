@@ -138,3 +138,35 @@ internal object WatchPrimary {
         else -> null
     }
 }
+
+/** Scorers under a team name: at most [max] lines, then "+N" for the rest. */
+internal object ScorerLines {
+    fun of(scorers: List<String>, max: Int = 3): List<String> =
+        if (scorers.size <= max) scorers else scorers.take(max) + "+${scorers.size - max}"
+}
+
+/** Label and tone of the soccer strip's last-event chip. */
+internal enum class EventTone { GOAL, YELLOW, RED, NEUTRAL }
+
+internal data class EventChip(val label: String, val tone: EventTone)
+
+internal object SoccerChips {
+    fun chip(kind: String): EventChip = when (kind) {
+        "goal" -> EventChip("GOAL", EventTone.GOAL)
+        "penalty" -> EventChip("PENALTY", EventTone.GOAL)
+        "yellow" -> EventChip("YELLOW CARD", EventTone.YELLOW)
+        "red" -> EventChip("RED CARD", EventTone.RED)
+        "sub" -> EventChip("SUBSTITUTION", EventTone.NEUTRAL)
+        "corner" -> EventChip("CORNER", EventTone.NEUTRAL)
+        "var" -> EventChip("VAR", EventTone.NEUTRAL)
+        "shot" -> EventChip("SHOT", EventTone.NEUTRAL)
+        "offside" -> EventChip("OFFSIDE", EventTone.NEUTRAL)
+        "foul" -> EventChip("FOUL", EventTone.NEUTRAL)
+        else -> EventChip(kind.uppercase(), EventTone.NEUTRAL)
+    }
+
+    /** "Cards ■1 – ■2" with reds appended only when > 0, e.g. "■1 ■1red". Returns the per-side count text. */
+    fun cardsText(yellow: Int, red: Int): String = if (red > 0) "■$yellow ▮$red" else "■$yellow"
+
+    fun awayPossession(home: Int?): Int? = home?.let { 100 - it }
+}
