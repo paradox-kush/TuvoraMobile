@@ -12,7 +12,10 @@ import com.nuvio.app.features.sportsdetail.api.LineupPlayer
 import com.nuvio.app.features.sportsdetail.api.LineupSide
 import com.nuvio.app.features.sportsdetail.api.LinescoreBlock
 import com.nuvio.app.features.sportsdetail.api.LiveInfo
+import com.nuvio.app.features.sportsdetail.api.BasketballStripBlock
 import com.nuvio.app.features.sportsdetail.api.FieldDrive
+import com.nuvio.app.features.sportsdetail.api.HockeyStripBlock
+import com.nuvio.app.features.sportsdetail.api.ScoringRun
 import com.nuvio.app.features.sportsdetail.api.FootballFieldBlock
 import com.nuvio.app.features.sportsdetail.api.PlaysBlock
 import com.nuvio.app.features.sportsdetail.api.SoccerEvent
@@ -122,6 +125,8 @@ internal class EspnAssembler(private val m: SportsMapping) {
             BlockType.PLAYS -> spec?.let { plays(it, profile, event, root(it)) }
             BlockType.FIELD -> spec?.let { field(it, event, root(it)) }
             BlockType.SOCCER_STRIP -> spec?.let { soccerStrip(it, event, summary) }
+            BlockType.BASKETBALL_STRIP -> spec?.let { basketballStrip(it, event, root(it)) }
+            BlockType.HOCKEY_STRIP -> spec?.let { hockeyStrip(it, event, root(it)) }
             BlockType.STANDINGS_TABLE -> spec?.let { standingsTable(it, event, root(it)) }
             BlockType.WIN_PROBABILITY -> spec?.let { winProbability(it, root(it)) }
             BlockType.SITUATION -> spec?.let { situation(it, root(it)) }
@@ -404,7 +409,9 @@ internal class EspnAssembler(private val m: SportsMapping) {
         if (allow.isNotEmpty() && (typeText == null || allow.none { typeText.startsWith(it, ignoreCase = true) })) return null
         val text = SportsPath.text(p, spec.str("text") ?: "text")?.takeIf { it.isNotBlank() } ?: SportsPath.text(p, "shortText")?.takeIf { it.isNotBlank() } ?: return null
         val scoring = (p as? JsonObject)?.get("scoringPlay")?.let { (it as? JsonPrimitive)?.booleanOrNull } == true
-        val kind = if (SportsPath.text(p, "type.penaltyType") != null) "penalty" else playKind(typeText, scoring)
+        val baseKind = if (SportsPath.text(p, "type.penaltyType") != null) "penalty" else playKind(typeText, scoring)
+        // A goal scored on the power play carries the feed's own `strength` ("Power Play"): tagged ppg, never from our clock.
+        val kind = if (baseKind == "goal" && SportsPath.text(p, spec.str("strength"))?.contains("power", ignoreCase = true) == true) "ppg" else baseKind
         val home = SportsPath.text(p, spec.str("homeScore"))
         val away = SportsPath.text(p, spec.str("awayScore"))
         return TimelineItem(
@@ -486,6 +493,90 @@ internal class EspnAssembler(private val m: SportsMapping) {
             awayTimeouts = SportsPath.text(sit, "awayTimeouts")?.toIntOrNull(),
             drive = drive,
             source = ESPN,
+        )
+    }
+
+    // ---- basketball strip (summary) ---------------------------------------------------------------------------------------------
+
+    /**
+     * Fouls (`fouls.teamFoulsCurrent`), `fouls.bonusState`, `timeoutsRemaining` and `possession` (a boolean on the competitor, verified on
+     * the NBA capture) read straight from the summary's header competitors, matched to home/away by `homeAway`. The 8+ point run is
+     * derived and exists only while the `basketballRun` switch is ON.
+     */
+    private fun basketballStrip(spec: BlockSpec, event: JsonElement, root: JsonElement?): GameBlock? {
+        val comps = SportsPath.read(root, spec.path ?: return null)
+        fun comp(side: String) = comps.firstOrNull { ownerSide(event, it) == side }
+        val h = comp("home")
+        val a = comp("away")
+        fun int(c: JsonElement?, path: String) = c?.let { SportsPath.text(it, path)?.toIntOrNull() }
+        val possession = when {
+            h != null && SportsPath.text(h, "possession") == "true" -> "home"
+            a != null && SportsPath.text(a, "possession") == "true" -> "away"
+            else -> null
+        }
+        val run: ScoringRun? = if (!m.switchOn("basketballRun")) null else spec.str("plays")?.let { path ->
+            BasketballRunPolicy.run(SportsPath.read(root, path).map { p ->
+                RunPlay(
+                    side = sideOfTeam(event, SportsPath.text(p, "team.id")),
+                    points = SportsPath.text(p, "scoreValue")?.toIntOrNull() ?: 0,
+                    scoring = SportsPath.text(p, "scoringPlay") == "true",
+                )
+            })
+        }
+        val block = BasketballStripBlock(
+            homeFouls = int(h, "fouls.teamFoulsCurrent"), awayFouls = int(a, "fouls.teamFoulsCurrent"),
+            homeBonus = h?.let { SportsPath.text(it, "fouls.bonusState") }, awayBonus = a?.let { SportsPath.text(it, "fouls.bonusState") },
+            homeTimeouts = int(h, "timeoutsRemaining"), awayTimeouts = int(a, "timeoutsRemaining"),
+            possession = possession, run = run, source = ESPN,
+        )
+        val empty = block.homeFouls == null && block.awayFouls == null && block.homeBonus == null && block.awayBonus == null &&
+            block.homeTimeouts == null && block.awayTimeouts == null && block.possession == null && block.run == null
+        return if (empty) null else block
+    }
+
+    // ---- hockey strip (summary) -----------------------------------------------------------------------------------------------------
+
+    private fun hockeyStrip(spec: BlockSpec, event: JsonElement, root: JsonElement?): GameBlock? {
+        if (root == null) return null
+        val plays = SportsPath.read(root, spec.str("plays") ?: "plays[*]").map { hockeyPlay(event, it) }
+        val side = HockeyStrength.powerPlaySide(plays)
+        val (ownersPath, rest) = splitStar(spec.str("stats") ?: "boxscore.teams[*].statistics[*]") ?: return null
+        val base = rest.removeSuffix("[*]")
+        val owners = SportsPath.read(root, ownersPath)
+        fun stat(s: String, label: String) = owners.firstOrNull { ownerSide(event, it) == s }?.let { SportsPath.text(it, "$base[label=$label].displayValue") }
+        fun pp(s: String): String? {
+            val g = stat(s, "Power Play Goals")?.toIntOrNull() ?: return null
+            val o = stat(s, "Power Play Opportunities")?.toIntOrNull() ?: return null
+            return "$g/$o"
+        }
+        // Derived: only with the switch ON, only for an unambiguous situation, always "as of the last update".
+        val secondsLeft = if (!m.switchOn("hockeyPowerPlayClock") || side == null) null else {
+            val period = SportsPath.text(event, m.common.period)?.toIntOrNull()
+            val remaining = SportsPath.text(event, "status.clock")?.toDoubleOrNull()?.toInt()
+            if (period == null || remaining == null) null else PowerPlayClock.secondsLeft(plays, period, remaining, side)
+        }
+        val block = HockeyStripBlock(
+            powerPlaySide = side, powerPlaySecondsLeft = secondsLeft,
+            homeShots = stat("home", "Shots")?.toIntOrNull(), awayShots = stat("away", "Shots")?.toIntOrNull(),
+            homePowerPlay = pp("home"), awayPowerPlay = pp("away"),
+            homeFaceoffs = stat("home", "Faceoffs Won")?.toIntOrNull(), awayFaceoffs = stat("away", "Faceoffs Won")?.toIntOrNull(),
+            source = ESPN,
+        )
+        val empty = block.powerPlaySide == null && block.homeShots == null && block.awayShots == null && block.homePowerPlay == null &&
+            block.awayPowerPlay == null && block.homeFaceoffs == null && block.awayFaceoffs == null
+        return if (empty) null else block
+    }
+
+    private fun hockeyPlay(event: JsonElement, p: JsonElement): HockeyPlay {
+        val clock = SportsPath.text(p, "clock.displayValue")?.split(":")?.mapNotNull { it.toIntOrNull() }
+        return HockeyPlay(
+            period = SportsPath.text(p, "period.number")?.toIntOrNull() ?: 0,
+            elapsedSec = clock?.takeIf { it.size == 2 }?.let { it[0] * 60 + it[1] },
+            side = sideOfTeam(event, SportsPath.text(p, "team.id")),
+            penaltyMinutes = SportsPath.text(p, "type.penaltyMinutes")?.toIntOrNull(),
+            penaltyType = SportsPath.text(p, "type.penaltyType"),
+            goal = SportsPath.text(p, "scoringPlay") == "true",
+            strength = SportsPath.text(p, "strength.text"),
         )
     }
 
