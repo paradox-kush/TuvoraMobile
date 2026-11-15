@@ -107,6 +107,8 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
                     state = current.detail.state, startsAtMs = ref.startsAtMs, nowMs = now,
                     lastEventFetchMs = lastEvent, lastSummaryFetchMs = lastSummary,
                     consecutiveFailures = failures, config = service.refreshConfig(),
+                    // Soccer lineups are published before kickoff: the pre-kickoff window refreshes the summary on its own cadence.
+                    wantsUpcomingSummary = GameDetailRefreshPolicy.wantsUpcomingSummary(current.detail.sport),
                 )
                 // Idle (final / long-dead live) ends the loop. Far-future upcoming is NOT idle: it carries
                 // nextCheckInMs with no fetch, and the delay below wakes the screen when the lead window opens.
