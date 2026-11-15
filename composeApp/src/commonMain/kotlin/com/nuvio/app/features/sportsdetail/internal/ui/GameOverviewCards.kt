@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -83,9 +84,9 @@ internal fun WinChanceCard(w: WinProbabilityBlock, detail: GameDetail, modifier:
         }
         Spacer(Modifier.height(NuvioTokens.Space.s8))
         WinBar(m, palette, moved, reduce)
-        GameDetailUiPolicy.chartPoints(w.history)?.let { pts ->
+        GameDetailUiPolicy.chartSeries(w.history)?.let { pts ->
             Spacer(Modifier.height(NuvioTokens.Space.s12))
-            WinChart(m.seriesFor(pts), leaderColor, moved, reduce, markers = ChartMarkers.markersFor(detail), dividers = ChartMarkers.dividersFor(detail), flipped = m.leaderSide == "away", palette = palette)
+            WinChart(m.seriesFor(pts), leaderColor, moved, reduce, markers = ChartMarkers.markersFor(detail), dividers = ChartMarkers.dividersFor(detail), palette = palette)
             Text("${m.leaderName} win chance over time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
         }
         val lines = GameDetailUiPolicy.storylineLines(GameDetailUiPolicy.visibleStorylines(w.storylines, detail.state, detail.live, detail.sport), detail.header)
@@ -120,14 +121,14 @@ private fun WinBar(m: WinChanceModel, palette: TeamPalette, animate: Boolean, re
     Canvas(Modifier.fillMaxWidth().height(8.dp)) {
         val total = (home + draw + away).coerceAtLeast(1f)
         val r = CornerRadius(size.height / 2)
-        // away on the left, draw in the middle, home on the right (matches the old bar's reading order)
+        // home on the left, draw in the middle, away on the right (same order as the scoreboard and every strip)
         var x = 0f
         fun seg(v: Float, c: Color) {
             val wd = size.width * v / total
             if (wd > 0f) drawRoundRect(c, Offset(x, 0f), Size(wd, size.height), r)
             x += wd
         }
-        seg(away, palette.away); seg(draw, neutral); seg(home, palette.home)
+        seg(home, palette.home); seg(draw, neutral); seg(away, palette.away)
     }
 }
 
@@ -139,7 +140,7 @@ private fun WinBar(m: WinChanceModel, palette: TeamPalette, animate: Boolean, re
 @Composable
 private fun WinChart(
     points: List<Float>, color: Color, animate: Boolean, reduce: Boolean,
-    markers: List<ChartMarker>, dividers: List<Pair<Float, String>>, flipped: Boolean, palette: TeamPalette,
+    markers: List<ChartMarker>, dividers: List<Pair<Float, String>>, palette: TeamPalette,
 ) {
     val mid = MaterialTheme.nuvio.colors.borderStrong
     val faint = MaterialTheme.nuvio.colors.borderSubtle
@@ -147,8 +148,10 @@ private fun WinChart(
     val measurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, color = muted)
     val progress = remember { Animatable(1f) }
+    val ledger = LocalPlayed.current
+    val seq = LocalMoments.current.seq
     LaunchedEffect(points.size, points.lastOrNull(), animate, reduce) {
-        if (animate && !reduce) {
+        if (animate && !reduce && ledger.claim("win-chart", seq)) {
             progress.snapTo(0f)
             progress.animateTo(1f, motion(MotionSpec.COUNT_MS, false))
         } else progress.snapTo(1f)
@@ -160,44 +163,47 @@ private fun WinChart(
         seen = markers.size
     }
     val hasDividers = dividers.isNotEmpty()
-    Canvas(Modifier.fillMaxWidth().height(if (hasDividers) 104.dp else 88.dp)) {
-        val w = size.width
-        val h = size.height - if (hasDividers) 16.dp.toPx() else 0f
-        dividers.forEach { (fx, label) ->
-            val x = w * fx
-            drawLine(faint, Offset(x, 0f), Offset(x, h), strokeWidth = 1f)
-            val t = measurer.measure(label, labelStyle)
-            drawText(t, topLeft = Offset((x - t.size.width / 2f).coerceIn(0f, w - t.size.width), h + 2.dp.toPx()))
-        }
-        drawLine(mid, Offset(0f, h / 2), Offset(w, h / 2), strokeWidth = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f)))
-        fun px(i: Int) = if (points.size == 1) 0f else w * i / (points.size - 1)
-        fun py(v: Float) = h * (1f - v)
-        val path = Path()
-        points.forEachIndexed { i, v ->
-            if (i == 0) path.moveTo(px(i), py(v)) else if (i < points.lastIndex) path.lineTo(px(i), py(v))
-        }
-        var endX = px(0); var endY = py(points[0])
-        if (points.size > 1) {
-            val a = points.lastIndex - 1
-            val p = progress.value
-            endX = px(a) + (px(a + 1) - px(a)) * p
-            endY = py(points[a]) + (py(points[a + 1]) - py(points[a])) * p
-            if (a == 0) path.moveTo(px(0), py(points[0]))
-            path.lineTo(endX, endY)
-        }
-        drawPath(path, color, style = Stroke(width = 3f))
-        drawCircle(color, radius = 5f, center = Offset(endX, endY))
-        markers.forEachIndexed { i, m ->
-            val y = MarkerView.displayY(m, flipped)
-            val cx = w * m.x
-            val cy = py(y)
-            val scale = if (i == markers.lastIndex) pop.value else 1f
-            drawCircle(paletteFor(m.side, palette), radius = 4.dp.toPx() * scale, center = Offset(cx, cy), style = Stroke(width = 2f))
-            val t = measurer.measure(m.label, labelStyle)
-            val ty = if (MarkerView.labelAbove(m, flipped)) cy - 6.dp.toPx() - t.size.height else cy + 6.dp.toPx()
-            drawText(t, topLeft = Offset((cx - t.size.width / 2f).coerceIn(0f, w - t.size.width), ty.coerceIn(0f, h - t.size.height)))
+    // The line is built once per series and size (drawWithCache); a frame only draws it plus the newest segment. A new series makes a new modifier.
+    val drawer = remember(points, markers, dividers, palette, color, mid, faint, labelStyle, hasDividers) {
+        Modifier.drawWithCache {
+            val w = size.width
+            val h = size.height - if (hasDividers) 16.dp.toPx() else 0f
+            fun px(i: Int) = if (points.size == 1) 0f else w * i / (points.size - 1)
+            fun py(v: Float) = h * (1f - v)
+            val base = Path()
+            base.moveTo(px(0), py(points[0]))
+            for (i in 1 until points.lastIndex) base.lineTo(px(i), py(points[i]))
+            onDrawBehind {
+                dividers.forEach { (fx, label) ->
+                    val x = w * fx
+                    drawLine(faint, Offset(x, 0f), Offset(x, h), strokeWidth = 1f)
+                    val t = measurer.measure(label, labelStyle)
+                    drawText(t, topLeft = Offset((x - t.size.width / 2f).coerceIn(0f, w - t.size.width), h + 2.dp.toPx()))
+                }
+                drawLine(mid, Offset(0f, h / 2), Offset(w, h / 2), strokeWidth = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f)))
+                var endX = px(0); var endY = py(points[0])
+                drawPath(base, color, style = Stroke(width = 3f))
+                if (points.size > 1) {
+                    val a = points.lastIndex - 1
+                    val p = progress.value
+                    endX = px(a) + (px(a + 1) - px(a)) * p
+                    endY = py(points[a]) + (py(points[a + 1]) - py(points[a])) * p
+                    drawLine(color, Offset(px(a), py(points[a])), Offset(endX, endY), strokeWidth = 3f)
+                }
+                drawCircle(color, radius = 5f, center = Offset(endX, endY))
+                markers.forEachIndexed { i, m ->
+                    val cx = w * m.x
+                    val cy = py(MarkerView.displayY(m, points))
+                    val scale = if (i == markers.lastIndex) pop.value else 1f
+                    drawCircle(paletteFor(m.side, palette), radius = 4.dp.toPx() * scale, center = Offset(cx, cy), style = Stroke(width = 2f))
+                    val t = measurer.measure(m.label, labelStyle)
+                    val ty = if (MarkerView.labelAbove(m, points)) cy - 6.dp.toPx() - t.size.height else cy + 6.dp.toPx()
+                    drawText(t, topLeft = Offset((cx - t.size.width / 2f).coerceIn(0f, w - t.size.width), ty.coerceIn(0f, h - t.size.height)))
+                }
+            }
         }
     }
+    Spacer(Modifier.fillMaxWidth().height(if (hasDividers) 104.dp else 88.dp).then(drawer))
 }
 
 /** The newest play (feed's own text): team logo + kind tag + text. Fades/rises in once when a new play arrives. */
@@ -208,7 +214,7 @@ internal fun LastPlayCard(item: TimelineItem, detail: GameDetail, modifier: Modi
     val reduce = rememberReduceMotion()
     val isNew = batch.moments.any { it is Moment.NewPlay }
     val palette = rememberTeamPalette(detail.header)
-    NuvioSurfaceCard(modifier = modifier.enterOnce(item.id ?: item.text, isNew, reduce)) {
+    NuvioSurfaceCard(modifier = modifier.enterOnce("last-play", isNew, reduce)) {
         Text("LAST PLAY", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textMuted)
         Spacer(Modifier.height(NuvioTokens.Space.s6))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8)) {

@@ -156,9 +156,14 @@ internal fun StandingsCards(block: StandingsTableBlock, modifier: Modifier = Mod
             }
             val cellCount = g.rows.maxOf { it.cells.size }
             val headers = List((cellCount - g.columns.size).coerceAtLeast(0)) { "" } + g.columns
+            androidx.compose.foundation.layout.BoxWithConstraints {
+            // The name column keeps a floor; columns shrink, then the leading ones drop (points/record stay) rather than squeezing names.
+            val fit = StandingsFit.of(maxWidth.value, cellCount)
+            val CELL_W = fit.cellDp.dp
+            Column {
             Row(Modifier.fillMaxWidth()) {
                 Spacer(Modifier.weight(1f))
-                headers.forEach { Text(it, modifier = Modifier.width(CELL_W), textAlign = TextAlign.End, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted) }
+                headers.takeLast(fit.visible).forEach { Text(it, modifier = Modifier.width(CELL_W), textAlign = TextAlign.End, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted) }
             }
             g.rows.forEach { r ->
                 val mod = if (r.isGameTeam) Modifier.background(MaterialTheme.nuvio.colors.surfaceElevated, RoundedCornerShape(NuvioTokens.Space.s6)) else Modifier
@@ -168,14 +173,14 @@ internal fun StandingsCards(block: StandingsTableBlock, modifier: Modifier = Mod
                         style = MaterialTheme.typography.bodySmall, fontWeight = if (r.isGameTeam) FontWeight.Bold else FontWeight.Normal,
                         color = MaterialTheme.nuvio.colors.textPrimary,
                     )
-                    r.cells.forEach { Text(it, modifier = Modifier.width(CELL_W), textAlign = TextAlign.End, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.nuvio.colors.textPrimary) }
+                    r.cells.takeLast(fit.visible).forEach { Text(it, modifier = Modifier.width(CELL_W), textAlign = TextAlign.End, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.nuvio.colors.textPrimary) }
                 }
+            }
+            }
             }
         }
     }
 }
-
-private val CELL_W = 38.dp
 
 /** Leaders with the team's logo on each row (the existing card, restyled). */
 @Composable
@@ -210,7 +215,7 @@ internal fun PlaysCard(block: com.nuvio.app.features.sportsdetail.api.PlaysBlock
             g.items.forEach { item ->
                 // Only the newly arrived row fades in; no list-wide motion.
                 val fresh = newId != null && item.id == newId.id && item.text == newId.text && item.time == newId.time
-                PlayRow(item, detail, palette, Modifier.enterOnce(batch.seq, fresh, reduce))
+                PlayRow(item, detail, palette, Modifier.enterOnce("play-${item.id ?: item.time + item.text}", fresh, reduce))
             }
         }
     }

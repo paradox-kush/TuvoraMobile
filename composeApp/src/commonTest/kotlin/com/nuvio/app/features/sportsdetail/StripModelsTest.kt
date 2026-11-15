@@ -36,6 +36,7 @@ class StripModelsTest {
         assertEquals("Even strength", m.chip, "no power play")
         assertNull(m.timeLeft, "no time")
         assertNull(m.barFraction, "no bar")
+        assertEquals(20 to 14, m.shotsHA, "numbers for the count-up")
         assertEquals("Shots 20 – 14", m.shots, "shots")
     }
 
@@ -50,6 +51,8 @@ class StripModelsTest {
         val m = HockeyStripModel.of(HockeyStripBlock(powerPlaySide = "away", powerPlaySecondsLeft = 72), header)
         assertEquals("1:12 left", m.timeLeft, "mm:ss")
         assertEquals(0.6f, m.barFraction!!, 0.001f, "72 of 120")
+        assertNull(HockeyStripModel.of(HockeyStripBlock(powerPlaySide = "away", powerPlaySecondsLeft = 150), header).barFraction, "above 2:00 the length is unknown: no bar, no rescale")
+        assertEquals("2:30 left", HockeyStripModel.of(HockeyStripBlock(powerPlaySide = "away", powerPlaySecondsLeft = 150), header).timeLeft, "time still shown")
         assertEquals("Power play · MIA", m.chip, "chip")
     }
 

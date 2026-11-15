@@ -10,6 +10,7 @@ import com.nuvio.app.features.sportsdetail.api.StatRow
 import com.nuvio.app.features.sportsdetail.api.StatsBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.TimelineItem
+import com.nuvio.app.features.sportsdetail.api.WinPoint
 import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
 import com.nuvio.app.features.sportsdetail.internal.GameMomentTracker
 import com.nuvio.app.features.sportsdetail.internal.Moment
@@ -164,9 +165,19 @@ class GameUiHelpersTest {
 
     @Test fun `chart follows the leader so the line rises with the headline number`() {
         val m = WinChanceModel.of(WinProbabilityBlock(homePercent = 1, awayPercent = 99), TeamsHeader(Side("A", "AAA"), Side("B", "BBB")))
-        assertEquals(listOf(0.8f, 0.99f), m.seriesFor(listOf(0.2f, 0.01f)), "away leads so the home series is flipped")
+        assertEquals(listOf(0.8f, 0.99f), m.seriesFor(listOf(WinPoint(1, 20), WinPoint(2, 1))), "away leads so the home series is flipped")
         val h = WinChanceModel.of(WinProbabilityBlock(homePercent = 70, awayPercent = 30), TeamsHeader(Side("A", "AAA"), Side("B", "BBB")))
-        assertEquals(listOf(0.2f, 0.7f), h.seriesFor(listOf(0.2f, 0.7f)), "home leads so the series is as given")
+        assertEquals(listOf(0.2f, 0.7f), h.seriesFor(listOf(WinPoint(1, 20), WinPoint(2, 70))), "home leads so the series is as given")
+    }
+
+    @Test fun `three-way chart ends at the headline when away leads`() {
+        // home 30 / draw 30 / away 40: the last point is home's NON-draw share 30/70 = 43 with draw 30.
+        val m = WinChanceModel.of(WinProbabilityBlock(homePercent = 30, drawPercent = 30, awayPercent = 40), TeamsHeader(Side("A", "AAA"), Side("B", "BBB")))
+        val s = m.seriesFor(listOf(WinPoint(1, 50, 25), WinPoint(2, 43, 30)))
+        assertEquals(0.4f, s.last(), 0.011f, "line ends at the 40 percent headline (was ~57)")
+        assertEquals(0.375f, s.first(), 0.001f, "50 percent of the non-draw 75")
+        val home = WinChanceModel.of(WinProbabilityBlock(homePercent = 40, drawPercent = 30, awayPercent = 30), TeamsHeader(Side("A"), Side("B")))
+        assertEquals(0.4f, home.seriesFor(listOf(WinPoint(1, 57, 30))).last(), 0.011f, "home leads: ends at 40")
     }
 }
 
@@ -194,15 +205,56 @@ class SoccerUiHelpersTest {
 }
 
 class MarkerViewTest {
+    private val view = com.nuvio.app.features.sportsdetail.internal.ui.MarkerView
     private val m = com.nuvio.app.features.sportsdetail.internal.ChartMarker(0.5f, 0.7f, "G", "home")
 
-    @Test fun `markers follow the flipped series`() {
-        assertEquals(0.7f, com.nuvio.app.features.sportsdetail.internal.ui.MarkerView.displayY(m, false), "as given")
-        assertEquals(0.3f, com.nuvio.app.features.sportsdetail.internal.ui.MarkerView.displayY(m, true), 0.0001f, "flipped")
+    @Test fun `marker y is read off the plotted series at its x`() {
+        assertEquals(0.4f, view.displayY(m, listOf(0.1f, 0.4f, 0.9f)), "middle point of the plotted line")
+        assertEquals(0.9f, view.displayY(com.nuvio.app.features.sportsdetail.internal.ChartMarker(1f, 0.1f, "G", "away"), listOf(0.1f, 0.4f, 0.9f)), "last point")
+        assertEquals(0.7f, view.displayY(m, emptyList()), "no series falls back to the marker's own y")
     }
 
     @Test fun `label goes above from fifty percent and below under it`() {
-        assertTrue(com.nuvio.app.features.sportsdetail.internal.ui.MarkerView.labelAbove(m, false), "70 percent above")
-        assertTrue(!com.nuvio.app.features.sportsdetail.internal.ui.MarkerView.labelAbove(m, true), "30 percent below")
+        assertTrue(view.labelAbove(m, listOf(0.6f, 0.7f, 0.8f)), "70 percent above")
+        assertTrue(!view.labelAbove(m, listOf(0.6f, 0.3f, 0.8f)), "30 percent below")
+    }
+}
+
+class PlayedLedgerTest {
+    @Test fun `a slot plays once per newer seq`() {
+        val l = com.nuvio.app.features.sportsdetail.internal.ui.PlayedLedger()
+        assertTrue(!l.claim("score-home", 0), "no batch yet")
+        assertTrue(l.claim("score-home", 3), "first time")
+        assertTrue(!l.claim("score-home", 3), "recomposition / tab back / resume with the same batch")
+        assertTrue(l.claim("score-home", 4), "a newer batch plays again")
+        assertTrue(l.claim("score-away", 3), "slots are independent")
+    }
+
+    @Test fun `tab switch fades only the items composed in the switch window`() {
+        val l = com.nuvio.app.features.sportsdetail.internal.ui.PlayedLedger()
+        assertTrue(l.inSwitchWindow("tab", 1, 1000), "first item of the switch")
+        assertTrue(l.inSwitchWindow("tab", 1, 1100), "second visible item, same switch")
+        assertTrue(!l.inSwitchWindow("tab", 1, 5000), "item scrolled in later")
+        assertTrue(l.inSwitchWindow("tab", 2, 6000), "next switch opens a new window")
+    }
+}
+
+class StandingsFitTest {
+    private val fit = com.nuvio.app.features.sportsdetail.internal.ui.StandingsFit
+
+    @Test fun `seven columns on a 300 dp card shrink so the name keeps its floor`() {
+        val f = fit.of(300f, 7)
+        assertEquals(7, f.visible, "all seven still fit at the minimum cell")
+        assertTrue(300f - f.visible * f.cellDp >= 96f - 0.01f, "name column keeps at least 96 dp (was ~34)")
+    }
+
+    @Test fun `too narrow drops leading columns instead of squeezing the name`() {
+        val f = fit.of(220f, 7)
+        assertEquals(5, f.visible, "124 dp of room holds five 24 dp cells")
+        assertTrue(220f - f.visible * f.cellDp >= 96f - 0.01f, "name floor holds")
+    }
+
+    @Test fun `wide cards keep the full 38 dp cells`() {
+        assertEquals(38f, fit.of(600f, 7).cellDp, "no shrink when there is room")
     }
 }

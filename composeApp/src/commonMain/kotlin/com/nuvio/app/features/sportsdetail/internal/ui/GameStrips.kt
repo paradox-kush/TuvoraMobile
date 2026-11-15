@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,10 +40,12 @@ import com.nuvio.app.features.sportsdetail.internal.MotionSpec
 
 /** A pill chip that pops in (QUICK_MS) when [popKey] changes while [pop] is true; otherwise static. */
 @Composable
-private fun PopChip(text: String, bg: Color, fg: Color, popKey: Any?, pop: Boolean, reduce: Boolean) {
+private fun PopChip(slot: String, text: String, bg: Color, fg: Color, popKey: Any?, pop: Boolean, reduce: Boolean) {
     val s = remember { Animatable(1f) }
+    val ledger = LocalPlayed.current
+    val seq = LocalMoments.current.seq
     LaunchedEffect(popKey, pop) {
-        if (pop && !reduce) { s.snapTo(0.6f); s.animateTo(1f, motion(MotionSpec.QUICK_MS, false, enter = true)) } else s.snapTo(1f)
+        if (pop && !reduce && ledger.claim("chip-$slot", seq)) { s.snapTo(0.6f); s.animateTo(1f, motion(MotionSpec.QUICK_MS, false, enter = true)) } else s.snapTo(1f)
     }
     Text(
         text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = fg, maxLines = 1,
@@ -53,12 +56,14 @@ private fun PopChip(text: String, bg: Color, fg: Color, popKey: Any?, pop: Boole
 
 /** Filled dots (left to right) out of [total]; the dot that just changed pops via [popIndex]. */
 @Composable
-private fun DotRow(filled: Int, total: Int, color: Color, popIndex: Int?, reduce: Boolean) {
+private fun DotRow(slot: String, filled: Int, total: Int, color: Color, popIndex: Int?, reduce: Boolean) {
+    val ledger = LocalPlayed.current
+    val seq = LocalMoments.current.seq
     Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         repeat(total) { i ->
             val scale = remember { Animatable(1f) }
             LaunchedEffect(popIndex) {
-                if (popIndex == i && !reduce) { scale.snapTo(0.4f); scale.animateTo(1f, motion(MotionSpec.QUICK_MS, false, enter = true)) } else scale.snapTo(1f)
+                if (popIndex == i && !reduce && ledger.claim("dot-$slot-$i", seq)) { scale.snapTo(0.4f); scale.animateTo(1f, motion(MotionSpec.QUICK_MS, false, enter = true)) } else scale.snapTo(1f)
             }
             Box(Modifier.size(8.dp).graphicsLayer { scaleX = scale.value; scaleY = scale.value }.clip(CircleShape).background(if (i < filled) color else color.copy(alpha = 0.18f)))
         }
@@ -78,9 +83,9 @@ internal fun BasketballStrip(b: BasketballStripBlock, detail: GameDetail, modifi
     NuvioSurfaceCard(modifier = modifier) {
         if (m.runLabel != null || m.bonusLabel != null) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                m.runLabel?.let { PopChip(it, colors.accent, colors.onAccent, moments.seq, false, reduce) }
+                m.runLabel?.let { PopChip("run", it, colors.accent, colors.onAccent, moments.seq, false, reduce) }
                 Spacer(Modifier.weight(1f))
-                m.bonusLabel?.let { PopChip(it, colors.surfaceElevated, colors.textPrimary, it, bonusPop, reduce) }
+                m.bonusLabel?.let { PopChip("bonus", it, colors.surfaceElevated, colors.textPrimary, it, bonusPop, reduce) }
             }
             Spacer(Modifier.height(NuvioTokens.Space.s8))
         }
@@ -88,9 +93,9 @@ internal fun BasketballStrip(b: BasketballStripBlock, detail: GameDetail, modifi
             val foulPop = moments.moments.filterIsInstance<Moment.FoulCount>()
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Team fouls", style = MaterialTheme.typography.labelMedium, color = colors.textMuted, modifier = Modifier.weight(1f))
-                m.homeFouls?.let { n -> FoulSide(n, palette.home, foulPop.firstOrNull { it.side == "home" }?.to?.minus(1), reduce) }
+                m.homeFouls?.let { n -> FoulSide("home", n, palette.home, foulPop.firstOrNull { it.side == "home" }?.to?.minus(1), reduce) }
                 Spacer(Modifier.padding(horizontal = NuvioTokens.Space.s8))
-                m.awayFouls?.let { n -> FoulSide(n, palette.away, foulPop.firstOrNull { it.side == "away" }?.to?.minus(1), reduce) }
+                m.awayFouls?.let { n -> FoulSide("away", n, palette.away, foulPop.firstOrNull { it.side == "away" }?.to?.minus(1), reduce) }
             }
         }
         if (m.homeTimeouts != null || m.awayTimeouts != null) {
@@ -98,18 +103,18 @@ internal fun BasketballStrip(b: BasketballStripBlock, detail: GameDetail, modifi
             val used = moments.moments.filterIsInstance<Moment.TimeoutUsed>()
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Timeouts", style = MaterialTheme.typography.labelMedium, color = colors.textMuted, modifier = Modifier.weight(1f))
-                m.homeTimeouts?.let { DotRow(it, BasketballStripModel.TIMEOUT_DOTS, palette.home, if (used.any { u -> u.side == "home" }) it else null, reduce) }
+                m.homeTimeouts?.let { DotRow("to-home", it, BasketballStripModel.TIMEOUT_DOTS, palette.home, if (used.any { u -> u.side == "home" }) it else null, reduce) }
                 Spacer(Modifier.padding(horizontal = NuvioTokens.Space.s8))
-                m.awayTimeouts?.let { DotRow(it, BasketballStripModel.TIMEOUT_DOTS, palette.away, if (used.any { u -> u.side == "away" }) it else null, reduce) }
+                m.awayTimeouts?.let { DotRow("to-away", it, BasketballStripModel.TIMEOUT_DOTS, palette.away, if (used.any { u -> u.side == "away" }) it else null, reduce) }
             }
         }
     }
 }
 
 @Composable
-private fun FoulSide(count: Int, color: Color, popIndex: Int?, reduce: Boolean) {
+private fun FoulSide(slot: String, count: Int, color: Color, popIndex: Int?, reduce: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        DotRow(count.coerceAtMost(BasketballStripModel.FOUL_DOTS), BasketballStripModel.FOUL_DOTS, color, popIndex, reduce)
+        DotRow("foul-$slot", count.coerceAtMost(BasketballStripModel.FOUL_DOTS), BasketballStripModel.FOUL_DOTS, color, popIndex, reduce)
         BasketballStripModel.foulNumber(count)?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = color) }
     }
 }
@@ -124,10 +129,10 @@ internal fun HockeyStrip(b: HockeyStripBlock, detail: GameDetail, modifier: Modi
     val colors = MaterialTheme.nuvio.colors
     NuvioSurfaceCard(modifier = modifier) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            PopChip(m.chip, if (m.onPowerPlay) colors.accent else colors.surfaceElevated, if (m.onPowerPlay) colors.onAccent else colors.textSecondary, ppMoment, ppMoment?.started == true, reduce)
+            PopChip("pp", m.chip, if (m.onPowerPlay) colors.accent else colors.surfaceElevated, if (m.onPowerPlay) colors.onAccent else colors.textSecondary, ppMoment, ppMoment?.started == true, reduce)
             m.timeLeft?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, modifier = Modifier.padding(start = NuvioTokens.Space.s8)) }
             Spacer(Modifier.weight(1f))
-            m.shots?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary) }
+            m.shotsHA?.let { CountedPair("Shots", it, reduce) }
         }
         m.barFraction?.let { f ->
             // Stepped to the value of the last update; nothing drains between updates (contract rule 2).
@@ -142,8 +147,16 @@ internal fun HockeyStrip(b: HockeyStripBlock, detail: GameDetail, modifier: Modi
             Spacer(Modifier.height(NuvioTokens.Space.s8))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(m.powerPlays.orEmpty(), style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-                Text(m.faceoffs.orEmpty(), style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                m.faceoffsHA?.let { CountedPair("Faceoffs", it, reduce) }
             }
         }
     }
+}
+
+/** "Shots 20 – 14" where both numbers count up over COUNT_MS when the feed changes them (nothing on first show or recomposition). */
+@Composable
+private fun CountedPair(label: String, ha: Pair<Int, Int>, reduce: Boolean) {
+    val h by animateIntAsState(ha.first, motion(MotionSpec.COUNT_MS, reduce), label = "$label-h")
+    val a by animateIntAsState(ha.second, motion(MotionSpec.COUNT_MS, reduce), label = "$label-a")
+    Text("$label $h – $a", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textSecondary)
 }

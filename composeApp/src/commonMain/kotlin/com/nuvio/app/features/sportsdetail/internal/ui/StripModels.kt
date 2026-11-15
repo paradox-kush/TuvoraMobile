@@ -53,6 +53,9 @@ internal data class HockeyStripModel(
     val shots: String?,
     val powerPlays: String?,
     val faceoffs: String?,
+    /** The numbers behind [shots] / [faceoffs], so the strip can count them up (spec C2). */
+    val shotsHA: Pair<Int, Int>? = null,
+    val faceoffsHA: Pair<Int, Int>? = null,
 ) {
     companion object {
         fun of(b: HockeyStripBlock, header: Header?): HockeyStripModel {
@@ -62,12 +65,19 @@ internal data class HockeyStripModel(
                 chip = if (b.powerPlaySide != null) listOfNotNull("Power play", tag).joinToString(" · ") else "Even strength",
                 onPowerPlay = b.powerPlaySide != null,
                 timeLeft = left?.let { "${it / 60}:${(it % 60).toString().padStart(2, '0')} left" },
-                barFraction = left?.let { (it / (if (it > 120) 240f else 120f)).coerceIn(0f, 1f) },
+                // One fixed scale (a 2:00 minor). Above it the penalty length is unknown (double minor / major): no bar, never a rescale mid-penalty.
+                barFraction = left?.takeIf { it <= MINOR_SECONDS }?.let { it / MINOR_SECONDS.toFloat() },
                 shots = pair("Shots", b.homeShots, b.awayShots),
                 powerPlays = if (b.homePowerPlay != null && b.awayPowerPlay != null) "Power plays ${b.homePowerPlay} – ${b.awayPowerPlay}" else null,
                 faceoffs = pair("Faceoffs", b.homeFaceoffs, b.awayFaceoffs),
+                shotsHA = ints(b.homeShots, b.awayShots),
+                faceoffsHA = ints(b.homeFaceoffs, b.awayFaceoffs),
             )
         }
+
+        private const val MINOR_SECONDS = 120
+
+        private fun ints(h: Int?, a: Int?): Pair<Int, Int>? = if (h != null && a != null) h to a else null
 
         private fun pair(label: String, h: Int?, a: Int?): String? = if (h != null && a != null) "$label $h – $a" else null
     }

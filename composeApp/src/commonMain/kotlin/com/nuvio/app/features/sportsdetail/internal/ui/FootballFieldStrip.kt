@@ -9,7 +9,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -81,9 +83,13 @@ internal fun FootballFieldStrip(f: FootballFieldBlock, detail: GameDetail, modif
             firstDown?.let { drawLine(accent, Offset(fx(it), 0f), Offset(fx(it), size.height), strokeWidth = 3.dp.toPx()) }
             drawCircle(Color.White, radius = 6.dp.toPx(), center = Offset(fx(ball), size.height / 2))
         }
-        Row(Modifier.fillMaxWidth().padding(top = NuvioTokens.Space.s4), horizontalArrangement = Arrangement.SpaceBetween) {
+        // Labels sit under the lines they name: field spans 120 units (10 end zone + 100 + 10); the 30s are at 40 and 80, the 50 at 60.
+        Row(Modifier.fillMaxWidth().padding(top = NuvioTokens.Space.s4)) {
             val h = teams?.home?.short ?: "H"; val a = teams?.away?.short ?: "A"
-            listOf(h, "30", "50", "30", a).forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted) }
+            @Composable fun label(t: String, w: Float) = Box(Modifier.weight(w), contentAlignment = Alignment.Center) {
+                Text(t, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted, maxLines = 1, softWrap = false, modifier = Modifier.wrapContentWidth(unbounded = true))
+            }
+            label(h, 10f); Spacer(Modifier.weight(20f)); label("30", 20f); label("50", 20f); label("30", 20f); Spacer(Modifier.weight(20f)); label(a, 10f)
         }
         f.drive?.summary?.let { Text("Drive: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted) }
     }

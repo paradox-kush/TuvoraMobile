@@ -121,8 +121,9 @@ internal fun AnimatedScore(score: String, side: String, large: Boolean) {
     val base = MaterialTheme.nuvio.colors.textPrimary
     val accent = MaterialTheme.nuvio.colors.accent
     val pulse = remember { Animatable(0f) }
+    val ledger = LocalPlayed.current
     LaunchedEffect(batch.seq, changed) {
-        if (changed && !reduce) {
+        if (changed && !reduce && ledger.claim("score-pulse-$side", batch.seq)) {
             pulse.snapTo(0f)
             pulse.animateTo(1f, motion(MotionSpec.PULSE_MS / 3, false))
             pulse.animateTo(0f, motion(MotionSpec.PULSE_MS * 2 / 3, false))

@@ -44,8 +44,9 @@ internal fun SoccerStrip(b: SoccerStripBlock, detail: GameDetail, modifier: Modi
     val moments = LocalMoments.current
     val popKey = moments.moments.filterIsInstance<Moment.SoccerMoment>().firstOrNull()?.event
     val pop = remember { Animatable(1f) }
+    val ledger = LocalPlayed.current
     LaunchedEffect(popKey) {
-        if (popKey != null && !reduce) {
+        if (popKey != null && !reduce && ledger.claim("soccer-chip", moments.seq)) {
             pop.snapTo(0.6f)
             pop.animateTo(1f, motion(MotionSpec.QUICK_MS, false, enter = true))
         } else pop.snapTo(1f)

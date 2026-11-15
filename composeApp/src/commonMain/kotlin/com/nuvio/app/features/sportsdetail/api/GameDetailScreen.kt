@@ -67,6 +67,8 @@ import com.nuvio.app.features.sportsdetail.internal.ui.PlaysCard
 import com.nuvio.app.features.sportsdetail.internal.ui.SoccerStrip
 import com.nuvio.app.features.sportsdetail.internal.ui.SituationLineCard
 import com.nuvio.app.features.sportsdetail.internal.ui.SlimScoreBar
+import com.nuvio.app.features.sportsdetail.internal.ui.LocalPlayed
+import com.nuvio.app.features.sportsdetail.internal.ui.PlayedLedger
 import com.nuvio.app.features.sportsdetail.internal.ui.SwitchFade
 import com.nuvio.app.features.sportsdetail.internal.ui.rememberReduceMotion
 import com.nuvio.app.features.sportsdetail.internal.ui.WatchPrimary
@@ -168,6 +170,7 @@ private fun LoadedContent(
 ) {
     val detail = s.detail
     val batch = remember(detail) { tracker.accept(detail) }
+    val played = remember { PlayedLedger() }
     val sections = remember(detail) { GameSectionsPolicy.sections(detail) }
     var chosen by rememberSaveable { mutableStateOf(GameSection.OVERVIEW) }
     var switchSeq by remember { mutableStateOf(0) }
@@ -188,7 +191,7 @@ private fun LoadedContent(
     val gap = Arrangement.spacedBy(NuvioTokens.Space.s12)
     // Bottom inset: the last row must clear the floating bottom navigation.
     val pad = PaddingValues(start = NuvioTokens.Space.s16, end = NuvioTokens.Space.s16, top = NuvioTokens.Space.s8, bottom = nuvioSafeBottomPadding(NuvioTokens.Space.s16))
-    CompositionLocalProvider(LocalMoments provides batch) {
+    CompositionLocalProvider(LocalMoments provides batch, LocalPlayed provides played) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             if (GameDetailUiPolicy.isWide(maxWidth.value.toInt())) {
                 Row(Modifier.fillMaxSize().padding(pad), horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12)) {

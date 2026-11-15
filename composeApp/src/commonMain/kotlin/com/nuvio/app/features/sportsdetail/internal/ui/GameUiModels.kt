@@ -6,9 +6,11 @@ import com.nuvio.app.features.sportsdetail.api.Header
 import com.nuvio.app.features.sportsdetail.api.StatsBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.TimelineItem
+import com.nuvio.app.features.sportsdetail.api.WinPoint
 import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import com.nuvio.app.features.sportsdetail.internal.GameSection
+import kotlin.math.roundToInt
 
 /** Pure view-models for the game screen: every decision a composable would otherwise make lives here and is unit-tested. */
 
@@ -106,8 +108,16 @@ internal data class WinChanceModel(
 ) {
     val leaderLabel: String get() = "$leaderName to win"
 
-    /** The provider's series is HOME's share; the card plots the LEADER's, so the line ends where the big number is. */
-    fun seriesFor(homeSeries: List<Float>): List<Float> = if (leaderSide == "home") homeSeries else homeSeries.map { 1f - it }
+    /**
+     * The leader's win chance per point, so the line ends where the big number is. A point's `home` is home's share of the NON-draw
+     * outcomes (h/(h+a)); with the point's draw percent d the full chances are home*(100-d)/100 and (100-home)*(100-d)/100.
+     */
+    fun seriesFor(points: List<WinPoint>): List<Float> = points.map { p ->
+        val home = p.home.coerceIn(0, 100)
+        val rest = (100 - (p.draw ?: 0).coerceIn(0, 100)) / 100f
+        val share = if (leaderSide == "home") home / 100f else (100 - home) / 100f
+        share * rest
+    }
 
     companion object {
         fun of(w: WinProbabilityBlock, header: Header?): WinChanceModel {
@@ -171,8 +181,52 @@ internal object SoccerChips {
     fun awayPossession(home: Int?): Int? = home?.let { 100 - it }
 }
 
-/** The chart plots the leader's series; markers come on the HOME series, so they flip with it. */
+/** Standings columns that fit: the name column keeps [NAME_MIN_DP]; cells shrink from 38 dp to 24 dp, then leading columns drop. */
+internal data class StandingsFit(val visible: Int, val cellDp: Float) {
+    companion object {
+        const val NAME_MIN_DP = 96f
+        const val CELL_MAX_DP = 38f
+        const val CELL_MIN_DP = 24f
+
+        fun of(availableDp: Float, cells: Int): StandingsFit {
+            if (cells <= 0) return StandingsFit(0, CELL_MAX_DP)
+            val room = (availableDp - NAME_MIN_DP).coerceAtLeast(0f)
+            val visible = minOf(cells, (room / CELL_MIN_DP).toInt().coerceAtLeast(1))
+            return StandingsFit(visible, minOf(CELL_MAX_DP, room / visible).coerceAtLeast(CELL_MIN_DP))
+        }
+    }
+}
+
+/** A marker sits on the plotted line: its y is the PLOTTED series at the marker's x (never a re-derived flip of the home series). */
 internal object MarkerView {
-    fun displayY(m: com.nuvio.app.features.sportsdetail.internal.ChartMarker, flipped: Boolean): Float = if (flipped) 1f - m.y else m.y
-    fun labelAbove(m: com.nuvio.app.features.sportsdetail.internal.ChartMarker, flipped: Boolean): Boolean = displayY(m, flipped) >= 0.5f
+    fun displayY(m: com.nuvio.app.features.sportsdetail.internal.ChartMarker, series: List<Float>): Float {
+        if (series.isEmpty()) return m.y
+        val i = (m.x.coerceIn(0f, 1f) * (series.size - 1)).roundToInt().coerceIn(0, series.lastIndex)
+        return series[i]
+    }
+    fun labelAbove(m: com.nuvio.app.features.sportsdetail.internal.ChartMarker, series: List<Float>): Boolean = displayY(m, series) >= 0.5f
+}
+
+/**
+ * Which animations already played, per slot, for the batch seq they played for. Held by the screen, so a card that is recomposed,
+ * scrolled away and back, or re-entered on a tab switch does not replay a moment it already showed (spec 05 D2).
+ */
+internal class PlayedLedger {
+    private val seqs = mutableMapOf<String, Long>()
+    private val windows = mutableMapOf<String, Pair<Int, Long>>()
+
+    /** True once per slot per newer [seq]; seq 0 (no batch yet) never plays. */
+    fun claim(slot: String, seq: Long): Boolean {
+        if (seq <= 0L) return false
+        if ((seqs[slot] ?: 0L) >= seq) return false
+        seqs[slot] = seq
+        return true
+    }
+
+    /** True for items composed within [windowMs] of the first item composed for this [token] (a tab switch); later scroll-ins do not fade. */
+    fun inSwitchWindow(slot: String, token: Int, nowMs: Long, windowMs: Long = 400L): Boolean {
+        val w = windows[slot]
+        if (w == null || w.first != token) { windows[slot] = token to nowMs; return true }
+        return nowMs - w.second <= windowMs
+    }
 }
