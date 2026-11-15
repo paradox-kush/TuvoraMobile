@@ -106,6 +106,9 @@ internal data class WinChanceModel(
 ) {
     val leaderLabel: String get() = "$leaderName to win"
 
+    /** The provider's series is HOME's share; the card plots the LEADER's, so the line ends where the big number is. */
+    fun seriesFor(homeSeries: List<Float>): List<Float> = if (leaderSide == "home") homeSeries else homeSeries.map { 1f - it }
+
     companion object {
         fun of(w: WinProbabilityBlock, header: Header?): WinChanceModel {
             val home = w.homePercent.coerceIn(0, 100)

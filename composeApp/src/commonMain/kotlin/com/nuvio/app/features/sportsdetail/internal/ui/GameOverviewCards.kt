@@ -78,8 +78,8 @@ internal fun WinChanceCard(w: WinProbabilityBlock, detail: GameDetail, modifier:
         WinBar(m, palette, moved, reduce)
         GameDetailUiPolicy.chartPoints(w.history)?.let { pts ->
             Spacer(Modifier.height(NuvioTokens.Space.s12))
-            WinChart(pts, leaderColor, moved, reduce)
-            Text("${teams?.home?.name ?: "Home"} win chance over time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
+            WinChart(m.seriesFor(pts), leaderColor, moved, reduce)
+            Text("${m.leaderName} win chance over time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
         }
         val lines = GameDetailUiPolicy.storylineLines(GameDetailUiPolicy.visibleStorylines(w.storylines, detail.state, detail.live, detail.sport), detail.header)
         val comeback = GameDetailUiPolicy.comebackWatch(w.history, w.homePercent, m.awayPercent, detail.state, w.asOfMs)?.let { c -> GameDetailUiPolicy.comebackText(c, detail.header) }
@@ -127,7 +127,7 @@ private fun WinBar(m: WinChanceModel, palette: TeamPalette, animate: Boolean, re
 /** Momentum line: faint dashed 50% line, line in [color], end dot. The newest segment draws over COUNT_MS on a real move. */
 @Composable
 private fun WinChart(points: List<Float>, color: Color, animate: Boolean, reduce: Boolean) {
-    val mid = MaterialTheme.nuvio.colors.borderSubtle
+    val mid = MaterialTheme.nuvio.colors.borderStrong
     val progress = remember { Animatable(1f) }
     LaunchedEffect(points.size, points.lastOrNull(), animate, reduce) {
         if (animate && !reduce) {

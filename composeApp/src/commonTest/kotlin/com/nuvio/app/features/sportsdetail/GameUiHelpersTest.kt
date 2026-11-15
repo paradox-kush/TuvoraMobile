@@ -161,4 +161,11 @@ class GameUiHelpersTest {
         val b = t.accept(detail(blocks = listOf(PlaysBlock(listOf(TimelineItem("2:00", "1st", "home", "new", id = "2"))))))
         assertTrue(b.moments.any { it is Moment.NewPlay }, "new play moment")
     }
+
+    @Test fun `chart follows the leader so the line rises with the headline number`() {
+        val m = WinChanceModel.of(WinProbabilityBlock(homePercent = 1, awayPercent = 99), TeamsHeader(Side("A", "AAA"), Side("B", "BBB")))
+        assertEquals(listOf(0.8f, 0.99f), m.seriesFor(listOf(0.2f, 0.01f)), "away leads so the home series is flipped")
+        val h = WinChanceModel.of(WinProbabilityBlock(homePercent = 70, awayPercent = 30), TeamsHeader(Side("A", "AAA"), Side("B", "BBB")))
+        assertEquals(listOf(0.2f, 0.7f), h.seriesFor(listOf(0.2f, 0.7f)), "home leads so the series is as given")
+    }
 }
