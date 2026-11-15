@@ -55,9 +55,9 @@ class TvGameReviewFixesTest {
 
     @Test fun `the field card budget counts its text rows`() {
         val full = TvFieldStrip(0.5f, null, null, null, null, null, null, true, "NYG ball", "2nd & 5 at NYG 33", false, null, 3, 3, "Drive 4 plays")
-        val bare = full.copy(line = null, ballLabel = null)
-        assertEquals(TvStrips.fieldDp(full), TvStrips.fieldDp(bare) + TvStrips.FIELD_TOP_ROW_DP, "the line/label row is budgeted when drawn")
-        assertTrue(TvStrips.fieldDp(full) >= 80, "a full field card is ~80+ dp, not the old 60")
+        val bare = full.copy(line = null, ballLabel = null, driveSummary = null)
+        assertEquals(TvStrips.fieldDp(full), TvStrips.fieldDp(bare) + TvStrips.FIELD_TOP_ROW_DP + TvStrips.FIELD_BOTTOM_ROW_DP, "each drawn text row is budgeted")
+        assertTrue(TvStrips.fieldDp(full) > 60, "a full field card is taller than the old 60")
     }
 
     // --- Soccer lineups before kickoff (core's refresh flag, used by tvos' loop) -------------------------------------
@@ -88,4 +88,40 @@ class TvGameReviewFixesTest {
     }
 
     private fun item(id: String) = com.nuvio.app.features.sportsdetail.api.TimelineItem(time = "1:0$id", period = "1", side = "home", text = "play $id", kind = "shot", id = id)
+
+    // --- The left column fits for every sport (the floor, with chart and last play sacrificed, must fit the canvas) -----------
+
+    private val fullField = TvFieldStrip(0.5f, null, null, null, null, null, null, true, "NYG ball", "2nd & 5 at NYG 33", false, null, 3, 3, "Drive 4 plays")
+
+    @Test fun `every sport's worst case still fits once the chart and last play are sacrificed`() {
+        val worst = mapOf(
+            "football" to Triple(TvStrips.fieldDp(fullField), 0, true),
+            "soccer" to Triple(TvStrips.SOCCER_DP, 3, false),
+            "basketball" to Triple(TvStrips.BASKETBALL_DP, 0, false),
+            "hockey" to Triple(TvStrips.HOCKEY_DP, 0, false),
+            "no strip" to Triple(0, 0, false),
+        )
+        for ((sport, w) in worst) {
+            val floor = TvLeftColumnFit.height(w.first, w.second, hasLine = true, hasStaleLabel = true, timeoutDots = w.third, lastPlay = false, chart = false)
+            assertTrue(floor <= TvLeftColumnFit.AVAILABLE, "$sport floor $floor dp must fit ${TvLeftColumnFit.AVAILABLE}")
+        }
+    }
+
+    @Test fun `a normal live football card keeps the chart and the last play`() {
+        val f = TvLeftColumnFit.fit(TvStrips.fieldDp(fullField.copy(driveSummary = null)), 0, hasLine = true, hasChart = true, hasLastPlay = true, timeoutDots = true)
+        assertTrue(f.showChart, "football with a line and no stale label must keep the chart")
+        assertTrue(f.showLastPlay)
+    }
+
+    @Test fun `a soccer card with three scorers keeps its last play`() {
+        val f = TvLeftColumnFit.fit(TvStrips.SOCCER_DP, 3, hasLine = true, hasChart = true, hasLastPlay = true)
+        assertTrue(f.showLastPlay)
+    }
+
+    @Test fun `hockey and basketball keep both with their strips`() {
+        for (dp in listOf(TvStrips.HOCKEY_DP, TvStrips.BASKETBALL_DP)) {
+            val f = TvLeftColumnFit.fit(dp, 0, hasLine = true, hasChart = true, hasLastPlay = true)
+            assertTrue(f.showChart && f.showLastPlay, "strip $dp dp")
+        }
+    }
 }

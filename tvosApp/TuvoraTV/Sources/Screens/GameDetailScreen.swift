@@ -965,10 +965,8 @@ private struct FieldStripCard: View {
                 }
             }
             field
-            HStack {
-                if let summary = strip.driveSummary { Text(summary).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1) }
-                Spacer(minLength: 0)
-                Text("G 10 20 30 40 50 40 30 20 10 G").font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1)
+            if let summary = strip.driveSummary {
+                Text(summary).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1)
             }
         }
         .padding(.horizontal, dp(12)).padding(.vertical, dp(6))

@@ -18,10 +18,15 @@ import com.nuvio.app.features.sportsdetail.internal.LineupPitchPolicy
 
 /** Builds the sport strips' view-models from the shared blocks. Pure; every position is already 0..1. */
 internal object TvStrips {
-    /** Field card: 12 padding + the 32 high field + the yard-number row (16) + gaps; the line/label row above it is [FIELD_TOP_ROW_DP]. */
-    private const val FIELD_BASE_DP = 66
-    const val FIELD_TOP_ROW_DP = 23
-    fun fieldDp(f: TvFieldStrip): Int = FIELD_BASE_DP + (if (f.line != null || f.ballLabel != null) FIELD_TOP_ROW_DP else 0)
+    /**
+     * Field card, compact: 12 padding + the 32 high field; the line/label row above it and the drive-summary row below are
+     * budgeted only when drawn (the decorative yard-number row is gone).
+     */
+    private const val FIELD_BASE_DP = 44
+    const val FIELD_TOP_ROW_DP = 26
+    const val FIELD_BOTTOM_ROW_DP = 19
+    fun fieldDp(f: TvFieldStrip): Int = FIELD_BASE_DP + (if (f.line != null || f.ballLabel != null) FIELD_TOP_ROW_DP else 0) +
+        (if (f.driveSummary != null) FIELD_BOTTOM_ROW_DP else 0)
     const val SOCCER_DP = 78
     const val BASKETBALL_DP = 72
     const val HOCKEY_DP = 62

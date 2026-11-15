@@ -83,7 +83,7 @@ data class TvLeftFit(val showChart: Boolean, val showLastPlay: Boolean)
  * Order of sacrifice (spec 03 B3): the win-chance chart first, then the last-play line. Heights are the drawn heights.
  */
 object TvLeftColumnFit {
-    private const val AVAILABLE = 452          // 540 - top/bottom padding - league bar - "Updated" label
+    const val AVAILABLE = 452          // 540 - top/bottom padding - league bar - "Updated" label
     private const val SCOREBOARD = 84
     private const val SCORER_LINE = 14
     private const val LAST_PLAY = 30
@@ -95,6 +95,20 @@ object TvLeftColumnFit {
     private const val TIMEOUT_DOTS = 8         // football: the dots row under a team's name
     private const val GAP = 7
 
+    /** The drawn height of the left column for one combination (scoreboard, optional strip, last play, win card, optional chart, Play row, gaps). */
+    fun height(
+        stripDp: Int, scorerLines: Int, hasLine: Boolean, hasStaleLabel: Boolean, timeoutDots: Boolean,
+        lastPlay: Boolean, chart: Boolean, hasDividers: Boolean = false,
+    ): Int {
+        var parts = 3                                   // scoreboard, win card, play row
+        var h = SCOREBOARD + scorerLines * SCORER_LINE + (if (timeoutDots) TIMEOUT_DOTS else 0) + WIN_BASE +
+            (if (hasLine) WIN_LINE else 0) + (if (hasStaleLabel) WIN_LINE else 0) + PLAY_ROW
+        if (stripDp > 0) { h += stripDp; parts++ }
+        if (lastPlay) { h += LAST_PLAY; parts++ }
+        if (chart) h += WIN_CHART + (if (hasDividers) DIVIDER_ROW else 0)
+        return h + GAP * (parts - 1)
+    }
+
     fun fit(
         stripDp: Int, scorerLines: Int, hasLine: Boolean, hasChart: Boolean, hasLastPlay: Boolean, hasDividers: Boolean = false,
         /** The win card's "Updated ..." label (a stale market), drawn as one more row. */
@@ -102,15 +116,9 @@ object TvLeftColumnFit {
         /** Football timeout dots under the team names. */
         timeoutDots: Boolean = false,
     ): TvLeftFit {
-        fun total(chart: Boolean, lastPlay: Boolean): Int {
-            var parts = 3                                   // scoreboard, win card, play row
-            var h = SCOREBOARD + scorerLines * SCORER_LINE + (if (timeoutDots) TIMEOUT_DOTS else 0) + WIN_BASE +
-                (if (hasLine) WIN_LINE else 0) + (if (hasStaleLabel) WIN_LINE else 0) + PLAY_ROW
-            if (stripDp > 0) { h += stripDp; parts++ }
-            if (lastPlay) { h += LAST_PLAY; parts++ }
-            if (chart) h += WIN_CHART + (if (hasDividers) DIVIDER_ROW else 0)
-            return h + GAP * (parts - 1)
-        }
+        fun total(chart: Boolean, lastPlay: Boolean) = height(
+            stripDp, scorerLines, hasLine, hasStaleLabel, timeoutDots, lastPlay, chart, hasDividers,
+        )
         var chart = hasChart
         var last = hasLastPlay
         if (total(chart, last) > AVAILABLE) chart = false
