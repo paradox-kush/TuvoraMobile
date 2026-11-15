@@ -80,11 +80,13 @@ internal object GameDetailUiPolicy {
     private const val CHART_MAX_POINTS = 60
 
     /** Momentum line as given by the server (home's per-point non-draw share): 0..1, time-ordered, at most 60 points; null when < 2 points. */
-    fun chartPoints(history: List<WinPoint>): List<Float>? {
+    fun chartPoints(history: List<WinPoint>): List<Float>? = chartSeries(history)?.map { it.home.coerceIn(0, 100) / 100f }
+
+    /** The DRAWN series: time-ordered and down-sampled to at most 60 points. Markers are placed on exactly these points. */
+    fun chartSeries(history: List<WinPoint>): List<WinPoint>? {
         if (history.size < 2) return null
         val sorted = history.sortedBy { it.t }
-        val picked = if (sorted.size <= CHART_MAX_POINTS) sorted else (0 until CHART_MAX_POINTS).map { sorted[(it.toLong() * (sorted.size - 1) / (CHART_MAX_POINTS - 1)).toInt()] }
-        return picked.map { it.home.coerceIn(0, 100) / 100f }
+        return if (sorted.size <= CHART_MAX_POINTS) sorted else (0 until CHART_MAX_POINTS).map { sorted[(it.toLong() * (sorted.size - 1) / (CHART_MAX_POINTS - 1)).toInt()] }
     }
 
     /** The trailing team gained [rise] win-chance points across the last 10 minutes of the series. */

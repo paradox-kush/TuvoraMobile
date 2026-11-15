@@ -7,6 +7,7 @@ import com.nuvio.app.features.sportsdetail.api.GameDetail
 import com.nuvio.app.features.sportsdetail.api.SoccerStripBlock
 import com.nuvio.app.features.sportsdetail.api.GameState
 import com.nuvio.app.features.sportsdetail.api.PlaysBlock
+import com.nuvio.app.features.sportsdetail.api.StatsBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.TimelineBlock
 import com.nuvio.app.features.sportsdetail.api.TimelineItem
@@ -28,6 +29,9 @@ internal sealed interface Moment {
     data class FoulCount(val side: String, val to: Int) : Moment
     data class BonusReached(val side: String) : Moment
     data class TimeoutUsed(val side: String) : Moment
+    // Phase D
+    data class MarkerAdded(val marker: ChartMarker) : Moment
+    data class StatChange(val label: String, val leaderChanged: Boolean) : Moment
 }
 
 internal object GameMomentPolicy {
@@ -43,6 +47,8 @@ internal object GameMomentPolicy {
             soccer(prev, next)?.let(::add)
             hockey(prev, next)?.let(::add)
             addAll(basketball(prev, next))
+            addAll(markers(prev, next))
+            addAll(statChanges(prev, next))
             newPlay(prev, next)?.let(::add)
         }
     }
@@ -114,6 +120,33 @@ internal object GameMomentPolicy {
                 val nt = if (side == "home") b.homeTimeouts else b.awayTimeouts
                 if (pt != null && nt != null && nt < pt) add(Moment.TimeoutUsed(side))
             }
+        }
+    }
+
+    /** Chart markers that were not there before (matched by play id); none while the chartMarkers switch is off. */
+    private fun markers(prev: GameDetail, next: GameDetail): List<Moment> {
+        val before = ChartMarkers.markersFor(prev).mapNotNull { it.playId }.toSet()
+        return ChartMarkers.markersFor(next).filter { it.playId != null && it.playId !in before }.map { Moment.MarkerAdded(it) }
+    }
+
+    private fun number(s: String): Double? = s.trim().removeSuffix("%").toDoubleOrNull()
+
+    private fun leader(label: String, home: String, away: String): String? {
+        val h = number(home) ?: return null
+        val a = number(away) ?: return null
+        if (h == a) return null
+        val lower = GameDetailUiPolicy.lowerIsBetter(label)
+        return if ((h < a) == lower) "home" else "away"
+    }
+
+    /** One per stat row whose value changed (rows that appear are not animated); [Moment.StatChange.leaderChanged] when the leading side flipped. */
+    private fun statChanges(prev: GameDetail, next: GameDetail): List<Moment> {
+        val a = prev.blocks.filterIsInstance<StatsBlock>().firstOrNull()?.rows?.associateBy { it.label } ?: return emptyList()
+        val b = next.blocks.filterIsInstance<StatsBlock>().firstOrNull()?.rows ?: return emptyList()
+        return b.mapNotNull { r ->
+            val old = a[r.label] ?: return@mapNotNull null
+            if (old.home == r.home && old.away == r.away) null
+            else Moment.StatChange(r.label, leaderChanged = leader(r.label, old.home, old.away) != leader(r.label, r.home, r.away))
         }
     }
 
