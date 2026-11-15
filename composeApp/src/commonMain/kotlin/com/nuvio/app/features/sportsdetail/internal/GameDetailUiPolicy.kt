@@ -187,11 +187,18 @@ internal object GameDetailUiPolicy {
         }
     }
 
+    /** Stat rows where the LOWER value leads (turnovers, fouls...): the leading side's pill flips. */
+    private val LOWER_IS_BETTER = setOf("turnovers", "fouls", "personal fouls", "penalty minutes", "giveaways", "penalties", "total penalties")
+
+    fun lowerIsBetter(label: String): Boolean = label.trim().lowercase() in LOWER_IS_BETTER
+
     /** An empty block hides instead of rendering a heading over nothing. */
     fun isEmpty(b: GameBlock): Boolean = when (b) {
         is StatsBlock -> b.rows.isEmpty()
         is LinescoreBlock -> b.rows.isEmpty() || b.columns.isEmpty()
         is TimelineBlock -> b.items.isEmpty()
+        is com.nuvio.app.features.sportsdetail.api.PlaysBlock -> b.items.isEmpty()
+        is com.nuvio.app.features.sportsdetail.api.StandingsTableBlock -> b.groups.all { it.rows.isEmpty() }
         is LeadersBlock -> b.items.isEmpty()
         is BroadcastBlock -> true   // owner decision: the broadcast block is never shown
         is FormBlock -> b.home.isEmpty() && b.away.isEmpty()

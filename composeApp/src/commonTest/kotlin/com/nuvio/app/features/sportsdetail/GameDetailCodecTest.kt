@@ -95,4 +95,28 @@ class GameDetailCodecTest {
         assertEquals(null, (old.blocks[0] as WinProbabilityBlock).attribution)
         assertEquals(emptyList(), (old.blocks[0] as WinProbabilityBlock).history)
     }
+
+    @Test fun `phase A blocks and the new side fields round trip`() {
+        val d = GameDetail(
+            gameId = "espn:9", sport = "Basketball", leagueId = "4387", leagueName = "NBA", startsAt = "2026-11-07T12:30:00Z", state = GameState.LIVE,
+            header = TeamsHeader(Side("H", score = "1", color = "98002e", altColor = "000000", rank = 12), Side("A", score = "0")),
+            blocks = listOf(
+                com.nuvio.app.features.sportsdetail.api.PlaysBlock(listOf(com.nuvio.app.features.sportsdetail.api.TimelineItem("5:12", "1st Quarter", "home", "Layup", "score", id = "p1", wallclockMs = 1_000L, score = "2–0")), "espn"),
+                com.nuvio.app.features.sportsdetail.api.StandingsTableBlock(listOf(com.nuvio.app.features.sportsdetail.api.StandingsGroup("East", listOf("W", "L"), listOf(com.nuvio.app.features.sportsdetail.api.StandingsTableRow("1", "H", listOf("5", "1"), true)))), "espn"),
+            ),
+        )
+        assertEquals(d, GameDetailCodec.decode(GameDetailCodec.encode(d)))
+    }
+
+    @Test fun `an old-shape payload without the new fields still decodes and an unknown future block is dropped beside the new ones`() {
+        val d = assertNotNull(GameDetailCodec.decode("""{"gameId":"x","sport":"s","leagueId":"1","leagueName":"l","startsAt":"t","state":"live",
+            "header":{"type":"teams","home":{"name":"A","score":"1"},"away":{"name":"B"}},
+            "blocks":[{"type":"timeline","source":"espn","items":[{"time":"1","text":"t"}]},
+                      {"type":"plays","source":"espn","items":[{"time":"1","text":"t","id":"9"}]},
+                      {"type":"someFutureBlock","source":"espn"}]}"""))
+        assertEquals(2, d.blocks.size)
+        val h = assertIs<TeamsHeader>(d.header)
+        assertNull(h.home.color); assertNull(h.home.rank)
+        assertEquals("9", (d.blocks[1] as com.nuvio.app.features.sportsdetail.api.PlaysBlock).items.single().id)
+    }
 }

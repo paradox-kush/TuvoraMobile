@@ -15,7 +15,9 @@ import kotlinx.serialization.json.longOrNull
 internal enum class BlockType(val id: String) {
     SITUATION("situation"), WATCH("watch"), BROADCAST("broadcast"), LINESCORE("linescore"), STATS("stats"),
     LEADERS("leaders"), TIMELINE("timeline"), LINEUP("lineup"), RESULTS("results"), STANDINGS("standings"),
-    FORM("form"), HIGHLIGHTS("highlights"), NEXT("next"), WIN_PROBABILITY("winProbability");
+    FORM("form"), HIGHLIGHTS("highlights"), NEXT("next"), WIN_PROBABILITY("winProbability"),
+    /** Phase A: the full play list, and generic standings (any league's columns). */
+    PLAYS("plays"), STANDINGS_TABLE("standingsTable");
 
     companion object {
         fun byId(id: String): BlockType? = entries.firstOrNull { it.id == id }
@@ -37,6 +39,8 @@ internal data class EspnSourceConfig(
     val summaryMs: Long,
     val minMs: Long,
     val deadlineMs: Long,
+    /** `sources.espn.event`: the single-event scoreboard (2-3 KB gzip) the live event tick reads. Null = the mapping has none: today's behaviour. */
+    val eventTemplate: String? = null,
 )
 
 internal data class LeagueEntry(
@@ -51,7 +55,17 @@ internal data class LeagueEntry(
 
 internal data class MatchConfig(val dateWindowHours: Int, val minTeamsMatching: Int)
 
-internal data class TeamPaths(val name: String, val short: String?, val badge: String?, val score: String?, val record: String?, val form: String?)
+internal data class TeamPaths(
+    val name: String, val short: String?, val badge: String?, val score: String?, val record: String?, val form: String?,
+    /** Team colour, alternate colour and poll rank. A mapping without these keys reads ESPN's own names, so no publish is needed. */
+    val color: String? = DEFAULT_COLOR_PATH, val altColor: String? = DEFAULT_ALT_COLOR_PATH, val rank: String? = DEFAULT_RANK_PATH,
+) {
+    companion object {
+        const val DEFAULT_COLOR_PATH = "team.color"
+        const val DEFAULT_ALT_COLOR_PATH = "team.alternateColor"
+        const val DEFAULT_RANK_PATH = "curatedRank.current"
+    }
+}
 
 internal data class CommonPaths(
     val event: String?, val id: String?, val state: String, val detail: String?, val clock: String?, val period: String?,
@@ -66,6 +80,9 @@ internal class BlockSpec(val raw: JsonObject) {
     fun fallback(): BlockSpec? = (raw["fallback"] as? JsonObject)?.let { fb -> BlockSpec(JsonObject(raw.filterKeys { it != "fallback" } + fb)) }
     fun str(key: String): String? = (raw[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
     fun int(key: String): Int? = (raw[key] as? JsonPrimitive)?.content?.toIntOrNull()
+    /** `extra` is either a list of strings (linescore columns) or an object (plays cap, standings labels); these read the object form. */
+    fun extraInt(key: String): Int? = ((raw["extra"] as? JsonObject)?.get(key) as? JsonPrimitive)?.content?.toIntOrNull()
+    fun extraStrings(key: String): List<String> = ((raw["extra"] as? JsonObject)?.get(key) as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }.orEmpty()
     fun strings(key: String): List<String> = (raw[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }.orEmpty()
 }
 
@@ -206,6 +223,7 @@ internal object SportsMappingParser {
                 summaryTemplate = espnSrc["summary"].s() ?: throw InvalidMapping("no espn.summary"),
                 liveMs = ms("liveMs", 15_000L), summaryMs = ms("summaryMs", 60_000L), minMs = ms("minMs", 6_000L),
                 deadlineMs = (espnSrc["deadlineMs"] as? JsonPrimitive)?.longOrNull ?: 8_000L,
+                eventTemplate = espnSrc["event"].s(),
             ),
             states = r["states"].obj()?.mapNotNull { (k, v) -> v.s()?.let { k to it } }?.toMap().orEmpty(),
             leagues = leagues,
@@ -225,6 +243,9 @@ internal object SportsMappingParser {
                     name = team["name"].s() ?: throw InvalidMapping("no common.team.name"),
                     short = team["short"].s(), badge = team["badge"].s(), score = team["score"].s(),
                     record = team["record"].s(), form = team["form"].s(),
+                    color = team["color"].s() ?: TeamPaths.DEFAULT_COLOR_PATH,
+                    altColor = team["altColor"].s() ?: TeamPaths.DEFAULT_ALT_COLOR_PATH,
+                    rank = team["rank"].s() ?: TeamPaths.DEFAULT_RANK_PATH,
                 ),
                 venue = cm["venue"].s(),
             ),
@@ -262,6 +283,10 @@ internal object SportsMappingValidator {
         if (!sb.startsWith(ESPN_PREFIX) || !sm.startsWith(ESPN_PREFIX)) return "espn template: not https on the ESPN host"
         if ("{path}" !in sb || "{yyyymmdd}" !in sb) return "espn template: scoreboard needs {path} and {yyyymmdd}"
         if ("{path}" !in sm || "{id}" !in sm) return "espn template: summary needs {path} and {id}"
+        m.espn.eventTemplate?.let { ev ->
+            if (!ev.startsWith(ESPN_PREFIX)) return "espn template: event not https on the ESPN host"
+            if ("{path}" !in ev || "{id}" !in ev) return "espn template: event needs {path} and {id}"
+        }
         if (m.espn.deadlineMs !in 500L..60_000L) return "espn deadline out of range"
         if (m.espn.liveMs < 1_000L || m.espn.minMs < 1_000L) return "refresh cadence out of range"
         for ((block, sources) in m.chain) {

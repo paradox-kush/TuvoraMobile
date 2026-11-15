@@ -12,7 +12,11 @@ import com.nuvio.app.features.sportsdetail.api.LineupPlayer
 import com.nuvio.app.features.sportsdetail.api.LineupSide
 import com.nuvio.app.features.sportsdetail.api.LinescoreBlock
 import com.nuvio.app.features.sportsdetail.api.LiveInfo
+import com.nuvio.app.features.sportsdetail.api.PlaysBlock
 import com.nuvio.app.features.sportsdetail.api.ResultsBlock
+import com.nuvio.app.features.sportsdetail.api.StandingsGroup
+import com.nuvio.app.features.sportsdetail.api.StandingsTableBlock
+import com.nuvio.app.features.sportsdetail.api.StandingsTableRow
 import com.nuvio.app.features.sportsdetail.api.Side
 import com.nuvio.app.features.sportsdetail.api.SituationBlock
 import com.nuvio.app.features.sportsdetail.api.StatRow
@@ -111,6 +115,8 @@ internal class EspnAssembler(private val m: SportsMapping) {
                 leaders(sp, event, root(sp)) ?: sp.fallback()?.let { fb -> leaders(fb, event, root(fb)) }
             }
             BlockType.TIMELINE -> spec?.let { timeline(it, profile, event, root(it)) }
+            BlockType.PLAYS -> spec?.let { plays(it, profile, event, root(it)) }
+            BlockType.STANDINGS_TABLE -> spec?.let { standingsTable(it, event, root(it)) }
             BlockType.WIN_PROBABILITY -> spec?.let { winProbability(it, root(it)) }
             BlockType.SITUATION -> spec?.let { situation(it, root(it)) }
             BlockType.RESULTS -> spec?.let { results(it, root(it)) }
@@ -151,8 +157,15 @@ internal class EspnAssembler(private val m: SportsMapping) {
             score = t.score?.let { SportsPath.text(c, it) },
             record = SportsPath.text(c, t.record),
             form = SportsPath.text(c, t.form)?.let(::formLetters)?.takeIf { it.isNotEmpty() },
+            color = hexColor(SportsPath.text(c, t.color)),
+            altColor = hexColor(SportsPath.text(c, t.altColor)),
+            rank = SportsPath.text(c, t.rank)?.toIntOrNull()?.takeIf { it in 1..98 },   // ESPN: 99 = unranked
         )
     }
+
+    /** `team.color` as 6 lower-case hex digits, or null when it is anything else. */
+    private fun hexColor(raw: String?): String? =
+        raw?.trim()?.removePrefix("#")?.takeIf { it.length == 6 && it.all { ch -> ch in '0'..'9' || ch in 'a'..'f' || ch in 'A'..'F' } }?.lowercase()
 
     private fun individual(c: JsonElement): Side? {
         val name = SportsPath.text(c, "athlete.displayName") ?: SportsPath.text(c, m.common.team.name) ?: return null
@@ -369,6 +382,104 @@ internal class EspnAssembler(private val m: SportsMapping) {
         return cut.takeIf { it.isNotEmpty() }?.let { TimelineBlock(it, ESPN) }
     }
 
+    // ---- plays (the full list for the Plays section) -----------------------------------------------------------------------
+
+    private fun plays(spec: BlockSpec, profile: ProfileSpec, event: JsonElement, root: JsonElement?): GameBlock? {
+        if (root == null) return null
+        val raw = SportsPath.read(root, spec.path ?: return null) + (spec.str("pathAlso")?.let { SportsPath.read(root, it) }.orEmpty())
+        val allow = spec.strings("allow")
+        val items = raw.mapNotNull { p -> playItem(spec, profile, event, p, allow) }.reversed()   // feeds are oldest first
+        val cap = spec.extraInt("last")?.takeIf { it > 0 } ?: DEFAULT_PLAYS_CAP
+        return items.take(cap).takeIf { it.isNotEmpty() }?.let { PlaysBlock(it, ESPN) }
+    }
+
+    private fun playItem(spec: BlockSpec, profile: ProfileSpec, event: JsonElement, p: JsonElement, allow: List<String>): TimelineItem? {
+        val typeText = SportsPath.text(p, spec.str("type"))
+        if (allow.isNotEmpty() && (typeText == null || allow.none { typeText.startsWith(it, ignoreCase = true) })) return null
+        val text = SportsPath.text(p, spec.str("text") ?: "text")?.takeIf { it.isNotBlank() } ?: SportsPath.text(p, "shortText")?.takeIf { it.isNotBlank() } ?: return null
+        val scoring = (p as? JsonObject)?.get("scoringPlay")?.let { (it as? JsonPrimitive)?.booleanOrNull } == true
+        val kind = if (SportsPath.text(p, "type.penaltyType") != null) "penalty" else playKind(typeText, scoring)
+        val home = SportsPath.text(p, spec.str("homeScore"))
+        val away = SportsPath.text(p, spec.str("awayScore"))
+        return TimelineItem(
+            time = SportsPath.text(p, spec.str("time")).orEmpty(),
+            period = playPeriod(profile, SportsPath.text(p, spec.str("period"))),
+            side = sideOfTeamRef(event, SportsPath.text(p, spec.str("team"))),
+            text = text,
+            kind = kind,
+            id = SportsPath.text(p, spec.str("id")),
+            wallclockMs = Iso.parseMs(SportsPath.text(p, spec.str("wallclock"))),
+            score = if (home != null && away != null) "$home\u2013$away" else null,
+        )
+    }
+
+    /** The tag a play carries: the timeline's goal/card/sub/penalty/score, plus the soccer commentary kinds. */
+    private fun playKind(typeText: String?, scoring: Boolean): String? {
+        val t = typeText?.lowercase().orEmpty()
+        return when {
+            "penalty" in t && "scored" in t -> "goal"
+            "corner" in t -> "corner"
+            "shot" in t -> "shot"
+            "offside" in t -> "offside"
+            t.startsWith("var") -> "var"
+            else -> kindOf(typeText, scoring)
+        }
+    }
+
+    /** Numeric periods read "Q1" / "P2" (periodLabel) or, for soccer, "1st Half"; a feed display value ("1st Quarter") passes through. */
+    private fun playPeriod(profile: ProfileSpec, raw: String?): String? {
+        val r = raw?.takeIf { it.isNotBlank() } ?: return null
+        val n = r.toIntOrNull() ?: return r
+        return when {
+            profile.key == "soccer" -> when (n) { 1 -> "1st Half"; 2 -> "2nd Half"; 3 -> "Extra time 1"; 4 -> "Extra time 2"; else -> "Shootout" }
+            !profile.periodLabel.isNullOrBlank() -> "${profile.periodLabel}$n"
+            else -> r
+        }
+    }
+
+    /** "home"/"away" for a team id (scoreboard competitors) or, when the feed gives only a name (soccer commentary), for that name. */
+    private fun sideOfTeamRef(event: JsonElement, ref: String?): String? {
+        if (ref == null) return null
+        sideOfTeam(event, ref)?.let { return it }
+        val namePath = m.common.team.name
+        return when (ref) {
+            SportsPath.text(SportsPath.first(event, m.common.home), namePath) -> "home"
+            SportsPath.text(SportsPath.first(event, m.common.away), namePath) -> "away"
+            else -> null
+        }
+    }
+
+    // ---- standings table ------------------------------------------------------------------------------------------------------
+
+    private fun standingsTable(spec: BlockSpec, event: JsonElement, root: JsonElement?): GameBlock? {
+        if (root == null) return null
+        val allow = spec.strings("allow")
+        val labels = spec.extraStrings("labels")
+        if (allow.isEmpty() || labels.size != allow.size) return null
+        val gameTeams = listOfNotNull(
+            SportsPath.text(SportsPath.first(event, m.common.home), "team.id"),
+            SportsPath.text(SportsPath.first(event, m.common.away), "team.id"),
+        )
+        val entriesPath = spec.str("entries") ?: "standings.entries[*]"
+        val groups = SportsPath.read(root, spec.path ?: return null).mapNotNull { g ->
+            val rows = SportsPath.read(g, entriesPath).mapNotNull { e ->
+                val name = SportsPath.text(e, spec.str("team") ?: "team") ?: return@mapNotNull null
+                val id = SportsPath.text(e, spec.str("teamId") ?: "id")
+                StandingsTableRow(
+                    teamId = id, name = name,
+                    cells = allow.map { stat -> SportsPath.text(SportsPath.read(e, "stats[name=$stat]").firstOrNull(), "displayValue") ?: "\u2013" },
+                    isGameTeam = id != null && id in gameTeams,
+                )
+            }
+            if (rows.isEmpty()) null else StandingsGroup(groupName(SportsPath.text(g, spec.str("group"))), labels, rows)
+        }
+        return groups.takeIf { it.isNotEmpty() }?.let { StandingsTableBlock(it, ESPN) }
+    }
+
+    /** "2026-27 Central Standings" -> "Central". */
+    private fun groupName(raw: String?): String =
+        raw.orEmpty().replace(Regex("""^\d{4}(-\d{2})?\s+"""), "").removeSuffix(" Standings").trim()
+
     private fun kindOf(typeText: String?, scoring: Boolean): String? {
         val t = typeText?.lowercase().orEmpty()
         return when {
@@ -475,6 +586,7 @@ internal class EspnAssembler(private val m: SportsMapping) {
 
     companion object {
         const val ESPN = "espn"
+        private const val DEFAULT_PLAYS_CAP = 60
         private val MARKERS = setOf("kickoff", "halftime", "full time", "end regular time", "end of regular time", "start 2nd half")
     }
 }

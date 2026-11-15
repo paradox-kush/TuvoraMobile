@@ -56,6 +56,12 @@ internal class EspnHttpSource(
         val url = m.espn.summaryTemplate.replace("{path}", espnPath).replace("{id}", eventId)
         return getJson(http, url, deadlineOverrideMs ?: m.espn.deadlineMs)
     }
+
+    override suspend fun event(espnPath: String, eventId: String): SourceResult<JsonElement> {
+        val m = mapping()
+        val template = m.espn.eventTemplate ?: return SourceResult.Disabled
+        return getJson(http, template.replace("{path}", espnPath).replace("{id}", eventId), deadlineOverrideMs ?: m.espn.deadlineMs)
+    }
 }
 
 /** TheSportsDB via our backend's `game-detail` function. */
