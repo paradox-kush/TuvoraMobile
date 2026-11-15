@@ -28,6 +28,9 @@ struct SportsScreen: View {
     @State private var pendingLeague: RadarLeague?
     @State private var browse: RadarCategory?
     @State private var sheet: MatchSheetTarget?
+    @State private var game: MatchSheetTarget?
+    /// The game screen had nothing for this fixture: the channel sheet opens once it has gone.
+    @State private var gameFallback: RadarFixture?
     @State private var pendingPlay: TvPlayerSession?
     @State private var smokeMatchOpened = false
 
@@ -93,6 +96,19 @@ struct SportsScreen: View {
                 .background(Color.black.opacity(0.6).ignoresSafeArea())
                 .presentationBackground(.clear)
         }
+        .fullScreenCover(item: $game, onDismiss: {
+            if let fixture = gameFallback { gameFallback = nil; sheet = MatchSheetTarget(fixture: fixture) }
+            else if let session = pendingPlay { pendingPlay = nil; playback.play(session) }
+        }) { target in
+            GameDetailScreen(fixture: target.fixture, onPlay: { session in
+                pendingPlay = session
+                game = nil
+            }, onNoData: {
+                gameFallback = target.fixture
+                game = nil
+            })
+            .environment(\.nuvio, colors).environmentObject(playback)
+        }
         .fullScreenCover(item: $sheet, onDismiss: {
             if let session = pendingPlay { pendingPlay = nil; playback.play(session) }
         }) { target in
@@ -107,7 +123,12 @@ struct SportsScreen: View {
         }
     }
 
-    private func open(_ fixture: RadarFixture) { sheet = MatchSheetTarget(fixture: fixture) }
+    /// OK on a match opens the live game screen; it hands over to the channel sheet when it has no data.
+    private func open(_ fixture: RadarFixture) {
+        // A fixture the game screen can't open (no event id / kick-off) goes straight to the channel sheet.
+        if TvGameDetail.shared.ref(fixture: fixture) == nil { sheet = MatchSheetTarget(fixture: fixture) }
+        else { game = MatchSheetTarget(fixture: fixture) }
+    }
 
     private func hub(_ radar: RadarUiState, _ hub: TvSportsHub) -> some View {
         ScrollView(.vertical, showsIndicators: false) {
