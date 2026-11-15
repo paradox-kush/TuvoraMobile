@@ -126,17 +126,17 @@ class GameScreenMarkersDTest {
         assertEquals(18f / 59f, d[0].first, 0.0001f, "on the drawn (60 point) series: full index 30 of 100 is drawn point 18 of 60")
     }
 
-    @Test fun `dividers - a feed with only period ends marks the start of the next period`() {
+    @Test fun `dividers - a feed with only period ends draws nothing because an end is not a start`() {
         val h = series(100)
         val d = ChartMarkers.dividers(h, listOf(play(t0 + 25 * 30_000L, "periodEnd", period = "1st Quarter"), play(t0 + 50 * 30_000L, "periodEnd", period = "2nd Quarter")), "Basketball")
-        assertEquals(listOf("Q2", "Q3"), d.map { it.second })
+        assertEquals(emptyList(), d, "the end of Q2 is the start of halftime, not of Q3: no guess")
     }
 
-    @Test fun `dividers - a period start wins over the previous period end and overtime reads OT`() {
+    @Test fun `dividers - only period starts count and overtime reads OT`() {
         val h = series(100)
         val plays = listOf(
             play(t0 + 29 * 30_000L, "periodEnd", period = "1st"), play(t0 + 30 * 30_000L, "periodStart", period = "2nd"),
-            play(t0 + 70 * 30_000L, "periodEnd", period = "3rd"),
+            play(t0 + 70 * 30_000L, "periodEnd", period = "3rd"), play(t0 + 75 * 30_000L, "periodStart", period = "4th"),
         )
         val d = ChartMarkers.dividers(h, plays, "Ice Hockey")
         assertEquals(listOf("P2", "OT"), d.map { it.second })
@@ -145,7 +145,7 @@ class GameScreenMarkersDTest {
 
     @Test fun `dividers - soccer reads 45 and 90 and a boundary outside the series or without a wall clock is skipped`() {
         val h = series(100)
-        val d = ChartMarkers.dividers(h, listOf(play(t0 + 40 * 30_000L, "periodEnd", period = "1st Half"), play(t0 + 80 * 30_000L, "periodEnd", period = "2nd Half")), "Soccer")
+        val d = ChartMarkers.dividers(h, listOf(play(t0 + 40 * 30_000L, "periodStart", period = "2nd Half"), play(t0 + 80 * 30_000L, "periodStart", period = "3rd Half")), "Soccer")
         assertEquals(listOf("45'", "90'"), d.map { it.second })
         assertEquals(emptyList(), ChartMarkers.dividers(h, listOf(play(t0 + 9_000 * 30_000L, "periodStart", period = "2nd")), "Ice Hockey"), "after the series")
         assertEquals(emptyList(), ChartMarkers.dividers(h, listOf(play(0, "periodStart", period = "2nd").copy(wallclockMs = null)), "Ice Hockey"))
@@ -228,5 +228,61 @@ class GameScreenMarkersDTest {
         val m = GameMomentPolicy.diff(d(listOf(StatRow("3rd down", "4/11", "5/9"))), d(listOf(StatRow("3rd down", "5/12", "5/9"), StatRow("Shots", "1", "0"))))
         assertEquals(listOf("3rd down"), m.filterIsInstance<Moment.StatChange>().map { it.label })
         assertFalse(m.filterIsInstance<Moment.StatChange>().single().leaderChanged)
+    }
+
+    // ---- Review fixes: classification --------------------------------------------------------------------------------------------------
+
+    private fun footballPlays(vararg plays: String): PlaysBlock =
+        EspnAssembler(bundledMapping()).assemble(BlockType.PLAYS, "football", parse(nhlEvent), parse("""{"drives":{"previous":[{"plays":[${plays.joinToString(",")}]}]}}""")) as PlaysBlock
+
+    /** Real type text and text from feeds/football_nfl.json (NFL, 2026-11-12). */
+    private val fgGood = """{"id":"4018730521007","type":{"id":"59","text":"Field Goal Good","abbreviation":"FG"},"text":"D.Stevens 46 yard field goal is GOOD, Center-T.Ott, Holder-T.Way.","period":{"number":2},"clock":{"displayValue":"1:00"},"scoringPlay":true,"wallclock":"2026-11-13T01:52:10Z","start":{"team":{"id":"10"}}}"""
+    private val fgMissed = """{"id":"401873052643","type":{"id":"60","text":"Field Goal Missed","abbreviation":"FGM"},"text":"D.Zvada 33 yard field goal is No Good, Wide Left, Center-B.Mann, Holder-J.Stout.","period":{"number":1},"clock":{"displayValue":"2:00"},"scoringPlay":false,"wallclock":"2026-11-13T01:37:00Z","start":{"team":{"id":"20"}}}"""
+
+    @Test fun `football - a made field goal is a score and gets an FG marker while a missed one is nothing`() {
+        val b = footballPlays(fgGood, fgMissed)
+        val good = b.items.single { it.id == "4018730521007" }
+        val missed = b.items.single { it.id == "401873052643" }
+        assertEquals("score", good.kind)
+        assertNull(missed.kind, "a missed or blocked field goal is not a goal")
+        assertEquals(listOf("score"), b.chartItems.map { it.kind })
+        val h = series(20)
+        val wall = good.wallclockMs!!
+        val m = ChartMarkers.markers(List(20) { WinPoint(wall - 10 * 30_000L + it * 30_000L, 50) }, b.chartItems, "American Football")
+        assertEquals(listOf("FG"), m.map { it.label })
+        assertEquals(20, h.size)
+    }
+
+    private fun basketballPlays(vararg plays: String): PlaysBlock =
+        EspnAssembler(bundledMapping()).assemble(BlockType.PLAYS, "basketball", parse(nhlEvent), parse("""{"plays":[${plays.joinToString(",")}]}""")) as PlaysBlock
+    private fun bball(id: Int, type: String, scoring: Boolean) =
+        """{"id":"$id","type":{"text":"$type"},"text":"play $id","period":{"displayValue":"1st Quarter"},"clock":{"displayValue":"9:00"},"scoringPlay":$scoring,"wallclock":"2026-11-15T01:1${id}:00Z","team":{"id":"10"},"homeScore":2,"awayScore":0}"""
+
+    @Test fun `basketball - a made jump shot is a score not a shot and defensive goaltending is a score not a goal`() {
+        val b = basketballPlays(bball(1, "Jump Shot", true), bball(2, "Defensive Goaltending", true), bball(3, "Layup Shot", false))
+        val byId = b.items.associateBy { it.id }
+        assertEquals("score", byId["1"]!!.kind)
+        assertEquals("score", byId["2"]!!.kind)
+        assertEquals("shot", byId["3"]!!.kind, "a missed shot stays a shot")
+    }
+
+    @Test fun `soccer - Start 2nd Half is a period start for the chart`() {
+        val soccer = """{"commentary":[
+            {"time":{"displayValue":"10'"},"text":"Goal! 1-0","play":{"id":"g","type":{"text":"Goal"},"team":{"displayName":"H"},"period":{"number":1},"clock":{"displayValue":"10'"},"wallclock":"2026-11-15T01:10:00Z"}},
+            {"time":{"displayValue":"46'"},"text":"Second Half begins.","play":{"id":"s","type":{"text":"Start 2nd Half"},"period":{"number":2},"clock":{"displayValue":"46'"},"wallclock":"2026-11-15T02:05:00Z"}}]}"""
+        val sb = EspnAssembler(bundledMapping()).assemble(BlockType.PLAYS, "soccer", parse(nhlEvent), parse(soccer)) as? PlaysBlock
+        assertEquals(listOf("goal", "periodStart"), sb?.chartItems?.map { it.kind })
+    }
+
+    // ---- Review fixes: first down ------------------------------------------------------------------------------------------------------
+
+    private fun fd(yard: Int, down: Int, dist: Int, side: String = "home") =
+        detailOf(com.nuvio.app.features.sportsdetail.api.FootballFieldBlock(yard, side, down = down, distance = dist), sport = "American Football")
+
+    @Test fun `moments - a first down gained on first down is a first down but a defensive penalty reset is not`() {
+        val gained = GameMomentPolicy.diff(fd(30, 1, 10), fd(45, 1, 10))
+        assertEquals(listOf<Moment>(Moment.FieldMove(30, 45, loss = false, firstDown = true)), gained)
+        val penalty = GameMomentPolicy.diff(fd(30, 1, 10), fd(35, 1, 5))
+        assertEquals(listOf<Moment>(Moment.FieldMove(30, 35, loss = false, firstDown = false)), penalty, "5 yards from a 1st and 10 is a penalty, not a first down")
     }
 }

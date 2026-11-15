@@ -452,10 +452,10 @@ internal class EspnAssembler(private val m: SportsMapping) {
         return when {
             "penalty" in t && "scored" in t -> "goal"
             "corner" in t -> "corner"
-            "shot" in t -> "shot"
+            "shot" in t && !scoring -> "shot"      // a made shot (scoringPlay) is a score, below
             "offside" in t -> "offside"
             t.startsWith("var") -> "var"
-            t == "period start" -> "periodStart"
+            t == "period start" || (t.startsWith("start ") && t.endsWith("half")) -> "periodStart"
             t == "end period" || t == "period end" || t == "end of half" || t == "halftime" || t == "end regular time" -> "periodEnd"
             else -> kindOf(typeText, scoring)
         }
@@ -712,12 +712,15 @@ internal class EspnAssembler(private val m: SportsMapping) {
     private fun groupName(raw: String?): String =
         raw.orEmpty().replace(Regex("""^\d{4}(-\d{2})?\s+"""), "").removeSuffix(" Standings").trim()
 
+    private val goalWord = Regex("""\bgoal\b""")
+
     private fun kindOf(typeText: String?, scoring: Boolean): String? {
         val t = typeText?.lowercase().orEmpty()
         return when {
             "no goal" in t || "disallowed" in t -> null
             "penalty" in t && "goal" !in t && "scored" !in t -> "penalty"
-            "goal" in t -> "goal"
+            "field goal" in t -> if (scoring) "score" else null     // good = a score; missed / blocked is no goal
+            goalWord.containsMatchIn(t) -> "goal"                   // not "goaltending"
             "card" in t -> "card"
             "substitution" in t -> "sub"
             scoring -> "score"
