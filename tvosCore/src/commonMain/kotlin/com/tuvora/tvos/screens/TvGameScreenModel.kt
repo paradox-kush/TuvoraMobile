@@ -31,6 +31,7 @@ import com.nuvio.app.features.sportsdetail.internal.GameSectionsPolicy
 import com.nuvio.app.features.sportsdetail.internal.Moment
 import com.nuvio.app.features.sportsdetail.internal.StandingsWindow
 import com.nuvio.app.features.sportsdetail.internal.TeamColor
+import com.nuvio.app.features.sportsdetail.internal.WinChanceSeries
 
 /** Sections the right-hand panel can show (OVERVIEW is not a chip on TV: its content is the left column). */
 enum class TvSection { PLAYS, STATS, LEADERS, LINEUPS, STANDINGS }
@@ -83,8 +84,12 @@ data class TvWinCard(
     val chance: TvWinChance,
     val homeColorHex: String?,
     val awayColorHex: String?,
-    /** Home's share per point, 0..1, oldest first, at most 60; empty when there is no series. */
+    /** The plotted line per core's shared rule (WinChanceSeries): the LEADER's value (three-way: full chance), oldest first, at most 120; empty without a series. */
     val chart: List<Float>,
+    /** "home" | "away": whose line [chart] is (the headline leader), so Swift tints it and the line ends at the big number. */
+    val leaderSide: String = "home",
+    /** The dashed reference line in 0..1 plot space: 0.5 two-way, an even third three-way. */
+    val reference: Float = 0.5f,
     val homeName: String,
     val awayName: String,
     /** At most 5 on TV; empty when the chartMarkers switch is off, there is no market series or no key events. */
@@ -279,10 +284,11 @@ data class TvGameScreenModel(
 
         private fun winCard(d: GameDetail, sides: Pair<Side, Side>?, colors: Pair<String?, String?>, nowMs: Long): TvWinCard? {
             val block = d.blocks.filterIsInstance<WinProbabilityBlock>().firstOrNull() ?: return null
+            val spec = WinChanceSeries.specOf(block)
             return TvWinCard(
                 chance = TvWinChanceCard.from(block, d, nowMs),
                 homeColorHex = colors.first, awayColorHex = colors.second,
-                chart = GameDetailUiPolicy.chartPoints(block.history).orEmpty(),
+                chart = WinChanceSeries.chart(block.history, spec).orEmpty(), leaderSide = spec.leaderSide, reference = spec.reference,
                 markers = TvStrips.markers(d, colors), dividers = TvStrips.dividers(d),
                 homeName = sides?.first?.let { it.short?.takeIf(String::isNotBlank) ?: it.name }.orEmpty(),
                 awayName = sides?.second?.let { it.short?.takeIf(String::isNotBlank) ?: it.name }.orEmpty(),

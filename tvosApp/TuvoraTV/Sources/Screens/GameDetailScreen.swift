@@ -534,7 +534,7 @@ private struct WinChanceCard: View {
             bar(home: home, draw: draw ?? 0, away: away, homeTint: homeTint, awayTint: awayTint)
                 .animation(animated ? GameMotion.move : nil, value: home)
             if showChart, card.chart.count >= 2 {
-                WinChart(points: card.chart.map { $0.floatValue }, tint: home >= away ? homeTint : awayTint,
+                WinChart(points: card.chart.map { $0.floatValue }, tint: card.leaderSide == "home" ? homeTint : awayTint, reference: CGFloat(card.reference),
                          markers: card.markers, dividers: card.dividers, homeTint: homeTint, awayTint: awayTint, animated: animated)
             }
             if let line = chance.line {
@@ -577,6 +577,8 @@ private struct WinChanceCard: View {
 private struct WinChart: View {
     let points: [Float]
     let tint: Color
+    /// Dashed reference line in 0..1 plot space (50 % two-way, an even third three-way), from core.
+    var reference: CGFloat = 0.5
     var markers: [TvChartMarker] = []
     var dividers: [TvChartDivider] = []
     var homeTint: Color = .white
@@ -591,7 +593,12 @@ private struct WinChart: View {
             GeometryReader { geo in
                 let w = geo.size.width, h = geo.size.height
                 ZStack(alignment: .topLeading) {
-                    Rectangle().fill(colors.border).frame(height: 1).opacity(0.7).position(x: w / 2, y: h / 2)   // the 50 % line
+                    Path { p in
+                        let y = inset + (h - inset * 2) * (1 - reference)
+                        p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
+                    }
+                    .stroke(colors.border, style: StrokeStyle(lineWidth: 1, dash: [dp(3), dp(3)]))
+                    .opacity(0.8)
                     ForEach(Array(dividers.enumerated()), id: \.offset) { _, d in
                         Rectangle().fill(colors.border.opacity(0.6)).frame(width: dp(1), height: h)
                             .position(x: w * CGFloat(d.x), y: h / 2)
