@@ -71,4 +71,16 @@ final class GameScreenRemoteTests: XCTestCase {
         XCTAssertFalse(has("More channels"), "Menu did not leave the game screen")
         shot("3-after-menu")
     }
+
+    /// The demo plays three snapshots nine seconds apart (score 14 -> 14 -> 21, a turnover on the last): the screen ends on the last one
+    /// and keeps focus on Play the whole time (an update never moves focus). Frames of the transitions are recorded by the caller.
+    func testDemoSnapshotsAnimateAndFocusSurvivesRefresh() {
+        openDemoGame()
+        XCTAssertTrue(has("Market-implied", timeout: 20), "game screen did not open on the demo data")
+        XCTAssertTrue(waitFocus(10) { $0.hasPrefix("Play") })
+        Thread.sleep(forTimeInterval: 26)   // both updates land
+        XCTAssertTrue(focusedLabel().hasPrefix("Play"), "focus moved on a refresh: \(focusedLabel())")
+        XCTAssertTrue(has("WSH ball"), "the turnover on the last snapshot flips the ball label")
+        shot("4-after-updates")
+    }
 }

@@ -584,7 +584,7 @@ private struct WinChart: View {
                                 .overlay(Circle().stroke(color, lineWidth: dp(2)))
                                 .position(x: w * CGFloat(m.x), y: y)
                             Text(m.label).font(NuvioType.labelSmall).foregroundStyle(color).fixedSize()
-                                .position(x: w * CGFloat(m.x), y: m.labelAbove ? y - dp(9) : y + dp(9))
+                                .position(x: w * CGFloat(m.x), y: m.labelAbove ? y - dp(12) : y + dp(12))
                         }
                         .transition(.scale.combined(with: .opacity))
                     }
