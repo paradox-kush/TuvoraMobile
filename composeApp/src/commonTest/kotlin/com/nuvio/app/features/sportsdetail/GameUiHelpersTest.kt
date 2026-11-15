@@ -192,3 +192,17 @@ class SoccerUiHelpersTest {
         assertEquals(44, c.awayPossession(56), "away share")
     }
 }
+
+class MarkerViewTest {
+    private val m = com.nuvio.app.features.sportsdetail.internal.ChartMarker(0.5f, 0.7f, "G", "home")
+
+    @Test fun `markers follow the flipped series`() {
+        assertEquals(0.7f, com.nuvio.app.features.sportsdetail.internal.ui.MarkerView.displayY(m, false), "as given")
+        assertEquals(0.3f, com.nuvio.app.features.sportsdetail.internal.ui.MarkerView.displayY(m, true), 0.0001f, "flipped")
+    }
+
+    @Test fun `label goes above from fifty percent and below under it`() {
+        assertTrue(com.nuvio.app.features.sportsdetail.internal.ui.MarkerView.labelAbove(m, false), "70 percent above")
+        assertTrue(!com.nuvio.app.features.sportsdetail.internal.ui.MarkerView.labelAbove(m, true), "30 percent below")
+    }
+}

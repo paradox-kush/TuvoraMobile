@@ -170,3 +170,9 @@ internal object SoccerChips {
 
     fun awayPossession(home: Int?): Int? = home?.let { 100 - it }
 }
+
+/** The chart plots the leader's series; markers come on the HOME series, so they flip with it. */
+internal object MarkerView {
+    fun displayY(m: com.nuvio.app.features.sportsdetail.internal.ChartMarker, flipped: Boolean): Float = if (flipped) 1f - m.y else m.y
+    fun labelAbove(m: com.nuvio.app.features.sportsdetail.internal.ChartMarker, flipped: Boolean): Boolean = displayY(m, flipped) >= 0.5f
+}
