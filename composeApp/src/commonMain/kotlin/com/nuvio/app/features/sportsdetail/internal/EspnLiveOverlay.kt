@@ -22,6 +22,9 @@ internal object EspnLiveOverlay {
         val b = base as? JsonObject ?: return base
         if (baseIsFresher) return withSituationOnly(b, summary)
         val live = SportsPath.first(summary, "header.competitions[0]") as? JsonObject ?: return base
+        // A summary fetched later can still be an OLDER cached copy (CDN max-age differs per endpoint): within a game a score never
+        // goes down, so a summary behind the event is treated as the older of the two.
+        if (summaryBehind(b, live)) return withSituationOnly(b, summary)
         val comps = (b["competitions"] as? JsonArray) ?: return base
         val baseComp = comps.firstOrNull() as? JsonObject ?: return base
         val liveCompetitors = (live["competitors"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
@@ -37,6 +40,19 @@ internal object EspnLiveOverlay {
         }
         val status = ((b["status"] as? JsonObject).orEmpty() + ((live["status"] as? JsonObject).orEmpty()))
         return JsonObject(b + mapOf("status" to JsonObject(status), "competitions" to JsonArray(listOf<JsonElement>(JsonObject(comp)) + comps.drop(1))))
+    }
+
+    private fun scoresOf(comp: JsonObject?): Map<String, Int> =
+        (comp?.get("competitors") as? JsonArray).orEmpty().filterIsInstance<JsonObject>().mapNotNull { c ->
+            val ha = (c["homeAway"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+            val sc = (c["score"] as? JsonPrimitive)?.content?.trim()?.toIntOrNull() ?: return@mapNotNull null
+            ha to sc
+        }.toMap()
+
+    private fun summaryBehind(base: JsonObject, live: JsonObject): Boolean {
+        val bs = scoresOf((base["competitions"] as? JsonArray)?.firstOrNull() as? JsonObject)
+        val ls = scoresOf(live)
+        return ls.any { (ha, v) -> (bs[ha] ?: return@any false) > v }
     }
 
     private fun withSituationOnly(b: JsonObject, summary: JsonElement?): JsonElement {

@@ -69,6 +69,8 @@ internal class GameDetailSession(
     /** When (ms, our clock) the cached event / summary were fetched: the overlay lets the FRESHER one win. */
     private var eventAsOfMs = 0L
     private var summaryAsOfMs = 0L
+    /** The cached summary was fetched when the game was already final: it is the last word, never refetched for the event ticks that follow. */
+    private var summaryFetchedFinal = false
 
     /** Base event + summary overlay. The summary only overwrites live keys while it is the fresher of the two. */
     private fun rebuildRoot() {
@@ -193,12 +195,14 @@ internal class GameDetailSession(
         //    (or when never fetched); a mapping without the template keeps the old rule -- the live tick IS the summary.
         val wantsSummary = espnOn && espnEventId != null && espnBase != null && summaryEndpoint && profile != null && provisional != null &&
             (provisional != GameState.UPCOMING || "lineup" in profile.blocks) && provisional != GameState.POSTPONED
-        val summaryDue = if (eventTickViaSingleEvent) fetchSummary || espnSummary == null else fetchEvent || fetchSummary || espnSummary == null
+        // A game that went FINAL on an event tick would otherwise keep its last LIVE summary (the next plan is IDLE): fetch it once.
+        val finalizedSinceSummary = provisional == GameState.FINAL && !summaryFetchedFinal && summaryAsOfMs < eventAsOfMs
+        val summaryDue = if (eventTickViaSingleEvent) fetchSummary || espnSummary == null || finalizedSinceSummary else fetchEvent || fetchSummary || espnSummary == null
         if (wantsSummary && espnCallable && summaryDue && !isMissed("espn|summary")) {
             val t0 = nowMs()
             summaryCalls++
             when (val r = espn!!.summary(league!!.espn!!, espnEventId!!)) {
-                is SourceResult.Ok -> { espnSummary = r.value; summaryAsOfMs = nowMs(); rebuildRoot(); espnAsOf = nowMs() }
+                is SourceResult.Ok -> { espnSummary = r.value; summaryAsOfMs = nowMs(); summaryFetchedFinal = provisional == GameState.FINAL; rebuildRoot(); espnAsOf = nowMs() }
                 is SourceResult.Empty, is SourceResult.Disabled -> miss("espn|summary")
                 is SourceResult.Failed -> { espnSummaryFailed = r; espnBackoffUntilMs = nowMs() + ESPN_BACKOFF_MS }
             }
