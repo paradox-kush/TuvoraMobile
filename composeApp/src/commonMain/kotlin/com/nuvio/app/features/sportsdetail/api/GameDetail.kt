@@ -1,0 +1,174 @@
+package com.nuvio.app.features.sportsdetail.api
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+/**
+ * What the game-detail screen consumes (research/sports-mapping/BLOCK_CONTRACT.md, v1). Providers and the
+ * remote mapping produce this; the UI never sees a provider shape. Display values are Strings on purpose
+ * (providers disagree on number types); the sport profile owns units and labels.
+ */
+@Serializable
+enum class GameState {
+    @SerialName("upcoming") UPCOMING,
+    @SerialName("live") LIVE,
+    @SerialName("final") FINAL,
+    @SerialName("postponed") POSTPONED,
+}
+
+@Serializable
+data class Side(
+    val name: String,
+    val short: String? = null,
+    val badgeUrl: String? = null,
+    /** "139", "187/4", "6 3". */
+    val score: String? = null,
+    val record: String? = null,
+    val form: List<String>? = null,
+)
+
+/** Live status line: clock "2H 49'", "Q2 5:12", "Over 38.2"; periodLabel; detail "Halftime". */
+@Serializable
+data class LiveInfo(
+    val clock: String? = null,
+    /** "2nd" for quarters/periods; null where the clock already says it (soccer "45'+2'"). */
+    val periodLabel: String? = null,
+    val detail: String? = null,
+    /** The current period number, when known (used to hide periods that have not started). */
+    val period: Int? = null,
+)
+
+@Serializable
+sealed interface Header
+
+/** Team sports: home/away. */
+@Serializable @SerialName("teams")
+data class TeamsHeader(val home: Side, val away: Side) : Header
+
+/** Head-to-head individuals (tennis). */
+@Serializable @SerialName("versus")
+data class VersusHeader(val a: Side, val b: Side) : Header
+
+/** Events with a field rather than two sides (motorsport weekend, fight card). */
+@Serializable @SerialName("event")
+data class EventHeader(val name: String, val session: String? = null, val venue: String? = null) : Header
+
+@Serializable
+data class GameDetail(
+    /** Our id: "tsdb:<idEvent>" or "espn:<id>". */
+    val gameId: String,
+    val sport: String,
+    /** TheSportsDB league id. */
+    val leagueId: String,
+    val leagueName: String,
+    val round: String? = null,
+    val venue: String? = null,
+    /** ISO-8601 UTC; may be empty when the provider has no kickoff time. */
+    val startsAt: String = "",
+    val state: GameState = GameState.UPCOMING,
+    val header: Header,
+    val live: LiveInfo? = null,
+    /** Ordered by the sport profile; any block may be absent. */
+    val blocks: List<GameBlock> = emptyList(),
+    /** blockType -> "tsdb" | "espn" | "derived" | "local" (includes "header"). */
+    val sources: Map<String, String> = emptyMap(),
+    /** Per source, WHEN WE FETCHED it (epoch ms; never a provider timestamp). UI shows "Updated 2 min ago" past ~20 s. */
+    val asOf: Map<String, Long> = emptyMap(),
+)
+
+/** One block of the screen. Every block says which source produced it. */
+@Serializable
+sealed interface GameBlock {
+    val source: String
+}
+
+@Serializable @SerialName("situation")
+data class SituationBlock(
+    val line: String,
+    /** Structured parts when the provider gives them (down/distance, runners, count, server, "need X off Y"). */
+    val parts: Map<String, String> = emptyMap(),
+    override val source: String = "",
+) : GameBlock
+
+/** Local block: the IPTV matcher's result. `entry` = "watching" | "browsing" decides Play vs Switch. Built by the UI lane. */
+@Serializable @SerialName("watch")
+data class WatchBlock(val entry: String, val channelName: String? = null, override val source: String = "local") : GameBlock
+
+@Serializable @SerialName("broadcast")
+data class BroadcastBlock(val byRegion: Map<String, List<String>>, override val source: String = "") : GameBlock
+
+/** columns e.g. Q1..Q4,T or 1..9,R,H,E; rows[side][] with row 0 = home (or first competitor). */
+@Serializable @SerialName("linescore")
+data class LinescoreBlock(
+    val columns: List<String>,
+    val rows: List<List<String>>,
+    val rowLabels: List<String> = emptyList(),
+    override val source: String = "",
+) : GameBlock
+
+@Serializable
+data class StatRow(val label: String, val home: String, val away: String, val unit: String? = null)
+
+@Serializable @SerialName("stats")
+data class StatsBlock(val rows: List<StatRow>, override val source: String = "") : GameBlock
+
+@Serializable
+data class LeaderItem(val category: String, val athlete: String, val value: String, val side: String? = null)
+
+@Serializable @SerialName("leaders")
+data class LeadersBlock(val items: List<LeaderItem>, override val source: String = "") : GameBlock
+
+@Serializable
+data class TimelineItem(
+    val time: String,
+    val period: String? = null,
+    /** "home" | "away" | null. */
+    val side: String? = null,
+    val text: String,
+    /** goal, card, sub, score, penalty. */
+    val kind: String? = null,
+)
+
+@Serializable @SerialName("timeline")
+data class TimelineBlock(val items: List<TimelineItem>, override val source: String = "") : GameBlock
+
+@Serializable
+data class LineupPlayer(val number: String, val name: String, val pos: String, val starter: Boolean)
+
+@Serializable
+data class LineupSide(val side: String, val formation: String? = null, val players: List<LineupPlayer>)
+
+@Serializable @SerialName("lineup")
+data class LineupBlock(val sides: List<LineupSide>, override val source: String = "") : GameBlock
+
+/** Motorsport / fighting / golf classification, bouts. */
+@Serializable @SerialName("results")
+data class ResultsBlock(val columns: List<String>, val rows: List<List<String>>, override val source: String = "") : GameBlock
+
+@Serializable
+data class StandingRow(val pos: String, val name: String, val played: String, val points: String, val gd: String? = null, val form: String? = null)
+
+@Serializable @SerialName("standings")
+data class StandingsBlock(val rows: List<StandingRow>, override val source: String = "") : GameBlock
+
+/** Last five per side: "W" | "D" | "L". */
+@Serializable @SerialName("form")
+data class FormBlock(val home: List<String>, val away: List<String>, override val source: String = "") : GameBlock
+
+/** TV shows a QR code, phone/iPad open the app. */
+@Serializable @SerialName("highlights")
+data class HighlightsBlock(val url: String, val thumbnail: String? = null, override val source: String = "") : GameBlock
+
+@Serializable
+data class NextItem(@SerialName("when") val whenText: String, val text: String)
+
+@Serializable @SerialName("next")
+data class NextBlock(val items: List<NextItem>, override val source: String = "") : GameBlock
+
+/** Home win chance, whole percent 0..100. */
+@Serializable @SerialName("winProbability")
+data class WinProbabilityBlock(val homePercent: Int, override val source: String = "") : GameBlock
+
+/** Decoded from a block type this build does not know; dropped by [GameDetailCodec]. */
+@Serializable @SerialName("unknown")
+data class UnknownBlock(override val source: String = "") : GameBlock
