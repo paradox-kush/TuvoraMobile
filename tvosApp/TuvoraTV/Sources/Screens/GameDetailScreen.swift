@@ -86,6 +86,10 @@ struct GameDetailScreen: View {
         // The model is made once, here; the state collector follows it (no polling-for-nil loop).
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
+            #if DEBUG
+            // Simulator passes without a live game: `-gameDemo football|soccer` plays three canned snapshots (debug builds only).
+            if let kind = Self.demoKind { await runDemo(kind); return }
+            #endif
             if model == nil {
                 guard let opened = TvGameDetail.shared.open(fixture: fixture) else { onNoData(); return }
                 model = opened
@@ -118,6 +122,25 @@ struct GameDetailScreen: View {
             .presentationBackground(.clear)
         }
     }
+
+    #if DEBUG
+    private static var demoKind: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-gameDemo"), args.indices.contains(i + 1) else { return nil }
+        return args[i + 1]
+    }
+
+    /// Three snapshots, nine seconds apart, then stops: exercises each moment once.
+    private func runDemo(_ kind: String) async {
+        for step in 0..<3 {
+            guard let detail = TvGameScreenDemo.shared.detail(kind: kind, step: Int32(step)) else { return }
+            state = TvGameDetailStateLoaded(detail: detail, stale: false)
+            apply(detail, stale: false)
+            try? await Task.sleep(nanoseconds: 9_000_000_000)
+            if Task.isCancelled { return }
+        }
+    }
+    #endif
 
     private var isLive: Bool {
         if case .loaded(let l) = onEnum(of: state) { return l.detail.state == .live }
@@ -177,7 +200,7 @@ struct GameDetailScreen: View {
             topBar(screen.scoreboard)
             HStack(alignment: .top, spacing: dp(18)) {
                 leftColumn(screen)
-                    .frame(width: dp(470), alignment: .topLeading)
+                    .frame(width: dp(450), alignment: .topLeading)
                 rightColumn(screen)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
@@ -274,7 +297,7 @@ struct GameDetailScreen: View {
     }
 
     private func chipRow(_ chips: [TvChip]) -> some View {
-        HStack(spacing: dp(8)) {
+        HStack(spacing: dp(6)) {
             ForEach(Array(chips.enumerated()), id: \.offset) { index, chip in
                 SectionChip(title: chip.title, selected: selected == index, target: .chip(index), focus: $focus)
             }
@@ -568,9 +591,9 @@ private struct SectionChip: View {
     var body: some View {
         let focused = focus.wrappedValue == target
         Button {} label: {
-            Text(title).font(NuvioType.labelLargeSemi)
+            Text(title).font(NuvioType.labelLargeSemi).lineLimit(1).fixedSize()
                 .foregroundStyle(focused ? colors.primary : (selected ? colors.secondary : colors.textSecondary))
-                .padding(.horizontal, dp(14)).padding(.vertical, dp(6))
+                .padding(.horizontal, dp(11)).padding(.vertical, dp(6))
                 .background(Capsule().fill(focused ? colors.focusBackground : (selected ? colors.secondary.opacity(0.16) : colors.backgroundElevated)))
                 .overlay(Capsule().stroke(focused ? colors.focusRing : Color.clear, lineWidth: dp(2)))
                 .scaleEffect(focused ? NuvioTokens.Motion.focusScale : 1)
