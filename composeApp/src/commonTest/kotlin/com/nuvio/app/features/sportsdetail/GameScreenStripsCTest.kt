@@ -241,6 +241,14 @@ class GameScreenStripsCTest {
         assertNull(PowerPlayClock.secondsLeft(listOf(HockeyPlay(1, null, "away", 2, "Minor")), 1, now(1, 400), "home"))
     }
 
+    @Test fun `clock - an old odd penalty cannot null the clock once it is surely over`() {
+        val odd = listOf(HockeyPlay(1, null, "away", 2, "Minor"), HockeyPlay(1, 100, null, 2, "Minor"), HockeyPlay(1, 200, "home", null, "Minor"))
+        assertEquals(80, PowerPlayClock.secondsLeft(odd + pen("away", 3, 1150), 3, now(3, 1190), "home"), "period 1 oddities are over by period 3")
+        // The same oddity in the CURRENT period could still be running: that stays ambiguous.
+        assertNull(PowerPlayClock.secondsLeft(listOf(HockeyPlay(3, null, "away", 2, "Minor")) + pen("away", 3, 1150), 3, now(3, 1190), "home"))
+        assertNull(PowerPlayClock.secondsLeft(listOf(HockeyPlay(3, 1100, null, 2, "Minor")) + pen("away", 3, 1150), 3, now(3, 1190), "home"), "a team-less penalty that could still be active")
+    }
+
     @Test fun `clock - misconducts do not create a power play and a side that contradicts the feed gives no number`() {
         assertNull(PowerPlayClock.secondsLeft(listOf(pen("away", 1, 300, 10, "Misconduct")), 1, now(1, 320), "home"))
         assertNull(PowerPlayClock.secondsLeft(listOf(pen("away", 1, 300)), 1, now(1, 320), "away"), "the feed says away is on the power play but away is the penalised team")

@@ -67,6 +67,16 @@ internal object PowerPlayClock {
         }
     }
 
+    private const val MAX_PENALTY_MIN = 10
+
+    private fun couldStillRun(p: HockeyPlay, minutes: Int?, now: Int): Boolean {
+        if (p.period !in 1..3) return true
+        val longest = (minutes ?: MAX_PENALTY_MIN) * 60
+        val earliest = (p.period - 1) * REGULATION_PERIOD_SEC + (p.elapsedSec ?: 0)
+        val latest = (p.period - 1) * REGULATION_PERIOD_SEC + (p.elapsedSec ?: REGULATION_PERIOD_SEC)
+        return latest + longest > now && earliest <= now
+    }
+
     fun secondsLeft(plays: List<HockeyPlay>, period: Int, clockRemainingSec: Int, powerPlaySide: String? = null): Int? {
         val nowIn = elapsedInPeriod(period, clockRemainingSec) ?: return null
         val now = (period - 1) * REGULATION_PERIOD_SEC + nowIn
@@ -74,10 +84,13 @@ internal object PowerPlayClock {
         for (p in plays) {
             val type = p.penaltyType ?: continue
             val kind = kindOf(type) ?: continue
-            val minutes = p.penaltyMinutes ?: return null
-            val side = p.side ?: return null
-            val el = p.elapsedSec ?: return null
-            if (p.period !in 1..3) return null
+            val minutes = p.penaltyMinutes
+            val side = p.side
+            val el = p.elapsedSec
+            if (minutes == null || side == null || el == null || p.period !in 1..3) {
+                // Unreadable: only a penalty that could STILL be running makes the answer ambiguous (an old one is surely over).
+                if (couldStillRun(p, minutes, now)) return null else continue
+            }
             pens += Penalty(side, (p.period - 1) * REGULATION_PERIOD_SEC + el, minutes, kind)
         }
         // Coincidental penalties (both teams, same moment) create no power play; unequal ones are ambiguous.

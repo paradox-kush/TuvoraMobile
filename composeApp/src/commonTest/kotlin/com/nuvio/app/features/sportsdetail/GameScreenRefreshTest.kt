@@ -37,7 +37,7 @@ class GameScreenRefreshTest {
     private val ref = GameRef(gameId = "espn:401909287", leagueId = "4387", tsdbEventId = null, espnEventId = "401909287",
         homeName = "Atlanta Hawks", awayName = "Washington Wizards", eventName = null, startsAtMs = startsAt)
 
-    private fun liveEvent(homeScore: String = "139", awayScore: String = "132", clock: String? = null): String =
+    private fun liveEvent(homeScore: String = "40", awayScore: String = "38", clock: String? = null): String =
         SportsFixtures.espn_nba_event.replace("\"state\":\"post\"", "\"state\":\"in\"")
             .replace("\"score\":\"139\"", "\"score\":\"$homeScore\"").replace("\"score\":\"132\"", "\"score\":\"$awayScore\"")
             .let { if (clock != null) it.replace("\"displayClock\":\"0.0\"", "\"displayClock\":\"$clock\"") else it }
@@ -211,8 +211,9 @@ class GameScreenRefreshTest {
     }
 
     @Test fun `overlay - the default is today's behaviour and the summary overwrites`() {
-        val r = EspnLiveOverlay.apply(baseEvent, summary)
-        assertEquals("50", SportsPath.text(r, "competitions[0].competitors[homeAway=home].score"))
+        // The summary is level or ahead of the cached event (a score never goes down in a game), so it overwrites as before.
+        val r = EspnLiveOverlay.apply(baseEvent, parse(summary.toString().replace("\"50\"", "\"70\"").replace("\"48\"", "\"80\"")))
+        assertEquals("70", SportsPath.text(r, "competitions[0].competitors[homeAway=home].score"))
         assertEquals("9:00", SportsPath.text(r, "status.displayClock"))
     }
 
@@ -242,5 +243,47 @@ class GameScreenRefreshTest {
         assertTrue(GameDetailRefreshPolicy.wantsUpcomingSummary("Soccer"))
         assertTrue(GameDetailRefreshPolicy.wantsUpcomingSummary("soccer"))
         for (s in listOf("Basketball", "American Football", "Ice Hockey", "Baseball", "Motorsport", "")) assertFalse(GameDetailRefreshPolicy.wantsUpcomingSummary(s), s)
+    }
+
+    // ---- Review fixes ----------------------------------------------------------------------------------------------------------------
+
+    @Test fun `a game that ends between summary ticks fetches the summary on the tick that sees it final`() = runBlocking<Unit> {
+        val e = espn()
+        val s = session(e)
+        assertEquals("50", home(loaded(s.tick())))
+        now += 15_000L
+        val finalBoard = SportsFixtures.espn_nba_event
+        e.event = SourceResult.Ok(parse(finalBoard))
+        e.summary = SourceResult.Ok(parse(SportsFixtures.espn_nba_summary))
+        val summariesBefore = e.summaryCalls
+        val d = loaded(s.tick(fetchEvent = true, fetchSummary = false))
+        assertEquals(GameState.FINAL, d.state)
+        assertEquals(summariesBefore + 1, e.summaryCalls, "LIVE -> FINAL on an event tick: the stale live summary must be replaced once")
+        // ... and only once: the next plan is IDLE, and a further final tick does not refetch it.
+        now += 15_000L
+        loaded(s.tick(fetchEvent = true, fetchSummary = false))
+        assertEquals(summariesBefore + 1, e.summaryCalls)
+    }
+
+    @Test fun `a summary served from an older CDN copy never moves the score backwards`() = runBlocking<Unit> {
+        val e = espn()
+        val s = session(e)
+        s.tick()
+        now += 60_000L
+        e.event = SourceResult.Ok(parse(liveEvent(homeScore = "60", awayScore = "55", clock = "1:00")))
+        e.summary = SourceResult.Ok(parse(liveSummary("58", "55")))     // fetched later, but its cached copy is one basket old
+        val d = loaded(s.tick(fetchEvent = true, fetchSummary = true))
+        assertEquals("60", home(d), "the older summary copy must not replace the newer score")
+        assertEquals("55", assertIs<TeamsHeader>(d.header).away.score)
+    }
+
+    @Test fun `a summary that is level or ahead still wins over an older event`() = runBlocking<Unit> {
+        val e = espn()
+        val s = session(e)
+        s.tick()
+        now += 60_000L
+        e.event = SourceResult.Ok(parse(liveEvent(homeScore = "58", awayScore = "55", clock = "1:00")))
+        e.summary = SourceResult.Ok(parse(liveSummary("60", "55")))
+        assertEquals("60", home(loaded(s.tick(fetchEvent = true, fetchSummary = true))))
     }
 }

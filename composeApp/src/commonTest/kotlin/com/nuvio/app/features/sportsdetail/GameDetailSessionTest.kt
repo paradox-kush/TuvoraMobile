@@ -322,11 +322,11 @@ class GameDetailSessionTest {
 
     @Test fun `the live overlay brings the summary score into an ESPN-primary header`() = runBlocking<Unit> {
         val live = SportsFixtures.espn_nba_summary
-            .replace("\"score\":\"139\"", "\"score\":\"77\"").replace("\"state\":\"post\"", "\"state\":\"in\"")
+            .replace("\"score\":\"139\"", "\"score\":\"150\"").replace("\"state\":\"post\"", "\"state\":\"in\"")
         val r = ref.copy(gameId = "espn:401909287", tsdbEventId = null, espnEventId = "401909287")
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(live)))
         val d = loaded(session(null, espn, r = r).tick())
-        assertEquals("77", assertIs<TeamsHeader>(d.header).home.score)
+        assertEquals("150", assertIs<TeamsHeader>(d.header).home.score)
         assertEquals(GameState.LIVE, d.state)
     }
 
