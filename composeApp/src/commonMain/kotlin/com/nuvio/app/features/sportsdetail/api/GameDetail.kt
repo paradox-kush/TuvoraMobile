@@ -147,7 +147,15 @@ data class TimelineBlock(val items: List<TimelineItem>, override val source: Str
 
 /** The full play list for the Plays section; [TimelineBlock] stays the scoring summary. Newest first. */
 @Serializable @SerialName("plays")
-data class PlaysBlock(val items: List<TimelineItem>, override val source: String = "") : GameBlock
+data class PlaysBlock(
+    val items: List<TimelineItem>,
+    override val source: String = "",
+    /**
+     * Every chart-worthy key event of the game, OLDEST first and NOT capped (the display [items] are capped at the newest 60): goals,
+     * touchdowns/field goals, red cards and the period boundaries. Kinds "periodStart" / "periodEnd" appear only here and on plays rows.
+     */
+    val chartItems: List<TimelineItem> = emptyList(),
+) : GameBlock
 
 @Serializable
 data class StandingsTableRow(val teamId: String?, val name: String, val cells: List<String>, val isGameTeam: Boolean = false)
