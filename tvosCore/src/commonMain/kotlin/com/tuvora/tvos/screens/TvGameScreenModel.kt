@@ -265,9 +265,29 @@ data class TvGameScreenModel(
         }
 
         private fun playRow(i: TimelineItem, d: GameDetail) = TvPlayRow(
-            key = i.id ?: "${i.time}|${i.text}", time = i.time, period = i.period, tag = GameDetailUiPolicy.teamTag(i.side, d.header),
+            key = i.id ?: "${i.time}|${i.text}", time = i.time, period = periodLabel(d.sport, i.period), tag = GameDetailUiPolicy.teamTag(i.side, d.header),
             kind = i.kind, text = i.text, score = i.score,
         )
+
+        private fun ordinal(n: Int) = when {
+            n % 100 in 11..13 -> "${n}th"
+            n % 10 == 1 -> "${n}st"
+            n % 10 == 2 -> "${n}nd"
+            n % 10 == 3 -> "${n}rd"
+            else -> "${n}th"
+        }
+
+        /** A bare "2" from the feed reads as the sport's own word ("2nd half"); a label the feed already wrote is kept. */
+        internal fun periodLabel(sport: String, raw: String?): String? {
+            val p = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            val n = p.toIntOrNull() ?: return p
+            return when (sport.lowercase()) {
+                "soccer" -> if (n <= 2) "${ordinal(n)} half" else "Extra time"
+                "basketball", "american football" -> "${ordinal(n)} quarter"
+                "ice hockey" -> "${ordinal(n)} period"
+                else -> p
+            }
+        }
 
         private fun number(s: String): Double? = s.trim().removeSuffix("%").toDoubleOrNull()
 

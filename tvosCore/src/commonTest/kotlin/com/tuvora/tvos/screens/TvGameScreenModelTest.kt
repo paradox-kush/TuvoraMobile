@@ -189,6 +189,21 @@ class TvGameScreenModelTest {
         assertEquals(2, small.sumOf { g -> g.rows.count { it.isGameTeam } })
     }
 
+    @Test fun `a bare period number reads as the sport's own word`() {
+        fun header(sport: String, period: String?): String? {
+            val d = detail(sport = sport, blocks = listOf(PlaysBlock(listOf(play("1", "x").copy(period = period)))))
+            return model(d).panels.plays.single().period
+        }
+        assertEquals("2nd half", header("Soccer", "2"))
+        assertEquals("1st half", header("Soccer", "1"))
+        assertEquals("Extra time", header("Soccer", "3"))
+        assertEquals("1st period", header("Ice Hockey", "1"))
+        assertEquals("3rd quarter", header("Basketball", "3"))
+        assertEquals("4th quarter", header("American Football", "4"))
+        assertEquals("2nd Period", header("Ice Hockey", "2nd Period"), "a feed label is kept as it is")
+        assertNull(header("Ice Hockey", null))
+    }
+
     // --- Moments -----------------------------------------------------------------------------------------------------
 
     @Test fun `opening the screen animates nothing`() {
