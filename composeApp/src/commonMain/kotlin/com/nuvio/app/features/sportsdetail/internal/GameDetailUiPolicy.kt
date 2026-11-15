@@ -162,11 +162,13 @@ internal object GameDetailUiPolicy {
         return if (minutes < 60) "Updated $minutes min ago" else "Updated ${minutes / 60} h ago"
     }
 
-    /** "via Polymarket" / "via ESPN": the block's attribution, else derived from its source; null when unknown. */
-    fun winChanceCaption(b: WinProbabilityBlock): String? = b.attribution?.takeIf { it.isNotBlank() } ?: when (b.source) {
-        "espn" -> "via ESPN"
-        "polymarket" -> "via Polymarket"
-        else -> null
+    /**
+     * "Market-implied · via Polymarket" / "via ESPN". Polymarket allowed the display on condition that it is credited AND
+     * shown as market-implied probability, not our own prediction, so that wording is fixed here, whatever the server sent.
+     */
+    fun winChanceCaption(b: WinProbabilityBlock): String? = when (b.source) {
+        "polymarket" -> "Market-implied · via Polymarket"
+        else -> b.attribution?.takeIf { it.isNotBlank() } ?: if (b.source == "espn") "via ESPN" else null
     }
 
     fun isWide(widthDp: Int): Boolean = widthDp >= WIDE_MIN_DP

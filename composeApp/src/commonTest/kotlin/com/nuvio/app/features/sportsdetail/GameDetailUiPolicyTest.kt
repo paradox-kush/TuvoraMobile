@@ -143,7 +143,9 @@ class GameDetailUiPolicyTest {
     }
 
     @Test fun `win chance caption is the attribution or the source name`() {
-        assertEquals("via Polymarket", GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "polymarket", attribution = "via Polymarket")))
+        // Polymarket's condition (11-11 reply): credited AND shown as market-implied probability, not our own prediction.
+        assertEquals("Market-implied · via Polymarket", GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "polymarket", attribution = "via Polymarket")))
+        assertEquals("Market-implied · via Polymarket", GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "polymarket")))
         assertEquals("via ESPN", GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "espn")))
         assertNull(GameDetailUiPolicy.winChanceCaption(WinProbabilityBlock(60, source = "")))
     }
