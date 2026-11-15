@@ -12,6 +12,7 @@ import com.nuvio.app.features.sportsdetail.api.LiveInfo
 import com.nuvio.app.features.sportsdetail.api.PlaysBlock
 import com.nuvio.app.features.sportsdetail.api.Side
 import com.nuvio.app.features.sportsdetail.api.SituationBlock
+import com.nuvio.app.features.sportsdetail.api.SoccerStripBlock
 import com.nuvio.app.features.sportsdetail.api.StandingsBlock
 import com.nuvio.app.features.sportsdetail.api.StandingsGroup
 import com.nuvio.app.features.sportsdetail.api.StandingsTableBlock
@@ -46,6 +47,8 @@ data class TvScoreSide(
     /** Contrast-safe team colour, 6 hex digits without '#'; null -> Swift falls back to the theme accent / border. */
     val colorHex: String?,
     val badgeUrl: String?,
+    /** Soccer goal scorers ("Saka 23'"), at most 3 then "+N". */
+    val scorers: List<String> = emptyList(),
 )
 
 data class TvScoreboard(
@@ -108,8 +111,14 @@ data class TvPanels(
 )
 
 /** What actually changed since the previous snapshot. Each is animated once; nothing loops. */
-enum class TvMomentKind { SCORE_CHANGE, WIN_CHANCE_MOVE, NEW_PLAY }
-data class TvMoment(val kind: TvMomentKind, val side: String?, val from: Int?, val to: Int?, val text: String?)
+enum class TvMomentKind { SCORE_CHANGE, WIN_CHANCE_MOVE, NEW_PLAY, FIELD_MOVE, TOUCHDOWN, POSSESSION_CHANGE, SOCCER_EVENT }
+data class TvMoment(
+    val kind: TvMomentKind, val side: String?, val from: Int?, val to: Int?, val text: String?,
+    /** FIELD_MOVE: the ball moved away from the goal it attacks. */
+    val loss: Boolean = false,
+    /** FIELD_MOVE: down returned to 1 with the same team on the ball. */
+    val firstDown: Boolean = false,
+)
 
 data class TvGameScreenModel(
     val gameId: String,
@@ -122,6 +131,11 @@ data class TvGameScreenModel(
     val situationLine: String?,
     val updatedLabel: String?,
     val moments: List<TvMoment>,
+    val field: TvFieldStrip? = null,
+    val soccer: TvSoccerStrip? = null,
+    /** Both lineups placed on a pitch; null -> Swift lists the players (unknown formation or missing places). */
+    val pitch: TvPitch? = null,
+    val leftFit: TvLeftFit = TvLeftFit(showChart = true, showLastPlay = true),
     /** VoiceOver: posted only on a score change, once per update ("Dallas 2, Buffalo 0"). */
     val announcement: String?,
 ) {
@@ -140,16 +154,28 @@ data class TvGameScreenModel(
             val sides = sidesOf(detail.header)
             val colors = if (sides != null) TeamColor.pair(sides.first, sides.second, SURFACE_HEX) else null to null
             val moments = if (previous == null) emptyList() else GameMomentPolicy.diff(previous, detail)
+            val field = TvStrips.field(detail, sides, colors)
+            val soccer = TvStrips.soccer(detail, sides)
+            val pitch = TvStrips.pitch(detail, colors)
+            val board = scoreboard(detail, sides, colors, soccer = detail.blocks.filterIsInstance<SoccerStripBlock>().firstOrNull())
+            val win = winCard(detail, sides, colors, nowMs)
+            val last = lastPlay(detail)
+            val leftFit = TvLeftColumnFit.fit(
+                stripDp = when { field != null -> TvStrips.FIELD_DP; soccer != null -> TvStrips.SOCCER_DP; else -> 0 },
+                scorerLines = maxOf(board.home?.scorers?.size ?: 0, board.away?.scorers?.size ?: 0),
+                hasLine = win?.chance?.line != null, hasChart = (win?.chart?.size ?: 0) >= 2, hasLastPlay = last != null,
+            )
             return TvGameScreenModel(
                 gameId = detail.gameId,
-                scoreboard = scoreboard(detail, sides, colors),
-                lastPlay = lastPlay(detail),
-                winCard = winCard(detail, sides, colors, nowMs),
+                scoreboard = board,
+                lastPlay = last,
+                winCard = win,
                 chips = chips(detail),
                 panels = panels(detail, hasPreview, hasChips = GameSectionsPolicy.sections(detail).size > 1),
                 situationLine = detail.blocks.filterIsInstance<SituationBlock>().firstOrNull()?.line?.takeIf { it.isNotBlank() },
                 updatedLabel = GameDetailUiPolicy.staleLabel(detail.asOf, nowMs) ?: if (stale) "Updating…" else null,
                 moments = moments.mapNotNull(::moment),
+                field = field, soccer = soccer, pitch = pitch, leftFit = leftFit,
                 announcement = announcement(detail, moments),
             )
         }
@@ -179,12 +205,18 @@ data class TvGameScreenModel(
             return d
         }
 
-        private fun side(s: Side, hex: String?) = TvScoreSide(
+        /** At most 3 scorer lines, then "+N". */
+        private fun scorers(all: List<String>?): List<String> {
+            val l = all.orEmpty()
+            return if (l.size <= 3) l else l.take(3) + "+${l.size - 3}"
+        }
+
+        private fun side(s: Side, hex: String?, scorers: List<String> = emptyList()) = TvScoreSide(
             name = s.name, shortName = s.short?.takeIf { it.isNotBlank() } ?: s.name, record = s.record, rank = s.rank,
-            score = s.score, colorHex = hex, badgeUrl = s.badgeUrl,
+            score = s.score, colorHex = hex, badgeUrl = s.badgeUrl, scorers = scorers,
         )
 
-        private fun scoreboard(d: GameDetail, sides: Pair<Side, Side>?, colors: Pair<String?, String?>): TvScoreboard {
+        private fun scoreboard(d: GameDetail, sides: Pair<Side, Side>?, colors: Pair<String?, String?>, soccer: SoccerStripBlock?): TvScoreboard {
             val main = when (d.state) {
                 GameState.LIVE -> GameDetailUiPolicy.liveStatusText(d.live)
                 GameState.FINAL -> "Final"
@@ -198,8 +230,8 @@ data class TvGameScreenModel(
                 statusSub = if (d.state == GameState.LIVE) statusSub(main, d.live) else null,
                 venue = d.venue?.takeIf { it.isNotBlank() },
                 isLive = d.state == GameState.LIVE,
-                home = sides?.let { side(it.first, colors.first) },
-                away = sides?.let { side(it.second, colors.second) },
+                home = sides?.let { side(it.first, colors.first, scorers(soccer?.homeScorers)) },
+                away = sides?.let { side(it.second, colors.second, scorers(soccer?.awayScorers)) },
                 eventName = event?.name,
                 eventSession = event?.session,
             )
@@ -335,6 +367,10 @@ data class TvGameScreenModel(
             is Moment.ScoreChange -> TvMoment(TvMomentKind.SCORE_CHANGE, m.side, null, m.to.toIntOrNull(), m.to)
             is Moment.WinChanceMove -> TvMoment(TvMomentKind.WIN_CHANCE_MOVE, null, m.fromHome, m.toHome, null)
             is Moment.NewPlay -> TvMoment(TvMomentKind.NEW_PLAY, m.item.side, null, null, m.item.text)
+            is Moment.FieldMove -> TvMoment(TvMomentKind.FIELD_MOVE, null, m.fromYard, m.toYard, null, loss = m.loss, firstDown = m.firstDown)
+            is Moment.Touchdown -> TvMoment(TvMomentKind.TOUCHDOWN, m.side, null, null, null)
+            is Moment.PossessionChange -> TvMoment(TvMomentKind.POSSESSION_CHANGE, m.to, null, null, null)
+            is Moment.SoccerMoment -> TvMoment(TvMomentKind.SOCCER_EVENT, m.event.side, null, null, m.event.text)
         }
 
         private fun announcement(d: GameDetail, moments: List<Moment>): String? {

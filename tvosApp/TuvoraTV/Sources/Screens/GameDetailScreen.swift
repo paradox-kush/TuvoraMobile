@@ -38,6 +38,8 @@ struct GameDetailScreen: View {
     @State private var previous: GameDetail?
     @State private var selected = 0
     @State private var pulseSide: String?
+    /// One-shot emphasis on the field strip (touchdown end zone, loss border, first-down glow); cleared after PULSE_MS.
+    @State private var flash: StripFlash?
     @State private var matches: [RadarChannelMatcher.ChannelMatch] = []
     @State private var matching = true
     @State private var opening = false
@@ -133,7 +135,15 @@ struct GameDetailScreen: View {
             screen = next
         } else {
             withAnimation(NuvioTokens.Motion.medium) { screen = next }
-            for moment in next.moments where moment.kind == .scoreChange { pulse(moment.side) }
+            for moment in next.moments {
+                switch moment.kind {
+                case .scoreChange: pulse(moment.side)
+                case .touchdown: flashOnce(.touchdown(moment.side ?? "home"))
+                case .fieldMove where moment.loss: flashOnce(.loss)
+                case .fieldMove where moment.firstDown: flashOnce(.firstDown)
+                default: break
+                }
+            }
         }
         // Only a score change is announced, at most once per update.
         if let line = next.announcement { UIAccessibility.post(notification: .announcement, argument: line) }
@@ -148,6 +158,15 @@ struct GameDetailScreen: View {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
             withAnimation(NuvioTokens.Motion.medium) { pulseSide = nil }
+        }
+    }
+
+    /// A strip flash lasts one pulse and is cleared: one shot, never repeating.
+    private func flashOnce(_ value: StripFlash) {
+        withAnimation(NuvioTokens.Motion.medium) { flash = value }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            withAnimation(NuvioTokens.Motion.medium) { flash = nil }
         }
     }
 
@@ -184,9 +203,11 @@ struct GameDetailScreen: View {
 
     private func leftColumn(_ screen: TvGameScreenModel) -> some View {
         VStack(alignment: .leading, spacing: dp(7)) {
-            ScoreboardCard(board: screen.scoreboard, pulseSide: pulseSide, upcomingLabel: upcomingLabel)
-            if let play = screen.lastPlay { LastPlayCard(play: play) }
-            if let win = screen.winCard { WinChanceCard(card: win) }
+            ScoreboardCard(board: screen.scoreboard, pulseSide: pulseSide, upcomingLabel: upcomingLabel, field: screen.field)
+            if let field = screen.field { FieldStripCard(strip: field, flash: flash) }
+            if let soccer = screen.soccer { SoccerStripCard(strip: soccer, board: screen.scoreboard) }
+            if screen.leftFit.showLastPlay, let play = screen.lastPlay { LastPlayCard(play: play) }
+            if let win = screen.winCard { WinChanceCard(card: win, showChart: screen.leftFit.showChart) }
             Spacer(minLength: 0)
             watchRow()
                 .focusSection()
@@ -274,7 +295,8 @@ struct GameDetailScreen: View {
         case .plays: PlaysPanel(rows: screen.panels.plays)
         case .stats: StatsPanel(rows: screen.panels.stats, byPeriod: screen.panels.byPeriod, board: screen.scoreboard, pulseSide: nil)
         case .leaders: LeadersPanel(rows: screen.panels.leaders, form: screen.panels.form)
-        case .lineups: LineupsPanel(sides: screen.panels.lineups)
+        case .lineups:
+            if let pitch = screen.pitch { PitchView(pitch: pitch) } else { LineupsPanel(sides: screen.panels.lineups) }
         case .standings: StandingsPanel(groups: screen.panels.standings)
         }
     }
@@ -302,6 +324,7 @@ private struct ScoreboardCard: View {
     let board: TvScoreboard
     let pulseSide: String?
     let upcomingLabel: String
+    var field: TvFieldStrip? = nil
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -343,12 +366,24 @@ private struct ScoreboardCard: View {
                             Text(s.shortName).font(NuvioType.titleMediumSemi).foregroundStyle(colors.textPrimary).lineLimit(1)
                         }
                         if let record = s.record { Text(record).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1) }
+                        if let dots = timeoutDots(side) { dots }
+                        ForEach(Array(s.scorers.enumerated()), id: \.offset) { _, line in
+                            Text(line).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1)
+                        }
                     }
                     if trailing { badge(s, tint: tint) }
                 }
             }
             if !trailing { scoreText(s, pulsing: pulsing) }
         }
+    }
+
+    /// Three dots per team under the name; filled = timeouts left (football).
+    private func timeoutDots(_ side: String) -> AnyView? {
+        guard let field, let left = (side == "home" ? field.homeTimeouts : field.awayTimeouts)?.intValue else { return nil }
+        return AnyView(HStack(spacing: dp(3)) {
+            ForEach(0..<3, id: \.self) { i in Circle().fill(i < left ? colors.secondary : colors.border).frame(width: dp(6), height: dp(6)) }
+        })
     }
 
     private func badge(_ s: TvScoreSide, tint: Color) -> some View {
@@ -417,6 +452,7 @@ private struct LastPlayCard: View {
 /// line come from shared Kotlin. Bar and chart animate to the new value once per update. No odds, prices or links.
 private struct WinChanceCard: View {
     let card: TvWinCard
+    var showChart: Bool = true
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -440,7 +476,7 @@ private struct WinChanceCard: View {
                 pct(card.awayName, away, leader: away > home, tint: awayTint, trailing: true)
             }
             bar(home: home, draw: draw ?? 0, away: away, homeTint: homeTint, awayTint: awayTint)
-            if card.chart.count >= 2 {
+            if showChart, card.chart.count >= 2 {
                 WinChart(points: card.chart.map { $0.floatValue }, tint: home >= away ? homeTint : awayTint)
                     .frame(height: dp(48))
             }
@@ -763,6 +799,200 @@ private struct GameActionButton: View {
             if target == .play {
                 DispatchQueue.main.async { if focus.wrappedValue == nil || focus.wrappedValue == .play { focus.wrappedValue = .play } }
             }
+        }
+    }
+}
+
+// MARK: - Sport strips (Phase B)
+
+/// One-shot emphasis moments on the field strip.
+private enum StripFlash: Equatable {
+    case loss, firstDown
+    case touchdown(String)
+}
+
+private func hexColor(_ hex: String?, _ fallback: Color) -> Color { teamColor(hex, fallback: fallback) }
+
+/// Football field strip: home end zone left, away right, 10-yard lines, drive span, first-down line, ball. Positions come
+/// from Kotlin as 0..1 (0 = home goal line); this only maps them to pixels. Changes slide once (the screen assignment is animated).
+private struct FieldStripCard: View {
+    let strip: TvFieldStrip
+    let flash: StripFlash?
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        let border: Color? = strip.borderHex.map { hexColor($0, colors.secondary) }
+        VStack(alignment: .leading, spacing: dp(3)) {
+            HStack {
+                if let line = strip.line { Text(line).font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary).lineLimit(1) }
+                Spacer(minLength: dp(6))
+                if let label = strip.ballLabel {
+                    Text(strip.attackingRight == true ? "\(label) ▶▶" : "◀◀ \(label)")
+                        .font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary).lineLimit(1)
+                }
+            }
+            field
+            HStack {
+                if let summary = strip.driveSummary { Text(summary).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1) }
+                Spacer(minLength: 0)
+                Text("G 10 20 30 40 50 40 30 20 10 G").font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, dp(12)).padding(.vertical, dp(6))
+        .background(RoundedRectangle(cornerRadius: dp(12)).fill(colors.backgroundCard))
+        .overlay(
+            RoundedRectangle(cornerRadius: dp(12))
+                .stroke(flash == .loss ? colors.live : (border ?? Color.clear), lineWidth: dp(2))
+        )
+    }
+
+    private var field: some View {
+        let home = hexColor(strip.homeEndZoneHex, colors.secondary)
+        let away = hexColor(strip.awayEndZoneHex, colors.textTertiary)
+        let tint = hexColor(strip.driveTintHex, colors.secondary)
+        return GeometryReader { geo in
+            let w = geo.size.width, ez = w * 0.08, fw = w - ez * 2
+            ZStack(alignment: .topLeading) {
+                Color(argb: 0xFF14241A).clipShape(RoundedRectangle(cornerRadius: dp(3)))
+                // End zones.
+                RoundedRectangle(cornerRadius: dp(4)).fill(home).frame(width: ez)
+                    .scaleEffect(flash == .touchdown("home") ? 1.3 : 1)
+                    .brightness(flash == .touchdown("home") ? 0.5 : 0)
+                RoundedRectangle(cornerRadius: dp(4)).fill(away).frame(width: ez).offset(x: w - ez)
+                    .scaleEffect(flash == .touchdown("away") ? 1.3 : 1)
+                    .brightness(flash == .touchdown("away") ? 0.5 : 0)
+                // 10-yard lines (midfield stronger).
+                ForEach(1..<10, id: \.self) { i in
+                    Rectangle().fill(Color(argb: i == 5 ? 0xFF4A6A52 : 0xFF2C4232)).frame(width: i == 5 ? dp(2) : dp(1))
+                        .offset(x: ez + fw * CGFloat(i) / 10)
+                }
+                // Drive span.
+                if let from = strip.driveFrom?.floatValue, let to = strip.driveTo?.floatValue {
+                    Rectangle().fill(tint.opacity(0.38)).frame(width: max(0, fw * CGFloat(to - from))).offset(x: ez + fw * CGFloat(from))
+                }
+                // First-down line.
+                if let fd = strip.firstDownX?.floatValue {
+                    Rectangle().fill(colors.secondary).frame(width: dp(3)).offset(x: ez + fw * CGFloat(fd) - dp(1.5))
+                        .shadow(color: flash == .firstDown ? colors.secondary : .clear, radius: dp(6))
+                }
+                // Ball.
+                Ellipse().fill(Color.white).overlay(Ellipse().stroke(Color(argb: 0xFF17130A), lineWidth: dp(1)))
+                    .frame(width: dp(15), height: dp(10))
+                    .position(x: ez + fw * CGFloat(strip.ballX), y: geo.size.height / 2)
+            }
+        }
+        .frame(height: dp(32))
+    }
+}
+
+/// Soccer strip: last real event chip, possession bar, corners and cards. All numbers are the feed's.
+private struct SoccerStripCard: View {
+    let strip: TvSoccerStrip
+    let board: TvScoreboard
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        let homeTint = teamColor(board.home?.colorHex, fallback: colors.secondary)
+        let awayTint = teamColor(board.away?.colorHex, fallback: colors.textTertiary)
+        VStack(alignment: .leading, spacing: dp(4)) {
+            HStack {
+                if let chip = strip.chip { eventChip(chip).id("\(chip.label)|\(chip.minute ?? "")|\(chip.text)").transition(.scale.combined(with: .opacity)) }
+                Spacer(minLength: dp(6))
+                if let home = strip.homePossession?.intValue, let away = strip.awayPossession?.intValue {
+                    Text("Possession \(home)% – \(away)%").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                        .contentTransition(.numericText())
+                }
+            }
+            if let home = strip.homePossession?.intValue {
+                GeometryReader { geo in
+                    HStack(spacing: dp(2)) {
+                        Capsule().fill(homeTint).frame(width: max(0, (geo.size.width - dp(2)) * CGFloat(home) / 100))
+                        Capsule().fill(awayTint).frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(height: dp(5))
+            }
+            HStack {
+                if let hc = strip.homeCorners?.intValue, let ac = strip.awayCorners?.intValue {
+                    Text("Corners \(hc) – \(ac)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                }
+                Spacer(minLength: dp(6))
+                Text(cards).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+            }
+        }
+        .padding(.horizontal, dp(12)).padding(.vertical, dp(7))
+        .background(RoundedRectangle(cornerRadius: dp(12)).fill(colors.backgroundCard))
+    }
+
+    /// "Cards ■1 – ■2" in yellow squares; a red count shows only when > 0.
+    private var cards: AttributedString {
+        func part(_ yellow: Int32, _ red: Int32) -> AttributedString {
+            var s = AttributedString("■\(yellow)")
+            s.foregroundColor = Color(argb: 0xFFE8C400)
+            if red > 0 {
+                var r = AttributedString(" ■\(red)")
+                r.foregroundColor = colors.live
+                s.append(r)
+            }
+            return s
+        }
+        var out = AttributedString("Cards ")
+        out.append(part(strip.homeYellow, strip.homeRed))
+        out.append(AttributedString(" – "))
+        out.append(part(strip.awayYellow, strip.awayRed))
+        return out
+    }
+
+    private func eventChip(_ chip: TvEventChip) -> some View {
+        let (bg, fg): (Color, Color) = {
+            switch chip.style {
+            case .goal: return (colors.secondary, colors.onSecondary)
+            case .yellow: return (Color(argb: 0xFFE8C400), Color(argb: 0xFF17130A))
+            case .red: return (colors.live.opacity(0.25), colors.live)
+            case .neutral: return (colors.backgroundElevated, colors.textSecondary)
+            }
+        }()
+        return HStack(spacing: dp(4)) {
+            Text(chip.label).font(NuvioType.labelSmall)
+            if let team = chip.team { Text(team).font(NuvioType.labelSmall) }
+            if let minute = chip.minute { Text(minute).font(NuvioType.labelSmall) }
+        }
+        .foregroundStyle(fg)
+        .padding(.horizontal, dp(8)).padding(.vertical, dp(2))
+        .background(Capsule().fill(bg))
+    }
+}
+
+/// Both lineups on one pitch: home on the left half, away on the right; shirt number in the dot, formations in the header.
+private struct PitchView: View {
+    let pitch: TvPitch
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        let home = teamColor(pitch.homeHex, fallback: colors.secondary)
+        let away = teamColor(pitch.awayHex, fallback: colors.textTertiary)
+        VStack(alignment: .leading, spacing: dp(6)) {
+            HStack {
+                Text([pitch.homeName, pitch.homeFormation].compactMap { $0 }.joined(separator: " · ")).font(NuvioType.labelLargeSemi).foregroundStyle(colors.textPrimary)
+                Spacer(minLength: 0)
+                Text([pitch.awayFormation, pitch.awayName].compactMap { $0 }.joined(separator: " · ")).font(NuvioType.labelLargeSemi).foregroundStyle(colors.textPrimary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: dp(8)).fill(Color(argb: 0xFF14241A))
+                    Rectangle().fill(Color(argb: 0xFF2C4232)).frame(width: dp(1)).offset(x: geo.size.width / 2)
+                    Circle().stroke(Color(argb: 0xFF2C4232), lineWidth: dp(1)).frame(width: dp(60), height: dp(60))
+                        .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                    ForEach(Array(pitch.spots.enumerated()), id: \.offset) { _, spot in
+                        Text(spot.number).font(NuvioType.labelSmall).foregroundStyle(.white)
+                            .frame(width: dp(22), height: dp(22))
+                            .background(Circle().fill(spot.isHome ? home : away))
+                            .overlay(Circle().stroke(Color.white.opacity(0.5), lineWidth: dp(1)))
+                            .position(x: geo.size.width * (0.03 + 0.94 * CGFloat(spot.x)), y: geo.size.height * (0.08 + 0.84 * CGFloat(spot.y)))
+                    }
+                }
+            }
+            .frame(height: dp(250))
         }
     }
 }
