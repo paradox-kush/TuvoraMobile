@@ -77,12 +77,12 @@ internal object GameDetailUiPolicy {
         return s.short?.takeIf { it.isNotBlank() } ?: s.name
     }
 
-    private const val CHART_MAX_POINTS = 60
+    private const val CHART_MAX_POINTS = 120
 
-    /** Momentum line as given by the server (home's per-point non-draw share): 0..1, time-ordered, at most 60 points; null when < 2 points. */
+    /** Momentum line as given by the server (home's per-point non-draw share): 0..1, time-ordered, at most 120 points; null when < 2 points. Prefer [WinChanceSeries] (the shared leader/three-way rule); this is the raw home line. */
     fun chartPoints(history: List<WinPoint>): List<Float>? = chartSeries(history)?.map { it.home.coerceIn(0, 100) / 100f }
 
-    /** The DRAWN series: time-ordered and down-sampled to at most 60 points. Markers are placed on exactly these points. */
+    /** The DRAWN series: time-ordered and down-sampled to at most 120 points (spec 05). Markers are placed on exactly these points. */
     fun chartSeries(history: List<WinPoint>): List<WinPoint>? {
         if (history.size < 2) return null
         val sorted = history.sortedBy { it.t }
