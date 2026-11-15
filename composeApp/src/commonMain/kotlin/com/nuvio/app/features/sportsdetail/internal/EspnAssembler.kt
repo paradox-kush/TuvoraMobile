@@ -12,7 +12,11 @@ import com.nuvio.app.features.sportsdetail.api.LineupPlayer
 import com.nuvio.app.features.sportsdetail.api.LineupSide
 import com.nuvio.app.features.sportsdetail.api.LinescoreBlock
 import com.nuvio.app.features.sportsdetail.api.LiveInfo
+import com.nuvio.app.features.sportsdetail.api.FieldDrive
+import com.nuvio.app.features.sportsdetail.api.FootballFieldBlock
 import com.nuvio.app.features.sportsdetail.api.PlaysBlock
+import com.nuvio.app.features.sportsdetail.api.SoccerEvent
+import com.nuvio.app.features.sportsdetail.api.SoccerStripBlock
 import com.nuvio.app.features.sportsdetail.api.ResultsBlock
 import com.nuvio.app.features.sportsdetail.api.StandingsGroup
 import com.nuvio.app.features.sportsdetail.api.StandingsTableBlock
@@ -116,6 +120,8 @@ internal class EspnAssembler(private val m: SportsMapping) {
             }
             BlockType.TIMELINE -> spec?.let { timeline(it, profile, event, root(it)) }
             BlockType.PLAYS -> spec?.let { plays(it, profile, event, root(it)) }
+            BlockType.FIELD -> spec?.let { field(it, event, root(it)) }
+            BlockType.SOCCER_STRIP -> spec?.let { soccerStrip(it, event, summary) }
             BlockType.STANDINGS_TABLE -> spec?.let { standingsTable(it, event, root(it)) }
             BlockType.WIN_PROBABILITY -> spec?.let { winProbability(it, root(it)) }
             BlockType.SITUATION -> spec?.let { situation(it, root(it)) }
@@ -449,6 +455,119 @@ internal class EspnAssembler(private val m: SportsMapping) {
         }
     }
 
+    // ---- football field strip ------------------------------------------------------------------------------------------------
+
+    /**
+     * Reads the live `situation` (single-event scoreboard). Verified on live CFB captures 2026-11-14/15: the single-event endpoint carries the
+     * same situation as the whole-day scoreboard, including `possession` (a team id), `downDistanceText`, `yardLine` (from the HOME goal line),
+     * `isRedZone` and both timeouts. When `possession` is missing the last play's team stands in, but only while the last play's drive has no
+     * `result` (a finished drive may have changed hands); otherwise possession stays null: no arrow, no guess.
+     */
+    private fun field(spec: BlockSpec, event: JsonElement, root: JsonElement?): GameBlock? {
+        val sit = SportsPath.first(root, spec.path ?: return null) as? JsonObject ?: return null
+        val yard = SportsPath.text(sit, "yardLine")?.toIntOrNull()?.takeIf { it in 0..100 } ?: return null
+        val possessionId = SportsPath.text(sit, "possession")
+        val possession = if (possessionId != null) sideOfTeam(event, possessionId)
+        else if (SportsPath.text(sit, "lastPlay.drive.result").isNullOrBlank()) sideOfTeam(event, SportsPath.text(sit, "lastPlay.team.id")) else null
+        val drive = (spec.str("drive")?.let { SportsPath.first(root, it) } ?: SportsPath.first(sit, "lastPlay.drive"))?.let { d ->
+            FieldDrive(
+                startYardLine = SportsPath.text(d, "start.yardLine")?.toIntOrNull()?.takeIf { it in 0..100 },
+                summary = SportsPath.text(d, "description")?.takeIf { it.isNotBlank() },
+            ).takeIf { it.startYardLine != null || it.summary != null }
+        }
+        return FootballFieldBlock(
+            yardLine = yard,
+            possession = possession,
+            down = SportsPath.text(sit, "down")?.toIntOrNull()?.takeIf { it > 0 },
+            distance = SportsPath.text(sit, "distance")?.toIntOrNull()?.takeIf { it > 0 },
+            line = (SportsPath.text(sit, "downDistanceText") ?: SportsPath.text(sit, "shortDownDistanceText"))?.takeIf { it.isNotBlank() },
+            redZone = SportsPath.text(sit, "isRedZone") == "true",
+            homeTimeouts = SportsPath.text(sit, "homeTimeouts")?.toIntOrNull(),
+            awayTimeouts = SportsPath.text(sit, "awayTimeouts")?.toIntOrNull(),
+            drive = drive,
+            source = ESPN,
+        )
+    }
+
+    // ---- soccer strip ----------------------------------------------------------------------------------------------------------
+
+    private fun soccerStrip(spec: BlockSpec, event: JsonElement, summary: JsonElement?): GameBlock? {
+        val details = SportsPath.read(event, spec.str("details") ?: return null)
+        fun flag(d: JsonElement, key: String) = SportsPath.text(d, key) == "true"
+        fun minuteValue(d: JsonElement) = SportsPath.text(d, "clock.value")?.toDoubleOrNull() ?: 0.0
+        fun who(d: JsonElement) = SportsPath.text(d, "athletesInvolved[0].shortName") ?: SportsPath.text(d, "athletesInvolved[0].displayName")
+        fun surname(n: String) = n.substringAfter(". ", n).trim()
+
+        val goals = details.filter { flag(it, "scoringPlay") }.sortedBy(::minuteValue)
+        fun scorers(side: String) = goals.filter { sideOfTeam(event, SportsPath.text(it, "team.id")) == side }.map { g ->
+            listOfNotNull(who(g)?.let(::surname), SportsPath.text(g, "clock.displayValue")).joinToString(" ") +
+                (if (flag(g, "penaltyKick")) " (pen)" else "") + (if (flag(g, "ownGoal")) " (og)" else "")
+        }
+        fun cards(side: String, key: String) = details.count { flag(it, key) && sideOfTeam(event, SportsPath.text(it, "team.id")) == side }
+
+        // Team statistics: possession (home share) and corners, read per competitor.
+        val (ownersPath, rest) = splitStar(spec.str("stats") ?: "competitions[0].competitors[*].statistics[*]") ?: return null
+        val statBase = rest.removeSuffix("[*]")
+        val owners = SportsPath.read(event, ownersPath)
+        fun stat(side: String, name: String): Double? =
+            owners.firstOrNull { ownerSide(event, it) == side }?.let { SportsPath.text(it, "$statBase[name=$name].displayValue")?.toDoubleOrNull() }
+        val homePoss = stat("home", "possessionPct")?.roundToInt() ?: stat("away", "possessionPct")?.let { 100 - it.roundToInt() }
+
+        val isLive = stateOf(event) == GameState.LIVE
+        val lastEvent = if (!isLive) null else {
+            val fromBoard = details.filter { flag(it, "scoringPlay") || flag(it, "yellowCard") || flag(it, "redCard") }
+                .withIndex().maxWithOrNull(compareBy({ minuteValue(it.value) }, { it.index }))?.value
+            val boardEvent = fromBoard?.let { d ->
+                SoccerEvent(
+                    kind = if (flag(d, "scoringPlay")) "goal" else if (flag(d, "redCard")) "red" else "yellow",
+                    side = sideOfTeam(event, SportsPath.text(d, "team.id")),
+                    minute = SportsPath.text(d, "clock.displayValue"),
+                    text = SportsPath.text(d, "athletesInvolved[0].displayName") ?: SportsPath.text(d, "type.text").orEmpty(),
+                )
+            }
+            val fresherCommentary = spec.str("commentary")?.let { path ->
+                SportsPath.read(summary, path).withIndex().mapNotNull { (i, c) ->
+                    val kind = commentaryKind(SportsPath.text(c, "play.type.text")) ?: return@mapNotNull null
+                    val t = SportsPath.text(c, "time.value")?.toDoubleOrNull() ?: return@mapNotNull null
+                    val text = SportsPath.text(c, "text")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    Triple(t, i, SoccerEvent(kind, sideOfTeamRef(event, SportsPath.text(c, "play.team.displayName")), SportsPath.text(c, "time.displayValue"), text))
+                }.maxWithOrNull(compareBy({ it.first }, { it.second }))
+            }
+            if (fresherCommentary != null && (fromBoard == null || fresherCommentary.first > minuteValue(fromBoard))) fresherCommentary.third else boardEvent
+        }
+
+        val block = SoccerStripBlock(
+            lastEvent = lastEvent,
+            homePossession = homePoss,
+            homeCorners = stat("home", "wonCorners")?.roundToInt(),
+            awayCorners = stat("away", "wonCorners")?.roundToInt(),
+            homeYellow = cards("home", "yellowCard"), awayYellow = cards("away", "yellowCard"),
+            homeRed = cards("home", "redCard"), awayRed = cards("away", "redCard"),
+            homeScorers = scorers("home"), awayScorers = scorers("away"),
+            source = ESPN,
+        )
+        val empty = block.lastEvent == null && block.homePossession == null && block.homeCorners == null && block.awayCorners == null &&
+            block.homeYellow + block.awayYellow + block.homeRed + block.awayRed == 0 && block.homeScorers.isEmpty() && block.awayScorers.isEmpty()
+        return if (empty) null else block
+    }
+
+    /** Commentary types that count as a strip event; everything else (fouls, aerials, delays...) is chatter. */
+    private fun commentaryKind(type: String?): String? {
+        val t = type?.lowercase() ?: return null
+        return when {
+            t == "goal" || ("penalty" in t && "scored" in t) -> "goal"
+            t == "yellow card" -> "yellow"
+            t == "red card" -> "red"
+            t == "substitution" -> "sub"
+            t == "corner awarded" -> "corner"
+            t == "shot on target" -> "shot"
+            t == "offside" -> "offside"
+            t.startsWith("var") -> "var"
+            t.startsWith("penalty") -> "penalty"
+            else -> null
+        }
+    }
+
     // ---- standings table ------------------------------------------------------------------------------------------------------
 
     private fun standingsTable(spec: BlockSpec, event: JsonElement, root: JsonElement?): GameBlock? {
@@ -575,6 +694,7 @@ internal class EspnAssembler(private val m: SportsMapping) {
                     name = name,
                     pos = SportsPath.text(pl, p("pos", "position.abbreviation")).orEmpty(),
                     starter = SportsPath.text(pl, p("starter", "starter")) == "true",
+                    place = SportsPath.text(pl, p("place", "formationPlace"))?.toIntOrNull()?.takeIf { it > 0 },
                 )
             }
             if (players.isEmpty()) null else LineupSide(side, SportsPath.text(r, p("formation", "formation")), players.sortedBy { !it.starter })
