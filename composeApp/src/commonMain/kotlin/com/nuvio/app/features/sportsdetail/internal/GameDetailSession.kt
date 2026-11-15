@@ -10,6 +10,7 @@ import com.nuvio.app.features.sportsdetail.api.LiveInfo
 import com.nuvio.app.features.sportsdetail.api.Header
 import com.nuvio.app.features.sportsdetail.api.Side
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
+import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
 import com.nuvio.app.features.sportsdetail.api.VersusHeader
 import co.touchlab.kermit.Logger
 import kotlinx.coroutines.CancellationException
@@ -37,6 +38,8 @@ internal class GameDetailSession(
     private val report: (Map<String, Any>) -> Unit = SportsDetailTelemetry::send,
     /** One line per tick (cumulative request counts, never URLs) — the evidence that live ticks hit the summary only. */
     private val debug: (String) -> Unit = { line -> runCatching { debugLog.d { line } } },
+    /** Polymarket win chance via our backend; used only when the mapping's `killSwitch.market` is false. */
+    private val market: MarketWinChanceSource? = null,
 ) : GameDetailSource {
 
     private val lock = Mutex()
@@ -54,6 +57,10 @@ internal class GameDetailSession(
     private var tsdbAsOf: Long? = null
     /** ESPN failed recently: skip it until then (the backend may be perfectly healthy). */
     private var espnBackoffUntilMs = 0L
+    private var marketCached: WinProbabilityBlock? = null
+    private var marketAsOf: Long? = null
+    private var marketBackoffUntilMs = 0L
+    private var marketFinalFetched = false
     private var backendCalls = 0
     private var summaryCalls = 0
     private var scoreboardCalls = 0
@@ -196,8 +203,11 @@ internal class GameDetailSession(
         val sources = LinkedHashMap<String, String>()
         sources["header"] = primary
         // Profiles list the screen's blocks, but some (winProbability) only appear as a path spec: those join at the end.
-        val order = profile?.let { p -> p.blocks + p.specs.keys.filter { it !in p.blocks && BlockType.byId(it) != null } }
+        val baseOrder = profile?.let { p -> p.blocks + p.specs.keys.filter { it !in p.blocks && BlockType.byId(it) != null } }
             ?: listOf("stats", "timeline", "highlights")
+        // The market fills win chance for sports/leagues ESPN has none for (NHL, soccer, college…), so it is asked for on any
+        // two-sided game when the mapping switched it on.
+        val order = if (market != null && mapping.marketEnabledFor(ref.leagueId) && ref.awayName != null && "winProbability" !in baseOrder) baseOrder + "winProbability" else baseOrder
         for (id in order) {
             val type = BlockType.byId(id) ?: continue
             // Owner decision: no broadcast block. A mapping or backend that still lists/sends one is simply ignored.
@@ -205,10 +215,14 @@ internal class GameDetailSession(
             for (source in mapping.chainFor(type)) {
                 val block: GameBlock? = when (source) {
                     "tsdb" -> if (tsdbD != null) tsdbBlocks[type].also { note(type.id, "tsdb", if (it == null) "empty" else "loaded") } else null
-                    "espn" -> espnBlock(type, asm, profileKey, espnOn, espnSummaryFailed, ::note, ::outcomeOf)
+                    "espn" -> if (type == BlockType.WIN_PROBABILITY && state != GameState.LIVE) null
+                        else espnBlock(type, asm, profileKey, espnOn, espnSummaryFailed, ::note, ::outcomeOf)?.let { b ->
+                            if (type == BlockType.WIN_PROBABILITY && b is WinProbabilityBlock) withMarketExtras(b, mapping, state, fetchSummary, ::isMissed, ::miss, ::note, durations) else b
+                        }
+                    "market" -> if (type == BlockType.WIN_PROBABILITY) marketBlock(mapping, state, fetchSummary, ::isMissed, ::miss, ::note, durations) else null
                     else -> null
                 }
-                if (block != null) { blocks += block; sources[type.id] = source; break }
+                if (block != null) { blocks += block; sources[type.id] = if (source == "market") "polymarket" else source; break }
             }
         }
 
@@ -230,6 +244,7 @@ internal class GameDetailSession(
                 asOf = buildMap {
                     tsdbAsOf?.let { put("tsdb", it) }
                     espnAsOf?.let { put("espn", it) }
+                    marketAsOf?.let { put("polymarket", it) }
                 },
             ),
         )
@@ -263,7 +278,7 @@ internal class GameDetailSession(
     /** What belongs on screen in each state: live-only blocks stay hidden after the whistle, score blocks before it. */
     private fun visible(type: BlockType, state: GameState): Boolean = when (state) {
         GameState.LIVE -> true
-        GameState.FINAL -> type != BlockType.SITUATION && type != BlockType.WIN_PROBABILITY
+        GameState.FINAL -> type != BlockType.SITUATION   // win chance: only the market's momentum history survives the whistle (see marketBlock)
         GameState.UPCOMING -> type in UPCOMING_BLOCKS
         GameState.POSTPONED -> false
     }
@@ -303,6 +318,72 @@ internal class GameDetailSession(
         return null
     }
 
+    /**
+     * The market's win-chance response, from OUR backend (Polymarket stays server-side). Fetched on the first tick and then only
+     * on the slow (summary) cadence — never a separate poll; a final game fetches once. A miss (404 / disabled) is remembered per
+     * game; a failure backs off. Returns the last good response, or null.
+     */
+    private suspend fun marketData(
+        mapping: SportsMapping,
+        state: GameState,
+        fetchSummary: Boolean,
+        isMissed: (String) -> Boolean,
+        miss: (String) -> Unit,
+        note: (String, String, String) -> Unit,
+        durations: MutableMap<String, Long>,
+    ): WinProbabilityBlock? {
+        val src = market ?: return null
+        val away = ref.awayName ?: return null
+        if (!mapping.marketEnabledFor(ref.leagueId) || state == GameState.POSTPONED) return null
+        val key = "market|winProbability"
+        val due = (marketCached == null || fetchSummary) && !(state == GameState.FINAL && marketFinalFetched)
+        if (due && !isMissed(key) && nowMs() >= marketBackoffUntilMs) {
+            val t0 = nowMs()
+            val r = src.winChance(MarketRequest(ref.gameId, ref.leagueId, ref.homeName, away, Iso.format(ref.startsAtMs)), history = true)
+            durations["polymarket"] = nowMs() - t0
+            when (r) {
+                is SourceResult.Ok -> {
+                    val w = r.value
+                    marketCached = WinProbabilityBlock(w.home, w.source, w.attribution, w.draw, w.away, w.history, w.storylines)
+                    marketAsOf = w.asOfMs ?: nowMs()   // the SERVER's time: a stale served value then shows 'Updated Xm ago'
+                    if (state == GameState.FINAL) marketFinalFetched = true
+                }
+                is SourceResult.Empty, is SourceResult.Disabled -> { miss(key); marketCached = null; note("winProbability", "polymarket", "empty"); return null }
+                is SourceResult.Failed -> { marketBackoffUntilMs = nowMs() + ESPN_BACKOFF_MS; note("winProbability", "polymarket", if (r.timedOut) "timeout" else "failed") }
+            }
+        }
+        return marketCached?.copy(asOfMs = marketAsOf)
+    }
+
+    /** The headline from the market (ESPN has none): a final game shows it only with a real momentum history. */
+    private suspend fun marketBlock(
+        mapping: SportsMapping, state: GameState, fetchSummary: Boolean,
+        isMissed: (String) -> Boolean, miss: (String) -> Unit, note: (String, String, String) -> Unit, durations: MutableMap<String, Long>,
+    ): GameBlock? {
+        val b = marketData(mapping, state, fetchSummary, isMissed, miss, note, durations) ?: return null
+        if (state == GameState.FINAL && b.history.size < 2) return null
+        note("winProbability", "polymarket", "loaded")
+        return b
+    }
+
+    /**
+     * ESPN stays the headline when it has one (no source flip-flop), but the market is ALWAYS asked as well — same slow cadence,
+     * server-cached — for its storylines and, since ESPN has no series, the chart. The extras are credited separately.
+     */
+    private suspend fun withMarketExtras(
+        headline: WinProbabilityBlock, mapping: SportsMapping, state: GameState, fetchSummary: Boolean,
+        isMissed: (String) -> Boolean, miss: (String) -> Unit, note: (String, String, String) -> Unit, durations: MutableMap<String, Long>,
+    ): WinProbabilityBlock {
+        val m = marketData(mapping, state, fetchSummary, isMissed, miss, note, durations) ?: return headline
+        note("winProbability", "polymarket", "loaded")
+        return headline.copy(
+            history = headline.history.ifEmpty { m.history },
+            storylines = m.storylines,
+            extrasAttribution = m.attribution ?: "via Polymarket",
+            asOfMs = m.asOfMs,
+        )
+    }
+
     private fun espnBlock(
         type: BlockType,
         asm: EspnAssembler,
@@ -330,7 +411,7 @@ internal class GameDetailSession(
         val debugLog = Logger.withTag("SportsDetail")
         const val NEGATIVE_TTL_MS = 5L * 60 * 1000
         const val ESPN_BACKOFF_MS = 30_000L
-        val UPCOMING_BLOCKS = setOf(BlockType.FORM, BlockType.LINEUP, BlockType.RESULTS, BlockType.NEXT, BlockType.STANDINGS, BlockType.HIGHLIGHTS)
+        val UPCOMING_BLOCKS = setOf(BlockType.WIN_PROBABILITY, BlockType.FORM, BlockType.LINEUP, BlockType.RESULTS, BlockType.NEXT, BlockType.STANDINGS, BlockType.HIGHLIGHTS)
     }
 }
 

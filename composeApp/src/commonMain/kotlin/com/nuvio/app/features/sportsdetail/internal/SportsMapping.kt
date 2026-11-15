@@ -22,7 +22,13 @@ internal enum class BlockType(val id: String) {
     }
 }
 
-internal data class KillSwitch(val espn: Boolean, val sports: Set<String>, val leagues: Set<String>)
+/**
+ * The Polymarket win-chance switch: `{all, sports, leagues}`. ON only when `all` is an explicit boolean false and the game's
+ * sport/league is not listed. Any other shape (missing, boolean, malformed, `all` absent or not a boolean) parses to null = OFF.
+ */
+internal data class MarketSwitch(val all: Boolean, val sports: Set<String>, val leagues: Set<String>)
+
+internal data class KillSwitch(val espn: Boolean, val sports: Set<String>, val leagues: Set<String>, val market: MarketSwitch? = null)
 
 internal data class EspnSourceConfig(
     val scoreboardTemplate: String,
@@ -92,6 +98,15 @@ internal data class SportsMapping(
     fun eventOverride(tsdbEventId: String?): String? =
         tsdbEventId?.let { eventOverrides[it] ?: eventOverrides["tsdb:$it"] }
 
+    /** Polymarket win chance (served by our backend): ON only for `killSwitch.market = {all:false,…}` and a game not listed by league or sport. */
+    fun marketEnabledFor(leagueTsdbId: String): Boolean {
+        val k = killSwitch.market ?: return false
+        if (k.all || leagueTsdbId in k.leagues) return false
+        val league = leagueByTsdb(leagueTsdbId) ?: return true
+        val off = k.sports.map { it.lowercase() }
+        return league.sport.lowercase() !in off && league.profile.lowercase() !in off
+    }
+
     fun leagueByTsdb(id: String): LeagueEntry? = leagues.firstOrNull { it.tsdb == id }
 
     /** Remote kill switches: ESPN as a whole, per sport (matches the league's sport OR its profile), per league. */
@@ -112,6 +127,7 @@ internal data class SportsMapping(
         BlockType.STATS, BlockType.TIMELINE, BlockType.LINEUP, BlockType.STANDINGS,
         BlockType.FORM, BlockType.RESULTS, BlockType.NEXT -> listOf("tsdb", "espn")
         BlockType.HIGHLIGHTS -> listOf("tsdb")
+        BlockType.WIN_PROBABILITY -> listOf("espn", "market")
         else -> listOf("espn")
     }
 }
@@ -180,6 +196,10 @@ internal object SportsMappingParser {
                 espn = (kill?.get("espn") as? JsonPrimitive)?.booleanOrNull ?: false,
                 sports = kill?.get("sports").strSet(),
                 leagues = kill?.get("leagues").strSet(),
+                market = (kill?.get("market") as? JsonObject)?.let { mk ->
+                    val all = (mk["all"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+                    if (all == null) null else MarketSwitch(all, mk["sports"].strSet(), mk["leagues"].strSet())
+                },
             ),
             espn = EspnSourceConfig(
                 scoreboardTemplate = espnSrc["scoreboard"].s() ?: throw InvalidMapping("no espn.scoreboard"),
@@ -224,7 +244,7 @@ internal object SportsMappingValidator {
     const val SUPPORTED_SCHEMA = 1
     private const val SMOKE_PROFILE = "basketball"
     private const val ESPN_PREFIX = "https://site.api.espn.com/"
-    private val SOURCES = setOf("tsdb", "espn")
+    private val SOURCES = setOf("tsdb", "espn", "market")
 
     private val teamEvent: JsonElement by lazy { Json.parseToJsonElement(SmokeFixture.TEAM_EVENT) }
     private val eventEvent: JsonElement by lazy { Json.parseToJsonElement(SmokeFixture.EVENT_EVENT) }

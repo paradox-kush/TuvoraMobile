@@ -77,7 +77,8 @@ class GameDetailSessionTest {
 
     private fun session(
         tsdb: TsdbSource?, espn: EspnSource?, mapping: SportsMappingStore = SportsMappingStore(MemStorage(), bundledMapping()), r: GameRef = ref,
-    ) = GameDetailSession(r, { mapping.current }, tsdb, espn, nowMs = { now }, report = { telemetry += it })
+        market: com.nuvio.app.features.sportsdetail.internal.MarketWinChanceSource? = null,
+    ) = GameDetailSession(r, { mapping.current }, tsdb, espn, nowMs = { now }, report = { telemetry += it }, market = market)
 
     private class MemStorage : MappingStorage {
         var stored: StoredMapping? = null
@@ -292,7 +293,7 @@ class GameDetailSessionTest {
 
     @Test fun `ESPN kill switch means ESPN is never called`() = runBlocking<Unit> {
         val store = SportsMappingStore(MemStorage(), bundledMapping())
-        store.offer(editedMappingJson("\"espn\": false, \"sports\": []", "\"espn\": true, \"sports\": []"), null)
+        store.offer(editedMappingJson("\"espn\": false", "\"espn\": true"), null)
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
         val d = loaded(session(FakeTsdb(tsdbEvent()), espn, store).tick())
         assertEquals(0, espn.scoreboardCalls + espn.summaryCalls)
@@ -356,7 +357,7 @@ class GameDetailSessionTest {
         val store = SportsMappingStore(MemStorage(), bundledMapping())
         val broken = editedMappingJson("\"path\": \"boxscore.teams[*].statistics[*]\", \"label\": \"label\", \"value\": \"displayValue\",\n        \"allow\": [\"Field Goal %\"",
             "\"path\": \"boxscore.teamz[*].statistics[*]\", \"label\": \"label\", \"value\": \"displayValue\",\n        \"allow\": [\"Field Goal %\"")
-            .replace("\"2026-11-08.2\"", "\"2026-11-07.2\"")
+            .replace("\"${bundledMapping().version}\"", "\"2026-11-07.2\"")
         assertIs<com.nuvio.app.features.sportsdetail.internal.AdoptResult.Adopted>(store.offer(broken, "b"))
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
         val s = session(FakeTsdb(tsdbEvent()), espn, store)
@@ -393,5 +394,166 @@ class GameDetailSessionTest {
         val d = loaded(session(null, espn, r = r).tick())
         assertEquals("Atlanta Hawks", assertIs<TeamsHeader>(d.header).home.name)
         assertEquals("espn", d.sources["header"])
+    }
+
+    // ---- Polymarket win chance (behind killSwitch.market) --------------------------------------------------------
+
+    private class FakeMarket(var answer: SourceResult<com.nuvio.app.features.sportsdetail.internal.MarketWinChance>) : com.nuvio.app.features.sportsdetail.internal.MarketWinChanceSource {
+        val requests = mutableListOf<Pair<com.nuvio.app.features.sportsdetail.internal.MarketRequest, Boolean>>()
+        override suspend fun winChance(req: com.nuvio.app.features.sportsdetail.internal.MarketRequest, history: Boolean): SourceResult<com.nuvio.app.features.sportsdetail.internal.MarketWinChance> {
+            requests += req to history
+            return answer
+        }
+    }
+
+    private fun mc(home: Int = 62, history: List<com.nuvio.app.features.sportsdetail.api.WinPoint> = emptyList(), draw: Int? = null, asOf: Long? = 1L,
+        storylines: List<com.nuvio.app.features.sportsdetail.api.Storyline> = emptyList()) =
+        SourceResult.Ok(com.nuvio.app.features.sportsdetail.internal.MarketWinChance(home, 100 - home - (draw ?: 0), draw, asOf, "polymarket", "via Polymarket", history, storylines))
+
+    private fun marketOn(): SportsMappingStore =
+        SportsMappingStore(MemStorage(), bundledMapping()).also { it.offer(editedMappingJson("\"market\": {\"all\": true", "\"market\": {\"all\": false"), null) }
+
+    private val nhlRef get() = ref.copy(gameId = "tsdb:2701", leagueId = "4380", tsdbEventId = "2701", espnEventId = "401892659", homeName = "Buffalo Sabres", awayName = "Columbus Blue Jackets")
+
+    private fun nhl(from: String, to: String): FakeEspn {
+        val ev = SportsFixtures.espn_nhl_event.replace("\"state\":\"post\"", "\"state\":\"$to\"")
+        val sm = SportsFixtures.espn_nhl_summary.replace("\"state\":\"post\"", "\"state\":\"$to\"")
+        return FakeEspn(scoreboardOf(ev), SourceResult.Ok(parse(sm)))
+    }
+
+    private fun nhlTsdb(state: GameState) = FakeTsdb(tsdbEvent(home = "Buffalo Sabres", away = "Columbus Blue Jackets", state = state))
+
+    private fun winBlock(d: GameDetail) = d.blocks.filterIsInstance<com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock>().singleOrNull()
+
+    @Test fun `ESPN stays the headline but the market is always asked for storylines and the chart`() = runBlocking<Unit> {
+        val liveEvent = SportsFixtures.espn_nba_event.replace("\"state\":\"post\"", "\"state\":\"in\"")
+        val liveSummary = SportsFixtures.espn_nba_summary.replace("\"state\":\"post\"", "\"state\":\"in\"")
+        val hist = listOf(com.nuvio.app.features.sportsdetail.api.WinPoint(1L, 40), com.nuvio.app.features.sportsdetail.api.WinPoint(2L, 44))
+        val stories = listOf(com.nuvio.app.features.sportsdetail.api.Storyline("ot", "Goes to overtime", 8, null))
+        val market = FakeMarket(mc(44, hist, storylines = stories, asOf = 1_000L))
+        val s = session(FakeTsdb(tsdbEvent(state = GameState.LIVE)), FakeEspn(scoreboardOf(liveEvent), SourceResult.Ok(parse(liveSummary))), marketOn(), market = market)
+        val d = loaded(s.tick())
+        val w = assertNotNull(winBlock(d))
+        assertEquals("espn", w.source, "the headline is ESPN's")
+        assertEquals("via ESPN", w.attribution)
+        assertEquals(100, w.homePercent, "ESPN's number, not the market's 44")
+        assertEquals(stories, w.storylines)
+        assertEquals(hist, w.history, "ESPN has no series, so the chart is the market's")
+        assertEquals("via Polymarket", w.extrasAttribution)
+        assertEquals(1_000L, w.asOfMs, "the market block carries its own timestamp")
+        assertEquals("espn", d.sources["winProbability"])
+        assertEquals(1, market.requests.size)
+        s.tick(fetchEvent = true, fetchSummary = false)
+        assertEquals(1, market.requests.size, "the market rides the slow cadence only")
+        s.tick(fetchEvent = true, fetchSummary = true)
+        assertEquals(2, market.requests.size)
+    }
+
+    @Test fun `with the market off ESPN's win probability has no extras and the market is never asked`() = runBlocking<Unit> {
+        val liveEvent = SportsFixtures.espn_nba_event.replace("\"state\":\"post\"", "\"state\":\"in\"")
+        val liveSummary = SportsFixtures.espn_nba_summary.replace("\"state\":\"post\"", "\"state\":\"in\"")
+        val market = FakeMarket(mc())
+        val w = assertNotNull(winBlock(loaded(session(FakeTsdb(tsdbEvent(state = GameState.LIVE)), FakeEspn(scoreboardOf(liveEvent), SourceResult.Ok(parse(liveSummary))), market = market).tick())))
+        assertEquals(emptyList(), w.storylines)
+        assertNull(w.extrasAttribution)
+        assertTrue(market.requests.isEmpty())
+    }
+
+    @Test fun `where ESPN has none the market fills the win chance with its attribution and history`() = runBlocking<Unit> {
+        val hist = listOf(com.nuvio.app.features.sportsdetail.api.WinPoint(1L, 50), com.nuvio.app.features.sportsdetail.api.WinPoint(2L, 62))
+        val market = FakeMarket(mc(62, hist))
+        val d = loaded(session(nhlTsdb(GameState.LIVE), nhl("post", "in"), marketOn(), r = nhlRef, market = market).tick())
+        val w = assertNotNull(winBlock(d))
+        assertEquals(62, w.homePercent)
+        assertEquals("polymarket", w.source)
+        assertEquals("via Polymarket", w.attribution)
+        assertEquals(hist, w.history)
+        assertEquals("polymarket", d.sources["winProbability"])
+        assertEquals(1L, d.asOf["polymarket"], "the server's asOf, so a stale served value shows 'Updated Xm ago'")
+        val (req, wantHistory) = market.requests.single()
+        assertEquals("tsdb:2701", req.gameId); assertEquals("4380", req.leagueId)
+        assertEquals("Buffalo Sabres", req.home); assertEquals("Columbus Blue Jackets", req.away)
+        assertTrue(wantHistory)
+        assertTrue(telemetry.any { it["block"] == "winProbability" && it["source"] == "polymarket" && it["outcome"] == "loaded" && it["sport"] == "hockey" })
+    }
+
+    @Test fun `a soccer game carries the honest three-way split and the server timestamp`() = runBlocking<Unit> {
+        val market = FakeMarket(mc(45, draw = 25, asOf = 1_700_000_000_000L))
+        val d = loaded(session(nhlTsdb(GameState.LIVE), nhl("post", "in"), marketOn(), r = nhlRef, market = market).tick())
+        val w = assertNotNull(winBlock(d))
+        assertEquals(Triple(45, 25, 30), Triple(w.homePercent, w.drawPercent, w.awayPercent))
+        assertEquals(1_700_000_000_000L, d.asOf["polymarket"])
+    }
+
+    @Test fun `storylines ride on the win chance block and vanish with the kill switch`() = runBlocking<Unit> {
+        val stories = listOf(com.nuvio.app.features.sportsdetail.api.Storyline("ot", "Goes to overtime", 23, null))
+        val on = loaded(session(nhlTsdb(GameState.LIVE), nhl("post", "in"), marketOn(), r = nhlRef, market = FakeMarket(mc(storylines = stories))).tick())
+        assertEquals(stories, winBlock(on)?.storylines)
+        val off = loaded(session(nhlTsdb(GameState.LIVE), nhl("post", "in"), r = nhlRef, market = FakeMarket(mc(storylines = stories))).tick())
+        assertNull(winBlock(off), "kill switch on (default): no block, so no storylines either")
+    }
+
+    @Test fun `with the kill switch on - the default - the market is never called`() = runBlocking<Unit> {
+        val market = FakeMarket(mc())
+        val d = loaded(session(nhlTsdb(GameState.LIVE), nhl("post", "in"), r = nhlRef, market = market).tick())
+        assertNull(winBlock(d))
+        assertTrue(market.requests.isEmpty())
+    }
+
+    @Test fun `disabled and 404 hide the block and are remembered - not re-asked every slow tick`() = runBlocking<Unit> {
+        for (answer in listOf<SourceResult<com.nuvio.app.features.sportsdetail.internal.MarketWinChance>>(SourceResult.Disabled, SourceResult.Empty)) {
+            val market = FakeMarket(answer)
+            val s = session(nhlTsdb(GameState.LIVE), nhl("post", "in"), marketOn(), r = nhlRef, market = market)
+            assertNull(winBlock(loaded(s.tick())))
+            repeat(3) { s.tick(fetchEvent = true, fetchSummary = true) }
+            assertEquals(1, market.requests.size, "$answer")
+            assertTrue(telemetry.any { it["block"] == "winProbability" && it["source"] == "polymarket" && it["outcome"] == "empty" })
+        }
+    }
+
+    @Test fun `a failing market backs off about 30 s and never blocks the screen`() = runBlocking<Unit> {
+        val market = FakeMarket(SourceResult.Failed(true))
+        val s = session(nhlTsdb(GameState.LIVE), nhl("post", "in"), marketOn(), r = nhlRef, market = market)
+        assertNull(winBlock(loaded(s.tick())))
+        s.tick(fetchEvent = true, fetchSummary = true)
+        assertEquals(1, market.requests.size)
+        now += 31_000
+        market.answer = mc()
+        assertNotNull(winBlock(loaded(s.tick(fetchEvent = true, fetchSummary = true))))
+        assertEquals(2, market.requests.size)
+    }
+
+    @Test fun `live ticks ride the summary cadence - the market is fetched on the slow tick only`() = runBlocking<Unit> {
+        val market = FakeMarket(mc())
+        val s = session(nhlTsdb(GameState.LIVE), nhl("post", "in"), marketOn(), r = nhlRef, market = market)
+        s.tick()
+        repeat(3) { assertNotNull(winBlock(loaded(s.tick(fetchEvent = true, fetchSummary = false))), "the last good value stays on screen") }
+        assertEquals(1, market.requests.size)
+        market.answer = mc(70)
+        assertEquals(70, winBlock(loaded(s.tick(fetchEvent = true, fetchSummary = true)))!!.homePercent)
+        assertEquals(2, market.requests.size)
+    }
+
+    @Test fun `a final game fetches once and shows only a real momentum history`() = runBlocking<Unit> {
+        val two = listOf(com.nuvio.app.features.sportsdetail.api.WinPoint(1L, 40), com.nuvio.app.features.sportsdetail.api.WinPoint(2L, 100))
+        val withHistory = FakeMarket(mc(100, two))
+        val s = session(nhlTsdb(GameState.FINAL), nhl("post", "post"), marketOn(), r = nhlRef, market = withHistory)
+        assertNotNull(winBlock(loaded(s.tick())))
+        s.tick(fetchEvent = true, fetchSummary = true); s.tick(fetchEvent = true, fetchSummary = true)
+        assertEquals(1, withHistory.requests.size, "final games fetch once")
+        val noHistory = FakeMarket(mc(100))
+        assertNull(winBlock(loaded(session(nhlTsdb(GameState.FINAL), nhl("post", "post"), marketOn(), r = nhlRef, market = noHistory).tick())), "a 100/0 bar after the whistle says nothing")
+    }
+
+    @Test fun `an upcoming game shows the pre-game win chance`() = runBlocking<Unit> {
+        val market = FakeMarket(mc(55))
+        val d = loaded(session(FakeTsdb(tsdbEvent(home = "Buffalo Sabres", away = "Columbus Blue Jackets", state = GameState.UPCOMING, hs = null, aws = null)), nhl("post", "pre"), marketOn(), r = nhlRef, market = market).tick())
+        assertEquals(55, winBlock(d)?.homePercent)
+    }
+
+    @Test fun `a single-entity event has no two sides so the market is not asked`() = runBlocking<Unit> {
+        val market = FakeMarket(mc())
+        loaded(session(nhlTsdb(GameState.LIVE), nhl("post", "in"), marketOn(), r = nhlRef.copy(awayName = null), market = market).tick())
+        assertTrue(market.requests.isEmpty())
     }
 }

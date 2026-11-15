@@ -18,7 +18,7 @@ private val adapterJson = Json { ignoreUnknownKeys = true }
  * (Ok / Empty / Failed) within [deadlineMs] even if the transport ignores cancellation, 404 is Empty, and
  * every other failure — HTTP 5xx, bad JSON, empty body, transport error, timeout — is Failed, never "empty".
  */
-private suspend fun getJson(http: SportsHttp, url: String, deadlineMs: Long, headers: Map<String, String> = emptyMap()): SourceResult<JsonElement> {
+internal suspend fun getJson(http: SportsHttp, url: String, deadlineMs: Long, headers: Map<String, String> = emptyMap()): SourceResult<JsonElement> {
     val reply: HttpReply? = try {
         withTimeoutOrNull(deadlineMs) { http.get(url, headers, deadlineMs) }
     } catch (e: CancellationException) {

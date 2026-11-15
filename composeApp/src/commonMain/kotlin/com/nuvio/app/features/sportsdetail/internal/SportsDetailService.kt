@@ -37,8 +37,9 @@ internal class DefaultSportsDetailService(
     private val sync = RemoteMappingSync(store, http, endpoints.mappingUrl)
     private val espn = EspnHttpSource(http) { store.current }
     private val tsdb = GameDetailBackendSource(http, endpoints.gameDetailUrl)
+    private val market = MarketWinChanceHttpSource(http, endpoints.marketWinChanceUrl)
 
-    override fun open(ref: GameRef): GameDetailSource = GameDetailSession(ref, { store.current }, tsdb, espn)
+    override fun open(ref: GameRef): GameDetailSource = GameDetailSession(ref, { store.current }, tsdb, espn, market = market)
 
     private var lastSyncMs = 0L
 

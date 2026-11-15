@@ -43,10 +43,12 @@ internal interface TsdbSource {
 internal class SportsDetailEndpoints(functionsBase: String) {
     val gameDetailUrl: String = "${functionsBase.trimEnd('/')}/$GAME_DETAIL_FUNCTION"
     val mappingUrl: String = "${functionsBase.trimEnd('/')}/$MAPPING_FUNCTION"
+    val marketWinChanceUrl: String = "${functionsBase.trimEnd('/')}/$MARKET_FUNCTION"
 
     companion object {
         const val GAME_DETAIL_FUNCTION = "game-detail"
         const val MAPPING_FUNCTION = "sports-mapping"
+        const val MARKET_FUNCTION = "market-winchance"
 
         fun fromSupabaseUrl(supabaseUrl: String) = SportsDetailEndpoints(supabaseUrl.trim().trimEnd('/') + "/functions/v1")
     }

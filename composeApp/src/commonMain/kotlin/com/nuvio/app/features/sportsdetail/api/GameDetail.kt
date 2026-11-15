@@ -165,9 +165,34 @@ data class NextItem(@SerialName("when") val whenText: String, val text: String)
 @Serializable @SerialName("next")
 data class NextBlock(val items: List<NextItem>, override val source: String = "") : GameBlock
 
-/** Home win chance, whole percent 0..100. */
+/** A short market storyline ("Goes to overtime" 23%): [yes] is 0..100, [side] "home"|"away" when it is about one team. */
+@Serializable
+data class Storyline(val key: String, val label: String, val yes: Int, val side: String? = null)
+
+/** One point of the win-chance history (epoch ms). [home] is plotted as given (soccer: home's non-draw share h/(h+a)); [draw] is that point's draw percent when the market has one. */
+@Serializable
+data class WinPoint(val t: Long, val home: Int, val draw: Int? = null)
+
+/**
+ * Home win chance, whole percent 0..100. [source] is "espn" or "polymarket"; [attribution] is the caption ("via Polymarket",
+ * "via ESPN"); [drawPercent] for sports with a draw; [history] feeds the momentum line (phone/iPad). No odds, prices or links.
+ */
 @Serializable @SerialName("winProbability")
-data class WinProbabilityBlock(val homePercent: Int, override val source: String = "") : GameBlock
+data class WinProbabilityBlock(
+    val homePercent: Int,
+    override val source: String = "",
+    val attribution: String? = null,
+    val drawPercent: Int? = null,
+    /** The away share when the provider gave it (soccer: home + draw + away); null = derive as the remainder. */
+    val awayPercent: Int? = null,
+    val history: List<WinPoint> = emptyList(),
+    /** Up to three market storylines shown under the win chance (phone/iPad; TV at most one line). */
+    val storylines: List<Storyline> = emptyList(),
+    /** Credit for the chart/storylines when they come from a different source than the headline ("via Polymarket" under an ESPN bar). */
+    val extrasAttribution: String? = null,
+    /** When the MARKET data of this block was valid (server time): the card shows its own staleness, not the screen's. */
+    val asOfMs: Long? = null,
+) : GameBlock
 
 /** Decoded from a block type this build does not know; dropped by [GameDetailCodec]. */
 @Serializable @SerialName("unknown")

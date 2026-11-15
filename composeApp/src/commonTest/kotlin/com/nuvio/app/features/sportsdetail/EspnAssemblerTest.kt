@@ -323,8 +323,8 @@ class EspnAssemblerTest {
         // v1 reads linescores[*].displayValue; ESPN tennis sets carry `value`. This is the "unverified" gap in the contract.
         assertNull(asm.assemble(BlockType.LINESCORE, "tennis", ev(SportsFixtures.espn_atp_event), null))
         val fixed = EspnAssembler(mappingOf(editedMappingJson(
-            "\"tennis\": { \"blocks\": [\"header\", \"situation\", \"watch\", \"linescore\", \"next\"], \"linescore\": { \"from\": \"scoreboard\", \"path\": \"competitions[0].competitors[*].linescores[*].displayValue\" } }",
-            "\"tennis\": { \"blocks\": [\"header\", \"situation\", \"watch\", \"linescore\", \"next\"], \"linescore\": { \"from\": \"scoreboard\", \"path\": \"competitions[0].competitors[*].linescores[*].value\" } }",
+            "\"blocks\": [\"header\", \"situation\", \"watch\", \"linescore\", \"next\"], \"linescore\": { \"from\": \"scoreboard\", \"path\": \"competitions[0].competitors[*].linescores[*].displayValue\"",
+            "\"blocks\": [\"header\", \"situation\", \"watch\", \"linescore\", \"next\"], \"linescore\": { \"from\": \"scoreboard\", \"path\": \"competitions[0].competitors[*].linescores[*].value\"",
         )))
         val b = assertNotNull(fixed.assemble(BlockType.LINESCORE, "tennis", ev(SportsFixtures.espn_atp_event), null)) as LinescoreBlock
         assertEquals(2, b.rows.size)
