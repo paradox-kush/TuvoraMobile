@@ -2634,6 +2634,8 @@
     <string name="compose_livetv_catchup_badge">CATCH-UP</string>
     <string name="compose_livetv_catchup_channel">This channel keeps a replay archive</string>
     <string name="compose_livetv_pinned_channel">Pinned channel</string>
+    <string name="compose_livetv_search_channels">Search channels</string>
+    <string name="compose_livetv_search_no_match">No channels match “%1$s”</string>
     <string name="compose_livetv_catchup_ended">This replay has ended · Back on live</string>
     <string name="compose_livetv_catchup_stalker_limit">This portal is already streaming on another device. Close it there, then press Retry.</string>
     <string name="compose_livetv_catchup_stalker_nothing">The portal has no recording of this programme. Press Retry to ask again.</string>
