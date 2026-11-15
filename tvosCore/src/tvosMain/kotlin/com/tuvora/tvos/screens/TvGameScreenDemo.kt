@@ -38,7 +38,10 @@ import com.nuvio.app.features.radar.RadarTime
 object TvGameScreenDemo {
     const val STEPS = 3
 
-    fun detail(kind: String, step: Int): GameDetail? = when (kind) {
+    /** Inert until a DEBUG build switches it on (Swift: `#if DEBUG ... enabled = true`); a Release build never does, so [detail] is always null there. */
+    var enabled: Boolean = false
+
+    fun detail(kind: String, step: Int): GameDetail? = if (!enabled) null else when (kind) {
         "football" -> football(step.coerceIn(0, STEPS - 1))
         "soccer" -> soccer(step.coerceIn(0, STEPS - 1))
         "hockey" -> hockey(step.coerceIn(0, STEPS - 1))

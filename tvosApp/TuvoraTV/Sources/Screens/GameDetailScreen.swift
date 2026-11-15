@@ -36,10 +36,16 @@ struct GameDetailScreen: View {
     @State private var screen: TvGameScreenModel?
     /// The snapshot before this one, so Kotlin can say what really changed. Nil on open and after a resume: no animation then.
     @State private var previous: GameDetail?
-    @State private var selected = 0
-    @State private var pulseSide: String?
-    /// One-shot emphasis on the field strip (touchdown end zone, loss border, first-down glow); cleared after PULSE_MS.
-    @State private var flash: StripFlash?
+    /// The chip the user picked, by SECTION (not slot): the chip list can gain entries before it (kickoff) without moving the view.
+    @State private var selectedSection: TvSection?
+    /// One entry per side whose score just changed; each clears itself after PULSE_MS (two moments in one update keep both).
+    @State private var pulseSides: Set<String> = []
+    /// One-shot emphasis on the strips (touchdown end zone, loss border, first-down glow, foul pop), each cleared after PULSE_MS.
+    @State private var flashes: Set<StripFlash> = []
+    /// The Plays row / last-play card that just arrived: only that one rises in; the rest of the list never moves.
+    @State private var freshPlayKey: String?
+    /// The ball slides only for a plain field move; a change of possession must not slide it across the field (spec 03 B1).
+    @State private var fieldSlides = false
     @State private var matches: [RadarChannelMatcher.ChannelMatch] = []
     @State private var matching = true
     @State private var opening = false
@@ -138,6 +144,7 @@ struct GameDetailScreen: View {
     /// Three snapshots, nine seconds apart, then stops: exercises each moment once.
     private func runDemo(_ kind: String) async {
         for step in 0..<3 {
+            TvGameScreenDemo.shared.enabled = true          // debug builds only (this whole block is #if DEBUG)
             guard let detail = TvGameScreenDemo.shared.detail(kind: kind, step: Int32(step)) else { return }
             state = TvGameDetailStateLoaded(detail: detail, stale: false)
             apply(detail, stale: false)
@@ -154,18 +161,26 @@ struct GameDetailScreen: View {
 
     // MARK: Snapshot -> screen
 
-    /// One snapshot: Kotlin builds the view-model and the moments; the change animates once (or not at all with reduce motion).
+    /// One snapshot: Kotlin builds the view-model and the moments. The model is assigned WITHOUT a transaction, so nothing moves
+    /// unless a view is tied to its own moment (bars, numbers, the new row, the strips); lists and cards never animate as a whole.
     private func apply(_ detail: GameDetail, stale: Bool) {
         let next = TvGameScreenModel.companion.from(
             detail: detail, nowMs: TvSports.shared.nowMs(), hasPreview: false, previous: previous, stale: stale)
         previous = detail
-        if reduceMotion || next.moments.isEmpty {
-            screen = next
-        } else {
-            withAnimation(NuvioTokens.Motion.medium) { screen = next }
+        let kinds = Set(next.moments.map { $0.kind })
+        fieldSlides = !reduceMotion && kinds.contains(.fieldMove) && !kinds.contains(.possessionChange)
+        freshPlayKey = reduceMotion ? nil : next.moments.first(where: { $0.kind == .newPlay })?.key
+        if let fresh = freshPlayKey {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: GameMotion.pulseNanos)
+                if freshPlayKey == fresh { freshPlayKey = nil }   // a later tab switch must not replay the entrance
+            }
+        }
+        screen = next
+        if !reduceMotion {
             for moment in next.moments {
                 switch moment.kind {
-                case .scoreChange: pulse(moment.side)
+                case .scoreChange: if let side = moment.side { pulse(side) }
                 case .touchdown: flashOnce(.touchdown(moment.side ?? "home"))
                 case .foulCount: flashOnce(.foul(moment.side ?? "home"))
                 case .fieldMove where moment.loss: flashOnce(.loss)
@@ -176,26 +191,28 @@ struct GameDetailScreen: View {
         }
         // Only a score change is announced, at most once per update.
         if let line = next.announcement { UIAccessibility.post(notification: .announcement, argument: line) }
-        // The section that was showing may have disappeared: keep a valid selection, and a focus target.
-        if selected >= next.chips.count { selected = 0 }
-        if case .chip(let index) = focus, index >= next.chips.count { focus = .play }
+        // The chip list may have gained or lost entries: keep the picked SECTION (or fall back to the first chip), and keep the
+        // focus on that section's chip rather than on whatever now sits in the old slot.
+        let index = Int(TvSectionSelection.shared.indexOf(chips: next.chips, selected: selectedSection))
+        selectedSection = next.chips.isEmpty ? nil : next.chips[index].section
+        if case .chip = focus { focus = next.chips.isEmpty ? .play : .chip(index) }
     }
 
-    /// The score pops once (scale + accent) and settles: one shot, never repeating.
-    private func pulse(_ side: String?) {
-        withAnimation(NuvioTokens.Motion.medium) { pulseSide = side }
+    /// The score pops once (scale + accent) and settles: one shot, never repeating. Per side: two goals in one update both pulse.
+    private func pulse(_ side: String) {
+        withAnimation(GameMotion.pulse) { _ = pulseSides.insert(side) }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            withAnimation(NuvioTokens.Motion.medium) { pulseSide = nil }
+            try? await Task.sleep(nanoseconds: GameMotion.pulseNanos)
+            withAnimation(GameMotion.pulse) { _ = pulseSides.remove(side) }
         }
     }
 
-    /// A strip flash lasts one pulse and is cleared: one shot, never repeating.
+    /// A strip flash lasts one pulse and is cleared: one shot, never repeating. Per kind: several can be on at once.
     private func flashOnce(_ value: StripFlash) {
-        withAnimation(NuvioTokens.Motion.medium) { flash = value }
+        withAnimation(GameMotion.pulse) { _ = flashes.insert(value) }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            withAnimation(NuvioTokens.Motion.medium) { flash = nil }
+            try? await Task.sleep(nanoseconds: GameMotion.pulseNanos)
+            withAnimation(GameMotion.pulse) { _ = flashes.remove(value) }
         }
     }
 
@@ -232,25 +249,26 @@ struct GameDetailScreen: View {
 
     private func leftColumn(_ screen: TvGameScreenModel) -> some View {
         VStack(alignment: .leading, spacing: dp(7)) {
-            ScoreboardCard(board: screen.scoreboard, pulseSide: pulseSide, upcomingLabel: upcomingLabel, field: screen.field, possession: screen.basketball?.possession)
-            if let field = screen.field { FieldStripCard(strip: field, flash: flash) }
-            if let soccer = screen.soccer { SoccerStripCard(strip: soccer, board: screen.scoreboard) }
-            if let basketball = screen.basketball { BasketballStripCard(strip: basketball, board: screen.scoreboard, flash: flash) }
-            if let hockey = screen.hockey { HockeyStripCard(strip: hockey, board: screen.scoreboard) }
-            if screen.leftFit.showLastPlay, let play = screen.lastPlay { LastPlayCard(play: play) }
-            if let win = screen.winCard { WinChanceCard(card: win, showChart: screen.leftFit.showChart) }
+            ScoreboardCard(board: screen.scoreboard, pulseSides: pulseSides, reduceMotion: reduceMotion, upcomingLabel: upcomingLabel, field: screen.field, possession: screen.basketball?.possession)
+            if let field = screen.field { FieldStripCard(strip: field, flashes: flashes, slides: fieldSlides) }
+            if let soccer = screen.soccer { SoccerStripCard(strip: soccer, board: screen.scoreboard, animated: !reduceMotion) }
+            if let basketball = screen.basketball { BasketballStripCard(strip: basketball, board: screen.scoreboard, flashes: flashes, animated: !reduceMotion) }
+            if let hockey = screen.hockey { HockeyStripCard(strip: hockey, board: screen.scoreboard, animated: !reduceMotion) }
+            if screen.leftFit.showLastPlay, let play = screen.lastPlay { LastPlayCard(play: play, fresh: freshPlayKey == play.key) }
+            if let win = screen.winCard { WinChanceCard(card: win, showChart: screen.leftFit.showChart, animated: !reduceMotion) }
             Spacer(minLength: 0)
             watchRow()
                 .focusSection()
                 // The chips sit top-right, out of the focus engine's geometric reach from the bottom-left Play row:
                 // Up goes to the selected chip explicitly (Right also reaches them through the right section).
                 .onMoveCommand { direction in
-                    if direction == .up, !(screenChips.isEmpty) { focus = .chip(min(selected, screenChips.count - 1)) }
+                    if direction == .up, !(screenChips.isEmpty) { focus = .chip(selectedIndex) }
                 }
         }
     }
 
     private var screenChips: [TvChip] { screen?.chips ?? [] }
+    private var selectedIndex: Int { Int(TvSectionSelection.shared.indexOf(chips: screenChips, selected: selectedSection)) }
 
     private var upcomingLabel: String { SportsWhen.label(fixture, now: TvSports.shared.nowMs()) }
 
@@ -291,9 +309,9 @@ struct GameDetailScreen: View {
             if !screen.chips.isEmpty {
                 chipRow(screen.chips)
                 panel(screen)
-                    .id(selected)
+                    .id(selectedSection)
                     .transition(.opacity)
-                    .animation(reduceMotion ? nil : NuvioTokens.Motion.fast, value: selected)
+                    .animation(reduceMotion ? nil : GameMotion.quick, value: selectedSection)
             } else {
                 fallbackCards(screen)
             }
@@ -307,12 +325,12 @@ struct GameDetailScreen: View {
     private func chipRow(_ chips: [TvChip]) -> some View {
         HStack(spacing: dp(6)) {
             ForEach(Array(chips.enumerated()), id: \.offset) { index, chip in
-                SectionChip(title: chip.title, selected: selected == index, target: .chip(index), focus: $focus)
+                SectionChip(title: chip.title, selected: selectedIndex == index, target: .chip(index), focus: $focus)
             }
         }
         // Focusing a chip selects it (no OK press); OK does nothing.
         .onChange(of: focus) { _, now in
-            if case .chip(let index) = now, index != selected { selected = index }
+            if case .chip(let index) = now, chips.indices.contains(index), chips[index].section != selectedSection { selectedSection = chips[index].section }
         }
         // Down from any chip goes back to Play (nothing is below the chips in the right column).
         .onMoveCommand { direction in if direction == .down { focus = .play } }
@@ -320,11 +338,10 @@ struct GameDetailScreen: View {
 
     @ViewBuilder
     private func panel(_ screen: TvGameScreenModel) -> some View {
-        let chips = screen.chips
-        let section = chips.indices.contains(selected) ? chips[selected].section : chips[0].section
+        let section = TvSectionSelection.shared.resolve(chips: screen.chips, selected: selectedSection) ?? .plays
         switch section {
-        case .plays: PlaysPanel(rows: screen.panels.plays)
-        case .stats: StatsPanel(rows: screen.panels.stats, byPeriod: screen.panels.byPeriod, board: screen.scoreboard, pulseSide: nil)
+        case .plays: PlaysPanel(rows: screen.panels.plays, freshKey: freshPlayKey)
+        case .stats: StatsPanel(rows: screen.panels.stats, byPeriod: screen.panels.byPeriod, board: screen.scoreboard, animated: !reduceMotion)
         case .leaders: LeadersPanel(rows: screen.panels.leaders, form: screen.panels.form)
         case .lineups:
             if let pitch = screen.pitch { PitchView(pitch: pitch) } else { LineupsPanel(sides: screen.panels.lineups) }
@@ -353,7 +370,8 @@ private func teamColor(_ hex: String?, fallback: Color) -> Color {
 
 private struct ScoreboardCard: View {
     let board: TvScoreboard
-    let pulseSide: String?
+    let pulseSides: Set<String>
+    var reduceMotion = false
     let upcomingLabel: String
     var field: TvFieldStrip? = nil
     /// Basketball: a small dot beside the name of the team with the ball ("home" | "away").
@@ -385,7 +403,7 @@ private struct ScoreboardCard: View {
 
     private func sideView(_ s: TvScoreSide, side: String, trailing: Bool) -> some View {
         let tint = teamColor(s.colorHex, fallback: trailing ? colors.textTertiary : colors.secondary)
-        let pulsing = pulseSide == side
+        let pulsing = pulseSides.contains(side)
         return HStack(spacing: dp(8)) {
             if trailing { scoreText(s, pulsing: pulsing) }
             VStack(alignment: trailing ? .trailing : .leading, spacing: dp(2)) {
@@ -440,6 +458,7 @@ private struct ScoreboardCard: View {
                 .font(NuvioType.inter(34, .bold))
                 .foregroundStyle(pulsing ? colors.secondary : colors.textPrimary)
                 .contentTransition(.numericText())
+                .animation(reduceMotion ? nil : GameMotion.count, value: score)
                 .scaleEffect(pulsing ? 1.25 : 1)
                 .frame(minWidth: dp(34))
         }
@@ -466,6 +485,7 @@ private struct ScoreboardCard: View {
 /// The newest play on one line. A new play fades and rises in once (the id changes with the play).
 private struct LastPlayCard: View {
     let play: TvLastPlay
+    var fresh = false
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -479,7 +499,7 @@ private struct LastPlayCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: dp(12)).fill(colors.backgroundCard))
         .id(play.key)
-        .transition(.opacity.combined(with: .offset(y: dp(8))))
+        .modifier(FreshEntrance(fresh: fresh))
     }
 }
 
@@ -488,6 +508,7 @@ private struct LastPlayCard: View {
 private struct WinChanceCard: View {
     let card: TvWinCard
     var showChart: Bool = true
+    var animated = true
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -511,9 +532,10 @@ private struct WinChanceCard: View {
                 pct(card.awayName, away, leader: away > home, tint: awayTint, trailing: true)
             }
             bar(home: home, draw: draw ?? 0, away: away, homeTint: homeTint, awayTint: awayTint)
+                .animation(animated ? GameMotion.move : nil, value: home)
             if showChart, card.chart.count >= 2 {
                 WinChart(points: card.chart.map { $0.floatValue }, tint: home >= away ? homeTint : awayTint,
-                         markers: card.markers, dividers: card.dividers, homeTint: homeTint, awayTint: awayTint)
+                         markers: card.markers, dividers: card.dividers, homeTint: homeTint, awayTint: awayTint, animated: animated)
             }
             if let line = chance.line {
                 Text(verbatim: line).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).lineLimit(1)
@@ -529,9 +551,9 @@ private struct WinChanceCard: View {
 
     private func pct(_ name: String, _ value: Int, leader: Bool, tint: Color, trailing: Bool = false) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: dp(4)) {
-            if trailing { Text("\(value)%").font(leader ? NuvioType.inter(20, .bold) : NuvioType.labelLargeSemi).foregroundStyle(leader ? tint : colors.textSecondary).contentTransition(.numericText()) }
+            if trailing { Text("\(value)%").font(leader ? NuvioType.inter(20, .bold) : NuvioType.labelLargeSemi).foregroundStyle(leader ? tint : colors.textSecondary).contentTransition(.numericText()).animation(animated ? GameMotion.count : nil, value: value) }
             Text(name).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
-            if !trailing { Text("\(value)%").font(leader ? NuvioType.inter(20, .bold) : NuvioType.labelLargeSemi).foregroundStyle(leader ? tint : colors.textSecondary).contentTransition(.numericText()) }
+            if !trailing { Text("\(value)%").font(leader ? NuvioType.inter(20, .bold) : NuvioType.labelLargeSemi).foregroundStyle(leader ? tint : colors.textSecondary).contentTransition(.numericText()).animation(animated ? GameMotion.count : nil, value: value) }
         }
     }
 
@@ -559,6 +581,7 @@ private struct WinChart: View {
     var dividers: [TvChartDivider] = []
     var homeTint: Color = .white
     var awayTint: Color = .white
+    var animated = true
     @Environment(\.nuvio) private var colors
 
     private let inset = dp(10)
@@ -576,6 +599,7 @@ private struct WinChart: View {
                     ChartLine(points: points, shown: Double(points.count))
                         .stroke(tint, style: StrokeStyle(lineWidth: dp(2.5), lineCap: .round, lineJoin: .round))
                         .padding(.vertical, inset)
+                        .animation(animated ? GameMotion.count : nil, value: points.count)
                     ForEach(markers, id: \.key) { m in
                         let color = teamColor(m.colorHex, fallback: tint)
                         let y = inset + (h - inset * 2) * (1 - CGFloat(m.y))
@@ -589,6 +613,7 @@ private struct WinChart: View {
                         .transition(.scale.combined(with: .opacity))
                     }
                 }
+                .animation(animated ? GameMotion.quick : nil, value: markers.map(\.key))
             }
             .frame(height: dp(48))
             if !dividers.isEmpty {
@@ -659,6 +684,7 @@ private struct SectionChip: View {
 
 private struct PlaysPanel: View {
     let rows: [TvPlayRow]
+    var freshKey: String?
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -680,7 +706,7 @@ private struct PlaysPanel: View {
                     if let score = row.score { Text(score).font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary) }
                 }
                 .padding(.vertical, dp(3))
-                .transition(.opacity.combined(with: .offset(y: dp(8))))
+                .modifier(FreshEntrance(fresh: row.key == freshKey))
             }
         }
     }
@@ -690,7 +716,7 @@ private struct StatsPanel: View {
     let rows: [TvStatRowView]
     let byPeriod: TvByPeriod?
     let board: TvScoreboard
-    let pulseSide: String?
+    var animated = true
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -714,6 +740,7 @@ private struct StatsPanel: View {
                             }
                         }
                         .frame(height: dp(3))
+                        .animation(animated ? GameMotion.move : nil, value: fraction)
                     }
                 }
             }
@@ -724,7 +751,7 @@ private struct StatsPanel: View {
     private func pill(_ value: String, leading: Bool, tint: Color) -> some View {
         Text(value).font(NuvioType.labelLargeSemi).foregroundStyle(leading ? Color.white : colors.textPrimary)
             .padding(.horizontal, dp(8))
-            .background(Capsule().fill(leading ? tint : Color.clear))
+            .background(Capsule().fill(leading ? tint : Color.clear).animation(animated ? GameMotion.quick : nil, value: leading))
             .frame(minWidth: dp(40))
     }
 }
@@ -885,7 +912,31 @@ private struct GameActionButton: View {
 // MARK: - Sport strips (Phase B)
 
 /// One-shot emphasis moments on the field strip.
-private enum StripFlash: Equatable {
+/// The spec's motion tokens (01-shared-contract §5, material3 durations) as Animations. Reduce Motion never reaches these (callers pass nil).
+private enum GameMotion {
+    static let quickMs = 200.0, moveMs = 500.0, countMs = 600.0, pulseMs = 700.0
+    static var quick: Animation { .timingCurve(0.2, 0, 0, 1, duration: quickMs / 1000) }
+    static var move: Animation { .timingCurve(0.2, 0, 0, 1, duration: moveMs / 1000) }
+    static var count: Animation { .timingCurve(0.2, 0, 0, 1, duration: countMs / 1000) }
+    static var pulse: Animation { .timingCurve(0.2, 0, 0, 1, duration: pulseMs / 1000) }
+    /// emphasizedDecelerate: things entering (the new play, a pop-in chip).
+    static var enter: Animation { .timingCurve(0.05, 0.7, 0.1, 1, duration: quickMs / 1000) }
+    static var pulseNanos: UInt64 { UInt64(pulseMs * 1_000_000) }
+}
+
+/// A one-shot entrance (fade + 8 dp rise) for a view that has just appeared because it is new. Others never move.
+private struct FreshEntrance: ViewModifier {
+    let fresh: Bool
+    @State private var shown = false
+    func body(content: Content) -> some View {
+        content
+            .opacity(fresh && !shown ? 0 : 1)
+            .offset(y: fresh && !shown ? dp(8) : 0)
+            .onAppear { if fresh { withAnimation(GameMotion.enter) { shown = true } } }
+    }
+}
+
+private enum StripFlash: Hashable {
     case loss, firstDown
     case touchdown(String)
     case foul(String)
@@ -897,7 +948,9 @@ private func hexColor(_ hex: String?, _ fallback: Color) -> Color { teamColor(he
 /// from Kotlin as 0..1 (0 = home goal line); this only maps them to pixels. Changes slide once (the screen assignment is animated).
 private struct FieldStripCard: View {
     let strip: TvFieldStrip
-    let flash: StripFlash?
+    let flashes: Set<StripFlash>
+    /// true only for a plain field move (not a change of possession): the ball, first-down line and drive span then slide.
+    var slides = false
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -922,7 +975,7 @@ private struct FieldStripCard: View {
         .background(RoundedRectangle(cornerRadius: dp(12)).fill(colors.backgroundCard))
         .overlay(
             RoundedRectangle(cornerRadius: dp(12))
-                .stroke(flash == .loss ? colors.live : (border ?? Color.clear), lineWidth: dp(2))
+                .stroke(flashes.contains(.loss) ? colors.live : (border ?? Color.clear), lineWidth: dp(2))
         )
     }
 
@@ -936,11 +989,11 @@ private struct FieldStripCard: View {
                 Color(argb: 0xFF14241A).clipShape(RoundedRectangle(cornerRadius: dp(3)))
                 // End zones.
                 RoundedRectangle(cornerRadius: dp(4)).fill(home).frame(width: ez)
-                    .scaleEffect(flash == .touchdown("home") ? 1.3 : 1)
-                    .brightness(flash == .touchdown("home") ? 0.5 : 0)
+                    .scaleEffect(flashes.contains(.touchdown("home")) ? 1.3 : 1)
+                    .brightness(flashes.contains(.touchdown("home")) ? 0.5 : 0)
                 RoundedRectangle(cornerRadius: dp(4)).fill(away).frame(width: ez).offset(x: w - ez)
-                    .scaleEffect(flash == .touchdown("away") ? 1.3 : 1)
-                    .brightness(flash == .touchdown("away") ? 0.5 : 0)
+                    .scaleEffect(flashes.contains(.touchdown("away")) ? 1.3 : 1)
+                    .brightness(flashes.contains(.touchdown("away")) ? 0.5 : 0)
                 // 10-yard lines (midfield stronger).
                 ForEach(1..<10, id: \.self) { i in
                     Rectangle().fill(Color(argb: i == 5 ? 0xFF4A6A52 : 0xFF2C4232)).frame(width: i == 5 ? dp(2) : dp(1))
@@ -949,16 +1002,19 @@ private struct FieldStripCard: View {
                 // Drive span.
                 if let from = strip.driveFrom?.floatValue, let to = strip.driveTo?.floatValue {
                     Rectangle().fill(tint.opacity(0.38)).frame(width: max(0, fw * CGFloat(to - from))).offset(x: ez + fw * CGFloat(from))
+                        .animation(slides ? GameMotion.move : nil, value: to)
                 }
                 // First-down line.
                 if let fd = strip.firstDownX?.floatValue {
                     Rectangle().fill(colors.secondary).frame(width: dp(3)).offset(x: ez + fw * CGFloat(fd) - dp(1.5))
-                        .shadow(color: flash == .firstDown ? colors.secondary : .clear, radius: dp(6))
+                        .shadow(color: flashes.contains(.firstDown) ? colors.secondary : .clear, radius: dp(6))
+                        .animation(slides ? GameMotion.move : nil, value: fd)
                 }
                 // Ball.
                 Ellipse().fill(Color.white).overlay(Ellipse().stroke(Color(argb: 0xFF17130A), lineWidth: dp(1)))
                     .frame(width: dp(15), height: dp(10))
                     .position(x: ez + fw * CGFloat(strip.ballX), y: geo.size.height / 2)
+                    .animation(slides ? GameMotion.move : nil, value: strip.ballX)
             }
         }
         .frame(height: dp(32))
@@ -969,6 +1025,7 @@ private struct FieldStripCard: View {
 private struct SoccerStripCard: View {
     let strip: TvSoccerStrip
     let board: TvScoreboard
+    var animated = true
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -976,11 +1033,15 @@ private struct SoccerStripCard: View {
         let awayTint = teamColor(board.away?.colorHex, fallback: colors.textTertiary)
         VStack(alignment: .leading, spacing: dp(4)) {
             HStack {
-                if let chip = strip.chip { eventChip(chip).id("\(chip.label)|\(chip.minute ?? "")|\(chip.text)").transition(.scale.combined(with: .opacity)) }
+                ZStack {
+                    if let chip = strip.chip { eventChip(chip).id("\(chip.label)|\(chip.minute ?? "")|\(chip.text)").transition(.scale.combined(with: .opacity)) }
+                }
+                .animation(animated ? GameMotion.enter : nil, value: strip.chip?.text)
                 Spacer(minLength: dp(6))
                 if let home = strip.homePossession?.intValue, let away = strip.awayPossession?.intValue {
                     Text("Possession \(home)% – \(away)%").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
                         .contentTransition(.numericText())
+                        .animation(animated ? GameMotion.count : nil, value: home)
                 }
             }
             if let home = strip.homePossession?.intValue {
@@ -991,10 +1052,12 @@ private struct SoccerStripCard: View {
                     }
                 }
                 .frame(height: dp(5))
+                .animation(animated ? GameMotion.move : nil, value: home)
             }
             HStack {
                 if let hc = strip.homeCorners?.intValue, let ac = strip.awayCorners?.intValue {
                     Text("Corners \(hc) – \(ac)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                        .contentTransition(.numericText()).animation(animated ? GameMotion.count : nil, value: hc + ac)
                 }
                 Spacer(minLength: dp(6))
                 Text(cards).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
@@ -1086,6 +1149,7 @@ private struct CountDots: View {
     var showNumber = false
     var popLast = false
     @Environment(\.nuvio) private var colors
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: dp(3)) {
@@ -1093,6 +1157,7 @@ private struct CountDots: View {
                 Circle().fill(i < filled ? colors.secondary : colors.border)
                     .frame(width: dp(8), height: dp(8))
                     .scaleEffect(popLast && i == filled - 1 ? 1.5 : 1)
+                    .animation(reduceMotion ? nil : GameMotion.quick, value: i < filled)
             }
             if showNumber && filled > total {
                 Text("\(filled)").font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary)
@@ -1105,7 +1170,8 @@ private struct CountDots: View {
 private struct BasketballStripCard: View {
     let strip: TvBasketballStrip
     let board: TvScoreboard
-    let flash: StripFlash?
+    let flashes: Set<StripFlash>
+    var animated = true
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -1116,11 +1182,12 @@ private struct BasketballStripCard: View {
                     Spacer(minLength: dp(6))
                     if let bonus = strip.bonusLabel { chip(bonus, filled: false).id(bonus).transition(.scale.combined(with: .opacity)) }
                 }
+                .animation(animated ? GameMotion.enter : nil, value: [strip.runLabel ?? "", strip.bonusLabel ?? ""])
             }
             if strip.homeFouls != nil || strip.awayFouls != nil {
                 pair("Team fouls") { side in
                     let n = (side == "home" ? strip.homeFouls : strip.awayFouls)?.intValue
-                    return n.map { AnyView(CountDots(filled: $0, total: 5, showNumber: true, popLast: flash == .foul(side))) }
+                    return n.map { AnyView(CountDots(filled: $0, total: 5, showNumber: true, popLast: flashes.contains(.foul(side)))) }
                 }
             }
             if strip.homeTimeouts != nil || strip.awayTimeouts != nil {
@@ -1159,6 +1226,7 @@ private struct BasketballStripCard: View {
 private struct HockeyStripCard: View {
     let strip: TvHockeyStrip
     let board: TvScoreboard
+    var animated = true
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -1169,12 +1237,15 @@ private struct HockeyStripCard: View {
                     .padding(.horizontal, dp(8)).padding(.vertical, dp(2))
                     .background(Capsule().fill(strip.onPowerPlay ? colors.secondary : colors.backgroundElevated))
                     .id(strip.chipLabel).transition(.scale.combined(with: .opacity))
+                    .animation(animated ? GameMotion.enter : nil, value: strip.chipLabel)
                 if let left = strip.timeLeftText {
                     Text(left).font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary).contentTransition(.numericText())
+                        .animation(animated ? GameMotion.count : nil, value: left)
                 }
                 Spacer(minLength: dp(6))
                 if let hs = strip.homeShots?.intValue, let a = strip.awayShots?.intValue {
                     Text("Shots \(hs) – \(a)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary).contentTransition(.numericText())
+                        .animation(animated ? GameMotion.count : nil, value: hs + a)
                 }
             }
             if let fraction = strip.fractionLeft?.floatValue {
@@ -1185,12 +1256,17 @@ private struct HockeyStripCard: View {
                     }
                 }
                 .frame(height: dp(5))
+                .animation(animated ? GameMotion.move : nil, value: fraction)
             }
             HStack {
-                if let pp = strip.powerPlayText { Text("Power plays \(pp)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary) }
+                if let pp = strip.powerPlayText {
+                    Text("Power plays \(pp)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                        .contentTransition(.numericText()).animation(animated ? GameMotion.count : nil, value: pp)
+                }
                 Spacer(minLength: dp(6))
                 if let f = strip.homeFaceoffs?.intValue, let g = strip.awayFaceoffs?.intValue {
                     Text("Faceoffs \(f) – \(g)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                        .contentTransition(.numericText()).animation(animated ? GameMotion.count : nil, value: f + g)
                 }
             }
         }

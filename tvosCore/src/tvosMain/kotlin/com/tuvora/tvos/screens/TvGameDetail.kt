@@ -3,7 +3,6 @@ package com.tuvora.tvos.screens
 import com.nuvio.app.features.radar.RadarFixture
 import com.nuvio.app.features.radar.RadarTime
 import com.nuvio.app.features.sportsdetail.api.DetailLoad
-import com.nuvio.app.features.sportsdetail.api.GameDetailRefreshPolicy
 import com.nuvio.app.features.sportsdetail.api.GameDetailSource
 import com.nuvio.app.features.sportsdetail.api.GameRef
 import com.nuvio.app.features.sportsdetail.api.GameState
@@ -103,12 +102,9 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
             if (first || current !is TvGameDetailState.Loaded) {
                 fetchEvent = true; fetchSummary = true
             } else {
-                val plan = GameDetailRefreshPolicy.plan(
-                    state = current.detail.state, startsAtMs = ref.startsAtMs, nowMs = now,
-                    lastEventFetchMs = lastEvent, lastSummaryFetchMs = lastSummary,
-                    consecutiveFailures = failures, config = service.refreshConfig(),
-                    // Soccer lineups are published before kickoff: the pre-kickoff window refreshes the summary on its own cadence.
-                    wantsUpcomingSummary = GameDetailRefreshPolicy.wantsUpcomingSummary(current.detail.sport),
+                val plan = TvGameRefresh.plan(
+                    sport = current.detail.sport, state = current.detail.state, startsAtMs = ref.startsAtMs, nowMs = now,
+                    lastEventMs = lastEvent, lastSummaryMs = lastSummary, failures = failures, config = service.refreshConfig(),
                 )
                 // Idle (final / long-dead live) ends the loop. Far-future upcoming is NOT idle: it carries
                 // nextCheckInMs with no fetch, and the delay below wakes the screen when the lead window opens.

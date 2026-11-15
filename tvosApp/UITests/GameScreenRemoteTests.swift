@@ -45,11 +45,14 @@ final class GameScreenRemoteTests: XCTestCase {
         press(.select, settle: 3)
     }
 
+    /// The Play slot reads "Play" with a matched channel, "Find channels" / "Finding channels…" without one (the sim's channel set varies).
+    private func isPlayRow(_ label: String) -> Bool { label.hasPrefix("Play") || label.hasPrefix("Find") }
+
     func testPlayFirstChipsSelectOnFocusDownReturnsAndMenuLeaves() {
         openDemoGame()
         XCTAssertTrue(has("Market-implied", timeout: 20), "game screen did not open on the demo data")
         // Play is the first action.
-        XCTAssertTrue(waitFocus(10) { $0.hasPrefix("Play") }, "Play is not focused on open: \(focusedLabel())")
+        XCTAssertTrue(waitFocus(10) { self.isPlayRow($0) }, "Play is not focused on open: \(focusedLabel())")
         shot("1-open")
         // Up reaches the selected chip, Right walks the chips and each shows its panel without OK.
         press(.up)
@@ -60,11 +63,10 @@ final class GameScreenRemoteTests: XCTestCase {
         shot("2-stats")
         // Down returns to Play.
         press(.down)
-        XCTAssertTrue(focusedLabel().hasPrefix("Play"), "Down from a chip must return to Play: \(focusedLabel())")
+        XCTAssertTrue(isPlayRow(focusedLabel()), "Down from a chip must return to Play: \(focusedLabel())")
         // Right from the Play row: More channels, then the chips.
         press(.right)
-        XCTAssertEqual(focusedLabel(), "More channels")
-        press(.right)
+        if focusedLabel() == "More channels" { press(.right) }   // only present when several channels matched
         XCTAssertTrue(["Plays", "Stats", "Leaders", "Standings"].contains(focusedLabel()), "Right from More channels must reach a chip: \(focusedLabel())")
         // Menu leaves the screen.
         press(.menu, settle: 2)
@@ -77,9 +79,9 @@ final class GameScreenRemoteTests: XCTestCase {
     func testDemoSnapshotsAnimateAndFocusSurvivesRefresh() {
         openDemoGame()
         XCTAssertTrue(has("Market-implied", timeout: 20), "game screen did not open on the demo data")
-        XCTAssertTrue(waitFocus(10) { $0.hasPrefix("Play") })
+        XCTAssertTrue(waitFocus(10) { self.isPlayRow($0) })
         Thread.sleep(forTimeInterval: 26)   // both updates land
-        XCTAssertTrue(focusedLabel().hasPrefix("Play"), "focus moved on a refresh: \(focusedLabel())")
+        XCTAssertTrue(isPlayRow(focusedLabel()), "focus moved on a refresh: \(focusedLabel())")
         XCTAssertTrue(has("WSH ball"), "the turnover on the last snapshot flips the ball label")
         shot("4-after-updates")
     }

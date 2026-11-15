@@ -37,6 +37,15 @@ enum class TvSection { PLAYS, STATS, LEADERS, LINEUPS, STANDINGS }
 
 data class TvChip(val section: TvSection, val title: String)
 
+/**
+ * The selected chip is a SECTION, never a slot number: when the chip list changes (an upcoming soccer game gains Plays / Stats /
+ * Leaders at kickoff) the user keeps looking at the same section. A section that is gone falls back to the first chip.
+ */
+object TvSectionSelection {
+    fun indexOf(chips: List<TvChip>, selected: TvSection?): Int = chips.indexOfFirst { it.section == selected }.coerceAtLeast(0)
+    fun resolve(chips: List<TvChip>, selected: TvSection?): TvSection? = chips.getOrNull(indexOf(chips, selected))?.section
+}
+
 data class TvScoreSide(
     val name: String,
     val shortName: String,
@@ -131,6 +140,8 @@ data class TvMoment(
     val firstDown: Boolean = false,
     /** STAT_CHANGE: the leading side flipped (the pill cross-fades). */
     val leaderChanged: Boolean = false,
+    /** NEW_PLAY: the key of that play's row in the Plays panel / last-play card, so only that row animates in. */
+    val key: String? = null,
 )
 
 data class TvGameScreenModel(
@@ -179,12 +190,14 @@ data class TvGameScreenModel(
             val last = lastPlay(detail)
             val leftFit = TvLeftColumnFit.fit(
                 stripDp = when {
-                    field != null -> TvStrips.FIELD_DP; soccer != null -> TvStrips.SOCCER_DP
+                    field != null -> TvStrips.fieldDp(field); soccer != null -> TvStrips.SOCCER_DP
                     basketball != null -> TvStrips.BASKETBALL_DP; hockey != null -> TvStrips.HOCKEY_DP; else -> 0
                 },
                 scorerLines = maxOf(board.home?.scorers?.size ?: 0, board.away?.scorers?.size ?: 0),
                 hasLine = win?.chance?.line != null, hasChart = (win?.chart?.size ?: 0) >= 2, hasLastPlay = last != null,
                 hasDividers = win?.dividers?.isNotEmpty() == true,
+                hasStaleLabel = win?.chance?.staleLabel != null,
+                timeoutDots = field?.let { it.homeTimeouts != null || it.awayTimeouts != null } == true,
             )
             return TvGameScreenModel(
                 gameId = detail.gameId,
@@ -336,7 +349,8 @@ data class TvGameScreenModel(
             val p = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
             val n = p.toIntOrNull() ?: return p
             return when (sport.lowercase()) {
-                "soccer" -> if (n <= 2) "${ordinal(n)} half" else "Extra time"
+                // Same words core's assembler writes (EspnAssembler): 3 and 4 are the extra-time halves, 5 and up the shootout.
+                "soccer" -> when { n <= 2 -> "${ordinal(n)} half"; n == 3 -> "Extra time 1"; n == 4 -> "Extra time 2"; else -> "Shootout" }
                 "basketball", "american football" -> "${ordinal(n)} quarter"
                 "ice hockey" -> "${ordinal(n)} period"
                 else -> p
@@ -388,7 +402,7 @@ data class TvGameScreenModel(
         private fun moment(m: Moment): TvMoment? = when (m) {
             is Moment.ScoreChange -> TvMoment(TvMomentKind.SCORE_CHANGE, m.side, null, m.to.toIntOrNull(), m.to)
             is Moment.WinChanceMove -> TvMoment(TvMomentKind.WIN_CHANCE_MOVE, null, m.fromHome, m.toHome, null)
-            is Moment.NewPlay -> TvMoment(TvMomentKind.NEW_PLAY, m.item.side, null, null, m.item.text)
+            is Moment.NewPlay -> TvMoment(TvMomentKind.NEW_PLAY, m.item.side, null, null, m.item.text, key = m.item.id ?: "${m.item.time}|${m.item.text}")
             is Moment.FieldMove -> TvMoment(TvMomentKind.FIELD_MOVE, null, m.fromYard, m.toYard, null, loss = m.loss, firstDown = m.firstDown)
             is Moment.Touchdown -> TvMoment(TvMomentKind.TOUCHDOWN, m.side, null, null, null)
             is Moment.PossessionChange -> TvMoment(TvMomentKind.POSSESSION_CHANGE, m.to, null, null, null)

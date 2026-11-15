@@ -196,7 +196,9 @@ class TvGameScreenModelTest {
         }
         assertEquals("2nd half", header("Soccer", "2"))
         assertEquals("1st half", header("Soccer", "1"))
-        assertEquals("Extra time", header("Soccer", "3"))
+        assertEquals("Extra time 1", header("Soccer", "3"))
+        assertEquals("Extra time 2", header("Soccer", "4"))
+        assertEquals("Shootout", header("Soccer", "5"))
         assertEquals("1st period", header("Ice Hockey", "1"))
         assertEquals("3rd quarter", header("Basketball", "3"))
         assertEquals("4th quarter", header("American Football", "4"))

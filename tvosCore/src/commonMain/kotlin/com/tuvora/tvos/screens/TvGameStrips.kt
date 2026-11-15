@@ -92,12 +92,20 @@ object TvLeftColumnFit {
     private const val WIN_CHART = 52
     private const val PLAY_ROW = 56
     private const val DIVIDER_ROW = 14
+    private const val TIMEOUT_DOTS = 8         // football: the dots row under a team's name
     private const val GAP = 7
 
-    fun fit(stripDp: Int, scorerLines: Int, hasLine: Boolean, hasChart: Boolean, hasLastPlay: Boolean, hasDividers: Boolean = false): TvLeftFit {
+    fun fit(
+        stripDp: Int, scorerLines: Int, hasLine: Boolean, hasChart: Boolean, hasLastPlay: Boolean, hasDividers: Boolean = false,
+        /** The win card's "Updated ..." label (a stale market), drawn as one more row. */
+        hasStaleLabel: Boolean = false,
+        /** Football timeout dots under the team names. */
+        timeoutDots: Boolean = false,
+    ): TvLeftFit {
         fun total(chart: Boolean, lastPlay: Boolean): Int {
             var parts = 3                                   // scoreboard, win card, play row
-            var h = SCOREBOARD + scorerLines * SCORER_LINE + WIN_BASE + (if (hasLine) WIN_LINE else 0) + PLAY_ROW
+            var h = SCOREBOARD + scorerLines * SCORER_LINE + (if (timeoutDots) TIMEOUT_DOTS else 0) + WIN_BASE +
+                (if (hasLine) WIN_LINE else 0) + (if (hasStaleLabel) WIN_LINE else 0) + PLAY_ROW
             if (stripDp > 0) { h += stripDp; parts++ }
             if (lastPlay) { h += LAST_PLAY; parts++ }
             if (chart) h += WIN_CHART + (if (hasDividers) DIVIDER_ROW else 0)
