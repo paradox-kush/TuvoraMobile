@@ -125,6 +125,11 @@ struct GameDetailScreen: View {
 
     #if DEBUG
     private static var demoKind: String? {
+        // The kind can also be switched without relaunching: write it to /tmp/tuvora-game-demo.txt (simulator reads host files).
+        if let file = try? String(contentsOfFile: "/tmp/tuvora-game-demo.txt", encoding: .utf8) {
+            let kind = file.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !kind.isEmpty { return kind }
+        }
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "-gameDemo"), args.indices.contains(i + 1) else { return nil }
         return args[i + 1]
