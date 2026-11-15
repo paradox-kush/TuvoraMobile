@@ -78,6 +78,9 @@ data class TvWinCard(
     val chart: List<Float>,
     val homeName: String,
     val awayName: String,
+    /** At most 5 on TV; empty when the chartMarkers switch is off, there is no market series or no key events. */
+    val markers: List<TvChartMarker> = emptyList(),
+    val dividers: List<TvChartDivider> = emptyList(),
 )
 
 data class TvPlayRow(
@@ -118,6 +121,7 @@ data class TvPanels(
 enum class TvMomentKind {
     SCORE_CHANGE, WIN_CHANCE_MOVE, NEW_PLAY, FIELD_MOVE, TOUCHDOWN, POSSESSION_CHANGE, SOCCER_EVENT,
     POWER_PLAY_START, POWER_PLAY_END, FOUL_COUNT, BONUS_REACHED, TIMEOUT_USED,
+    MARKER_ADDED, STAT_CHANGE,
 }
 data class TvMoment(
     val kind: TvMomentKind, val side: String?, val from: Int?, val to: Int?, val text: String?,
@@ -125,6 +129,8 @@ data class TvMoment(
     val loss: Boolean = false,
     /** FIELD_MOVE: down returned to 1 with the same team on the ball. */
     val firstDown: Boolean = false,
+    /** STAT_CHANGE: the leading side flipped (the pill cross-fades). */
+    val leaderChanged: Boolean = false,
 )
 
 data class TvGameScreenModel(
@@ -178,6 +184,7 @@ data class TvGameScreenModel(
                 },
                 scorerLines = maxOf(board.home?.scorers?.size ?: 0, board.away?.scorers?.size ?: 0),
                 hasLine = win?.chance?.line != null, hasChart = (win?.chart?.size ?: 0) >= 2, hasLastPlay = last != null,
+                hasDividers = win?.dividers?.isNotEmpty() == true,
             )
             return TvGameScreenModel(
                 gameId = detail.gameId,
@@ -263,6 +270,7 @@ data class TvGameScreenModel(
                 chance = TvWinChanceCard.from(block, d, nowMs),
                 homeColorHex = colors.first, awayColorHex = colors.second,
                 chart = GameDetailUiPolicy.chartPoints(block.history).orEmpty(),
+                markers = TvStrips.markers(d, colors), dividers = TvStrips.dividers(d),
                 homeName = sides?.first?.let { it.short?.takeIf(String::isNotBlank) ?: it.name }.orEmpty(),
                 awayName = sides?.second?.let { it.short?.takeIf(String::isNotBlank) ?: it.name }.orEmpty(),
             )
@@ -389,6 +397,8 @@ data class TvGameScreenModel(
             is Moment.FoulCount -> TvMoment(TvMomentKind.FOUL_COUNT, m.side, null, m.to, null)
             is Moment.BonusReached -> TvMoment(TvMomentKind.BONUS_REACHED, m.side, null, null, null)
             is Moment.TimeoutUsed -> TvMoment(TvMomentKind.TIMEOUT_USED, m.side, null, null, null)
+            is Moment.MarkerAdded -> TvMoment(TvMomentKind.MARKER_ADDED, m.marker.side, null, null, m.marker.label)
+            is Moment.StatChange -> TvMoment(TvMomentKind.STAT_CHANGE, null, null, null, m.label, leaderChanged = m.leaderChanged)
         }
 
         private fun announcement(d: GameDetail, moments: List<Moment>): String? {

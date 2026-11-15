@@ -51,7 +51,11 @@ object TvGameScreenDemo {
     private fun play(id: Int, time: String, side: String, text: String, period: String, kind: String? = null, score: String? = null) =
         TimelineItem(time = time, period = period, side = side, text = text, kind = kind, id = "$id", score = score)
 
-    private fun history(vararg v: Int) = v.mapIndexed { i, h -> WinPoint(t = 1_000L * i, home = h) }
+    /** One point per minute ending now, so key events can be placed by wall clock exactly like the real feed. */
+    private fun history(vararg v: Int): List<WinPoint> = v.mapIndexed { i, h -> WinPoint(t = now() - (v.size - 1 - i) * 60_000L, home = h) }
+
+    private fun chartPlay(n: Int, index: Int, kind: String, side: String?, text: String, period: String = "1", id: String) =
+        TimelineItem(time = "", period = period, side = side, text = text, kind = kind, id = id, wallclockMs = now() - (n - 1 - index) * 60_000L)
 
     private fun football(step: Int): GameDetail {
         val homeScore = listOf("14", "14", "21")[step]
@@ -81,7 +85,12 @@ object TvGameScreenDemo {
             blocks = listOf<GameBlock>(
                 field,
                 WinProbabilityBlock(homePercent = win.last(), source = "polymarket", attribution = "via Polymarket", history = history(*win.toIntArray()), asOfMs = now()),
-                PlaysBlock(plays),
+                PlaysBlock(plays, chartItems = buildList {
+                    val n = win.size
+                    add(chartPlay(n, 1, "periodStart", null, "Start of period 2", "2", "ps2"))
+                    add(chartPlay(n, 2, "score", "home", "Field goal good", "1", "fg1"))
+                    if (step >= 2) add(chartPlay(n, n - 1, "score", "home", "D. Jones pass to W. Robinson, TOUCHDOWN", "2", "td1"))
+                }),
                 StatsBlock(listOf(StatRow("Total Yards", "212", "164"), StatRow("Turnovers", "0", "1"), StatRow("3rd down", "4/7", "2/6"), StatRow("Penalties", "3", "5"))),
                 LeadersBlock(listOf(LeaderItem("Passing", "D. Jones", "14/19 · 171", "home"), LeaderItem("Rushing", "S. Barkley", "17 · 88", "home"), LeaderItem("Receiving", "W. Robinson", "5 · 62", "home"))),
                 LinescoreBlock(listOf("1", "2", "3", "4", "T"), listOf(listOf("7", "7", "", "", homeScore), listOf("3", "7", "", "", awayScore)), listOf("NYG", "WSH")),
@@ -91,6 +100,7 @@ object TvGameScreenDemo {
                 ),
             ),
             asOf = mapOf("espn" to now()),
+            uiSwitches = setOf("chartMarkers"),
         )
     }
 
@@ -122,7 +132,11 @@ object TvGameScreenDemo {
                 SoccerStripBlock(lastEvent = last, homePossession = listOf(56, 57, 58)[step], homeCorners = listOf(3, 4, 4)[step], awayCorners = 2,
                     homeYellow = 0, awayYellow = 1, homeRed = 0, awayRed = 0, homeScorers = scorers, awayScorers = listOf("Palmer 31' (pen)")),
                 WinProbabilityBlock(homePercent = win.last(), drawPercent = 22, awayPercent = 100 - win.last() - 22, source = "polymarket", attribution = "via Polymarket", history = history(*win.toIntArray()), asOfMs = now()),
-                PlaysBlock(plays),
+                PlaysBlock(plays, chartItems = buildList {
+                    val n = win.size
+                    add(chartPlay(n, 2, "goal", "home", "Goal! Arsenal 1, Chelsea 0. Saka", "1", "gs1"))
+                    if (step >= 2) add(chartPlay(n, n - 1, "goal", "home", "Goal! Arsenal 2, Chelsea 1. Saka", "1", "gs2"))
+                }),
                 StatsBlock(listOf(StatRow("Shots", "9", "5"), StatRow("Shots on target", "4", "2"), StatRow("Fouls", "7", "9"), StatRow("Possession", "56%", "44%"))),
                 LineupBlock(listOf(LineupSide("home", "4-3-3", xi("A", "4-3-3")), LineupSide("away", "4-2-3-1", xi("C", "4-2-3-1")))),
                 StandingsTableBlock(listOf(StandingsGroup("Premier League", listOf("P", "W", "D", "L", "GD", "PTS"), listOf(
@@ -131,6 +145,7 @@ object TvGameScreenDemo {
                 ),
             ),
             asOf = mapOf("espn" to now()),
+            uiSwitches = setOf("chartMarkers"),
         )
     }
 
@@ -156,13 +171,19 @@ object TvGameScreenDemo {
             blocks = listOf<GameBlock>(
                 strip,
                 WinProbabilityBlock(homePercent = listOf(64, 66, 74)[step], source = "polymarket", attribution = "via Polymarket", history = history(60, 61, 63, listOf(64, 66, 74)[step]), asOfMs = now()),
-                PlaysBlock(plays),
+                PlaysBlock(plays, chartItems = buildList {
+                    val n = 4
+                    add(chartPlay(n, 1, "periodStart", null, "Start of period 2", "2", "ps2"))
+                    add(chartPlay(n, 2, "goal", "home", "Goal by DAL", "1", "hg1"))
+                    if (step >= 2) add(chartPlay(n, n - 1, "ppg", "home", "Goal by DAL, power play", "2", "hg2"))
+                }),
                 StatsBlock(listOf(StatRow("Shots", "20", "14"), StatRow("Hits", "12", "18"), StatRow("Penalty Minutes", "2", "4"))),
                 StandingsTableBlock(listOf(StandingsGroup("Central", listOf("W", "L", "OTL", "PTS"), listOf(
                     StandingsTableRow("1", "Dallas", listOf("9", "4", "1", "19"), true), StandingsTableRow("2", "Colorado", listOf("8", "4", "2", "18"))))),
                 ),
             ),
             asOf = mapOf("espn" to now()),
+            uiSwitches = setOf("chartMarkers"),
         )
     }
 
@@ -195,6 +216,7 @@ object TvGameScreenDemo {
                 ),
             ),
             asOf = mapOf("espn" to now()),
+            uiSwitches = setOf("chartMarkers"),
         )
     }
 }

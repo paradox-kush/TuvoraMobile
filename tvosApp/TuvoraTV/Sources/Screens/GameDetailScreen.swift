@@ -512,8 +512,8 @@ private struct WinChanceCard: View {
             }
             bar(home: home, draw: draw ?? 0, away: away, homeTint: homeTint, awayTint: awayTint)
             if showChart, card.chart.count >= 2 {
-                WinChart(points: card.chart.map { $0.floatValue }, tint: home >= away ? homeTint : awayTint)
-                    .frame(height: dp(48))
+                WinChart(points: card.chart.map { $0.floatValue }, tint: home >= away ? homeTint : awayTint,
+                         markers: card.markers, dividers: card.dividers, homeTint: homeTint, awayTint: awayTint)
             }
             if let line = chance.line {
                 Text(verbatim: line).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).lineLimit(1)
@@ -549,17 +549,57 @@ private struct WinChanceCard: View {
     }
 }
 
-/// Home's win chance over time. The newest segment draws itself in (animatable point count); everything else is static.
+/// Home's win chance over time. The newest segment draws itself in (animatable point count); scoring moments are hollow dots
+/// ON the line (placed by core from the feed's wall clock, never estimated) with a label above or below; period dividers are
+/// faint lines with labels under the chart. A new marker scales in once.
 private struct WinChart: View {
     let points: [Float]
     let tint: Color
+    var markers: [TvChartMarker] = []
+    var dividers: [TvChartDivider] = []
+    var homeTint: Color = .white
+    var awayTint: Color = .white
     @Environment(\.nuvio) private var colors
 
+    private let inset = dp(10)
+
     var body: some View {
-        ZStack {
-            Rectangle().fill(colors.border).frame(height: 1).opacity(0.7)   // the 50 % line
-            ChartLine(points: points, shown: Double(points.count))
-                .stroke(tint, style: StrokeStyle(lineWidth: dp(2.5), lineCap: .round, lineJoin: .round))
+        VStack(spacing: dp(1)) {
+            GeometryReader { geo in
+                let w = geo.size.width, h = geo.size.height
+                ZStack(alignment: .topLeading) {
+                    Rectangle().fill(colors.border).frame(height: 1).opacity(0.7).position(x: w / 2, y: h / 2)   // the 50 % line
+                    ForEach(Array(dividers.enumerated()), id: \.offset) { _, d in
+                        Rectangle().fill(colors.border.opacity(0.6)).frame(width: dp(1), height: h)
+                            .position(x: w * CGFloat(d.x), y: h / 2)
+                    }
+                    ChartLine(points: points, shown: Double(points.count))
+                        .stroke(tint, style: StrokeStyle(lineWidth: dp(2.5), lineCap: .round, lineJoin: .round))
+                        .padding(.vertical, inset)
+                    ForEach(markers, id: \.key) { m in
+                        let color = teamColor(m.colorHex, fallback: tint)
+                        let y = inset + (h - inset * 2) * (1 - CGFloat(m.y))
+                        ZStack {
+                            Circle().fill(colors.backgroundCard).frame(width: dp(8), height: dp(8))
+                                .overlay(Circle().stroke(color, lineWidth: dp(2)))
+                                .position(x: w * CGFloat(m.x), y: y)
+                            Text(m.label).font(NuvioType.labelSmall).foregroundStyle(color).fixedSize()
+                                .position(x: w * CGFloat(m.x), y: m.labelAbove ? y - dp(9) : y + dp(9))
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+            }
+            .frame(height: dp(48))
+            if !dividers.isEmpty {
+                GeometryReader { geo in
+                    ForEach(Array(dividers.enumerated()), id: \.offset) { _, d in
+                        Text(d.label).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).fixedSize()
+                            .position(x: geo.size.width * CGFloat(d.x), y: dp(6))
+                    }
+                }
+                .frame(height: dp(12))
+            }
         }
     }
 }

@@ -11,6 +11,7 @@ import com.nuvio.app.features.sportsdetail.api.Side
 import com.nuvio.app.features.sportsdetail.api.SoccerEvent
 import com.nuvio.app.features.sportsdetail.api.SoccerStripBlock
 import com.nuvio.app.features.sportsdetail.internal.BasketballStripPolicy
+import com.nuvio.app.features.sportsdetail.internal.ChartMarkers
 import com.nuvio.app.features.sportsdetail.internal.FieldGeometry
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import com.nuvio.app.features.sportsdetail.internal.LineupPitchPolicy
@@ -84,6 +85,20 @@ internal object TvStrips {
             homeFormation = home.formation, awayFormation = away.formation, homeHex = colors.first, awayHex = colors.second, spots = spots,
         )
     }
+
+    const val MAX_TV_MARKERS = 5
+
+    /** Markers for the win chart (newest [MAX_TV_MARKERS], in the scoring team's colour) from core's switched, tolerance-checked placement. */
+    fun markers(d: GameDetail, colors: Pair<String?, String?>): List<TvChartMarker> =
+        ChartMarkers.markersFor(d, MAX_TV_MARKERS).map {
+            TvChartMarker(
+                key = it.playId ?: "${it.label}@${it.x}", x = it.x, y = it.y, label = it.label, side = it.side,
+                colorHex = when (it.side) { "home" -> colors.first; "away" -> colors.second; else -> null },
+                labelAbove = ChartMarkers.labelAbove(it),
+            )
+        }
+
+    fun dividers(d: GameDetail): List<TvChartDivider> = ChartMarkers.dividersFor(d).map { TvChartDivider(it.first, it.second) }
 
     fun basketball(d: GameDetail): TvBasketballStrip? {
         val b = d.blocks.filterIsInstance<BasketballStripBlock>().firstOrNull() ?: return null

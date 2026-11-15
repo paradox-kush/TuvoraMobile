@@ -42,6 +42,11 @@ data class TvSoccerStrip(
 data class TvPitchSpot(val x: Float, val y: Float, val number: String, val name: String, val isHome: Boolean)
 data class TvPitch(val homeName: String, val awayName: String, val homeFormation: String?, val awayFormation: String?, val homeHex: String?, val awayHex: String?, val spots: List<TvPitchSpot>)
 
+/** A scoring moment on the win-chance chart: x/y in 0..1 chart space, placed on the drawn line by core (no estimates). */
+data class TvChartMarker(val key: String, val x: Float, val y: Float, val label: String, val side: String?, val colorHex: String?, val labelAbove: Boolean)
+/** A faint period boundary with its label under the chart ("Q2", "P1", "45'"). */
+data class TvChartDivider(val x: Float, val label: String)
+
 /** Basketball strip: direct feed values (fouls this period, timeouts left, bonus) and the switched, derived run. Swift only draws. */
 data class TvBasketballStrip(
     /** "DAL 8-0 run"; null unless the `basketballRun` switch is on and a run of 8+ exists. */
@@ -86,15 +91,16 @@ object TvLeftColumnFit {
     private const val WIN_LINE = 14
     private const val WIN_CHART = 52
     private const val PLAY_ROW = 56
+    private const val DIVIDER_ROW = 14
     private const val GAP = 7
 
-    fun fit(stripDp: Int, scorerLines: Int, hasLine: Boolean, hasChart: Boolean, hasLastPlay: Boolean): TvLeftFit {
+    fun fit(stripDp: Int, scorerLines: Int, hasLine: Boolean, hasChart: Boolean, hasLastPlay: Boolean, hasDividers: Boolean = false): TvLeftFit {
         fun total(chart: Boolean, lastPlay: Boolean): Int {
             var parts = 3                                   // scoreboard, win card, play row
             var h = SCOREBOARD + scorerLines * SCORER_LINE + WIN_BASE + (if (hasLine) WIN_LINE else 0) + PLAY_ROW
             if (stripDp > 0) { h += stripDp; parts++ }
             if (lastPlay) { h += LAST_PLAY; parts++ }
-            if (chart) h += WIN_CHART
+            if (chart) h += WIN_CHART + (if (hasDividers) DIVIDER_ROW else 0)
             return h + GAP * (parts - 1)
         }
         var chart = hasChart
