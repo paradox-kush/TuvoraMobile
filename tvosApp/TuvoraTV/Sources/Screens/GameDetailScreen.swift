@@ -97,7 +97,9 @@ struct GameDetailScreen: View {
             if let situation = situation(detail) {
                 Text(situation).font(NuvioType.titleMediumSemi).foregroundStyle(colors.textPrimary).lineLimit(2)
             }
-            if let home = winProbability(detail) { WinProbabilityBar(homePercent: home, home: homeName(detail), away: awayName(detail)) }
+            if let chance = TvSports.shared.winChance(detail: detail, nowMs: TvSports.shared.nowMs()) {
+                WinProbabilityBar(chance: chance, home: homeName(detail), away: awayName(detail))
+            }
             if let ls = linescore(detail) { LinescoreTable(block: ls) }
             watchRow(detail)
             plays(detail)
@@ -219,11 +221,6 @@ struct GameDetailScreen: View {
         return nil
     }
 
-    private func winProbability(_ d: GameDetail) -> Int? {
-        for b in d.blocks { if case .winProbabilityBlock(let w) = onEnum(of: b) { return Int(w.homePercent) } }
-        return nil
-    }
-
     private func linescore(_ d: GameDetail) -> LinescoreBlock? {
         for b in d.blocks { if case .linescoreBlock(let l) = onEnum(of: b) { return l } }
         return nil
@@ -279,18 +276,21 @@ struct GameDetailScreen: View {
 
 // MARK: - Pieces
 
+/// Win chance as a market-implied probability, always credited (Polymarket's display condition): the caption and the
+/// single extra line come from shared Kotlin (TvWinChanceCard), so this view only draws them. No odds, prices or links.
 private struct WinProbabilityBar: View {
-    let homePercent: Int
+    let chance: TvWinChance
     let home: String
     let away: String
     @Environment(\.nuvio) private var colors
 
     var body: some View {
+        let homePercent = Int(chance.homePercent)
         VStack(alignment: .leading, spacing: dp(6)) {
             HStack {
                 Text("\(home) \(homePercent)%").font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary)
                 Spacer()
-                Text("\(100 - homePercent)% \(away)").font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary)
+                Text("\(chance.awayPercent)% \(away)").font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -299,6 +299,17 @@ private struct WinProbabilityBar: View {
                 }
             }
             .frame(height: dp(8))
+            if chance.caption != nil || chance.staleLabel != nil {
+                HStack(spacing: dp(12)) {
+                    if let caption = chance.caption { Text(verbatim: caption) }
+                    Spacer(minLength: 0)
+                    if let stale = chance.staleLabel { Text(verbatim: stale) }
+                }
+                .font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).lineLimit(1)
+            }
+            if let line = chance.line {
+                Text(verbatim: line).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary).lineLimit(1)
+            }
         }
         .accessibilityElement(children: .combine)
     }

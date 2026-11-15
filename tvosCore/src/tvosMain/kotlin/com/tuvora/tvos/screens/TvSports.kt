@@ -23,6 +23,11 @@ object TvSports {
 
     fun nowMs(): Long = RadarTime.nowMs()
 
+    /** The game screen's win-chance card (caption, one extra line, stale label), decided in shared Kotlin. Null when the game has no win-chance block. */
+    fun winChance(detail: com.nuvio.app.features.sportsdetail.api.GameDetail, nowMs: Long): TvWinChance? =
+        detail.blocks.filterIsInstance<com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock>().firstOrNull()
+            ?.let { TvWinChanceCard.from(it, detail, nowMs) }
+
     fun hub(state: RadarUiState, nowMs: Long): TvSportsHub = TvSportsHubPolicy.build(state, nowMs)
 
     fun isLive(state: RadarUiState, fixture: RadarFixture, nowMs: Long): Boolean = state.isLive(fixture, nowMs)
