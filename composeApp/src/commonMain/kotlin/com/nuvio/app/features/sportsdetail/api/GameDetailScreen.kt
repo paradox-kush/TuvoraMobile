@@ -67,6 +67,8 @@ import com.nuvio.app.features.sportsdetail.internal.ui.PlaysCard
 import com.nuvio.app.features.sportsdetail.internal.ui.SoccerStrip
 import com.nuvio.app.features.sportsdetail.internal.ui.SituationLineCard
 import com.nuvio.app.features.sportsdetail.internal.ui.SlimScoreBar
+import com.nuvio.app.features.sportsdetail.internal.ui.SwitchFade
+import com.nuvio.app.features.sportsdetail.internal.ui.rememberReduceMotion
 import com.nuvio.app.features.sportsdetail.internal.ui.WatchPrimary
 import com.nuvio.app.features.sportsdetail.internal.ui.WinChanceCard
 import com.nuvio.app.features.sportsdetail.internal.ui.GameBackButton
@@ -168,6 +170,8 @@ private fun LoadedContent(
     val batch = remember(detail) { tracker.accept(detail) }
     val sections = remember(detail) { GameSectionsPolicy.sections(detail) }
     var chosen by rememberSaveable { mutableStateOf(GameSection.OVERVIEW) }
+    var switchSeq by remember { mutableStateOf(0) }
+    val reduce = rememberReduceMotion()
     val section = GameTabsUi.selected(sections, chosen)
     val showTabs = GameSectionsPolicy.showsTabRow(detail)
     val primary = WatchPrimary.offer(s.watch)
@@ -196,8 +200,8 @@ private fun LoadedContent(
                         overviewLeft(detail)
                     }
                     Column(Modifier.weight(0.56f)) {
-                        if (showTabs) GameTabRow(sections, section, { chosen = it })
-                        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = gap) { sectionItems(section, detail, wide = true) }
+                        if (showTabs) GameTabRow(sections, section, { if (it != chosen) { chosen = it; switchSeq++ } })
+                        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = gap) { sectionItems(section, detail, wide = true, fadeKey = switchSeq, reduce = reduce) }
                     }
                 }
             } else {
@@ -211,10 +215,10 @@ private fun LoadedContent(
                     stickyHeader(key = "tabs") {
                         Column {
                             if (slim) SlimScoreBar(detail, canPlay = primary != null, onPlay = { primary?.let { onPlayChannel(it.channelId) } })
-                            if (showTabs) GameTabRow(sections, section, { chosen = it })
+                            if (showTabs) GameTabRow(sections, section, { if (it != chosen) { chosen = it; switchSeq++ } })
                         }
                     }
-                    sectionItems(section, detail, wide = false)
+                    sectionItems(section, detail, wide = false, fadeKey = switchSeq, reduce = reduce)
                 }
             }
         }
@@ -238,21 +242,21 @@ private fun LazyListScope.overviewLeft(detail: GameDetail) {
 }
 
 /** The selected section's cards. In the wide layout Overview omits what the left pane already shows. */
-private fun LazyListScope.sectionItems(section: GameSection, detail: GameDetail, wide: Boolean) {
+private fun LazyListScope.sectionItems(section: GameSection, detail: GameDetail, wide: Boolean, fadeKey: Int, reduce: Boolean) {
     val blocks = GameSectionsPolicy.blocksFor(section, detail)
     when (section) {
         GameSection.OVERVIEW -> {
             if (!wide) overviewLeft(detail)
-            items(blocks.filter { it !is WinProbabilityBlock && it !is SituationBlock && it !is FootballFieldBlock && it !is SoccerStripBlock && it !is BasketballStripBlock && it !is HockeyStripBlock }) { BlockContent(it, detail) }
+            items(blocks.filter { it !is WinProbabilityBlock && it !is SituationBlock && it !is FootballFieldBlock && it !is SoccerStripBlock && it !is BasketballStripBlock && it !is HockeyStripBlock }) { SwitchFade(fadeKey, reduce) { BlockContent(it, detail) } }
         }
         GameSection.PLAYS -> blocks.forEach { b ->
             if (b is PlaysBlock) {
-                item(key = "plays") { PlaysCard(b, detail) }
-            } else item { BlockContent(b, detail) }
+                item(key = "plays") { SwitchFade(fadeKey, reduce) { PlaysCard(b, detail) } }
+            } else item { SwitchFade(fadeKey, reduce) { BlockContent(b, detail) } }
         }
         GameSection.LINEUPS -> items(blocks) { b ->
-            if (b is LineupBlock && PitchLayout.canDraw(b)) PitchLineup(b, detail) else BlockContent(b, detail)
+            SwitchFade(fadeKey, reduce) { if (b is LineupBlock && PitchLayout.canDraw(b)) PitchLineup(b, detail) else BlockContent(b, detail) }
         }
-        else -> items(blocks) { BlockContent(it, detail) }
+        else -> items(blocks) { SwitchFade(fadeKey, reduce) { BlockContent(it, detail) } }
     }
 }

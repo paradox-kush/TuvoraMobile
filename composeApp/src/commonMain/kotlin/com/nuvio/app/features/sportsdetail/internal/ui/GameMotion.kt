@@ -81,3 +81,13 @@ private fun rememberEnter(key: Any?, enabled: Boolean, reduce: Boolean): Animata
     }
     return p
 }
+
+/** Tab/section switch: the new content fades in over QUICK_MS. Nothing on first load (key 0); instant with reduce motion. */
+@Composable
+internal fun SwitchFade(key: Int, reduce: Boolean, content: @Composable () -> Unit) {
+    val p = remember { Animatable(1f) }
+    LaunchedEffect(key) {
+        if (key > 0 && !reduce) { p.snapTo(0f); p.animateTo(1f, motion(MotionSpec.QUICK_MS, false)) } else p.snapTo(1f)
+    }
+    androidx.compose.foundation.layout.Box(Modifier.graphicsLayer { alpha = p.value }) { content() }
+}

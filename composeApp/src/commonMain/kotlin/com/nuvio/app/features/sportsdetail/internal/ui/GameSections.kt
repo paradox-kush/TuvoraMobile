@@ -113,28 +113,34 @@ internal fun StatsCard(block: StatsBlock, detail: GameDetail, modifier: Modifier
                     Text(r.label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textMuted)
                     StatValue(r.away, r.leader == StatLeader.AWAY, palette.away, Modifier.width(72.dp), TextAlign.End)
                 }
-                r.homeFraction?.let { f ->
-                    val share by animateFloatAsState(f, motion(MotionSpec.MOVE_MS, reduce), label = "stat")
-                    Spacer(Modifier.height(NuvioTokens.Space.s4))
-                    Row(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(percent = 50)), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        if (share > 0f) Box(Modifier.weight(share).height(4.dp).background(palette.home))
-                        if (share < 1f) Box(Modifier.weight(1f - share).height(4.dp).background(palette.away))
-                    }
-                }
+                r.homeFraction?.let { f -> StatBar(f, palette, reduce) }
             }
         }
     }
 }
 
+/** Two-part bar. The animated share is read here only, so a stat change recomposes this bar, not the whole card. */
+@Composable
+private fun StatBar(f: Float, palette: TeamPalette, reduce: Boolean) {
+    val share by animateFloatAsState(f, motion(MotionSpec.MOVE_MS, reduce), label = "stat")
+    Spacer(Modifier.height(NuvioTokens.Space.s4))
+    Row(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(percent = 50)), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (share > 0f) Box(Modifier.weight(share).height(4.dp).background(palette.home))
+        if (share < 1f) Box(Modifier.weight(1f - share).height(4.dp).background(palette.away))
+    }
+}
+
 @Composable
 private fun StatValue(text: String, leads: Boolean, color: Color, modifier: Modifier, align: TextAlign) {
+    val reduce = rememberReduceMotion()
+    val pill by androidx.compose.animation.animateColorAsState(if (leads) color.copy(alpha = 0.28f) else Color.Transparent, motion(MotionSpec.QUICK_MS, reduce), label = "pill")
     Box(modifier, contentAlignment = if (align == TextAlign.End) Alignment.CenterEnd else Alignment.CenterStart) {
         Text(
             text,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = if (leads) FontWeight.Bold else FontWeight.Normal,
             color = if (leads) MaterialTheme.nuvio.colors.textPrimary else MaterialTheme.nuvio.colors.textSecondary,
-            modifier = if (leads) Modifier.clip(RoundedCornerShape(percent = 50)).background(color.copy(alpha = 0.28f)).padding(horizontal = NuvioTokens.Space.s8, vertical = 2.dp) else Modifier,
+            modifier = Modifier.clip(RoundedCornerShape(percent = 50)).background(pill).padding(horizontal = NuvioTokens.Space.s8, vertical = 2.dp),
         )
     }
 }

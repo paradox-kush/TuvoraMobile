@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -62,6 +63,7 @@ internal fun GameScoreboard(detail: GameDetail, modifier: Modifier = Modifier) {
         )
         Spacer(Modifier.height(NuvioTokens.Space.s8))
         val palette = rememberTeamPalette(detail.header)
+        ScoreAnnouncement(detail)
         when (val h = detail.header) {
             is TeamsHeader -> SidesRow(h.home, h.away, "home", "away", palette, detail, extras = rememberSideExtras(detail, palette))
             is VersusHeader -> SidesRow(h.a, h.b, "home", "away", palette, detail)
@@ -200,5 +202,19 @@ private fun rememberSideExtras(detail: GameDetail, palette: TeamPalette): SideEx
         possession = ball,
         home = scorers(soccer?.homeScorers.orEmpty()) ?: dots(field?.homeTimeouts, palette.home),
         away = scorers(soccer?.awayScorers.orEmpty()) ?: dots(field?.awayTimeouts, palette.away),
+    )
+}
+
+/** Only a score change is announced to screen readers, once per update ("Dallas 2, Buffalo 0"); no other moment speaks. */
+@Composable
+private fun ScoreAnnouncement(detail: GameDetail) {
+    val batch = LocalMoments.current
+    val t = GameScoreBar.of(detail) ?: return
+    val said = if (batch.moments.any { it is Moment.ScoreChange }) "${t.home} ${t.homeScore}, ${t.away} ${t.awayScore}" else ""
+    Box(
+        Modifier.size(0.dp).semantics {
+            liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+            contentDescription = said
+        },
     )
 }
