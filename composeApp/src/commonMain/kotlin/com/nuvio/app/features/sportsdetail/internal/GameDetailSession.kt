@@ -64,7 +64,17 @@ internal class GameDetailSession(
     private var backendCalls = 0
     private var summaryCalls = 0
     private var scoreboardCalls = 0
+    private var eventCalls = 0
     private var espnAsOf: Long? = null
+    /** When (ms, our clock) the cached event / summary were fetched: the overlay lets the FRESHER one win. */
+    private var eventAsOfMs = 0L
+    private var summaryAsOfMs = 0L
+
+    /** Base event + summary overlay. The summary only overwrites live keys while it is the fresher of the two. */
+    private fun rebuildRoot() {
+        val b = espnBase ?: return
+        espnEventRoot = espnSummary?.let { EspnLiveOverlay.apply(b, it, baseIsFresher = eventAsOfMs > summaryAsOfMs) } ?: b
+    }
 
     // Negative cache + telemetry de-dup.
     private val misses = mutableMapOf<String, Long>()
@@ -132,19 +142,39 @@ internal class GameDetailSession(
         //    re-fetch whole-day scoreboards every tick.
         val needResolve = espnBase == null && !isMissed("espn|match")
         val needScoreboardRefresh = espnBase != null && !summaryEndpoint && fetchSummary
-        val espnCallable = espnOn && nowMs() >= espnBackoffUntilMs
+        var espnCallable = espnOn && nowMs() >= espnBackoffUntilMs
+        var justResolved = false
         if (espnCallable && (needResolve || needScoreboardRefresh)) {
             val t0 = nowMs()
             val failure = resolveEspnEvent(mapping, league!!, ::miss) { scoreboardCalls++ }
             durations["espn"] = nowMs() - t0
             espnEventFailed = failure
             if (failure != null) espnBackoffUntilMs = nowMs() + ESPN_BACKOFF_MS
-            if (failure == null && espnBase != null) { espnAsOf = nowMs(); espnEventRoot = espnSummary?.let { EspnLiveOverlay.apply(espnBase!!, it) } ?: espnBase }
+            if (failure == null && espnBase != null) { espnAsOf = nowMs(); eventAsOfMs = nowMs(); justResolved = true; rebuildRoot() }
             when {
                 failure != null -> note("match", "espn", outcomeOf(failure))
                 espnEventId == null -> note("match", "espn", "empty")
                 else -> note("match", "espn", "loaded")
             }
+        }
+
+        // 2b. The live event tick: the single-event scoreboard (2-3 KB gzip) replaces the heavy summary as the 15 s signal. Not on
+        //     the tick that just resolved the whole-day scoreboard (that answer is already fresh), not for leagues without a summary
+        //     endpoint (their shapes differ), and only when the mapping has the template -- otherwise today's behaviour (below).
+        val eventTemplate = mapping.espn.eventTemplate
+        val eventTickViaSingleEvent = eventTemplate != null && summaryEndpoint
+        if (espnCallable && fetchEvent && !justResolved && eventTickViaSingleEvent && espnEventId != null && espnBase != null) {
+            val t0 = nowMs()
+            eventCalls++
+            when (val r = espn!!.event(league!!.espn!!, espnEventId!!)) {
+                is SourceResult.Ok -> { espnBase = EspnLiveOverlay.mergeEvent(espnBase!!, r.value); eventAsOfMs = nowMs(); espnAsOf = nowMs(); rebuildRoot() }
+                // The answer was "nothing": keep the last good event. Not a failure, not remembered.
+                is SourceResult.Empty, is SourceResult.Disabled -> {}
+                // A failed tick keeps the last good data, never fails the screen, and counts toward the existing ESPN backoff.
+                is SourceResult.Failed -> espnBackoffUntilMs = nowMs() + ESPN_BACKOFF_MS
+            }
+            durations["espn"] = (durations["espn"] ?: 0L) + (nowMs() - t0)
+            espnCallable = nowMs() >= espnBackoffUntilMs
         }
 
         // 3. Provisional state (to decide whether the summary is worth fetching).
@@ -159,14 +189,16 @@ internal class GameDetailSession(
         }
         val provisional = tsdbD?.state ?: baseHdr?.state
 
-        // 4. Live tick = the per-game summary only (carries score + clock + everything the blocks need).
+        // 4. The summary: plays, stats, leaders, lineups, standings. With the single-event tick it rides the slow (60 s) cadence only
+        //    (or when never fetched); a mapping without the template keeps the old rule -- the live tick IS the summary.
         val wantsSummary = espnOn && espnEventId != null && espnBase != null && summaryEndpoint && profile != null && provisional != null &&
             (provisional != GameState.UPCOMING || "lineup" in profile.blocks) && provisional != GameState.POSTPONED
-        if (wantsSummary && espnCallable && (fetchEvent || fetchSummary || espnSummary == null) && !isMissed("espn|summary")) {
+        val summaryDue = if (eventTickViaSingleEvent) fetchSummary || espnSummary == null else fetchEvent || fetchSummary || espnSummary == null
+        if (wantsSummary && espnCallable && summaryDue && !isMissed("espn|summary")) {
             val t0 = nowMs()
             summaryCalls++
             when (val r = espn!!.summary(league!!.espn!!, espnEventId!!)) {
-                is SourceResult.Ok -> { espnSummary = r.value; espnEventRoot = EspnLiveOverlay.apply(espnBase!!, r.value); espnAsOf = nowMs() }
+                is SourceResult.Ok -> { espnSummary = r.value; summaryAsOfMs = nowMs(); rebuildRoot(); espnAsOf = nowMs() }
                 is SourceResult.Empty, is SourceResult.Disabled -> miss("espn|summary")
                 is SourceResult.Failed -> { espnSummaryFailed = r; espnBackoffUntilMs = nowMs() + ESPN_BACKOFF_MS }
             }
@@ -226,7 +258,7 @@ internal class GameDetailSession(
             }
         }
 
-        debug("tick fetchEvent=$fetchEvent fetchSummary=$fetchSummary | backend=$backendCalls summary=$summaryCalls scoreboard=$scoreboardCalls")
+        debug("tick fetchEvent=$fetchEvent fetchSummary=$fetchSummary | backend=$backendCalls summary=$summaryCalls event=$eventCalls scoreboard=$scoreboardCalls")
         return DetailLoad.Loaded(
             GameDetail(
                 gameId = ref.gameId,
@@ -258,7 +290,11 @@ internal class GameDetailSession(
     }
 
     private fun mergeFreshEspn(primary: EspnHeader, espn: EspnHeader, aliases: Map<String, String>): EspnHeader? {
-        fun side(p: Side, e: Side) = p.copy(score = e.score ?: p.score, short = p.short ?: e.short)
+        fun side(p: Side, e: Side) = p.copy(
+            score = e.score ?: p.score, short = p.short ?: e.short,
+            // Colours and rank ride along under the same "both teams agree by name" guard that protects the score.
+            color = e.color ?: p.color, altColor = e.altColor ?: p.altColor, rank = e.rank ?: p.rank,
+        )
         val header: Header = when (val p = primary.header) {
             is TeamsHeader -> {
                 val e = espn.header as? TeamsHeader ?: return null
@@ -411,7 +447,7 @@ internal class GameDetailSession(
         val debugLog = Logger.withTag("SportsDetail")
         const val NEGATIVE_TTL_MS = 5L * 60 * 1000
         const val ESPN_BACKOFF_MS = 30_000L
-        val UPCOMING_BLOCKS = setOf(BlockType.WIN_PROBABILITY, BlockType.FORM, BlockType.LINEUP, BlockType.RESULTS, BlockType.NEXT, BlockType.STANDINGS, BlockType.HIGHLIGHTS)
+        val UPCOMING_BLOCKS = setOf(BlockType.WIN_PROBABILITY, BlockType.FORM, BlockType.LINEUP, BlockType.RESULTS, BlockType.NEXT, BlockType.STANDINGS, BlockType.STANDINGS_TABLE, BlockType.HIGHLIGHTS)
     }
 }
 
@@ -430,5 +466,7 @@ internal fun blockTypeOf(b: GameBlock): BlockType? = when (b) {
     is com.nuvio.app.features.sportsdetail.api.HighlightsBlock -> BlockType.HIGHLIGHTS
     is com.nuvio.app.features.sportsdetail.api.NextBlock -> BlockType.NEXT
     is com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock -> BlockType.WIN_PROBABILITY
+    is com.nuvio.app.features.sportsdetail.api.PlaysBlock -> BlockType.PLAYS
+    is com.nuvio.app.features.sportsdetail.api.StandingsTableBlock -> BlockType.STANDINGS_TABLE
     else -> null
 }

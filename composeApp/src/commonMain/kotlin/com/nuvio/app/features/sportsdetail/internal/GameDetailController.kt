@@ -188,7 +188,10 @@ internal class GameDetailController(
         if (d.state == GameState.LIVE) GameDetailUiPolicy.staleLabel(d.asOf, nowMs()) else null
 
     private fun plan(d: GameDetail) =
-        GameDetailRefreshPolicy.plan(d.state, ref.startsAtMs, nowMs(), lastEventMs, lastSummaryMs, failures, config())
+        GameDetailRefreshPolicy.plan(
+            d.state, ref.startsAtMs, nowMs(), lastEventMs, lastSummaryMs, failures, config(),
+            wantsUpcomingSummary = GameDetailRefreshPolicy.wantsUpcomingSummary(d.sport),
+        )
 
     /** Wake at least every 5 s while a live chip needs to stay honest. */
     private fun planWait(): Long? {
