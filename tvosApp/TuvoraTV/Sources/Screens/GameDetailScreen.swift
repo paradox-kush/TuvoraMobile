@@ -821,7 +821,7 @@ private struct GameActionButton: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: dp(2)) {
                 Text(title).font(NuvioType.titleMediumSemi).foregroundStyle(focused ? colors.primary : colors.textPrimary)
-                if let subtitle { Text(subtitle).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary).lineLimit(1) }
+                if let subtitle { Text(subtitle).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary).lineLimit(1).frame(maxWidth: dp(200), alignment: .leading) }
             }
             .padding(.horizontal, dp(16)).padding(.vertical, dp(10))
             .background(RoundedRectangle(cornerRadius: dp(12)).fill(focused ? colors.focusBackground : colors.backgroundElevated))
