@@ -133,7 +133,7 @@ class GameDetailUiPolicyTest {
         ))!!
         assertEquals(listOf(0.5f, 1.0f, 0.8f), pts, "sorted by time, percent -> 0..1")
         val many = (1L..500L).map { com.nuvio.app.features.sportsdetail.api.WinPoint(it, (it % 101).toInt()) }
-        assertEquals(60, GameDetailUiPolicy.chartPoints(many)!!.size)
+        assertEquals(120, GameDetailUiPolicy.chartPoints(many)!!.size, "spec 05: 120 drawn points on every platform")
         assertEquals(0.01f, GameDetailUiPolicy.chartPoints(many)!!.first(), 0.0001f)
     }
 

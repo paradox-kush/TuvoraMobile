@@ -123,7 +123,7 @@ class GameScreenMarkersDTest {
         val h = series(100)
         val d = ChartMarkers.dividers(h, listOf(play(t0 + 30 * 30_000L, "periodStart", period = "2nd"), play(t0 + 60 * 30_000L, "periodStart", period = "3rd")), "Ice Hockey")
         assertEquals(listOf("P2", "P3"), d.map { it.second })
-        assertEquals(18f / 59f, d[0].first, 0.0001f, "on the drawn (60 point) series: full index 30 of 100 is drawn point 18 of 60")
+        assertEquals(30f / 99f, d[0].first, 0.0001f, "100 points fit under the 120-point cap, so the drawn series is the full one: index 30 of 99")
     }
 
     @Test fun `dividers - a feed with only period ends draws nothing because an end is not a start`() {
@@ -140,7 +140,7 @@ class GameScreenMarkersDTest {
         )
         val d = ChartMarkers.dividers(h, plays, "Ice Hockey")
         assertEquals(listOf("P2", "OT"), d.map { it.second })
-        assertEquals(18f / 59f, d[0].first, 0.0001f, "on the drawn (60 point) series: full index 30 of 100 is drawn point 18 of 60")
+        assertEquals(30f / 99f, d[0].first, 0.0001f, "100 points fit under the 120-point cap, so the drawn series is the full one: index 30 of 99")
     }
 
     @Test fun `dividers - soccer reads 45 and 90 and a boundary outside the series or without a wall clock is skipped`() {
