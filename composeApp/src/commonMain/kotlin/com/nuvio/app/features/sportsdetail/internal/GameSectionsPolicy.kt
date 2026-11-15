@@ -2,7 +2,9 @@ package com.nuvio.app.features.sportsdetail.internal
 
 import com.nuvio.app.features.sportsdetail.api.BroadcastBlock
 import com.nuvio.app.features.sportsdetail.api.GameBlock
+import com.nuvio.app.features.sportsdetail.api.FootballFieldBlock
 import com.nuvio.app.features.sportsdetail.api.GameDetail
+import com.nuvio.app.features.sportsdetail.api.SituationBlock
 import com.nuvio.app.features.sportsdetail.api.LeadersBlock
 import com.nuvio.app.features.sportsdetail.api.LineupBlock
 import com.nuvio.app.features.sportsdetail.api.PlaysBlock
@@ -34,6 +36,8 @@ internal object GameSectionsPolicy {
 
     fun blocksFor(s: GameSection, d: GameDetail): List<GameBlock> {
         val live = d.blocks.filterNot { GameDetailUiPolicy.isEmpty(it) }
+        // The field strip shows what the "4th & Goal" text card shows: new clients drop the card (old clients, which cannot decode the strip, keep it).
+        val hasField = live.any { it is FootballFieldBlock }
         return when (s) {
             GameSection.PLAYS -> live.filterIsInstance<PlaysBlock>().take(1).ifEmpty { live.filterIsInstance<TimelineBlock>().take(1) }
             GameSection.STATS -> live.filterIsInstance<StatsBlock>().take(1)
@@ -41,7 +45,7 @@ internal object GameSectionsPolicy {
             GameSection.LINEUPS -> live.filterIsInstance<LineupBlock>().take(1)
             GameSection.STANDINGS -> live.filterIsInstance<StandingsTableBlock>().take(1).ifEmpty { live.filterIsInstance<StandingsBlock>().take(1) }
             GameSection.OVERVIEW -> live.filterNot {
-                it is PlaysBlock || it is TimelineBlock || it is StatsBlock || it is LeadersBlock || it is LineupBlock ||
+                (it is SituationBlock && hasField) || it is PlaysBlock || it is TimelineBlock || it is StatsBlock || it is LeadersBlock || it is LineupBlock ||
                     it is StandingsTableBlock || it is StandingsBlock || it is WatchBlock || it is BroadcastBlock || it is UnknownBlock
             }
         }
