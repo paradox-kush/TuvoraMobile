@@ -7,8 +7,11 @@ package com.nuvio.app.features.sportsdetail.api
  * RESUMED (`repeatOnLifecycle(Lifecycle.State.RESUMED)`), never a bare `while (true)`, and sleep for
  * [Plan.nextCheckInMs] (or stop when it is null).
  *
- *  - LIVE: event tick every `liveMs` (15 s), summary every `summaryMs` (60 s).
- *  - UPCOMING within [Config.preKickoffLeadMs] of kickoff: event tick only, so the card flips to live promptly.
+ *  - LIVE: event tick every `liveMs` (15 s) = the single-event scoreboard (score, clock, situation; ~2-3 KB gzip), summary
+ *    every `summaryMs` (60 s) = plays, stats, leaders, lineups, standings (35-52 KB gzip). A mapping without the single-event
+ *    template makes the session fall back to the summary on the event tick, exactly as before.
+ *  - UPCOMING within [Config.preKickoffLeadMs] of kickoff: event tick, so the card flips to live promptly; plus the summary
+ *    on its own cadence when `wantsUpcomingSummary` (soccer publishes lineups before kickoff).
  *  - Final, postponed, or live 12 h past kickoff: idle — ZERO requests and no next check.
  *  - Far-future upcoming: zero requests, but [Plan.nextCheckInMs] says when the lead window opens (the screen wakes).
  *  - Failures back off 2x/4x/8x so a flaky provider is not hammered.
@@ -47,6 +50,8 @@ object GameDetailRefreshPolicy {
         lastSummaryFetchMs: Long?,
         consecutiveFailures: Int = 0,
         config: Config = Config(),
+        /** Soccer publishes lineups before kickoff: inside the pre-kickoff window the summary is refreshed on its own (slow) cadence. */
+        wantsUpcomingSummary: Boolean = false,
     ): Plan {
         val backoff = 1L shl consecutiveFailures.coerceIn(0, MAX_BACKOFF_SHIFT)
         val eventEvery = maxOf(config.liveMs, config.minMs, CLIENT_FLOOR_MS) * backoff
@@ -65,6 +70,7 @@ object GameDetailRefreshPolicy {
                         val wait = remaining(lastEventFetchMs, nowMs, STALE_UPCOMING_RECHECK_MS)
                         Plan(fetchEvent = wait == 0L, fetchSummary = false, nextCheckInMs = wait)
                     }
+                    wantsUpcomingSummary -> Plan(fetchEvent = eventWait == 0L, fetchSummary = summaryWait == 0L, nextCheckInMs = minOf(eventWait, summaryWait))
                     else -> Plan(fetchEvent = eventWait == 0L, fetchSummary = false, nextCheckInMs = eventWait)
                 }
             }
@@ -75,6 +81,9 @@ object GameDetailRefreshPolicy {
             )
         }
     }
+
+    /** Sports whose lineups are published before kickoff (they need the summary inside the pre-kickoff window). */
+    fun wantsUpcomingSummary(sport: String): Boolean = sport.equals("soccer", ignoreCase = true)
 
     private fun remaining(lastMs: Long?, nowMs: Long, everyMs: Long): Long =
         if (lastMs == null) 0L else (everyMs - (nowMs - lastMs)).coerceAtLeast(0L)

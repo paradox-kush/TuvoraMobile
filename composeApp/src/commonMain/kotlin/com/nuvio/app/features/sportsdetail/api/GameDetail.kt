@@ -25,6 +25,11 @@ data class Side(
     val score: String? = null,
     val record: String? = null,
     val form: List<String>? = null,
+    /** Team colour hex without '#', from the feed (`team.color`); null when absent. Contrast is handled by TeamColor. */
+    val color: String? = null,
+    val altColor: String? = null,
+    /** Poll rank (`curatedRank.current`), null when unranked (ESPN uses 99 for "unranked"). */
+    val rank: Int? = null,
 )
 
 /** Live status line: clock "2H 49'", "Q2 5:12", "Over 38.2"; periodLabel; detail "Halftime". */
@@ -127,10 +132,30 @@ data class TimelineItem(
     val text: String,
     /** goal, card, sub, score, penalty. */
     val kind: String? = null,
+    /** ESPN play id. */
+    val id: String? = null,
+    /** The play's `wallclock`, epoch ms; null when the feed has none. */
+    val wallclockMs: Long? = null,
+    /** Running score AFTER this play, "10–21" (home–away), only when the feed gives both. */
+    val score: String? = null,
 )
 
 @Serializable @SerialName("timeline")
 data class TimelineBlock(val items: List<TimelineItem>, override val source: String = "") : GameBlock
+
+/** The full play list for the Plays section; [TimelineBlock] stays the scoring summary. Newest first. */
+@Serializable @SerialName("plays")
+data class PlaysBlock(val items: List<TimelineItem>, override val source: String = "") : GameBlock
+
+@Serializable
+data class StandingsTableRow(val teamId: String?, val name: String, val cells: List<String>, val isGameTeam: Boolean = false)
+
+@Serializable
+data class StandingsGroup(val name: String, val columns: List<String>, val rows: List<StandingsTableRow>)
+
+/** Generic standings (any league's stat columns); the old soccer-shaped [StandingsBlock] stays for the backend path. */
+@Serializable @SerialName("standingsTable")
+data class StandingsTableBlock(val groups: List<StandingsGroup>, override val source: String = "") : GameBlock
 
 @Serializable
 data class LineupPlayer(val number: String, val name: String, val pos: String, val starter: Boolean)

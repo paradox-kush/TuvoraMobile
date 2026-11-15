@@ -25,6 +25,8 @@ internal interface SportsHttp {
 internal interface EspnSource {
     suspend fun scoreboard(espnPath: String, yyyymmdd: String): SourceResult<JsonElement>
     suspend fun summary(espnPath: String, eventId: String): SourceResult<JsonElement>
+    /** The single-event scoreboard (`sources.espn.event`): the event object itself, same shape as an entry of the whole-day scoreboard. */
+    suspend fun event(espnPath: String, eventId: String): SourceResult<JsonElement> = SourceResult.Disabled
 }
 
 /**

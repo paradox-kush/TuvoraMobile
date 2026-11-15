@@ -88,6 +88,9 @@ class GameDetailSessionTest {
 
     private fun loaded(l: DetailLoad): GameDetail = assertIs<DetailLoad.Loaded>(l).detail
 
+    /** A mapping without `sources.espn.event` (an old remote mapping): the live tick is the summary, exactly as before the game-screen redesign. */
+    private fun legacyStore() = SportsMappingStore(MemStorage(), mappingOf(editedMappingJson("\"event\": \"https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard/{id}\",", "")))
+
     @Test fun `NBA final assembles header from TheSportsDB and blocks from ESPN`() = runBlocking<Unit> {
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
         val d = loaded(session(FakeTsdb(tsdbEvent()), espn).tick())
@@ -137,7 +140,8 @@ class GameDetailSessionTest {
         val lines = mutableListOf<String>()
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
         val tsdb = FakeTsdb(tsdbEvent(state = GameState.LIVE))
-        val s = GameDetailSession(ref, { SportsMappingStore(MemStorage(), bundledMapping()).current }, tsdb, espn, nowMs = { now }, report = {}, debug = { lines += it })
+        val legacy = legacyStore()
+        val s = GameDetailSession(ref, { legacy.current }, tsdb, espn, nowMs = { now }, report = {}, debug = { lines += it })
         s.tick()
         s.tick(fetchEvent = true, fetchSummary = false)
         s.tick(fetchEvent = true, fetchSummary = false)
@@ -303,7 +307,7 @@ class GameDetailSessionTest {
     @Test fun `a live tick requests only the summary of the resolved event - never the whole-day scoreboard`() = runBlocking<Unit> {
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
         val tsdb = FakeTsdb(tsdbEvent(state = GameState.LIVE))
-        val s = session(tsdb, espn)
+        val s = session(tsdb, espn, legacyStore())   // pins the legacy pattern; the new one is in GameScreenRefreshTest
         s.tick()
         val scoreboards = espn.scoreboardCalls
         val summaries = espn.summaryCalls
