@@ -80,7 +80,11 @@ data class TvWinCard(
     val awayName: String,
 )
 
-data class TvPlayRow(val key: String, val time: String, val period: String?, val tag: String?, val kind: String?, val text: String, val score: String?)
+data class TvPlayRow(
+    val key: String, val time: String, val period: String?, val tag: String?, val kind: String?, val text: String, val score: String?,
+    /** A hockey goal the FEED marked as scored on the power play (from the play's own strength, never our clock). */
+    val ppg: Boolean = false,
+)
 
 data class TvStatRowView(
     val label: String,
@@ -111,7 +115,10 @@ data class TvPanels(
 )
 
 /** What actually changed since the previous snapshot. Each is animated once; nothing loops. */
-enum class TvMomentKind { SCORE_CHANGE, WIN_CHANCE_MOVE, NEW_PLAY, FIELD_MOVE, TOUCHDOWN, POSSESSION_CHANGE, SOCCER_EVENT }
+enum class TvMomentKind {
+    SCORE_CHANGE, WIN_CHANCE_MOVE, NEW_PLAY, FIELD_MOVE, TOUCHDOWN, POSSESSION_CHANGE, SOCCER_EVENT,
+    POWER_PLAY_START, POWER_PLAY_END, FOUL_COUNT, BONUS_REACHED, TIMEOUT_USED,
+}
 data class TvMoment(
     val kind: TvMomentKind, val side: String?, val from: Int?, val to: Int?, val text: String?,
     /** FIELD_MOVE: the ball moved away from the goal it attacks. */
@@ -135,6 +142,8 @@ data class TvGameScreenModel(
     val soccer: TvSoccerStrip? = null,
     /** Both lineups placed on a pitch; null -> Swift lists the players (unknown formation or missing places). */
     val pitch: TvPitch? = null,
+    val basketball: TvBasketballStrip? = null,
+    val hockey: TvHockeyStrip? = null,
     val leftFit: TvLeftFit = TvLeftFit(showChart = true, showLastPlay = true),
     /** VoiceOver: posted only on a score change, once per update ("Dallas 2, Buffalo 0"). */
     val announcement: String?,
@@ -157,11 +166,16 @@ data class TvGameScreenModel(
             val field = TvStrips.field(detail, sides, colors)
             val soccer = TvStrips.soccer(detail, sides)
             val pitch = TvStrips.pitch(detail, colors)
+            val basketball = TvStrips.basketball(detail)
+            val hockey = TvStrips.hockey(detail)
             val board = scoreboard(detail, sides, colors, soccer = detail.blocks.filterIsInstance<SoccerStripBlock>().firstOrNull())
             val win = winCard(detail, sides, colors, nowMs)
             val last = lastPlay(detail)
             val leftFit = TvLeftColumnFit.fit(
-                stripDp = when { field != null -> TvStrips.FIELD_DP; soccer != null -> TvStrips.SOCCER_DP; else -> 0 },
+                stripDp = when {
+                    field != null -> TvStrips.FIELD_DP; soccer != null -> TvStrips.SOCCER_DP
+                    basketball != null -> TvStrips.BASKETBALL_DP; hockey != null -> TvStrips.HOCKEY_DP; else -> 0
+                },
                 scorerLines = maxOf(board.home?.scorers?.size ?: 0, board.away?.scorers?.size ?: 0),
                 hasLine = win?.chance?.line != null, hasChart = (win?.chart?.size ?: 0) >= 2, hasLastPlay = last != null,
             )
@@ -175,7 +189,7 @@ data class TvGameScreenModel(
                 situationLine = detail.blocks.filterIsInstance<SituationBlock>().firstOrNull()?.line?.takeIf { it.isNotBlank() },
                 updatedLabel = GameDetailUiPolicy.staleLabel(detail.asOf, nowMs) ?: if (stale) "Updating…" else null,
                 moments = moments.mapNotNull(::moment),
-                field = field, soccer = soccer, pitch = pitch, leftFit = leftFit,
+                field = field, soccer = soccer, pitch = pitch, basketball = basketball, hockey = hockey, leftFit = leftFit,
                 announcement = announcement(detail, moments),
             )
         }
@@ -298,7 +312,7 @@ data class TvGameScreenModel(
 
         private fun playRow(i: TimelineItem, d: GameDetail) = TvPlayRow(
             key = i.id ?: "${i.time}|${i.text}", time = i.time, period = periodLabel(d.sport, i.period), tag = GameDetailUiPolicy.teamTag(i.side, d.header),
-            kind = i.kind, text = i.text, score = i.score,
+            kind = i.kind, text = i.text, score = i.score, ppg = i.kind == "ppg",
         )
 
         private fun ordinal(n: Int) = when {
@@ -371,6 +385,10 @@ data class TvGameScreenModel(
             is Moment.Touchdown -> TvMoment(TvMomentKind.TOUCHDOWN, m.side, null, null, null)
             is Moment.PossessionChange -> TvMoment(TvMomentKind.POSSESSION_CHANGE, m.to, null, null, null)
             is Moment.SoccerMoment -> TvMoment(TvMomentKind.SOCCER_EVENT, m.event.side, null, null, m.event.text)
+            is Moment.PowerPlay -> TvMoment(if (m.started) TvMomentKind.POWER_PLAY_START else TvMomentKind.POWER_PLAY_END, m.side, null, null, null)
+            is Moment.FoulCount -> TvMoment(TvMomentKind.FOUL_COUNT, m.side, null, m.to, null)
+            is Moment.BonusReached -> TvMoment(TvMomentKind.BONUS_REACHED, m.side, null, null, null)
+            is Moment.TimeoutUsed -> TvMoment(TvMomentKind.TIMEOUT_USED, m.side, null, null, null)
         }
 
         private fun announcement(d: GameDetail, moments: List<Moment>): String? {

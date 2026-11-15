@@ -1,6 +1,9 @@
 package com.tuvora.tvos.screens
 
+import com.nuvio.app.features.sportsdetail.api.BasketballStripBlock
 import com.nuvio.app.features.sportsdetail.api.FieldDrive
+import com.nuvio.app.features.sportsdetail.api.HockeyStripBlock
+import com.nuvio.app.features.sportsdetail.api.ScoringRun
 import com.nuvio.app.features.sportsdetail.api.FootballFieldBlock
 import com.nuvio.app.features.sportsdetail.api.GameBlock
 import com.nuvio.app.features.sportsdetail.api.GameDetail
@@ -38,6 +41,8 @@ object TvGameScreenDemo {
     fun detail(kind: String, step: Int): GameDetail? = when (kind) {
         "football" -> football(step.coerceIn(0, STEPS - 1))
         "soccer" -> soccer(step.coerceIn(0, STEPS - 1))
+        "hockey" -> hockey(step.coerceIn(0, STEPS - 1))
+        "basketball" -> basketball(step.coerceIn(0, STEPS - 1))
         else -> null
     }
 
@@ -123,6 +128,70 @@ object TvGameScreenDemo {
                 StandingsTableBlock(listOf(StandingsGroup("Premier League", listOf("P", "W", "D", "L", "GD", "PTS"), listOf(
                     StandingsTableRow("1", "1  Arsenal", listOf("11", "8", "2", "1", "+17", "26"), true), StandingsTableRow("2", "2  Man City", listOf("11", "7", "2", "2", "+12", "23")),
                     StandingsTableRow("3", "5  Chelsea", listOf("11", "6", "3", "2", "+8", "21"), true)))),
+                ),
+            ),
+            asOf = mapOf("espn" to now()),
+        )
+    }
+
+    private fun hockey(step: Int): GameDetail {
+        val home = listOf("2", "2", "3")[step]
+        val strip = when (step) {
+            0 -> HockeyStripBlock(powerPlaySide = null, homeShots = 20, awayShots = 14, homePowerPlay = "0/1", awayPowerPlay = "0/0", homeFaceoffs = 14, awayFaceoffs = 11)
+            1 -> HockeyStripBlock(powerPlaySide = "home", powerPlaySecondsLeft = 72, homeShots = 22, awayShots = 14, homePowerPlay = "0/2", awayPowerPlay = "0/0", homeFaceoffs = 15, awayFaceoffs = 11)
+            else -> HockeyStripBlock(powerPlaySide = null, homeShots = 24, awayShots = 15, homePowerPlay = "1/2", awayPowerPlay = "0/0", homeFaceoffs = 16, awayFaceoffs = 12)
+        }
+        val plays = listOf(
+            listOf(play(3, "12:40", "away", "Hit by BUF", "2nd period"), play(2, "13:10", "home", "Shot on goal by DAL", "2nd period"), play(1, "14:02", "away", "Penalty to BUF, tripping", "2nd period", "penalty")),
+            listOf(play(4, "11:05", "home", "Shot on goal by DAL", "2nd period"), play(3, "12:40", "away", "Hit by BUF", "2nd period"), play(2, "13:10", "home", "Shot on goal by DAL", "2nd period")),
+            listOf(play(5, "9:51", "home", "Goal by DAL, power play", "2nd period", "ppg", "3–1"), play(4, "11:05", "home", "Shot on goal by DAL", "2nd period"), play(3, "12:40", "away", "Hit by BUF", "2nd period")),
+        )[step]
+        return GameDetail(
+            gameId = "demo:hockey", sport = "Ice Hockey", leagueId = "4380", leagueName = "NHL", venue = "American Airlines Center", state = GameState.LIVE,
+            header = TeamsHeader(
+                Side("Dallas Stars", short = "DAL", record = "9-4-1", score = home, color = "006847", altColor = "8f8f8c"),
+                Side("Buffalo Sabres", short = "BUF", record = "7-6-1", score = "1", color = "003087", altColor = "ffb81c"),
+            ),
+            live = LiveInfo(clock = "9:51", periodLabel = "2nd", detail = "2nd Period - 9:51", period = 2),
+            blocks = listOf<GameBlock>(
+                strip,
+                WinProbabilityBlock(homePercent = listOf(64, 66, 74)[step], source = "polymarket", attribution = "via Polymarket", history = history(60, 61, 63, listOf(64, 66, 74)[step]), asOfMs = now()),
+                PlaysBlock(plays),
+                StatsBlock(listOf(StatRow("Shots", "20", "14"), StatRow("Hits", "12", "18"), StatRow("Penalty Minutes", "2", "4"))),
+                StandingsTableBlock(listOf(StandingsGroup("Central", listOf("W", "L", "OTL", "PTS"), listOf(
+                    StandingsTableRow("1", "Dallas", listOf("9", "4", "1", "19"), true), StandingsTableRow("2", "Colorado", listOf("8", "4", "2", "18"))))),
+                ),
+            ),
+            asOf = mapOf("espn" to now()),
+        )
+    }
+
+    private fun basketball(step: Int): GameDetail {
+        val strip = when (step) {
+            0 -> BasketballStripBlock(homeFouls = 3, awayFouls = 4, homeBonus = "NONE", awayBonus = "NONE", homeTimeouts = 5, awayTimeouts = 4, possession = "home")
+            1 -> BasketballStripBlock(homeFouls = 4, awayFouls = 4, homeBonus = "DOUBLE", awayBonus = "NONE", homeTimeouts = 5, awayTimeouts = 4, possession = "away")
+            else -> BasketballStripBlock(homeFouls = 4, awayFouls = 5, homeBonus = "DOUBLE", awayBonus = "NONE", homeTimeouts = 4, awayTimeouts = 4, possession = "home",
+                run = ScoringRun("home", 10))   // demo only: the real run is behind the `basketballRun` switch (OFF)
+        }
+        val plays = listOf(
+            listOf(play(3, "4:10", "home", "Jump shot by DAL", "3rd quarter", "score", "70–68"), play(2, "4:31", "away", "Foul on BOS", "3rd quarter"), play(1, "4:50", "home", "Rebound by DAL", "3rd quarter")),
+            listOf(play(4, "3:44", "away", "Shooting foul on DAL", "3rd quarter"), play(3, "4:10", "home", "Jump shot by DAL", "3rd quarter", "score", "70–68"), play(2, "4:31", "away", "Foul on BOS", "3rd quarter")),
+            listOf(play(5, "3:02", "home", "Three point shot by DAL", "3rd quarter", "score", "73–68"), play(4, "3:44", "away", "Shooting foul on DAL", "3rd quarter"), play(3, "4:10", "home", "Jump shot by DAL", "3rd quarter", "score", "70–68")),
+        )[step]
+        return GameDetail(
+            gameId = "demo:basketball", sport = "Basketball", leagueId = "4387", leagueName = "NBA", venue = "American Airlines Center", state = GameState.LIVE,
+            header = TeamsHeader(
+                Side("Dallas Mavericks", short = "DAL", record = "7-5", score = listOf("70", "70", "73")[step], color = "00538c", altColor = "b8c4ca"),
+                Side("Boston Celtics", short = "BOS", record = "9-3", score = "68", color = "007a33", altColor = "ba9653"),
+            ),
+            live = LiveInfo(clock = "3:02", periodLabel = "3rd", detail = "3rd Quarter - 3:02", period = 3),
+            blocks = listOf<GameBlock>(
+                strip,
+                WinProbabilityBlock(homePercent = listOf(52, 54, 58)[step], source = "polymarket", attribution = "via Polymarket", history = history(48, 50, 51, listOf(52, 54, 58)[step]), asOfMs = now()),
+                PlaysBlock(plays),
+                StatsBlock(listOf(StatRow("Field Goal %", "48%", "44%"), StatRow("Rebounds", "30", "28"), StatRow("Turnovers", "8", "6"))),
+                StandingsTableBlock(listOf(StandingsGroup("West", listOf("W", "L", "PCT", "GB"), listOf(
+                    StandingsTableRow("1", "Dallas", listOf("7", "5", ".583", "2.0"), true), StandingsTableRow("2", "Denver", listOf("8", "3", ".727", "–"))))),
                 ),
             ),
             asOf = mapOf("espn" to now()),

@@ -42,6 +42,34 @@ data class TvSoccerStrip(
 data class TvPitchSpot(val x: Float, val y: Float, val number: String, val name: String, val isHome: Boolean)
 data class TvPitch(val homeName: String, val awayName: String, val homeFormation: String?, val awayFormation: String?, val homeHex: String?, val awayHex: String?, val spots: List<TvPitchSpot>)
 
+/** Basketball strip: direct feed values (fouls this period, timeouts left, bonus) and the switched, derived run. Swift only draws. */
+data class TvBasketballStrip(
+    /** "DAL 8-0 run"; null unless the `basketballRun` switch is on and a run of 8+ exists. */
+    val runLabel: String?,
+    /** "<Team> in the bonus"; the feed's raw value is never printed. */
+    val bonusLabel: String?,
+    val homeFouls: Int?, val awayFouls: Int?,
+    val homeTimeouts: Int?, val awayTimeouts: Int?,
+    /** "home" | "away" | null: a small dot beside that team's name on the scoreboard. */
+    val possession: String?,
+)
+
+/** Hockey strip. The time and bar exist only when core delivered a power-play clock (switch on and unambiguous). */
+data class TvHockeyStrip(
+    /** "Power play · DAL" or "Even strength". */
+    val chipLabel: String,
+    val onPowerPlay: Boolean,
+    val powerPlaySide: String?,
+    /** "1:12" as of the last update; nothing drains between updates. */
+    val timeLeftText: String?,
+    /** 0..1 of the penalty that is left, only with [timeLeftText]. */
+    val fractionLeft: Float?,
+    val homeShots: Int?, val awayShots: Int?,
+    /** "1/2 – 0/1". */
+    val powerPlayText: String?,
+    val homeFaceoffs: Int?, val awayFaceoffs: Int?,
+)
+
 /** What the left column can afford. The chart is the first thing to drop, then the last-play line (spec 03 B3). */
 data class TvLeftFit(val showChart: Boolean, val showLastPlay: Boolean)
 

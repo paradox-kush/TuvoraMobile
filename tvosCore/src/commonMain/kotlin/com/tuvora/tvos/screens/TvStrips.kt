@@ -1,6 +1,8 @@
 package com.tuvora.tvos.screens
 
+import com.nuvio.app.features.sportsdetail.api.BasketballStripBlock
 import com.nuvio.app.features.sportsdetail.api.FootballFieldBlock
+import com.nuvio.app.features.sportsdetail.api.HockeyStripBlock
 import com.nuvio.app.features.sportsdetail.api.GameDetail
 import com.nuvio.app.features.sportsdetail.api.GameState
 import com.nuvio.app.features.sportsdetail.api.LineupBlock
@@ -8,6 +10,7 @@ import com.nuvio.app.features.sportsdetail.api.LineupSide
 import com.nuvio.app.features.sportsdetail.api.Side
 import com.nuvio.app.features.sportsdetail.api.SoccerEvent
 import com.nuvio.app.features.sportsdetail.api.SoccerStripBlock
+import com.nuvio.app.features.sportsdetail.internal.BasketballStripPolicy
 import com.nuvio.app.features.sportsdetail.internal.FieldGeometry
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import com.nuvio.app.features.sportsdetail.internal.LineupPitchPolicy
@@ -16,6 +19,8 @@ import com.nuvio.app.features.sportsdetail.internal.LineupPitchPolicy
 internal object TvStrips {
     const val FIELD_DP = 60
     const val SOCCER_DP = 78
+    const val BASKETBALL_DP = 72
+    const val HOCKEY_DP = 62
 
     private fun short(s: Side) = s.short?.takeIf { it.isNotBlank() } ?: s.name
 
@@ -77,6 +82,45 @@ internal object TvStrips {
         return TvPitch(
             homeName = GameDetailUiPolicy.teamTag("home", d.header).orEmpty(), awayName = GameDetailUiPolicy.teamTag("away", d.header).orEmpty(),
             homeFormation = home.formation, awayFormation = away.formation, homeHex = colors.first, awayHex = colors.second, spots = spots,
+        )
+    }
+
+    fun basketball(d: GameDetail): TvBasketballStrip? {
+        val b = d.blocks.filterIsInstance<BasketballStripBlock>().firstOrNull() ?: return null
+        val any = b.homeFouls != null || b.awayFouls != null || b.homeTimeouts != null || b.awayTimeouts != null ||
+            b.possession != null || b.run != null || BasketballStripPolicy.inBonus("home", b) || BasketballStripPolicy.inBonus("away", b)
+        if (!any) return null
+        val homeIn = BasketballStripPolicy.inBonus("home", b)
+        val awayIn = BasketballStripPolicy.inBonus("away", b)
+        val bonus = when {
+            homeIn && awayIn -> "Both teams in the bonus"
+            homeIn -> "${GameDetailUiPolicy.teamTag("home", d.header).orEmpty()} in the bonus"
+            awayIn -> "${GameDetailUiPolicy.teamTag("away", d.header).orEmpty()} in the bonus"
+            else -> null
+        }
+        return TvBasketballStrip(
+            runLabel = b.run?.let { "${GameDetailUiPolicy.teamTag(it.side, d.header).orEmpty()} ${it.points}-0 run" },
+            bonusLabel = bonus,
+            homeFouls = b.homeFouls, awayFouls = b.awayFouls, homeTimeouts = b.homeTimeouts, awayTimeouts = b.awayTimeouts,
+            possession = b.possession?.takeIf { it == "home" || it == "away" },
+        )
+    }
+
+    /** The bar measures what is left of the penalty: a minor (2:00) unless more than that remains (4:00, then 5:00). */
+    private fun penaltyTotal(secondsLeft: Int) = when { secondsLeft > 240 -> 300; secondsLeft > 120 -> 240; else -> 120 }
+
+    fun hockey(d: GameDetail): TvHockeyStrip? {
+        val h = d.blocks.filterIsInstance<HockeyStripBlock>().firstOrNull() ?: return null
+        val side = h.powerPlaySide?.takeIf { it == "home" || it == "away" }
+        val left = if (side != null) h.powerPlaySecondsLeft?.takeIf { it >= 0 } else null
+        val pp = if (h.homePowerPlay != null && h.awayPowerPlay != null) "${h.homePowerPlay} – ${h.awayPowerPlay}" else null
+        return TvHockeyStrip(
+            chipLabel = if (side != null) "Power play · ${GameDetailUiPolicy.teamTag(side, d.header).orEmpty()}" else "Even strength",
+            onPowerPlay = side != null, powerPlaySide = side,
+            timeLeftText = left?.let { "${it / 60}:${(it % 60).toString().padStart(2, '0')}" },
+            fractionLeft = left?.let { (it.toFloat() / penaltyTotal(it)).coerceIn(0f, 1f) },
+            homeShots = h.homeShots, awayShots = h.awayShots, powerPlayText = pp,
+            homeFaceoffs = h.homeFaceoffs, awayFaceoffs = h.awayFaceoffs,
         )
     }
 }

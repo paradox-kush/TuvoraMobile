@@ -167,6 +167,7 @@ struct GameDetailScreen: View {
                 switch moment.kind {
                 case .scoreChange: pulse(moment.side)
                 case .touchdown: flashOnce(.touchdown(moment.side ?? "home"))
+                case .foulCount: flashOnce(.foul(moment.side ?? "home"))
                 case .fieldMove where moment.loss: flashOnce(.loss)
                 case .fieldMove where moment.firstDown: flashOnce(.firstDown)
                 default: break
@@ -231,9 +232,11 @@ struct GameDetailScreen: View {
 
     private func leftColumn(_ screen: TvGameScreenModel) -> some View {
         VStack(alignment: .leading, spacing: dp(7)) {
-            ScoreboardCard(board: screen.scoreboard, pulseSide: pulseSide, upcomingLabel: upcomingLabel, field: screen.field)
+            ScoreboardCard(board: screen.scoreboard, pulseSide: pulseSide, upcomingLabel: upcomingLabel, field: screen.field, possession: screen.basketball?.possession)
             if let field = screen.field { FieldStripCard(strip: field, flash: flash) }
             if let soccer = screen.soccer { SoccerStripCard(strip: soccer, board: screen.scoreboard) }
+            if let basketball = screen.basketball { BasketballStripCard(strip: basketball, board: screen.scoreboard, flash: flash) }
+            if let hockey = screen.hockey { HockeyStripCard(strip: hockey, board: screen.scoreboard) }
             if screen.leftFit.showLastPlay, let play = screen.lastPlay { LastPlayCard(play: play) }
             if let win = screen.winCard { WinChanceCard(card: win, showChart: screen.leftFit.showChart) }
             Spacer(minLength: 0)
@@ -353,6 +356,8 @@ private struct ScoreboardCard: View {
     let pulseSide: String?
     let upcomingLabel: String
     var field: TvFieldStrip? = nil
+    /// Basketball: a small dot beside the name of the team with the ball ("home" | "away").
+    var possession: String? = nil
     @Environment(\.nuvio) private var colors
 
     var body: some View {
@@ -391,7 +396,9 @@ private struct ScoreboardCard: View {
                             if let rank = s.rank?.intValue {
                                 Text("\(rank)").font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary)
                             }
+                            if possession == side && !trailing { Circle().fill(colors.secondary).frame(width: dp(7), height: dp(7)) }
                             Text(s.shortName).font(NuvioType.titleMediumSemi).foregroundStyle(colors.textPrimary).lineLimit(1)
+                            if possession == side && trailing { Circle().fill(colors.secondary).frame(width: dp(7), height: dp(7)) }
                         }
                         if let record = s.record { Text(record).font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary).lineLimit(1) }
                         if let dots = timeoutDots(side) { dots }
@@ -624,6 +631,10 @@ private struct PlaysPanel: View {
                 HStack(alignment: .firstTextBaseline, spacing: dp(8)) {
                     Text(row.time).font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary).frame(width: dp(48), alignment: .leading)
                     if let tag = row.tag { Text(tag).font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary) }
+                    if row.ppg {
+                        Text("PPG").font(NuvioType.labelSmall).foregroundStyle(colors.onSecondary)
+                            .padding(.horizontal, dp(5)).background(Capsule().fill(colors.secondary))
+                    }
                     Text(row.text).font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary).lineLimit(1)
                     Spacer(minLength: 0)
                     if let score = row.score { Text(score).font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary) }
@@ -837,6 +848,7 @@ private struct GameActionButton: View {
 private enum StripFlash: Equatable {
     case loss, firstDown
     case touchdown(String)
+    case foul(String)
 }
 
 private func hexColor(_ hex: String?, _ fallback: Color) -> Color { teamColor(hex, fallback: fallback) }
@@ -1022,5 +1034,127 @@ private struct PitchView: View {
             }
             .frame(height: dp(250))
         }
+    }
+}
+
+// MARK: - Basketball and hockey strips (Phase C)
+
+/// Filled / empty dots (`total` capped); a number follows when the count passes the dots.
+private struct CountDots: View {
+    let filled: Int
+    let total: Int
+    var showNumber = false
+    var popLast = false
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        HStack(spacing: dp(3)) {
+            ForEach(0..<total, id: \.self) { i in
+                Circle().fill(i < filled ? colors.secondary : colors.border)
+                    .frame(width: dp(8), height: dp(8))
+                    .scaleEffect(popLast && i == filled - 1 ? 1.5 : 1)
+            }
+            if showNumber && filled > total {
+                Text("\(filled)").font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary)
+            }
+        }
+    }
+}
+
+/// Basketball: run chip, bonus chip, team fouls (5 dots) and timeouts (7 dots). Fouls, bonus and timeouts are the feed's own.
+private struct BasketballStripCard: View {
+    let strip: TvBasketballStrip
+    let board: TvScoreboard
+    let flash: StripFlash?
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: dp(4)) {
+            if strip.runLabel != nil || strip.bonusLabel != nil {
+                HStack {
+                    if let run = strip.runLabel { chip(run, filled: true).id(run).transition(.scale.combined(with: .opacity)) }
+                    Spacer(minLength: dp(6))
+                    if let bonus = strip.bonusLabel { chip(bonus, filled: false).id(bonus).transition(.scale.combined(with: .opacity)) }
+                }
+            }
+            if strip.homeFouls != nil || strip.awayFouls != nil {
+                pair("Team fouls") { side in
+                    let n = (side == "home" ? strip.homeFouls : strip.awayFouls)?.intValue
+                    return n.map { AnyView(CountDots(filled: $0, total: 5, showNumber: true, popLast: flash == .foul(side))) }
+                }
+            }
+            if strip.homeTimeouts != nil || strip.awayTimeouts != nil {
+                pair("Timeouts") { side in
+                    let n = (side == "home" ? strip.homeTimeouts : strip.awayTimeouts)?.intValue
+                    return n.map { AnyView(CountDots(filled: $0, total: 7)) }
+                }
+            }
+        }
+        .padding(.horizontal, dp(12)).padding(.vertical, dp(7))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: dp(12)).fill(colors.backgroundCard))
+    }
+
+    private func pair(_ label: String, _ dots: (String) -> AnyView?) -> some View {
+        HStack(spacing: dp(6)) {
+            Text(board.home?.shortName ?? "").font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary)
+            if let d = dots("home") { d }
+            Spacer(minLength: dp(4))
+            Text(label).font(NuvioType.labelSmall).foregroundStyle(colors.textSecondary)
+            Spacer(minLength: dp(4))
+            if let d = dots("away") { d }
+            Text(board.away?.shortName ?? "").font(NuvioType.labelSmall).foregroundStyle(colors.textTertiary)
+        }
+    }
+
+    private func chip(_ text: String, filled: Bool) -> some View {
+        Text(text).font(NuvioType.labelSmall)
+            .foregroundStyle(filled ? colors.onSecondary : colors.secondary)
+            .padding(.horizontal, dp(8)).padding(.vertical, dp(2))
+            .background(Capsule().fill(filled ? colors.secondary : colors.secondary.opacity(0.16)))
+    }
+}
+
+/// Hockey: "Power play · TEAM" chip (+ time and a bar only when the derived clock exists), shots, power plays, faceoffs.
+private struct HockeyStripCard: View {
+    let strip: TvHockeyStrip
+    let board: TvScoreboard
+    @Environment(\.nuvio) private var colors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: dp(4)) {
+            HStack(spacing: dp(6)) {
+                Text(strip.chipLabel).font(NuvioType.labelSmall)
+                    .foregroundStyle(strip.onPowerPlay ? colors.onSecondary : colors.textSecondary)
+                    .padding(.horizontal, dp(8)).padding(.vertical, dp(2))
+                    .background(Capsule().fill(strip.onPowerPlay ? colors.secondary : colors.backgroundElevated))
+                    .id(strip.chipLabel).transition(.scale.combined(with: .opacity))
+                if let left = strip.timeLeftText {
+                    Text(left).font(NuvioType.labelMedium).foregroundStyle(colors.textPrimary).contentTransition(.numericText())
+                }
+                Spacer(minLength: dp(6))
+                if let hs = strip.homeShots?.intValue, let a = strip.awayShots?.intValue {
+                    Text("Shots \(hs) – \(a)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary).contentTransition(.numericText())
+                }
+            }
+            if let fraction = strip.fractionLeft?.floatValue {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(colors.border)
+                        Capsule().fill(colors.secondary).frame(width: geo.size.width * CGFloat(fraction))
+                    }
+                }
+                .frame(height: dp(5))
+            }
+            HStack {
+                if let pp = strip.powerPlayText { Text("Power plays \(pp)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary) }
+                Spacer(minLength: dp(6))
+                if let f = strip.homeFaceoffs?.intValue, let g = strip.awayFaceoffs?.intValue {
+                    Text("Faceoffs \(f) – \(g)").font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                }
+            }
+        }
+        .padding(.horizontal, dp(12)).padding(.vertical, dp(7))
+        .background(RoundedRectangle(cornerRadius: dp(12)).fill(colors.backgroundCard))
     }
 }
