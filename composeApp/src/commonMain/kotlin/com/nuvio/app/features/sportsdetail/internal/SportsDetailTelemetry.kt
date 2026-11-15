@@ -1,7 +1,7 @@
 package com.nuvio.app.features.sportsdetail.internal
 
 import co.touchlab.kermit.Logger
-import com.nuvio.app.core.analytics.AnalyticsSink
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
@@ -40,7 +40,7 @@ internal object SportsDetailTelemetry {
                 if (sent.compareAndSet(cur, cur + (key to n + 1))) break
             }
         }
-        runCatching { AnalyticsSink.capture(EVENT, props) }
+        runCatching { TelemetryAccess.current().emit(EVENT, props) }
     }
 
     /** A remote mapping was refused. Reason is a short CODE (never the free-text reason, a URL or the body). */
