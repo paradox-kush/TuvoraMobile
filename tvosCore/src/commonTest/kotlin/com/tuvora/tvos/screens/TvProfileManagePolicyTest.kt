@@ -29,6 +29,11 @@ class TvProfileManagePolicyTest {
     }
 
     @Test
+    fun `empty account still offers the add card`() {
+        assertTrue(p.canAddProfile(0))
+    }
+
+    @Test
     fun `names are capped and blank names cannot be saved`() {
         assertEquals(20, p.clampName("x".repeat(30)).length)
         assertFalse(p.canSave("  ", isSaving = false))
