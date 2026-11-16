@@ -27,6 +27,11 @@ internal data class WinChanceSpec(val leaderSide: String, val threeWay: Boolean,
  *  - markers use the same plotted value ([valueOf]) and the same reference ([WinChanceSpec.reference]) as the line.
  */
 internal object WinChanceSeries {
+    /** The chart stays hidden until it has this many points: one point would draw a lone dot, not a line. */
+    const val MIN_POINTS = 2
+
+    fun isVisible(history: List<WinPoint>): Boolean = history.size >= MIN_POINTS
+
     fun specOf(w: WinProbabilityBlock): WinChanceSpec {
         val home = w.homePercent.coerceIn(0, 100)
         val draw = w.drawPercent?.coerceIn(0, 100)?.takeIf { it > 0 }
