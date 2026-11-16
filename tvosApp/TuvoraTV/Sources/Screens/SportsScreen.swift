@@ -287,6 +287,10 @@ private struct MatchCard: View {
     let radar: RadarUiState
     let now: Int64
     let action: () -> Void
+    /// Take focus when it appears (the league page's first card, so Follow never gets a stray Select).
+    var autoFocus = false
+    /// Up from this card goes here explicitly (the league page's Follow button).
+    var onUp: (() -> Void)? = nil
     @Environment(\.nuvio) private var colors
     @FocusState private var focused: Bool
 
@@ -341,6 +345,10 @@ private struct MatchCard: View {
         .buttonStyle(PlainNoChromeButtonStyle())
         .focused($focused)
         .reportsFocus(focused)
+        .onAppear { if autoFocus { DispatchQueue.main.async { focused = true } } }
+        .onMoveCommand { direction in
+            if direction == .up, let onUp, TvLeagueFocusPolicy.shared.up(onFirstRow: true) == .follow { onUp() }
+        }
     }
 }
 
@@ -574,8 +582,8 @@ private struct LeaguePageView: View {
                     .reportsFocus(followFocused)
                 }
                 .focusSection()
-                if !page.upcoming.isEmpty { section("Live & Upcoming", page.upcoming) }
-                if !page.recent.isEmpty { section("Recent results", page.recent) }
+                if !page.upcoming.isEmpty { section("Live & Upcoming", page.upcoming, first: true) }
+                if !page.recent.isEmpty { section("Recent results", page.recent, first: page.upcoming.isEmpty) }
                 if page.empty {
                     Text("No scheduled matches right now.").font(NuvioType.bodyMedium).foregroundStyle(colors.textSecondary)
                         .padding(.vertical, dp(12))
@@ -591,15 +599,21 @@ private struct LeaguePageView: View {
             .padding(.horizontal, SportsMetrics.gutter).padding(.vertical, dp(24))
         }
         .scrollClipDisabled()
-        .onAppear { DispatchQueue.main.async { followFocused = true } }
+        .onAppear {
+            // Follow is a toggle: it only takes first focus when there is no game card to land on.
+            let hasGames = !page.upcoming.isEmpty || !page.recent.isEmpty
+            if TvLeagueFocusPolicy.shared.initial(hasGames: hasGames) == .follow { DispatchQueue.main.async { followFocused = true } }
+        }
     }
 
-    private func section(_ title: String, _ fixtures: [RadarFixture]) -> some View {
+    private func section(_ title: String, _ fixtures: [RadarFixture], first: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: dp(8)) {
             Text(ui: title).font(NuvioType.titleMediumSemi).foregroundStyle(colors.textPrimary).padding(.vertical, dp(8))
             LazyVGrid(columns: [GridItem(.adaptive(minimum: SportsMetrics.matchCardWidth), spacing: dp(12))], alignment: .leading, spacing: dp(12)) {
-                ForEach(fixtures, id: \.self) { fixture in
-                    MatchCard(fixture: fixture, radar: radar, now: now) { onMatch(fixture) }
+                ForEach(Array(fixtures.enumerated()), id: \.element) { index, fixture in
+                    let isFirst = first && index == 0
+                    MatchCard(fixture: fixture, radar: radar, now: now, action: { onMatch(fixture) },
+                              autoFocus: isFirst, onUp: isFirst ? { followFocused = true } : nil)
                 }
             }
             .focusSection()
