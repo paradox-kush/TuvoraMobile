@@ -745,7 +745,8 @@ private struct LiveGuideView: View {
     private var categoryColumn: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(alignment: .leading, spacing: dp(2)) {
-                GuideCategoryRow(title: guideQuery.isEmpty ? "Search" : "Search: “\(guideQuery)”", selected: category == "search") { searchOpen = true }
+                // UX2 (sim pass 2026-11-16): not plain "Search", which is also the chip above that searches the hub.
+                GuideCategoryRow(title: guideQuery.isEmpty ? "Search channels" : "Search: “\(guideQuery)”", selected: category == "search") { searchOpen = true }
                     .focused($categoryFocus, equals: "search")
                     .accessibilityIdentifier("guide.search")
                 GuideCategoryRow(title: "All favorites", selected: category == "allfavorites") { category = "allfavorites" }
@@ -880,7 +881,7 @@ private struct LiveGuideView: View {
             } else if visible.isEmpty {
                 if category == "search" {
                     NuvioStateMessage(title: guideQuery.isEmpty ? "Search channels" : "No channels match “\(guideQuery)”",
-                                      message: "Press OK on Search to type a channel name", actionTitle: "Search") { searchOpen = true }
+                                      message: "Press OK on Search channels to type a channel name", actionTitle: "Search") { searchOpen = true }
                 } else {
                     NuvioStateMessage(title: "No channels here", message: category == "recent" ? "Channels you watch show up here." : "This category is empty on your provider.")
                 }
