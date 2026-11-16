@@ -61,6 +61,7 @@ import com.nuvio.app.core.ui.NuvioDropdownChip
 import com.nuvio.app.core.ui.NuvioDropdownOption
 import com.nuvio.app.core.ui.NuvioPosterCard
 import com.nuvio.app.core.ui.NuvioPosterShape
+import com.nuvio.app.core.ui.LocalScreenActive
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.NuvioShelfSection
 import com.nuvio.app.core.ui.NuvioTokens
@@ -243,7 +244,8 @@ fun XtreamHubScreen(
             searchController.clear()
         }
     }
-    PlatformBackHandler(enabled = searchOpen && searchApplies) {
+    val screenActive = LocalScreenActive.current
+    PlatformBackHandler(enabled = IptvHubSearchBackPolicy.consumesBack(searchOpen, searchApplies, screenActive)) {
         searchOpen = false
         searchController.clear()
     }
