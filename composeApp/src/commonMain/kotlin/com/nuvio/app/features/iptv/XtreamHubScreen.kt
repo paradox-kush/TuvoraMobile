@@ -250,7 +250,15 @@ fun XtreamHubScreen(
         searchOpen = false
         searchController.clear()
     }
-    val openCategory = openCategoryId?.let { id -> displayedCategories.firstOrNull { it.id == id } }
+    // UX5: leaving the hub (another root tab) with a bare search closes it, so the next visit opens on the
+    // section, not on an empty input prompt. A real query is kept with its results.
+    LaunchedEffect(screenActive) {
+        if (!screenActive && searchOpen && !HubEntrySectionPolicy.keepsSearchOnLeave(searchController.state.value.query)) {
+            searchOpen = false
+            searchController.clear()
+        }
+    }
+    val openCategory =openCategoryId?.let { id -> displayedCategories.firstOrNull { it.id == id } }
 
     val tokens = MaterialTheme.nuvio
     val listState = rememberLazyListState()

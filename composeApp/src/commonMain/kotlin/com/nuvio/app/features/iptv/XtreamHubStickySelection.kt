@@ -95,6 +95,13 @@ internal object HubEntrySectionPolicy {
             ?: XtreamHubSection.LIVE
     }
 
+    /**
+     * UX5 (sim pass 2026-11-16): whether the hub search is still open when the viewer comes back. A bare search
+     * (nothing typed, or too short to have searched) is treated like an empty tab: it closes on leave, so the hub
+     * reopens on its section instead of a bare input prompt. A real query keeps the viewer's results.
+     */
+    fun keepsSearchOnLeave(query: String): Boolean = query.trim().length >= IptvHubSearchPolicy.MIN_QUERY_LENGTH
+
     /** The tab to hand over to when the entry tab [current] proved empty; null once every enabled tab was [tried]. */
     fun advanceFrom(
         current: XtreamHubSection,
