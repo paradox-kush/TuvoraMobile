@@ -74,6 +74,7 @@ import com.nuvio.app.features.sportsdetail.internal.ui.rememberReduceMotion
 import com.nuvio.app.features.sportsdetail.internal.ui.WatchPrimary
 import com.nuvio.app.features.sportsdetail.internal.ui.WinChanceCard
 import com.nuvio.app.features.sportsdetail.internal.ui.GameBackButton
+import com.nuvio.app.features.sportsdetail.internal.ui.GameTopFade
 import com.nuvio.app.features.sportsdetail.internal.ui.StaleChip
 import com.nuvio.app.features.sportsdetail.internal.ui.WatchCard
 import kotlin.time.Clock
@@ -222,6 +223,15 @@ private fun LoadedContent(
                         }
                     }
                     sectionItems(section, detail, wide = false, fadeKey = switchSeq, reduce = reduce)
+                }
+                // Soft edge where scrolled content meets the fixed back-button header (no hard dark band).
+                val scrolled by remember { derivedStateOf { listState.canScrollBackward } }
+                if (GameTopFade.visible(scrolled, slim)) {
+                    val bg = MaterialTheme.nuvio.colors.background
+                    Box(
+                        Modifier.fillMaxWidth().height(NuvioTokens.Space.s16)
+                            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(bg, androidx.compose.ui.graphics.Color.Transparent))),
+                    )
                 }
             }
         }

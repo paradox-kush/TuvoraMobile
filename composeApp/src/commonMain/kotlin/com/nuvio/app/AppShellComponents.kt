@@ -82,6 +82,7 @@ internal data class AppTabRequests(
     val searchScrollToTopRequests: Flow<Unit>,
     val libraryScrollToTopRequests: Flow<Unit>,
     val iptvScrollToTopRequests: Flow<Unit>,
+    val sportsRootRequests: Flow<Unit>,
     val settingsRootActionRequests: Flow<Unit>,
 )
 
@@ -220,6 +221,7 @@ internal fun AppTabHost(
                     },
                     // Replays ride the live route with the programme bounds beside the id.
                     onPlayReplay = actions.onPlaySportsReplay,
+                    rootRequests = requests.sportsRootRequests,
                 )
             }
 

@@ -207,3 +207,8 @@ internal class PlayedLedger {
         return nowMs - w.second <= windowMs
     }
 }
+
+/** The soft edge under the fixed back-button header: only while content has scrolled under it and no sticky score bar already covers that edge. */
+internal object GameTopFade {
+    fun visible(scrolledPastTop: Boolean, stickyBarShown: Boolean): Boolean = scrolledPastTop && !stickyBarShown
+}
