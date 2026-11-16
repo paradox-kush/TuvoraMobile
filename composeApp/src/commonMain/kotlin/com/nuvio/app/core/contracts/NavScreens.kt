@@ -34,6 +34,8 @@ interface SportsHubContent {
         onAddPlaylist: () -> Unit,
         onOpenRecording: (String) -> Unit,
         onPlayReplay: (SportsReplay) -> Unit,
+        /** Fires when the Sports tab is re-selected while already shown: return to the Sports root. */
+        rootRequests: Flow<Unit>,
     )
 }
 

@@ -13,6 +13,7 @@ import com.nuvio.app.features.sportsdetail.api.TimelineItem
 import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
 import com.nuvio.app.features.sportsdetail.internal.GameMomentTracker
 import com.nuvio.app.features.sportsdetail.internal.Moment
+import com.nuvio.app.features.sportsdetail.internal.ui.GameTopFade
 import com.nuvio.app.features.sportsdetail.internal.ui.GameScoreBar
 import com.nuvio.app.features.sportsdetail.internal.ui.GameTabsUi
 import com.nuvio.app.features.sportsdetail.internal.ui.PlaysGrouping
@@ -222,5 +223,14 @@ class StandingsFitTest {
 
     @Test fun `wide cards keep the full 38 dp cells`() {
         assertEquals(38f, fit.of(600f, 7).cellDp, "no shrink when there is room")
+    }
+}
+
+class GameTopFadeTest {
+    @Test
+    fun `fade shows only once scrolled and when no sticky bar covers the edge`() {
+        assertEquals(false, GameTopFade.visible(scrolledPastTop = false, stickyBarShown = false))
+        assertEquals(true, GameTopFade.visible(scrolledPastTop = true, stickyBarShown = false))
+        assertEquals(false, GameTopFade.visible(scrolledPastTop = true, stickyBarShown = true))
     }
 }

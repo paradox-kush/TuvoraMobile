@@ -21,6 +21,8 @@ struct IptvHubScreen: View {
     // Live: the guide owns channel search; the header chip asks it to open (bumped per press) so Search sits in one place on every section.
     @State private var liveSearchRequest = 0
     @FocusState private var chipFocus: String?
+    /// F7: the hub is one focus scope so the live guide's first channel can be the preferred landing on entry.
+    @Namespace private var entryScope
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -49,7 +51,7 @@ struct IptvHubScreen: View {
                 } else if hub.section == .live {
                     LiveGuideView(accountId: hub.selectedAccountId ?? hub.accounts[0].id,
                                   categories: hub.categories.map { ($0.id, $0.name) },
-                                  searchRequest: liveSearchRequest)
+                                  searchRequest: liveSearchRequest, entryScope: entryScope)
                 } else {
                     IptvShelves(hub: hub) { details = PreviewBox(preview: $0) }
                 }
@@ -63,6 +65,7 @@ struct IptvHubScreen: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .focusScope(entryScope)
         .task {
             TvIptvBrowse.shared.open(section: hub?.section ?? .live)
             for await next in TvIptvBrowse.shared.state {
@@ -391,6 +394,8 @@ private struct LiveGuideView: View {
     let categories: [(String, String)]
     /// F48: the hub's Search chip was pressed on Live (bumped per press) — open this guide's own channel search.
     var searchRequest: Int = 0
+    /// F7: the hub's focus scope; the first channel is its preferred focus (TvIptvEntryFocus).
+    var entryScope: Namespace.ID? = nil
     @EnvironmentObject private var playback: PlaybackCoordinator
     @Environment(\.nuvio) private var colors
 
@@ -407,6 +412,9 @@ private struct LiveGuideView: View {
     @State private var previewing: LiveGuideChannel?
     @State private var previewSession: TvPlayerSession?
     @State private var previewFullscreenRequested = false
+    /// What the strip shows for the opened channel: loading, playing, or failed with Retry (TvGuidePreviewPolicy).
+    @State private var previewStatus: TvGuidePreviewStatus?
+    @State private var previewOpenedAt = Date()
     /// Latest preview request wins: one that resolves after another channel was chosen or the guide
     /// closed would otherwise play on with no screen (B112).
     @State private var previewRequests = TvPlaybackRequestGate()
@@ -597,6 +605,7 @@ private struct LiveGuideView: View {
             cellDescription = try? await TvCatchUp.shared.description(contentId: channel.contentId, programme: cell)
         }
         .onChange(of: timelineChannel) { _, _ in syncEdgeOwnership() }
+        .task(id: previewing?.contentId) { await watchPreview() }
         // P5: leaving the favourites row lets a held removed row go.
         .onChange(of: category) { _, _ in if !undoInFlight { dropHeldRemoval() } }
         // The guide keeps a display mode the fullscreen player matched (it never switches one itself, as
@@ -770,6 +779,19 @@ private struct LiveGuideView: View {
                 if let previewSession {
                     EngineHost(session: previewSession, generation: 0)
                 }
+                if let status = previewStatus, status.phase != .playing, let channel = previewing {
+                    if status.phase == .loading {
+                        ProgressView()
+                    } else {
+                        VStack(spacing: dp(8)) {
+                            Text(status.message ?? "").font(NuvioType.bodySmall).foregroundStyle(colors.textPrimary)
+                                .multilineTextAlignment(.center).lineLimit(3)
+                            Button("Retry") { retryPreview(channel) }
+                                .buttonStyle(.bordered)
+                        }
+                        .padding(dp(8))
+                    }
+                }
             }
             .frame(width: Self.previewHeight * 16 / 9, height: Self.previewHeight)
             .clipShape(RoundedRectangle(cornerRadius: dp(8)))
@@ -899,6 +921,8 @@ private struct LiveGuideView: View {
                                             onEdge: { direction in travel(direction, channel: channel) },
                                             onLeaveTimeline: { leaveTimeline(refocus: channel) },
                                             onLeft: showCategories)
+                                .modifier(EntryFocus(scope: entryScope, preferred: index == 0
+                                    && TvIptvEntryFocus.shared.landing(section: .live, hasChannels: true) == .channels))
                                 // Hold OK (NuvioTV) = the tvOS context menu.
                                 .contextMenu {
                                     // F03: Undo for the favourite toggle just made (the tvOS stand-in for
@@ -1071,9 +1095,32 @@ private struct LiveGuideView: View {
             ?? rowProgrammes(channel).first { $0.startMs <= now && $0.endMs > now }
     }
 
+    private func retryPreview(_ channel: LiveGuideChannel) {
+        previewRequests.cancel()
+        previewSession?.close(); previewSession = nil; previewing = nil; previewStatus = nil
+        select(channel)
+    }
+
+    /// Re-evaluates the strip once a second while a channel is open: the deadline is held here, never left to the engine.
+    private func watchPreview() async {
+        while !Task.isCancelled, previewing != nil {
+            let state = previewSession?.state.value
+            let elapsed = Int64(Date().timeIntervalSince(previewOpenedAt) * 1000)
+            let status = TvGuidePreviewPolicy.shared.status(elapsedMs: elapsed, playing: state?.isPlaying ?? false, error: state?.errorMessage)
+            if previewStatus?.phase != status.phase || previewStatus?.message != status.message { previewStatus = status }
+            if status.phase == .failed { return }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+    }
+
     /// OK previews a channel in the strip; OK on the previewing channel goes full screen.
     private func select(_ channel: LiveGuideChannel) {
         notice = nil
+        // A failed preview: OK asks again instead of waiting on a session that will not come.
+        if previewStatus?.phase == .failed, previewing?.contentId == channel.contentId {
+            previewRequests.cancel()
+            previewSession?.close(); previewSession = nil; previewing = nil; previewStatus = nil
+        }
         TvCatchUp.shared.cancelOpens()   // a replay still opening for another programme publishes nothing
         let action = TvGuideSelectionPolicy.shared.decide(
             sameChannel: previewing?.contentId == channel.contentId,
@@ -1103,6 +1150,8 @@ private struct LiveGuideView: View {
         previewSession?.close()
         previewSession = nil
         previewing = channel
+        previewOpenedAt = Date()
+        previewStatus = TvGuidePreviewPolicy.shared.status(elapsedMs: 0, playing: false, error: nil)
         let request = previewRequests.begin()
         Task {
             let resolved = try? await TvIptvBrowse.shared.playChannel(contentId: channel.contentId, name: channel.name, logo: channel.logo)
@@ -1520,5 +1569,14 @@ private struct GuideChannelSearchDialog: View {
                 SettingsActionRow(title: "Clear search", showChevron: false) { onSearch("") }
             }
         }
+    }
+}
+
+/// F7: marks one view as the preferred focus of its scope (nothing when there is no scope or it is not preferred).
+private struct EntryFocus: ViewModifier {
+    let scope: Namespace.ID?
+    let preferred: Bool
+    func body(content: Content) -> some View {
+        if let scope, preferred { content.prefersDefaultFocus(true, in: scope) } else { content }
     }
 }
