@@ -159,16 +159,21 @@ struct PreviewBox: Identifiable {
 private struct PlaylistDialog: View {
     let hub: XtreamHubUiState
     let dismiss: () -> Void
+    @FocusState private var focus: String?
 
     var body: some View {
         NuvioDialog(title: "Choose a playlist") {
             ForEach(hub.accounts, id: \.id) { account in
-                SettingsActionRow(title: TvIptvSettingsPolicy.shared.playlistName(name: account.name), value: account.id == hub.selectedAccountId ? "Selected" : nil) {
+                // Names stay on one line (SettingsActionRow ellipsizes); the current playlist is marked "Current".
+                SettingsActionRow(title: TvIptvSettingsPolicy.shared.playlistName(name: account.name), value: account.id == hub.selectedAccountId ? "Current" : nil) {
                     TvIptvBrowse.shared.selectPlaylist(accountId: account.id)
                     dismiss()
                 }
+                .focused($focus, equals: account.id)
             }
         }
+        // UX4 (sim pass 2026-11-16): open on the current playlist, not the first row.
+        .defaultFocus($focus, hub.selectedAccountId ?? hub.accounts.first?.id)
     }
 }
 
