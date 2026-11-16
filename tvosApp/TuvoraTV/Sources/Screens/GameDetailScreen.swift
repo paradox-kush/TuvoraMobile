@@ -276,15 +276,15 @@ struct GameDetailScreen: View {
         // Watching (a live channel is already open) switches; browsing plays the best matched channel.
         let watching = playback.session?.session.title
         let best = matches.first
+        // One label policy for every sport: "Play / <channel>" when a channel matched, "Find channels" only when none did.
+        let label = TvWatchActionPolicy.shared.label(watching: watching, bestChannel: best?.channel.name, matching: matching)
         return HStack(spacing: dp(10)) {
-            if let watching {
-                GameActionButton(title: L("Switch"), subtitle: L("Now on \(watching)"), target: .play, focus: $focus) { showSheet = true }
-            } else if let best {
-                GameActionButton(title: L("Play"), subtitle: best.channel.name, target: .play, focus: $focus) { play(best) }
+            if watching == nil, let best {
+                GameActionButton(title: L(label.title), subtitle: label.subtitle, target: .play, focus: $focus) { play(best) }
                     .disabled(opening)
                 if matches.count > 1 { GameActionButton(title: L("More channels"), subtitle: nil, target: .more, focus: $focus) { showSheet = true } }
             } else {
-                GameActionButton(title: matching ? L("Finding channels…") : L("Find channels"), subtitle: nil, target: .play, focus: $focus) { showSheet = true }
+                GameActionButton(title: L(label.title), subtitle: label.subtitle, target: .play, focus: $focus) { showSheet = true }
             }
         }
     }
