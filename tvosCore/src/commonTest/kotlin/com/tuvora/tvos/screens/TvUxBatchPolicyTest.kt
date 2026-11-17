@@ -17,8 +17,14 @@ class TvUxBatchPolicyTest {
     }
 
     @Test
+    fun `the channel on the play action is cleaned of provider tags`() {
+        assertEquals(TvWatchLabel("Play", "Sky Sports Main Event"), TvWatchActionPolicy.label(null, "UK || SKY SPORTS MAIN EVENT HD", false), "tag + caps + quality")
+        assertEquals(TvWatchLabel("Switch", "Now on Sky Sports Main Event"), TvWatchActionPolicy.label("UK || SKY SPORTS MAIN EVENT", "x", false), "watching name too")
+    }
+
+    @Test
     fun `the play action reads Play with a channel and Find channels without one for every sport`() {
-        assertEquals(TvWatchLabel("Play", "ESPN HD"), TvWatchActionPolicy.label(watching = null, bestChannel = "ESPN HD", matching = false))
+        assertEquals(TvWatchLabel("Play", "ESPN"), TvWatchActionPolicy.label(watching = null, bestChannel = "ESPN HD", matching = false))
         assertEquals(TvWatchLabel("Find channels", null), TvWatchActionPolicy.label(watching = null, bestChannel = null, matching = false))
         assertEquals(TvWatchLabel("Finding channels…", null), TvWatchActionPolicy.label(watching = null, bestChannel = null, matching = true))
         assertEquals(TvWatchLabel("Switch", "Now on Sky"), TvWatchActionPolicy.label(watching = "Sky", bestChannel = "ESPN HD", matching = false))
