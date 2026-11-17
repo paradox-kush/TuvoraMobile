@@ -429,6 +429,20 @@ class GameDetailSessionTest {
 
     private fun winBlock(d: GameDetail) = d.blocks.filterIsInstance<com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock>().singleOrNull()
 
+    @Test fun `F9 - a lagging backend UPCOMING with ESPN LIVE still fetches the summary so plays and strips appear`() = runBlocking<Unit> {
+        val espn = nhl("post", "in")
+        val s = session(FakeTsdb(tsdbEvent(home = "Buffalo Sabres", away = "Columbus Blue Jackets", state = GameState.UPCOMING, hs = null, aws = null)), espn, r = nhlRef)
+        val d = loaded(s.tick())
+        assertEquals(GameState.LIVE, d.state, "the header already shows the fresher ESPN state")
+        assertEquals(1, espn.summaryCalls, "the summary decision must use that same fresher state")
+    }
+
+    @Test fun `F9 - a genuinely upcoming game on both sources still skips the summary`() = runBlocking<Unit> {
+        val espn = nhl("post", "pre")
+        loaded(session(FakeTsdb(tsdbEvent(home = "Buffalo Sabres", away = "Columbus Blue Jackets", state = GameState.UPCOMING, hs = null, aws = null)), espn, r = nhlRef).tick())
+        assertEquals(0, espn.summaryCalls)
+    }
+
     @Test fun `ESPN stays the headline but the market is always asked for storylines and the chart`() = runBlocking<Unit> {
         val liveEvent = SportsFixtures.espn_nba_event.replace("\"state\":\"post\"", "\"state\":\"in\"")
         val liveSummary = SportsFixtures.espn_nba_summary.replace("\"state\":\"post\"", "\"state\":\"in\"")
