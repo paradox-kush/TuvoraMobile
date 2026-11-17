@@ -44,6 +44,7 @@ internal object M3uIngestMapping {
                 IptvStreamRow(
                     M3uIdentity.itemSid(entry.url, login), entry.name, entry.logo, entry.tvgId, catId, entry.url, entry.ext,
                     catchUp = entry.catchUp,
+                    streamHeaders = entry.headers,
                 ),
                 catId,
             )

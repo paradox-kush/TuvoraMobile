@@ -91,6 +91,13 @@ data class TvPlayerState(
     val bufferedMs: Long = 0L,
     /** Non-null when playback failed and nothing is left to try. */
     val errorMessage: String? = null,
+    /** What the failure's HTTP status means, when the engine named one (StreamHttpStatusHintPolicy); shown under [errorMessage]. */
+    val failureHint: String? = null,
+    /**
+     * Live only: "Reconnecting… (attempt N of M)" and why, on two lines, while the reconnect ladder runs
+     * ([TvLiveStatusText]). Null once a frame renders, on the viewer's Retry, and on the give-up (the error card owns it).
+     */
+    val reconnectStatus: String? = null,
     /** Series only: the next episode, and whether its card is due (PlayerNextEpisodeRules thresholds). */
     val nextEpisode: com.nuvio.app.features.details.MetaVideo? = null,
     val showNextEpisode: Boolean = false,
@@ -238,6 +245,12 @@ class TvPlayerSession(
     private val playbackSession = launch.externalPlaybackSession()
     private val gate = TvProgressGate()
     private var monitor = TvLiveMonitor()
+    /** Why the live stream last failed (reason code only, never the engine text); words the reconnect line. */
+    private var lastReconnectReason = com.nuvio.app.core.analytics.LiveReconnectReason.STREAM_STOPPED
+    /** The last engine failure's HTTP status hint, kept for the live give-up card (its message is a fixed sentence). */
+    private var lastFailureHint: String? = null
+    /** The frame counter when the last reconnect was scheduled: the frozen picture's, so only a NEW frame clears the line. */
+    private var reconnectTicksBaseline = 0L
     /** True while the TV changes display mode for this channel: the picture is deliberately off. */
     private var displayModeSwitching = false
     private val clock = TimeSource.Monotonic.markNow()
@@ -596,7 +609,7 @@ class TvPlayerSession(
         vodRetryFailure = null
         if (vodDeadlineFailed) { vodDeadlineFailed = false; wantsToPlay = true }
         vodClock.reset(clock.elapsedNow().inWholeMilliseconds)
-        _state.value = _state.value.copy(errorMessage = null, isLoading = true)
+        _state.value = _state.value.copy(errorMessage = null, failureHint = null, isLoading = true)
         if (!isLive && vodReresolve != null) {
             val position = if (snapshot.positionMs > 0) snapshot.positionMs else resumeTargetMs
             vodRetry.retry(position, !wantsToPlay)
@@ -608,6 +621,7 @@ class TvPlayerSession(
             // ladder's first attempt and the next poll cannot mint a second link on top of it.
             monitor.onUserRetry()
             identityFallback?.reset()
+            clearReconnectStatus()
             poll()
         } else {
             bridge?.retry()
@@ -1025,9 +1039,15 @@ class TvPlayerSession(
             } else snapshot
             if (!displayModeSwitching) when (monitor.sample(now, sampled, wantsToPlay)) {
                 TvLiveAction.None -> Unit
-                TvLiveAction.Reconnect -> { log.i { "live freeze: reconnecting" }; reconnectLive() }
-                TvLiveAction.GiveUp -> _state.value = _state.value.copy(errorMessage = TvLiveRelinkPolicy.viewerMessage(null))
+                TvLiveAction.Reconnect -> { log.i { "live freeze: reconnecting" }; publishReconnectAttempt(); reconnectLive() }
+                TvLiveAction.GiveUp -> _state.value = _state.value.copy(
+                    errorMessage = TvLiveRelinkPolicy.viewerMessage(null), failureHint = lastFailureHint, reconnectStatus = null,
+                )
             }
+            // A new frame rendered after the reconnect: the reconnect line has done its job.
+            if (_state.value.reconnectStatus != null &&
+                TvLiveStatusText.playingAgain(snapshot, reconnectTicksBaseline)
+            ) clearReconnectStatus()
         } else {
             val now = clock.elapsedNow().inWholeMilliseconds
             if (snapshot.isPlaying && now - lastSaveAtMs >= SAVE_INTERVAL_MS) {
@@ -1057,21 +1077,27 @@ class TvPlayerSession(
                     return true
                 }
                 // A live error is a stream that ended: same bounded reconnect ladder as a freeze.
+                // Only the reason code and the status hint are kept from the engine text (it can carry a host).
+                lastReconnectReason = com.nuvio.app.core.analytics.LiveReconnectReasonPolicy.fromFailureText(error)
+                lastFailureHint = TvLiveStatusText.hintFor(error)
                 val ended = snapshot.copy(isEnded = true, isPlaying = false, isLoading = false)
                 when (monitor.sample(clock.elapsedNow().inWholeMilliseconds, ended, wantsToPlay = true)) {
-                    TvLiveAction.Reconnect -> reconnectLive()
+                    TvLiveAction.Reconnect -> { publishReconnectAttempt(); reconnectLive() }
                     TvLiveAction.GiveUp -> {
                         // The engine's text carries the stream URL and play token: log it redacted, show plain words.
                         if (_state.value.errorMessage == null) log.w { "live gave up: ${LogRedaction.text(error)}" }
                         _state.value = _state.value.copy(
-                            errorMessage = TvLiveRelinkPolicy.viewerMessage(error), isLoading = false, isPlaying = false,
+                            errorMessage = TvLiveRelinkPolicy.viewerMessage(error), failureHint = lastFailureHint,
+                            reconnectStatus = null, isLoading = false, isPlaying = false,
                         )
                     }
                     TvLiveAction.None -> _state.value = _state.value.copy(isLoading = true)
                 }
                 return true
             }
-            _state.value = _state.value.copy(errorMessage = error, isLoading = false, isPlaying = false)
+            _state.value = _state.value.copy(
+                errorMessage = error, failureHint = TvLiveStatusText.hintFor(error), isLoading = false, isPlaying = false,
+            )
             return true
         }
         log.w { "$lane failed ($error); escalating to $next" }
@@ -1093,6 +1119,23 @@ class TvPlayerSession(
      * call: a fresh link from the re-resolver, the same stable address, or nothing — a spent Stalker
      * link is never re-opened, by this engine or the next one.
      */
+    /** The reconnect line for the attempt the monitor just scheduled ([TvLiveMonitor.attemptCount] of its cap). */
+    private fun publishReconnectAttempt() {
+        val status = com.nuvio.app.core.analytics.LiveReconnectStatus(
+            attempt = monitor.attemptCount.coerceAtLeast(1),
+            maxAttempts = com.nuvio.app.core.analytics.LivePlaybackRecoveryPolicy.MAX_ATTEMPTS,
+            reason = lastReconnectReason,
+        )
+        reconnectTicksBaseline = snapshot.videoProgressTicks
+        _state.value = _state.value.copy(reconnectStatus = TvLiveStatusText.text(status))
+    }
+
+    private fun clearReconnectStatus() {
+        lastReconnectReason = com.nuvio.app.core.analytics.LiveReconnectReason.STREAM_STOPPED
+        lastFailureHint = null
+        if (_state.value.reconnectStatus != null) _state.value = _state.value.copy(reconnectStatus = null)
+    }
+
     private fun reconnectLive() {
         val spent = spentLinkAfterOpen
         val step = TvLiveRelinkPolicy.onReconnect(spent, canRemint = liveReresolve != null, remintInFlight = remintJob?.isActive == true)

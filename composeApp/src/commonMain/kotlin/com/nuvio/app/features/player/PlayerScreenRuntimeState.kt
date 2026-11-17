@@ -173,6 +173,11 @@ internal class PlayerScreenRuntime(
     var errorMessage by mutableStateOf<String?>(null)
     /** The live reconnect ladder ran out: the error modal offers Retry beside Go back. */
     var liveReconnectFailed by mutableStateOf(false)
+    /**
+     * "Reconnecting… (attempt N of M)" + why, while the live reconnect ladder runs; mirrored from the surface's
+     * [com.nuvio.app.core.analytics.LivePlaybackReconnector.status] on every live snapshot. Null otherwise.
+     */
+    var liveReconnectStatus by mutableStateOf<com.nuvio.app.core.analytics.LiveReconnectStatus?>(null)
     /** Bumped by the viewer's Retry on that error; the live freeze ladder starts over on it (never on its own reconnects). */
     var liveUserRetryGeneration by mutableStateOf(0)
     /** A VOD start hit [VodStartDeadlinePolicy.FAIL_AFTER_MS] with no first frame: the error modal offers Retry. */

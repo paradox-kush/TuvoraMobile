@@ -14,6 +14,8 @@ import kotlin.test.assertNull
 import kotlinx.coroutines.runBlocking
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.player_error_stream_blocked
+import nuvio.composeapp.generated.resources.player_error_stream_connection_limit
+import nuvio.composeapp.generated.resources.player_error_stream_provider_firewall
 import nuvio.composeapp.generated.resources.player_error_stream_expired
 import nuvio.composeapp.generated.resources.player_error_stream_rate_limited
 import nuvio.composeapp.generated.resources.player_error_stream_removed
@@ -36,6 +38,13 @@ class PlaybackErrorMessagesTest {
         assertEquals(Res.string.player_error_stream_unavailable, httpStatusExplanation(503))
         assertEquals(Res.string.player_error_stream_blocked, httpStatusExplanation(403))
         assertNull(httpStatusExplanation(302))
+    }
+
+    @Test
+    fun providerFirewallAndConnectionLimitHaveTheirOwnAdvice() {
+        assertEquals(Res.string.player_error_stream_provider_firewall, httpStatusExplanation(456))
+        assertEquals(Res.string.player_error_stream_connection_limit, httpStatusExplanation(458))
+        assertEquals(Res.string.player_error_stream_connection_limit, httpStatusExplanation(509))
     }
 
     @Test

@@ -374,6 +374,7 @@ object M3UClient : IptvClient {
         catchUpDays = catchUp?.days ?: 0,
         streamUrl = url,
         m3uCatchUp = catchUp,
+        streamHeaders = streamHeaders,
     )
 
     private fun IptvStreamRow.toMovie() = XtreamMovie(

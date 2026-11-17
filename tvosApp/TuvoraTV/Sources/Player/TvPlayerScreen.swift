@@ -561,6 +561,11 @@ private struct PlayerChrome: View {
                     if state.isLive, let reason = TvLiveFailureReason.shared.of(message: error) {
                         Text(reason).font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary).multilineTextAlignment(.center)
                     }
+                    // What the stream's HTTP status means (456 firewall: set a User-Agent; 458/509: too many connections).
+                    if let hint = state.failureHint, hint != TvLiveFailureReason.shared.of(message: error) {
+                        Text(hint).font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary).multilineTextAlignment(.center)
+                            .accessibilityIdentifier("player.error.hint")
+                    }
                     Text("Press Play/Pause to try again").font(NuvioType.labelMedium).foregroundStyle(colors.textTertiary)
                     // Retry is the primary action and keeps initial focus; Send report is the next focusable to its right.
                     HStack(spacing: dp(12)) {
@@ -584,6 +589,16 @@ private struct PlayerChrome: View {
                 }
                 .onAppear { DispatchQueue.main.async { retryFocused = true } }
                 .padding(dp(24))
+                .navigationGlass(in: RoundedRectangle(cornerRadius: NuvioTokens.Radius.dialog))
+            } else if state.isLive, let reconnecting = state.reconnectStatus {
+                // The live reconnect ladder is running: which attempt, and why (shared TvLiveStatusText).
+                VStack(spacing: dp(12)) {
+                    ProgressView().scaleEffect(1.4)
+                    Text(reconnecting).font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("player.reconnectStatus")
+                }
+                .padding(dp(20))
                 .navigationGlass(in: RoundedRectangle(cornerRadius: NuvioTokens.Radius.dialog))
             } else if state.isLoading && scrubMs == nil {
                 ProgressView().scaleEffect(1.4)

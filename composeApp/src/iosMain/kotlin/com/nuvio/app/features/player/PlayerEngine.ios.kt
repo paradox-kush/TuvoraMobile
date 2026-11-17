@@ -533,7 +533,8 @@ private fun PlatformPlayerSurfaceInner(
             val errorMessage = bridge.getErrorMessage().ifBlank { null }
             if (errorMessage != lastReportedError) {
                 lastReportedError = errorMessage
-                latestOnError.value(errorMessage)
+                // libmpv's text names the status ("HTTP error 456") but not what it means: add the shared hint.
+                latestOnError.value(errorMessage?.let { withHttpStatusHint(it) })
             }
             delay(250L)
         }

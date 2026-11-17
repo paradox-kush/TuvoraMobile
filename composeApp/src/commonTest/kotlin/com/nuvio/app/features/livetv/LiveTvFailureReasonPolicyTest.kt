@@ -10,14 +10,23 @@ class LiveTvFailureReasonPolicyTest {
     private fun reason(message: String?, code: String? = "playback_error") = LiveTvFailureReasonPolicy.classify(code, message)
 
     @Test fun `a refused link status reads as the provider refusing the line`() {
-        for (status in listOf(401, 403, 404, 410, 451, 456)) {
+        for (status in listOf(401, 403, 404, 410, 451)) {
             assertEquals(Reason.PROVIDER_REFUSED, reason("Source error (HTTP $status)"), "HTTP $status")
         }
         assertEquals(Reason.PROVIDER_REFUSED, reason("Server returned 403 Forbidden"), "ffmpeg wording")
         assertEquals(Reason.PROVIDER_REFUSED, reason("Response code: 403"), "media3 wording")
     }
 
+    @Test fun `456 reads as the provider firewall so the pill can advise a custom User-Agent`() {
+        assertEquals(Reason.PROVIDER_FIREWALL, reason("Source error (HTTP 456)"))
+        assertEquals(Reason.PROVIDER_FIREWALL, reason("[ffmpeg] http: HTTP error 456"), "libmpv wording")
+        // A provider status proves the device reached it: a stale offline flag must not hide the advice.
+        assertEquals(Reason.PROVIDER_FIREWALL, LiveTvFailureReasonPolicy.classify("playback_error", "HTTP error 456", offline = true))
+        assertEquals("playback_error_provider_firewall", LiveTvFailureReasonPolicy.telemetryCode("playback_error", Reason.PROVIDER_FIREWALL))
+    }
+
     @Test fun `connection cap statuses and text read as too many connections`() {
+        assertEquals(Reason.TOO_MANY_CONNECTIONS, reason("Source error (HTTP 509)"))
         assertEquals(Reason.TOO_MANY_CONNECTIONS, reason("Source error (HTTP 429)"))
         assertEquals(Reason.TOO_MANY_CONNECTIONS, reason("Source error (HTTP 458)"))
         assertEquals(Reason.TOO_MANY_CONNECTIONS, reason("Maximum connections reached"))

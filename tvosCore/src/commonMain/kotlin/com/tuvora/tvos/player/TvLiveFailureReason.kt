@@ -18,6 +18,7 @@ object TvLiveFailureReason {
 
     fun of(message: String?, offline: Boolean): String? = when (LiveTvFailureReasonPolicy.classify(failureCode = null, message = message, offline = offline)) {
         Reason.PROVIDER_REFUSED -> "Your provider refused this stream. The subscription may have expired, or this device is blocked."
+        Reason.PROVIDER_FIREWALL -> TvLiveStatusText.hint(com.nuvio.app.features.player.StreamHttpStatusHintPolicy.Hint.PROVIDER_FIREWALL)
         Reason.TOO_MANY_CONNECTIONS -> "Your provider allows fewer connections than you are using. Close another device and retry."
         Reason.PROVIDER_DOWN -> "The provider's server had a problem. Try again in a moment."
         Reason.LINK_UNAVAILABLE -> "The provider did not give a stream link for this channel."
