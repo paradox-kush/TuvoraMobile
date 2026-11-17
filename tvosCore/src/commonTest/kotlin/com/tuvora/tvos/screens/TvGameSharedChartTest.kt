@@ -43,4 +43,9 @@ class TvGameSharedChartTest {
         val many = (1L..500L).map { WinPoint(it, (it % 101).toInt()) }
         assertEquals(120, card(WinProbabilityBlock(homePercent = 60, history = many)).chart.size)
     }
+
+    @Test fun `one history point draws no chart`() {
+        val c = card(WinProbabilityBlock(homePercent = 60, history = listOf(WinPoint(1, 60))))
+        assertEquals(emptyList(), c.chart, "a lone point is a dot, not a line")
+    }
 }

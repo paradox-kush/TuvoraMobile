@@ -288,7 +288,7 @@ data class TvGameScreenModel(
             return TvWinCard(
                 chance = TvWinChanceCard.from(block, d, nowMs),
                 homeColorHex = colors.first, awayColorHex = colors.second,
-                chart = WinChanceSeries.chart(block.history, spec).orEmpty(), leaderSide = spec.leaderSide, reference = spec.reference,
+                chart = if (WinChanceSeries.isVisible(block.history)) WinChanceSeries.chart(block.history, spec).orEmpty() else emptyList(), leaderSide = spec.leaderSide, reference = spec.reference,
                 markers = TvStrips.markers(d, colors), dividers = TvStrips.dividers(d),
                 homeName = sides?.first?.let { it.short?.takeIf(String::isNotBlank) ?: it.name }.orEmpty(),
                 awayName = sides?.second?.let { it.short?.takeIf(String::isNotBlank) ?: it.name }.orEmpty(),
