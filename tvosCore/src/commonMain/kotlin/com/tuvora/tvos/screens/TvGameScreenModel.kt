@@ -226,9 +226,9 @@ data class TvGameScreenModel(
             else -> null
         }
 
-        /** A bare number reads through core's [roundLabel] ("Week 11" for American football, "Round 7" otherwise); a text round ("Quarterfinal") stays as the feed wrote it. */
+        /** The round reads through core's [roundLabel] ("Week 11" for American football, "Round 7" otherwise, a text round as the feed wrote it). */
         internal fun leagueLine(league: String, sport: String?, round: String?): String {
-            val r = round?.trim()?.takeIf { it.isNotEmpty() }?.let { if (it.all(Char::isDigit)) roundLabel(sport, it) else it }
+            val r = round?.trim()?.takeIf { it.isNotEmpty() }?.let { roundLabel(sport, it) }
             return listOfNotNull(league.takeIf { it.isNotBlank() }, r).joinToString(" · ")
         }
 
