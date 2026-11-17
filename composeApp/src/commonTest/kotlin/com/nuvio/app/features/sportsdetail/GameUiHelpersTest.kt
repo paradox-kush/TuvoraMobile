@@ -14,6 +14,7 @@ import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
 import com.nuvio.app.features.sportsdetail.internal.GameMomentTracker
 import com.nuvio.app.features.sportsdetail.internal.Moment
 import com.nuvio.app.features.sportsdetail.internal.ui.GameTopFade
+import com.nuvio.app.features.sportsdetail.internal.ui.WatchRowText
 import com.nuvio.app.features.sportsdetail.internal.ui.UpcomingStartText
 import com.nuvio.app.features.sportsdetail.internal.StartTimeFormat
 import com.nuvio.app.features.sportsdetail.internal.ui.GameScoreBar
@@ -251,5 +252,21 @@ class UpcomingStartTextTest {
     @Test
     fun `an unparseable start keeps the old wording`() {
         assertEquals("soon UTC", UpcomingStartText.of("soon", fake))
+    }
+}
+
+class WatchRowTextTest {
+    @Test
+    fun `play carries the cleaned channel as its second line`() {
+        val t = WatchRowText.play("UK || SKY SPORTS MAIN EVENT HD")
+        assertEquals("Play", t.title)
+        assertEquals("On Sky Sports Main Event · your channels", t.subtitle)
+    }
+
+    @Test
+    fun `switch variant is worded likewise`() {
+        val t = WatchRowText.switchTo("TSN 1")
+        assertEquals("Switch", t.title)
+        assertEquals("On TSN 1 · your channels", t.subtitle)
     }
 }

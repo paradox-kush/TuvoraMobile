@@ -1,5 +1,7 @@
 package com.nuvio.app.features.sportsdetail.internal.ui
 
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.nuvio.app.features.sportsdetail.internal.ChannelLabelPolicy
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -133,6 +135,25 @@ internal fun SituationLineCard(situation: SituationBlock) {
     }
 }
 
+/** The mock's yellow Play button: a play glyph, the action, and the cleaned channel as its second line. */
+@Composable
+private fun WatchPlayButton(text: WatchButtonText, onClick: () -> Unit) {
+    val tokens = MaterialTheme.nuvio
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(tokens.colors.accent).clickable(onClick = onClick)
+            .padding(horizontal = NuvioTokens.Space.s16, vertical = 11.dp)
+            .semantics(mergeDescendants = true) { contentDescription = "${text.title}, ${text.subtitle}" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12),
+    ) {
+        Text("▶", style = MaterialTheme.typography.titleMedium, color = tokens.colors.onAccent)
+        Column(Modifier.weight(1f)) {
+            Text(text.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = tokens.colors.onAccent, maxLines = 1)
+            Text(text.subtitle, style = MaterialTheme.typography.labelMedium, color = tokens.colors.onAccent.copy(alpha = 0.75f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
 @Composable
 internal fun WatchCard(
     ui: WatchUi,
@@ -143,41 +164,42 @@ internal fun WatchCard(
     onRetry: () -> Unit,
 ) {
     if (ui == WatchUi.Hidden) return
-    BlockCard("Watch on your channels") {
-        when (ui) {
-            WatchUi.Hidden -> {}
-            WatchUi.Checking -> Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(NuvioTokens.Space.s8))
-                Text("Checking your channels…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
+    // Browsing / Watching are the mock's bare Play row (no card, no channel-count tile); every other state keeps its card.
+    when (ui) {
+        is WatchUi.Browsing -> Column {
+            WatchPlayButton(WatchRowText.play(ui.offer.channelName)) { onPlay(ui.offer) }
+            TextButton(onClick = onFindChannels, contentPadding = PaddingValues(0.dp)) { Text("Find other channels") }
+        }
+        is WatchUi.Watching -> Column {
+            Text("Your channel playing here", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
+            Text(ChannelLabelPolicy.clean(ui.current.channelName), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary)
+            ui.switchTo?.let { offer ->
+                Spacer(Modifier.height(NuvioTokens.Space.s8))
+                WatchPlayButton(WatchRowText.switchTo(offer.channelName)) { onPlay(offer) }
             }
-            is WatchUi.Watching -> Column {
-                Text("Your channel playing here", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
-                Text(ChannelLabelPolicy.clean(ui.current.channelName), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary)
-                ui.switchTo?.let { offer ->
-                    Spacer(Modifier.height(NuvioTokens.Space.s8))
-                    NuvioPrimaryButton("Switch to ${ChannelLabelPolicy.clean(offer.channelName)}", onClick = { onPlay(offer) })
+        }
+        else -> BlockCard("Watch on your channels") {
+            when (ui) {
+                WatchUi.Checking -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(NuvioTokens.Space.s8))
+                    Text("Checking your channels…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
                 }
-            }
-            is WatchUi.Browsing -> Column {
-                Text(ChannelLabelPolicy.clean(ui.offer.channelName), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary)
-                Spacer(Modifier.height(NuvioTokens.Space.s8))
-                NuvioPrimaryButton("Play", onClick = { onPlay(ui.offer) })
-                TextButton(onClick = onFindChannels, contentPadding = PaddingValues(0.dp)) { Text("Find other channels") }
-            }
-            WatchUi.NoPlaylist -> Column {
-                Text("Add an IPTV playlist to find and watch this game on your channels.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
-                Spacer(Modifier.height(NuvioTokens.Space.s8))
-                NuvioPrimaryButton("Add IPTV playlist", onClick = onAddPlaylist)
-            }
-            WatchUi.NoMatch -> Column {
-                Text("None of your channels list this game yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
-                Spacer(Modifier.height(NuvioTokens.Space.s8))
-                NuvioPrimaryButton("Find channels", onClick = onFindChannels)
-            }
-            WatchUi.LookupFailed -> Column {
-                Text("Couldn't check your channels.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
-                TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text("Retry") }
+                WatchUi.NoPlaylist -> Column {
+                    Text("Add an IPTV playlist to find and watch this game on your channels.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
+                    Spacer(Modifier.height(NuvioTokens.Space.s8))
+                    NuvioPrimaryButton("Add IPTV playlist", onClick = onAddPlaylist)
+                }
+                WatchUi.NoMatch -> Column {
+                    Text("None of your channels list this game yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
+                    Spacer(Modifier.height(NuvioTokens.Space.s8))
+                    NuvioPrimaryButton("Find channels", onClick = onFindChannels)
+                }
+                WatchUi.LookupFailed -> Column {
+                    Text("Couldn't check your channels.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.nuvio.colors.textSecondary)
+                    TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text("Retry") }
+                }
+                else -> {}
             }
         }
     }
