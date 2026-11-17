@@ -8,4 +8,8 @@ enum class TvIptvLanding { Channels, SelectedChip }
 object TvIptvEntryFocus {
     fun landing(section: XtreamHubSection, hasChannels: Boolean): TvIptvLanding =
         if (section == XtreamHubSection.LIVE && hasChannels) TvIptvLanding.Channels else TvIptvLanding.SelectedChip
+
+    /** The first channel takes focus when it appears, but only while the viewer has not pressed a direction (never steals). */
+    fun claimsFirstChannel(section: XtreamHubSection, hasChannels: Boolean, viewerMoved: Boolean): Boolean =
+        !viewerMoved && landing(section, hasChannels) == TvIptvLanding.Channels
 }

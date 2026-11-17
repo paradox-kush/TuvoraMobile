@@ -83,6 +83,8 @@ data class TvPlayerState(
     val isLive: Boolean,
     val isLoading: Boolean = true,
     val isPlaying: Boolean = false,
+    /** A decoded frame or advancing position was seen. [isPlaying] alone is the engine's "not paused", true while idle. */
+    val hasStarted: Boolean = false,
     val isEnded: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
@@ -1004,6 +1006,7 @@ class TvPlayerSession(
             showNextEpisode = showNext,
             isLoading = snapshot.isLoading,
             isPlaying = snapshot.isPlaying,
+            hasStarted = playbackStarted || com.nuvio.app.features.player.LivePlaybackStartupPolicy.hasStarted(snapshot),
             isEnded = snapshot.isEnded,
             positionMs = snapshot.positionMs,
             durationMs = snapshot.durationMs,
