@@ -1,5 +1,7 @@
 package com.nuvio.app.features.sportsdetail.internal.ui
 
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import com.nuvio.app.features.sportsdetail.internal.ChannelLabelPolicy
@@ -140,13 +142,13 @@ internal fun SituationLineCard(situation: SituationBlock) {
 private fun WatchPlayButton(text: WatchButtonText, onClick: () -> Unit) {
     val tokens = MaterialTheme.nuvio
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(tokens.colors.accent).clickable(onClick = onClick)
-            .padding(horizontal = NuvioTokens.Space.s16, vertical = 11.dp)
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(tokens.colors.accent).clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s12)
             .semantics(mergeDescendants = true) { contentDescription = "${text.title}, ${text.subtitle}" },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12),
     ) {
-        Text("▶", style = MaterialTheme.typography.titleMedium, color = tokens.colors.onAccent)
+        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = tokens.colors.onAccent, modifier = Modifier.size(NuvioTokens.Icon.md))
         Column(Modifier.weight(1f)) {
             Text(text.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = tokens.colors.onAccent, maxLines = 1)
             Text(text.subtitle, style = MaterialTheme.typography.labelMedium, color = tokens.colors.onAccent.copy(alpha = 0.75f), maxLines = 1, overflow = TextOverflow.Ellipsis)
