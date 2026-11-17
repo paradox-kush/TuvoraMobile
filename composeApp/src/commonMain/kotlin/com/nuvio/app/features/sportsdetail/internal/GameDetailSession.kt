@@ -189,7 +189,13 @@ internal class GameDetailSession(
                 else -> DetailLoad.Empty
             }
         }
-        val provisional = tsdbD?.state ?: baseHdr?.state
+        // The freshest state, chosen exactly as the header will be (step 5): the backend lags ESPN by 1-2 min, so a live game can still
+        // read UPCOMING there. When ESPN resolved THIS game (names agree) its state wins; otherwise the backend's stands. (F9: a lagging
+        // UPCOMING used to skip the summary, leaving a LIVE header with no plays, strips, stats or standings.)
+        val provisional = if (tsdbD != null) {
+            val backendHdr = EspnHeader(tsdbD.header, tsdbD.state, tsdbD.live, tsdbD.startsAt, tsdbD.venue, null, null)
+            (if (baseHdr != null) mergeFreshEspn(backendHdr, baseHdr, mapping.aliases)?.state else null) ?: tsdbD.state
+        } else baseHdr?.state
 
         // 4. The summary: plays, stats, leaders, lineups, standings. With the single-event tick it rides the slow (60 s) cadence only
         //    (or when never fetched); a mapping without the template keeps the old rule -- the live tick IS the summary.
