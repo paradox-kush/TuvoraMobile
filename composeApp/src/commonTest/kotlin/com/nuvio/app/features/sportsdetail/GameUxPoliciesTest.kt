@@ -104,5 +104,8 @@ class GameUxPoliciesTest {
         assertEquals("Round 11", roundLabel("Soccer", "11"))
         assertEquals("Round 3", roundLabel("Australian Football", "3"))
         assertEquals("Round 7", roundLabel(null, "7"))
+        assertEquals("Quarterfinal", roundLabel("Soccer", "Quarterfinal"), "a text round is shown as the feed wrote it")
+        assertEquals("Final", roundLabel("American Football", " Final "))
+        assertEquals("Week 11", roundLabel("American Football", " 11 "))
     }
 }
