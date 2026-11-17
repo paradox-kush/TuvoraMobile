@@ -8,6 +8,7 @@ import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.TimelineItem
 import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
+import com.nuvio.app.features.sportsdetail.internal.ChannelLabelPolicy
 import com.nuvio.app.features.sportsdetail.internal.GameSection
 import com.nuvio.app.features.sportsdetail.internal.GameStartLabel
 import com.nuvio.app.features.sportsdetail.internal.StartTimeFormat
@@ -219,4 +220,13 @@ internal object GameTopFade {
 internal object UpcomingStartText {
     fun of(startsAt: String, format: StartTimeFormat): String =
         GameStartLabel.of(startsAt, format) ?: (startsAt.replace('T', ' ').removeSuffix("Z").take(16) + " UTC")
+}
+
+/** The Watch row's one primary button: a title and the cleaned channel as its second line ("Play" / "On TSN 1 · your channels"). */
+internal data class WatchButtonText(val title: String, val subtitle: String)
+
+internal object WatchRowText {
+    fun play(channelName: String) = WatchButtonText("Play", subtitle(channelName))
+    fun switchTo(channelName: String) = WatchButtonText("Switch", subtitle(channelName))
+    private fun subtitle(channelName: String) = "On ${ChannelLabelPolicy.clean(channelName)} · your channels"
 }
