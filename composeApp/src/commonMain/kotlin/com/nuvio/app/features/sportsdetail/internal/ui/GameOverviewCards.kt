@@ -86,7 +86,7 @@ internal fun WinChanceCard(w: WinProbabilityBlock, detail: GameDetail, modifier:
         Spacer(Modifier.height(NuvioTokens.Space.s8))
         WinBar(m, palette, moved, reduce)
         val spec = WinChanceSeries.specOf(w)
-        WinChanceSeries.chart(w.history, spec)?.let { pts ->
+        (if (WinChanceSeries.isVisible(w.history)) WinChanceSeries.chart(w.history, spec) else null)?.let { pts ->
             Spacer(Modifier.height(NuvioTokens.Space.s12))
             WinChart(pts, spec.reference, leaderColor, moved, reduce, markers = ChartMarkers.markersFor(detail), dividers = ChartMarkers.dividersFor(detail), palette = palette)
             Text("${m.leaderName} win chance over time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)

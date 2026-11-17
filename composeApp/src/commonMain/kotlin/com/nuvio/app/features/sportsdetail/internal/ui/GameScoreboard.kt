@@ -155,7 +155,7 @@ internal fun StatusLine(detail: GameDetail) {
         }
         GameState.FINAL -> Text(live?.detail?.takeIf { it.isNotBlank() } ?: "Final", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.nuvio.colors.textSecondary)
         GameState.POSTPONED -> Text("Postponed", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.nuvio.colors.textSecondary)
-        GameState.UPCOMING -> Text(detail.startsAt.replace('T', ' ').removeSuffix("Z").take(16) + " UTC", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textSecondary)
+        GameState.UPCOMING -> Text(UpcomingStartText.of(detail.startsAt, RadarStartTimeFormat), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.nuvio.colors.textSecondary)
     }
 }
 
@@ -218,4 +218,10 @@ private fun ScoreAnnouncement(detail: GameDetail) {
             contentDescription = said
         },
     )
+}
+
+/** The match-list cards' device-local day/time formats, as the game screen's start-time port. */
+private object RadarStartTimeFormat : com.nuvio.app.features.sportsdetail.internal.StartTimeFormat {
+    override fun dayLabel(epochMs: Long): String = com.nuvio.app.features.radar.RadarTime.dayLabel(epochMs)
+    override fun formatTime(epochMs: Long): String = com.nuvio.app.features.radar.RadarTime.formatTime(epochMs)
 }

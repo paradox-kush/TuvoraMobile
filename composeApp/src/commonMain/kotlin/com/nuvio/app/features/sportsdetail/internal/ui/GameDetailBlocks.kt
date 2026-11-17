@@ -1,5 +1,6 @@
 package com.nuvio.app.features.sportsdetail.internal.ui
 
+import com.nuvio.app.features.sportsdetail.internal.ChannelLabelPolicy
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -152,14 +153,14 @@ internal fun WatchCard(
             }
             is WatchUi.Watching -> Column {
                 Text("Your channel playing here", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.nuvio.colors.textMuted)
-                Text(ui.current.channelName, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary)
+                Text(ChannelLabelPolicy.clean(ui.current.channelName), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary)
                 ui.switchTo?.let { offer ->
                     Spacer(Modifier.height(NuvioTokens.Space.s8))
-                    NuvioPrimaryButton("Switch to ${offer.channelName}", onClick = { onPlay(offer) })
+                    NuvioPrimaryButton("Switch to ${ChannelLabelPolicy.clean(offer.channelName)}", onClick = { onPlay(offer) })
                 }
             }
             is WatchUi.Browsing -> Column {
-                Text(ui.offer.channelName, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary)
+                Text(ChannelLabelPolicy.clean(ui.offer.channelName), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.nuvio.colors.textPrimary)
                 Spacer(Modifier.height(NuvioTokens.Space.s8))
                 NuvioPrimaryButton("Play", onClick = { onPlay(ui.offer) })
                 TextButton(onClick = onFindChannels, contentPadding = PaddingValues(0.dp)) { Text("Find other channels") }
