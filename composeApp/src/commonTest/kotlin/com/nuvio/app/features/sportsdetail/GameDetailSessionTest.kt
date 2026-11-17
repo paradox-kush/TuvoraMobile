@@ -125,6 +125,22 @@ class GameDetailSessionTest {
         assertEquals("State Farm Arena", d.venue)
     }
 
+    @Test fun `G6 - the team record from the ESPN scoreboard fills a backend header that has none`() = runBlocking<Unit> {
+        val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
+        val h = assertIs<TeamsHeader>(loaded(session(FakeTsdb(tsdbEvent(hs = "1", aws = "2", state = GameState.LIVE)), espn).tick()).header)
+        assertEquals("6-4", h.home.record)
+        assertEquals("4-5", h.away.record)
+    }
+
+    @Test fun `G6 - a record the backend already has is kept`() = runBlocking<Unit> {
+        val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
+        val tsdb = tsdbEvent(hs = "1", aws = "2", state = GameState.LIVE)
+        val withRec = SourceResult.Ok((tsdb.value.header as TeamsHeader).let { t -> tsdb.value.copy(header = TeamsHeader(t.home.copy(record = "9-0"), t.away)) })
+        val h = assertIs<TeamsHeader>(loaded(session(FakeTsdb(withRec), espn).tick()).header)
+        assertEquals("9-0", h.home.record)
+        assertEquals("4-5", h.away.record)
+    }
+
     @Test fun `when the ESPN event is for different teams the primary header stays untouched`() = runBlocking<Unit> {
         val espn = FakeEspn(scoreboardOf(SportsFixtures.espn_nba_event), SourceResult.Ok(parse(SportsFixtures.espn_nba_summary)))
         val pinned = ref.copy(espnEventId = "401909287")      // a bad pin: ESPN's Hawks game for a Celtics game

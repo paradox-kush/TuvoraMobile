@@ -5,6 +5,7 @@ import com.nuvio.app.features.sportsdetail.internal.ChannelLabelPolicy
 import com.nuvio.app.features.sportsdetail.internal.GameStartLabel
 import com.nuvio.app.features.sportsdetail.internal.Iso
 import com.nuvio.app.features.sportsdetail.internal.StartTimeFormat
+import com.nuvio.app.features.sportsdetail.internal.roundLabel
 import com.nuvio.app.features.sportsdetail.internal.WinChanceSeries
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -77,5 +78,31 @@ class GameUxPoliciesTest {
         assertFalse(WinChanceSeries.isVisible(listOf(WinPoint(1, 50))), "one point would draw a dot")
         assertTrue(WinChanceSeries.isVisible(listOf(WinPoint(1, 50), WinPoint(2, 52))))
         assertEquals(2, WinChanceSeries.MIN_POINTS)
+    }
+    // ---- gaps G2-G5 (review 2026-11-16) ----
+
+    @Test fun `G2 - trailing separators are stripped`() {
+        assertEquals("TSN 1", ChannelLabelPolicy.clean("TSN 1 |"))
+        assertEquals("TSN 1", ChannelLabelPolicy.clean("TSN 1 ||"))
+        assertEquals("TSN 1", ChannelLabelPolicy.clean("TSN 1 :"))
+        assertEquals("TSN 1", ChannelLabelPolicy.clean("TSN 1 -"))
+        assertEquals("Sky Sports Main Event", ChannelLabelPolicy.clean("UK || SKY SPORTS MAIN EVENT HD |"))
+        assertEquals("A-League TV", ChannelLabelPolicy.clean("A-League TV"), "an inner hyphen stays")
+        assertEquals("|", ChannelLabelPolicy.clean("|"), "nothing left falls back to the raw text")
+    }
+
+    @Test fun `G3 - a flat series is hidden and a moving one is shown`() {
+        assertFalse(WinChanceSeries.isVisible(listOf(WinPoint(1, 50), WinPoint(2, 50))), "flat pre-kickoff line says nothing")
+        assertFalse(WinChanceSeries.isVisible(listOf(WinPoint(1, 50))))
+        assertTrue(WinChanceSeries.isVisible(listOf(WinPoint(1, 50), WinPoint(2, 51))))
+        assertTrue(WinChanceSeries.isVisible(listOf(WinPoint(1, 40, draw = 30), WinPoint(2, 40, draw = 31))), "a moving draw share is movement too")
+    }
+
+    @Test fun `G4 - round label is Week for American football and Round otherwise`() {
+        assertEquals("Week 11", roundLabel("American Football", "11"))
+        assertEquals("Week 11", roundLabel("american football", "11"))
+        assertEquals("Round 11", roundLabel("Soccer", "11"))
+        assertEquals("Round 3", roundLabel("Australian Football", "3"))
+        assertEquals("Round 7", roundLabel(null, "7"))
     }
 }

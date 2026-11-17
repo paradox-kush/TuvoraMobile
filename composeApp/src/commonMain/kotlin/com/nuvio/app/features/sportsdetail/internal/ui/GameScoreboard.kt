@@ -49,13 +49,14 @@ import com.nuvio.app.features.sportsdetail.api.VersusHeader
 import com.nuvio.app.features.sportsdetail.internal.GameDetailUiPolicy
 import com.nuvio.app.features.sportsdetail.internal.Moment
 import com.nuvio.app.features.sportsdetail.internal.MotionSpec
+import com.nuvio.app.features.sportsdetail.internal.roundLabel
 
 /** Scoreboard card: logo, rank, name, record, score (counts + pulses once on a real change); centre LIVE pill + clock. */
 @Composable
 internal fun GameScoreboard(detail: GameDetail, modifier: Modifier = Modifier) {
     NuvioSurfaceCard(modifier = modifier) {
         Text(
-            listOfNotNull(detail.leagueName.takeIf { it.isNotBlank() }, detail.round?.let { "Round $it" }, detail.venue).joinToString(" · "),
+            listOfNotNull(detail.leagueName.takeIf { it.isNotBlank() }, detail.round?.let { roundLabel(detail.sport, it) }, detail.venue).joinToString(" · "),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.nuvio.colors.textMuted,
             maxLines = 1,

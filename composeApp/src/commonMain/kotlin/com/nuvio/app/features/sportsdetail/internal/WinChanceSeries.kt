@@ -30,7 +30,16 @@ internal object WinChanceSeries {
     /** The chart stays hidden until it has this many points: one point would draw a lone dot, not a line. */
     const val MIN_POINTS = 2
 
-    fun isVisible(history: List<WinPoint>): Boolean = history.size >= MIN_POINTS
+    /** Smallest movement (in percentage points) that is worth a chart: a flat line says nothing. */
+    const val MIN_SPAN = 1
+
+    /** 2+ points AND the plotted values (home share, and the draw share when there is one) move by at least [MIN_SPAN] point. */
+    fun isVisible(history: List<WinPoint>): Boolean {
+        if (history.size < MIN_POINTS) return false
+        val home = history.map { it.home }
+        val draws = history.mapNotNull { it.draw }
+        return (home.max() - home.min() >= MIN_SPAN) || (draws.size >= 2 && draws.max() - draws.min() >= MIN_SPAN)
+    }
 
     fun specOf(w: WinProbabilityBlock): WinChanceSpec {
         val home = w.homePercent.coerceIn(0, 100)

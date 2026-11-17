@@ -204,14 +204,60 @@ class GameScreenPoliciesTest {
         assertNull(TeamColor.forDark("f2b2", surface))
     }
 
-    @Test fun `team colour - black is lifted only as far as the contrast needs`() {
-        val out = assertNotNull(TeamColor.forDark("000000", surface))
-        assertEquals("666666", out, "40 percent toward white is the first 10 percent step with contrast of at least 3")
-        assertTrue(contrast(out, surface) >= 3.0)
+    private fun hsl(hex: String): Triple<Double, Double, Double> {
+        val r = hex.substring(0, 2).toInt(16) / 255.0; val g = hex.substring(2, 4).toInt(16) / 255.0; val b = hex.substring(4, 6).toInt(16) / 255.0
+        val mx = maxOf(r, g, b); val mn = minOf(r, g, b); val l = (mx + mn) / 2; val d = mx - mn
+        if (d == 0.0) return Triple(0.0, 0.0, l)
+        val sat = d / (1 - kotlin.math.abs(2 * l - 1))
+        val h = when (mx) { r -> ((g - b) / d).mod(6.0); g -> (b - r) / d + 2; else -> (r - g) / d + 4 } * 60
+        return Triple(h, sat, l)
     }
 
-    @Test fun `team colour - the lift stops at 70 percent even when contrast cannot be reached`() {
-        assertEquals("fbfbfb", TeamColor.forDark("f0f0f0", "ffffff"), "240 + 15 * 0.7 = 250.5 -> 251")
+    @Test fun `team colour - black is lifted to the first lightness that has contrast 3`() {
+        val out = assertNotNull(TeamColor.forDark("000000", surface))
+        assertTrue(contrast(out, surface) >= 3.0, out)
+        assertTrue(hsl(out).third < 0.6, "not pushed toward white: $out")
+    }
+
+    @Test fun `team colour - lifting never reaches white`() {
+        val out = assertNotNull(TeamColor.forDark("a0a0a0", "ffffff"))
+        assertTrue(hsl(out).third <= 0.86, out)
+    }
+
+    @Test fun `G5 - a navy keeps its hue and saturation instead of going grey`() {
+        val (h0, s0, _) = hsl("03202f")
+        val out = assertNotNull(TeamColor.forDark("03202f", surface))
+        val (h1, s1, l1) = hsl(out)
+        assertTrue(contrast(out, surface) >= 3.0, out)
+        assertTrue(kotlin.math.abs(h1 - h0) < 6, "hue $h0 -> $h1 ($out)")
+        assertTrue(s1 > s0 * 0.85, "saturation $s0 -> $s1 ($out)")
+        assertTrue(l1 < 0.6, out)
+    }
+
+    @Test fun `G5 - the LSU purple lightens to a purple and the Chelsea blue to a blue`() {
+        for ((hex, alt) in listOf("461d7c" to "fdd023", "034694" to "ee242c")) {
+            val (h0, s0, _) = hsl(hex)
+            val out = assertNotNull(TeamColor.forDark(hex, surface, alt))
+            val (h1, s1, _) = hsl(out)
+            assertTrue(contrast(out, surface) >= 3.0, out)
+            assertTrue(kotlin.math.abs(h1 - h0) < 6, "$hex stays its hue, got $out")
+            assertTrue(s1 > s0 * 0.85, "$hex stays saturated, got $out")
+        }
+    }
+
+    @Test fun `G5 - a primary that needs heavy lightening yields to an alt that already reads`() {
+        // IND: navy primary, light grey alt that passes contrast as it is.
+        assertEquals("a2aaad", TeamColor.forDark("002c5f", surface, "a2aaad"))
+        // HOU: navy primary, red alt that does NOT reach contrast 3 -> the lightened navy stays.
+        val hou = assertNotNull(TeamColor.forDark("03202f", surface, "a71930"))
+        assertNotEquals("a71930", hou)
+        assertTrue(contrast(hou, surface) >= 3.0)
+    }
+
+    @Test fun `G5 - HOU and IND stay visibly different from each other`() {
+        val (h, a) = TeamColor.pair(Side("Texans", color = "03202f", altColor = "a71930"), Side("Colts", color = "002c5f", altColor = "a2aaad"), surface)
+        assertNotNull(h); assertNotNull(a)
+        assertNotEquals(h, a)
     }
 
     @Test fun `team colour - near identical colours push the away side to its alternate colour`() {

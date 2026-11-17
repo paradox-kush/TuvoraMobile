@@ -305,6 +305,8 @@ internal class GameDetailSession(
             score = e.score ?: p.score, short = p.short ?: e.short,
             // Colours and rank ride along under the same "both teams agree by name" guard that protects the score.
             color = e.color ?: p.color, altColor = e.altColor ?: p.altColor, rank = e.rank ?: p.rank,
+            // The backend row often has no team record (an upcoming game); ESPN's scoreboard carries it. A record the backend has stays.
+            record = p.record ?: e.record,
         )
         val header: Header = when (val p = primary.header) {
             is TeamsHeader -> {
