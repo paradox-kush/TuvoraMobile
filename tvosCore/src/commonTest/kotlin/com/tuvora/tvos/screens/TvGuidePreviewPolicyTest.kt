@@ -33,4 +33,13 @@ class TvGuidePreviewPolicyTest {
         assertEquals(TvGuidePhase.Loading, TvGuidePreviewPolicy.status(5_000, started = false, error = null).phase, "idle engine early")
         assertEquals(TvGuidePhase.Failed, TvGuidePreviewPolicy.status(stall + 1, started = false, error = null).phase, "idle engine late")
     }
+
+    @Test
+    fun `a channel link that fails to resolve fails at once with a reason and Retry`() {
+        val s = TvGuidePreviewPolicy.resolveFailed()
+        assertEquals(TvGuidePhase.Failed, s.phase, "no waiting for the deadline")
+        assertEquals(TvGuidePreviewPolicy.UNREACHABLE_MESSAGE, s.message, "visible reason")
+        assertEquals(true, TvGuidePreviewPolicy.offersRetry(s), "Retry offered")
+        assertEquals(false, TvGuidePreviewPolicy.offersRetry(TvGuidePreviewPolicy.status(1_000, started = false, error = null)), "not while loading")
+    }
 }

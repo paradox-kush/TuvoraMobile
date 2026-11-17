@@ -1111,11 +1111,12 @@ private struct LiveGuideView: View {
     /// Re-evaluates the strip once a second while a channel is open: the deadline is held here, never left to the engine.
     private func watchPreview() async {
         while !Task.isCancelled, previewing != nil {
+            if let current = previewStatus, TvGuidePreviewPolicy.shared.offersRetry(status: current) { return }
             let state = previewSession?.state.value
             let elapsed = Int64(Date().timeIntervalSince(previewOpenedAt) * 1000)
             let status = TvGuidePreviewPolicy.shared.status(elapsedMs: elapsed, started: state?.hasStarted ?? false, error: state?.errorMessage)
             if previewStatus?.phase != status.phase || previewStatus?.message != status.message { previewStatus = status }
-            if status.phase == .failed { return }
+            if status.phase == .failed { previewRequests.cancel(); return }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
     }
@@ -1168,8 +1169,9 @@ private struct LiveGuideView: View {
                 previewSession = session
                 if previewFullscreenRequested { select(channel) }
             } else {
-                previewing = nil
-                playback.notify("\(channel.name) isn't available right now.")
+                // The link or handshake failed before any session existed (a down portal): show it in the strip with
+                // Retry at once; the watcher below stops once the status is failed.
+                previewStatus = TvGuidePreviewPolicy.shared.resolveFailed()
             }
         }
     }
