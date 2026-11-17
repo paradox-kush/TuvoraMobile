@@ -172,6 +172,22 @@ Arch gate must be green and `arch-baseline.txt` must not have grown.
   files such as `SubtitleMojibakeSanitizer`, the charset-decoding `downloadSubtitleBody`). Re-check
   `MainActivity` after every merge: IPTV + Sports `rootRoutes`/`drawerItems` and the
   `SidebarVisibilityPolicy` gate at both nav hosts.
+  **The pin silently drops upstream robustness fixes (found 2026-10-25).** Taking `ui/screens/player/*`
+  from the fork wholesale means every upstream fix to a file we pinned becomes an *ancestor* of `main`
+  (git says "merged", `git log --grep` finds it) while its code never arrives. A 10-24 audit found ~15:
+  the audio fallback ladder that rebuilt the player forever (#3988), the hardware-first video decoder
+  filter (#3969), parallel chunk-buffer lease + off-heap (#3944/#3947 — `ParallelRangeDataSource.kt`
+  was byte-identical to upstream's 2026-08-22 version, seven commits behind), mpv `eof-reached`/auto-retry
+  (#3319/#3796/#4263), USB tunneling (#4276), background decoder release (#4282). Restored by
+  `fix/restore-upstream-player-fixes`. So, at every TV sync, after resolving:
+  1. List what the pin held back: `git log --oneline <old-merge-base>..origin/dev -- app/src/main/java/com/nuvio/tv/ui/screens/player app/src/test/java/com/nuvio/tv/ui/screens/player`.
+  2. For each commit, record **ported / skipped (reason)** in `docs/UPSTREAM_SYNC_<date>.md`. "Unported feature"
+     (sidecar subtitles, autosync, post-play) is a valid skip; a bug fix to a file we kept is not.
+  3. Diff pinned files against upstream's: `git diff <merge-base> origin/dev -- <file>` empty for a file
+     the fork never edited means the pin is only lag — take upstream's file.
+  4. Tests are the tell: upstream tests present at the merge-base but missing from the fork
+     (`comm -23` of the two `git ls-tree` listings) point at dropped code. Port them with the fix.
+  The fork's own wiring guard is `RestoredUpstreamPlayerFixesWiringTest`; extend it per restored fix.
 - **Backend parity**: upstream open-sourced its backend at **`NuvioMedia/self-host`**. For any feature
   gated only by a missing RPC (delta-sync, discovery-endpoint, provider-creds), port the migration from
   there into `nuvio-backend`, adapting to the fork's `*_core`-wrapper technique. Deploy backend BEFORE
