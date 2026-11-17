@@ -53,6 +53,11 @@ class TvGameScreenModelTest {
         assertEquals("NHL", model(detail(round = null)).scoreboard.leagueLine)
     }
 
+    @Test fun `an American football round reads Week N like the phone`() {
+        assertEquals("NFL · Week 11", model(detail(round = "11", sport = "American Football").copy(leagueName = "NFL")).scoreboard.leagueLine)
+        assertEquals("NHL · Round 7", model(detail(round = "7")).scoreboard.leagueLine)
+    }
+
     @Test fun `the clock appears once in the status lines`() {
         val d = detail(live = LiveInfo(clock = "5:12", periodLabel = "2nd", detail = "2nd Period - 5:12", period = 2))
         val s = model(d).scoreboard
