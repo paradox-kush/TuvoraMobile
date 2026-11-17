@@ -88,6 +88,9 @@ val tvosExcludedCommon = listOf(
     // 15th sync (2026-11-12): upstream moved the AutoSync engine to commonMain and added an mpv coordinator
     // that wraps the Compose PlayerEngineController (iPhone libmpv). Same Apple TV gap as above.
     "com/nuvio/app/features/autosync/AutoSyncMpvCoordinator.kt",
+    // Back for an in-screen mode (the phone hub search): Android Back / iPhone swipe. Apple TV closes its
+    // search sheet with the Menu button in SwiftUI (IptvHubScreen onExitCommand / .sheet).
+    "com/nuvio/app/core/ui/ModeBackHandler.kt",
 )
 val tvosExcludedIos = listOf(
     // iPhone-only APIs; Apple TV supplies its own actual in tvosCore/src/tvosMain (named gaps).
@@ -98,6 +101,7 @@ val tvosExcludedIos = listOf(
     "com/nuvio/app/features/updater/**",                              // in-app APK updater
     "com/nuvio/app/core/storage/AppleDataDirectory.ios.kt",          // tvOS writes only to Caches
     "com/nuvio/app/features/autosync/AutoSyncMpvPlatform.ios.kt",    // iPhone libmpv AutoSync glue (Apple TV: AutoSync gap)
+    "com/nuvio/app/core/ui/ModeBackHandler.ios.kt",                   // iPhone swipe-back; Apple TV uses the Menu button in SwiftUI
 )
 
 fun uiFiles(sourceSet: String): List<String> {

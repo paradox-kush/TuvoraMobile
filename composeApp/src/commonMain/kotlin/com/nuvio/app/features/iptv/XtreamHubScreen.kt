@@ -61,6 +61,8 @@ import com.nuvio.app.core.ui.NuvioDropdownChip
 import com.nuvio.app.core.ui.NuvioDropdownOption
 import com.nuvio.app.core.ui.NuvioPosterCard
 import com.nuvio.app.core.ui.NuvioPosterShape
+import com.nuvio.app.core.ui.LocalScreenActive
+import com.nuvio.app.core.ui.ModeBackHandler
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.NuvioShelfSection
 import com.nuvio.app.core.ui.NuvioTokens
@@ -243,11 +245,20 @@ fun XtreamHubScreen(
             searchController.clear()
         }
     }
-    PlatformBackHandler(enabled = searchOpen && searchApplies) {
+    val screenActive = LocalScreenActive.current
+    ModeBackHandler(enabled = IptvHubSearchBackPolicy.consumesBack(searchOpen, searchApplies, screenActive)) {
         searchOpen = false
         searchController.clear()
     }
-    val openCategory = openCategoryId?.let { id -> displayedCategories.firstOrNull { it.id == id } }
+    // UX5: leaving the hub (another root tab) with a bare search closes it, so the next visit opens on the
+    // section, not on an empty input prompt. A real query is kept with its results.
+    LaunchedEffect(screenActive) {
+        if (!screenActive && searchOpen && !HubEntrySectionPolicy.keepsSearchOnLeave(searchController.state.value.query)) {
+            searchOpen = false
+            searchController.clear()
+        }
+    }
+    val openCategory =openCategoryId?.let { id -> displayedCategories.firstOrNull { it.id == id } }
 
     val tokens = MaterialTheme.nuvio
     val listState = rememberLazyListState()

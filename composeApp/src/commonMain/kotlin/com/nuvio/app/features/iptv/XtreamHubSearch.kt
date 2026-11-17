@@ -34,6 +34,16 @@ internal object IptvHubSearchPolicy {
     }
 }
 
+/**
+ * F5/F6 (sim pass 2026-11-16): whether Back (Android) or the left-edge swipe (iPhone) closes the hub search
+ * instead of leaving the screen. Only the hub on screen may take it: the root tab host keeps a visited hub
+ * composed, and a hidden hub with its search left open must never swallow another tab's Back.
+ */
+internal object IptvHubSearchBackPolicy {
+    fun consumesBack(searchOpen: Boolean, searchApplies: Boolean, screenActive: Boolean): Boolean =
+        searchOpen && searchApplies && screenActive
+}
+
 internal data class HubSearchUiState(
     val query: String = "",
     /** Entered only through [BoundedLoad]: a failed search is Failed (with Retry), never "no matches". */

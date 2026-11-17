@@ -21,8 +21,8 @@ struct IptvHubScreen: View {
     // Live: the guide owns channel search; the header chip asks it to open (bumped per press) so Search sits in one place on every section.
     @State private var liveSearchRequest = 0
     @FocusState private var chipFocus: String?
-    /// F7: the hub is one focus scope so the live guide's first channel can be the preferred landing on entry.
-    @Namespace private var entryScope
+    /// F7: no direction pressed yet since the hub opened; until then the live guide's first channel claims focus (TvIptvEntryFocus).
+    @State private var viewerMoved = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -51,7 +51,7 @@ struct IptvHubScreen: View {
                 } else if hub.section == .live {
                     LiveGuideView(accountId: hub.selectedAccountId ?? hub.accounts[0].id,
                                   categories: hub.categories.map { ($0.id, $0.name) },
-                                  searchRequest: liveSearchRequest, entryScope: entryScope)
+                                  searchRequest: liveSearchRequest, viewerMoved: viewerMoved)
                 } else {
                     IptvShelves(hub: hub) { details = PreviewBox(preview: $0) }
                 }
@@ -65,7 +65,7 @@ struct IptvHubScreen: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .focusScope(entryScope)
+        .onMoveCommand { _ in viewerMoved = true }
         .task {
             TvIptvBrowse.shared.open(section: hub?.section ?? .live)
             for await next in TvIptvBrowse.shared.state {
@@ -159,16 +159,21 @@ struct PreviewBox: Identifiable {
 private struct PlaylistDialog: View {
     let hub: XtreamHubUiState
     let dismiss: () -> Void
+    @FocusState private var focus: String?
 
     var body: some View {
         NuvioDialog(title: "Choose a playlist") {
             ForEach(hub.accounts, id: \.id) { account in
-                SettingsActionRow(title: TvIptvSettingsPolicy.shared.playlistName(name: account.name), value: account.id == hub.selectedAccountId ? "Selected" : nil) {
+                // Names stay on one line (SettingsActionRow ellipsizes); the current playlist is marked "Current".
+                SettingsActionRow(title: TvIptvSettingsPolicy.shared.playlistName(name: account.name), value: account.id == hub.selectedAccountId ? "Current" : nil) {
                     TvIptvBrowse.shared.selectPlaylist(accountId: account.id)
                     dismiss()
                 }
+                .focused($focus, equals: account.id)
             }
         }
+        // UX4 (sim pass 2026-11-16): open on the current playlist, not the first row.
+        .defaultFocus($focus, hub.selectedAccountId ?? hub.accounts.first?.id)
     }
 }
 
@@ -394,8 +399,8 @@ private struct LiveGuideView: View {
     let categories: [(String, String)]
     /// F48: the hub's Search chip was pressed on Live (bumped per press) — open this guide's own channel search.
     var searchRequest: Int = 0
-    /// F7: the hub's focus scope; the first channel is its preferred focus (TvIptvEntryFocus).
-    var entryScope: Namespace.ID? = nil
+    /// F7: the viewer has pressed a direction since the hub opened; the first channel then never claims focus.
+    var viewerMoved = false
     @EnvironmentObject private var playback: PlaybackCoordinator
     @Environment(\.nuvio) private var colors
 
@@ -745,7 +750,8 @@ private struct LiveGuideView: View {
     private var categoryColumn: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(alignment: .leading, spacing: dp(2)) {
-                GuideCategoryRow(title: guideQuery.isEmpty ? "Search" : "Search: “\(guideQuery)”", selected: category == "search") { searchOpen = true }
+                // UX2 (sim pass 2026-11-16): not plain "Search", which is also the chip above that searches the hub.
+                GuideCategoryRow(title: guideQuery.isEmpty ? "Search channels" : "Search: “\(guideQuery)”", selected: category == "search") { searchOpen = true }
                     .focused($categoryFocus, equals: "search")
                     .accessibilityIdentifier("guide.search")
                 GuideCategoryRow(title: "All favorites", selected: category == "allfavorites") { category = "allfavorites" }
@@ -781,7 +787,7 @@ private struct LiveGuideView: View {
                 }
                 if let status = previewStatus, status.phase != .playing, let channel = previewing {
                     if status.phase == .loading {
-                        ProgressView()
+                        ProgressView().tint(.white)
                     } else {
                         VStack(spacing: dp(8)) {
                             Text(status.message ?? "").font(NuvioType.bodySmall).foregroundStyle(colors.textPrimary)
@@ -880,7 +886,7 @@ private struct LiveGuideView: View {
             } else if visible.isEmpty {
                 if category == "search" {
                     NuvioStateMessage(title: guideQuery.isEmpty ? "Search channels" : "No channels match “\(guideQuery)”",
-                                      message: "Press OK on Search to type a channel name", actionTitle: "Search") { searchOpen = true }
+                                      message: "Press OK on Search channels to type a channel name", actionTitle: "Search") { searchOpen = true }
                 } else {
                     NuvioStateMessage(title: "No channels here", message: category == "recent" ? "Channels you watch show up here." : "This category is empty on your provider.")
                 }
@@ -890,7 +896,10 @@ private struct LiveGuideView: View {
                         ForEach(Array(visible.enumerated()), id: \.element.contentId) { index, channel in
                             let cells = timeline.cells(programmes: rowProgrammes(channel), channel: channel,
                                                        startMs: windowStart, nowMs: now, catchUpSupported: catchUpSupported)
-                            GuideChannelRow(number: index + 1, channel: channel, cells: cells,
+                            GuideChannelRow(number: index + 1, channel: channel,
+                                            autoFocus: index == 0 && category == "all"
+                                                && TvIptvEntryFocus.shared.claimsFirstChannel(section: .live, hasChannels: true, viewerMoved: viewerMoved),
+                                            cells: cells,
                                             favorite: favorites.contains(channel.contentId),
                                             removed: pendingRemoval?.contentId == channel.contentId && !undoInFlight,
                                             interactive: timelineChannel == channel.contentId,
@@ -921,8 +930,6 @@ private struct LiveGuideView: View {
                                             onEdge: { direction in travel(direction, channel: channel) },
                                             onLeaveTimeline: { leaveTimeline(refocus: channel) },
                                             onLeft: showCategories)
-                                .modifier(EntryFocus(scope: entryScope, preferred: index == 0
-                                    && TvIptvEntryFocus.shared.landing(section: .live, hasChannels: true) == .channels))
                                 // Hold OK (NuvioTV) = the tvOS context menu.
                                 .contextMenu {
                                     // F03: Undo for the favourite toggle just made (the tvOS stand-in for
@@ -1106,7 +1113,7 @@ private struct LiveGuideView: View {
         while !Task.isCancelled, previewing != nil {
             let state = previewSession?.state.value
             let elapsed = Int64(Date().timeIntervalSince(previewOpenedAt) * 1000)
-            let status = TvGuidePreviewPolicy.shared.status(elapsedMs: elapsed, playing: state?.isPlaying ?? false, error: state?.errorMessage)
+            let status = TvGuidePreviewPolicy.shared.status(elapsedMs: elapsed, started: state?.hasStarted ?? false, error: state?.errorMessage)
             if previewStatus?.phase != status.phase || previewStatus?.message != status.message { previewStatus = status }
             if status.phase == .failed { return }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -1151,7 +1158,7 @@ private struct LiveGuideView: View {
         previewSession = nil
         previewing = channel
         previewOpenedAt = Date()
-        previewStatus = TvGuidePreviewPolicy.shared.status(elapsedMs: 0, playing: false, error: nil)
+        previewStatus = TvGuidePreviewPolicy.shared.status(elapsedMs: 0, started: false, error: nil)
         let request = previewRequests.begin()
         Task {
             let resolved = try? await TvIptvBrowse.shared.playChannel(contentId: channel.contentId, name: channel.name, logo: channel.logo)
@@ -1282,6 +1289,7 @@ private struct GuideCategoryRow: View {
 private struct GuideChannelRow: View {
     let number: Int
     let channel: LiveGuideChannel
+    var autoFocus = false
     let cells: [TvGuideCell]
     let favorite: Bool
     /// P5: a favourite just removed, kept in its favourites row while Undo is offered.
@@ -1308,6 +1316,8 @@ private struct GuideChannelRow: View {
                 .buttonStyle(PlainNoChromeButtonStyle())
                 .focused($focused)
                 .reportsFocus(focused)
+                // F7: sidebar entry lands here, not on a header chip; only while the viewer has not moved (autoFocus).
+                .onAppear { if autoFocus { DispatchQueue.main.async { focused = true } } }
                 .disabled(interactive)
                 .onMoveCommand { direction in
                     if direction == .right { onEnterTimeline() }
@@ -1569,14 +1579,5 @@ private struct GuideChannelSearchDialog: View {
                 SettingsActionRow(title: "Clear search", showChevron: false) { onSearch("") }
             }
         }
-    }
-}
-
-/// F7: marks one view as the preferred focus of its scope (nothing when there is no scope or it is not preferred).
-private struct EntryFocus: ViewModifier {
-    let scope: Namespace.ID?
-    let preferred: Bool
-    func body(content: Content) -> some View {
-        if let scope, preferred { content.prefersDefaultFocus(true, in: scope) } else { content }
     }
 }
