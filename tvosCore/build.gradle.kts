@@ -269,6 +269,8 @@ kotlin {
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/iptv/refresh"))
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/iptv/match/progress"))
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/epg"))
+            // The epg telemetry tests record through RecordingTelemetryPort; the rest of this folder tests shared telemetry too.
+            kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/core/telemetry"))
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/iptv/epg"))
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/iptv/overlay/customgroup"))
             // Watch party: the shared rules Apple TV's party screen and player sync run on.
