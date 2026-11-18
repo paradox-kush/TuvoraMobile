@@ -28,12 +28,15 @@ class MpvLogLevelPolicyTest {
     }
 
     @Test
-    fun ffmpegHttpStatusLineReachesTheErrorLogButSiblingsStaySilent() {
-        // Device pass: libmpv only ends a refused live open with "loading failed"; the status ("HTTP error 458")
-        // is FFmpeg's http module warning, which all=no swallowed, so the screen could not name it.
-        assertEquals("warn", MpvLogLevelPolicy.levelFor("ffmpeg/http"), "the HTTP status line")
-        assertEquals("no", MpvLogLevelPolicy.levelFor("ffmpeg/hls"), "hls warns with segment URLs")
-        assertEquals("no", MpvLogLevelPolicy.levelFor("ffmpeg/tcp"), "tcp lines carry hosts")
-        assertEquals("no", MpvLogLevelPolicy.levelFor("stream"), "stream formats the URL")
+    fun theHttpStatusLineIsOnlyAskedForWhileALiveOpenIsPending() {
+        // Device pass (Android emulator, verbose log): FFmpeg's status arrives as module "ffmpeg" (NOT "ffmpeg/http"),
+        // text "http: HTTP error 458", level warn. mpv cannot narrow below the module, so the whole ffmpeg module is
+        // let through for the open only; the steady state stays silent (hls/tcp warnings carry segment URLs and hosts).
+        assertEquals("warn", MpvLogLevelPolicy.levelFor("ffmpeg", MpvLogLevelPolicy.specFor(liveOpen = true)), "status line during a live open")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("ffmpeg", MpvLogLevelPolicy.specFor(liveOpen = false)), "steady state")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("ffmpeg", MpvLogLevelPolicy.MSG_LEVEL), "init level")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("stream", MpvLogLevelPolicy.specFor(liveOpen = true)), "stream formats the URL")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("cplayer", MpvLogLevelPolicy.specFor(liveOpen = true)), "cplayer prints the URL")
+        assertEquals("warn", MpvLogLevelPolicy.levelFor("vo/gpu", MpvLogLevelPolicy.specFor(liveOpen = true)), "outputs keep their level")
     }
 }

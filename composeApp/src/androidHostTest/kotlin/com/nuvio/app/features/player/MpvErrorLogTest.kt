@@ -27,6 +27,18 @@ class MpvErrorLogTest {
     }
 
     @Test
+    fun theGenericFfmpegModuleKeepsOnlyTheHttpStatusLine() {
+        // The live-open window lets module "ffmpeg" through: its tcp/tls/hls warnings carry hosts and segment URLs.
+        val log = MpvErrorLog()
+        log.onLog("ffmpeg", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "tcp: Connection to tcp://203.0.113.9:8080 failed: Connection refused")
+        log.onLog("ffmpeg", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "hls: keepalive request failed for 'seg1.ts' with error: Connection reset")
+        assertNull(log.logLine(), "no non-status ffmpeg line is kept")
+        log.onLog("ffmpeg", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "http: HTTP error 458 ")
+        assertEquals(458, mpvHttpStatusCode(log.logLine()))
+        assertFalse(log.logLine().orEmpty().contains("203.0.113.9"))
+    }
+
+    @Test
     fun pixelDrainHotlinkBlockShowsTheHttpStatusAndReason() {
         // mpv's log for a PixelDrain file blocked for hotlinking.
         val log = MpvErrorLog()

@@ -105,11 +105,28 @@ class LiveReconnectStatusTest {
 
     @Test
     fun `an open refused for a reason a retry cannot fix fails at once`() {
-        for (message in listOf("HTTP error 458", "HTTP error 509", "HTTP error 456", "HTTP error 404", "HTTP error 403", null)) {
+        for (message in listOf("HTTP error 458", "HTTP error 509", "HTTP error 456", "HTTP error 404", "HTTP error 403", "Source error (unsupported format)")) {
             reconnector.onUserRetry()
             assertNull(reconnector.onOpenFailed(message), "$message")
             assertNull(reconnector.status.value)
         }
+    }
+
+    @Test
+    fun `an open that failed with no readable status gets the bounded reconnect too`() {
+        // Device pass (Android libmpv): END_FILE only says "loading failed"; with no status to read, the open used to
+        // fail at once as "did not start". Unknown is not final: same ladder as a 5xx, same cap.
+        for (message in listOf(null, "", "  ", "loading failed")) {
+            reconnector.onUserRetry()
+            assertEquals(LiveOpenRetryPolicy.delayMs(0), reconnector.onOpenFailed(message), "$message")
+            assertEquals(LiveReconnectStatus(1, max, LiveReconnectReason.STREAM_STOPPED), reconnector.status.value)
+        }
+        reconnector.onUserRetry()
+        var attempts = 0
+        while (reconnector.onOpenFailed(null) != null) attempts++
+        assertEquals(max, attempts, "bounded by the shared cap")
+        assertEquals(true, reconnector.hasGivenUp)
+        assertNull(reconnector.status.value)
     }
 
     @Test

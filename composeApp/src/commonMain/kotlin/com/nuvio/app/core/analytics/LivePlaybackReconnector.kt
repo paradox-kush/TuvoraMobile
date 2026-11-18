@@ -170,7 +170,7 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
     fun onOpenFailed(message: String?): Long? {
         if (gaveUp) return null
         lastReason = LiveReconnectReasonPolicy.fromFailureText(message)
-        if (!LiveOpenRetryPolicy.retries(lastReason)) {
+        if (!LiveOpenRetryPolicy.retries(lastReason, message)) {
             _status.value = null
             return null
         }

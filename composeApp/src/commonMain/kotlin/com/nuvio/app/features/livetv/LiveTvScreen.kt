@@ -1025,6 +1025,13 @@ fun LiveTvScreen(
             when (openFailureGate.onGraceElapsed()) {
                 StalkerOpenFailureGate.Step.Switch -> switchStalkerProfile()
                 StalkerOpenFailureGate.Step.Proceed -> {
+                    // The open ended and no text named why (Android libmpv: END_FILE "loading failed", and no
+                    // status line landed within the grace). Unknown is not final: the bounded reconnect first,
+                    // then the give-up error + Retry.
+                    freezeReconnector.onOpenFailed(null)?.let { delayMs ->
+                        retryOpenAfter(delayMs)
+                        return@LaunchedEffect
+                    }
                     startupFailed = true
                     snapshot = snapshot.copy(isLoading = false, isPlaying = false)
                     controller = null

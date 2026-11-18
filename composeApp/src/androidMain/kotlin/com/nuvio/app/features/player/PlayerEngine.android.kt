@@ -1816,7 +1816,10 @@ private fun LibmpvPlayerSurface(
                     }
                     MPV.mpvEvent.MPV_EVENT_FILE_LOADED,
                     MPV.mpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
-                        if (eventId == MPV.mpvEvent.MPV_EVENT_FILE_LOADED) view.attachStartupSubtitles()
+                        if (eventId == MPV.mpvEvent.MPV_EVENT_FILE_LOADED) {
+                            view.endLiveOpenLogWindow()
+                            view.attachStartupSubtitles()
+                        }
                         coroutineScope.launch(Dispatchers.Main.immediate) {
                             latestOnError.value(null)
                             val snapshot = view.snapshot()
@@ -1833,6 +1836,7 @@ private fun LibmpvPlayerSurface(
                         }
                     }
                     MPV.mpvEvent.MPV_EVENT_END_FILE -> {
+                        view.endLiveOpenLogWindow()
                         val endReason = data.nodeString("reason")
                         val fileError = data.nodeString("file_error")
                         val endFileJson = data.toJson()
@@ -2640,6 +2644,12 @@ private class NuvioLibmpvView(
         }
     }
 
+    /** The live open is over (file loaded or ended): the `ffmpeg` module goes silent again. Any thread. */
+    fun endLiveOpenLogWindow() {
+        if (!isLiveStream) return
+        ctl { mpv.setPropertyString("msg-level", MpvLogLevelPolicy.specFor(liveOpen = false)) }
+    }
+
     // Runs on the mpv-ctl thread only.
     private fun loadCurrentSource(playWhenReady: Boolean, startOption: String? = null) {
         val sourceUrl = currentSourceUrl ?: return
@@ -2653,6 +2663,9 @@ private class NuvioLibmpvView(
         // options require reloading the file for changes to take effect"). Set as a global, not a
         // loadfile per-file option, so retry()/restartFromBeginning()/live rejoin reuse it unchanged.
         mpv.setPropertyString("stream-lavf-o", currentStreamLavfOptions)
+        // A refused live open ends END_FILE "loading failed" with no status; FFmpeg's "HTTP error NNN" warning is the
+        // only carrier, in module "ffmpeg", which stays silent otherwise (MpvLogLevelPolicy). Ask for it for this open.
+        if (isLiveStream) mpv.setPropertyString("msg-level", MpvLogLevelPolicy.specFor(liveOpen = true))
         if (startOption != null) {
             mpv.command("loadfile", sourceUrl.toMpvSource(), "replace", "-1", startOption)
         } else {

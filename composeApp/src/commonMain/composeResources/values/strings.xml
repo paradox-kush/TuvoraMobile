@@ -2663,7 +2663,7 @@
     <string name="compose_livetv_error_reason_link">The provider did not give a stream link for this channel.</string>
     <string name="compose_livetv_error_reason_network">Couldn't reach the provider. Check your connection.</string>
     <string name="compose_livetv_error_reason_unsupported">This device can't read this stream.</string>
-    <string name="compose_livetv_error_reason_not_started">The stream did not start. Try again or check your playlist.</string>
+    <string name="compose_livetv_error_reason_not_started">The stream did not start, even after a few tries. Try again in a moment.</string>
     <string name="compose_livetv_error_reason_provider_no_data">The provider's server sent no video. Try again later, or check with your provider.</string>
     <string name="compose_livetv_error_reason_connection_held">Your provider may still be holding the previous connection. Wait a few seconds, then try again.</string>
     <string name="compose_livetv_error_tap_retry">Can't play this channel · Tap to retry</string>

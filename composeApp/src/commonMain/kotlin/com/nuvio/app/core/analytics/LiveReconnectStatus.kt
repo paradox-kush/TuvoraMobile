@@ -97,6 +97,22 @@ object LiveOpenRetryPolicy {
     fun retries(reason: LiveReconnectReason): Boolean =
         reason == LiveReconnectReason.PROVIDER_SERVER_ERROR || reason == LiveReconnectReason.UNREACHABLE
 
+    private val NAMES_A_FORMAT_PROBLEM = listOf("unrecognized", "unsupported", "decoder", "decoding", "codec", "malformed")
+
+    /**
+     * Whether a failed first open is worth asking again given its [reason] and engine [message]. Beyond [retries], an
+     * open that names NO cause at all (Android libmpv ends a refused open with only "loading failed", no status)
+     * is not final: it gets the same bounded ladder, then a clear give-up, instead of failing at once with a
+     * guess. A status we do not retry (404, 403, 456, 458...) or a text naming a format problem still fails at once.
+     */
+    fun retries(reason: LiveReconnectReason, message: String?): Boolean {
+        if (retries(reason)) return true
+        if (reason != LiveReconnectReason.STREAM_STOPPED) return false
+        if (LiveReconnectReasonPolicy.httpStatusIn(message) != null) return false
+        val text = message?.lowercase().orEmpty()
+        return NAMES_A_FORMAT_PROBLEM.none { it in text }
+    }
+
     /**
      * The wait before open retry N (0-based): the freeze ladder's backoff one step on, since the failed open already
      * made its immediate request — 2 s, 5 s, 10 s, then 20 s.

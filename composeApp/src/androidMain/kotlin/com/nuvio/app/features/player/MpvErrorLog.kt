@@ -41,9 +41,9 @@ internal class MpvErrorLog {
     @Synchronized
     fun onLog(prefix: String, level: Int, text: String) {
         val isHttp = MPV_HTTP_ERROR_REGEX.containsMatchIn(text)
-        // FFmpeg's http module is let through for its "HTTP error NNN" status only; its other warnings name bare
-        // host:port tokens that the URL strip below cannot see.
-        if (mpvLogPrefixIsHttpModule(prefix, text) && !isHttp) return
+        // FFmpeg's module is let through (for a live open) for its "HTTP error NNN" status only: the generic "ffmpeg"
+        // module, and its http class, also warn with bare host:port and tcp:// tokens the URL strip below cannot see.
+        if ((mpvLogPrefixIsHttpModule(prefix, text) || prefix.trim().equals("ffmpeg", ignoreCase = true)) && !isHttp) return
         if (level > MPV.mpvLogLevel.MPV_LOG_LEVEL_INFO) return
         val isInfo = level > MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN
         if (isInfo && !mpvInfoLineIsUseful(text)) return
