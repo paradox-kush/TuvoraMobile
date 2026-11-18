@@ -294,6 +294,12 @@ private fun PlatformPlayerSurfaceInner(
         mutableStateOf(gated)
     }
 
+    // Every engine failure lands in the flight recorder as closed codes (surface/engine/category/phase), so a
+    // "won't play" report says why; an ExoPlayer failure that fails over to libmpv is recorded too.
+    val failureTrail = remember(playerSourceKey) {
+        PlaybackFailureTrailRecorder(PlaybackFailureTrail.surfaceOf(streamType, isCatchUpPlayback))
+    }
+
     when (activeEngine) {
         ResolvedAndroidPlaybackEngine.ExoPlayer -> ExoPlayerSurface(
             sourceUrl = sourceUrl,
@@ -319,8 +325,12 @@ private fun PlatformPlayerSurfaceInner(
             useNativeController = useNativeController,
             onInitialPositionHandled = onInitialPositionHandled,
             onControllerReady = onControllerReady,
-            onSnapshot = onSnapshot,
+            onSnapshot = { snapshot ->
+                failureTrail.onSnapshot(snapshot)
+                onSnapshot(snapshot)
+            },
             onError = { message, linkAuthFailure ->
+                failureTrail.onError(message, engine = "exoplayer")
                 // A 401/403/410 is the LINK being refused, not a decoding problem — libmpv would be
                 // handed the same dead URL and fail identically. Worse, swallowing it as `null` here
                 // hid it from the screen's expired-link recovery (which only runs for a non-null
@@ -377,8 +387,14 @@ private fun PlatformPlayerSurfaceInner(
                 yuv420pEnabled = playerSettings.androidLibmpvYuv420pEnabled,
                 preferredSubtitleLanguage = playerSettings.preferredSubtitleLanguage,
                 onControllerReady = onControllerReady,
-                onSnapshot = onSnapshot,
-                onError = onError,
+                onSnapshot = { snapshot ->
+                    failureTrail.onSnapshot(snapshot)
+                    onSnapshot(snapshot)
+                },
+                onError = { message ->
+                    failureTrail.onError(message, engine = "libmpv")
+                    onError(message)
+                },
             )
         }
     }

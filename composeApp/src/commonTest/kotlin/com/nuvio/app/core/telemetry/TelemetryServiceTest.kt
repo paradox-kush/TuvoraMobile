@@ -117,6 +117,26 @@ class TelemetryServiceTest {
     }
 
     @Test
+    fun `a player failure entry reaches the send report trail with its closed fields`() = runTest {
+        val (s, host) = service()
+        s.record(
+            com.nuvio.app.features.player.PlaybackFailureTrail.entry(
+                nowMs = host.now - 500,
+                surface = com.nuvio.app.features.player.PlaybackFailureTrail.Surface.VOD,
+                engine = "exoplayer",
+                category = "http_403",
+                phase = com.nuvio.app.features.player.PlaybackFailureTrail.Phase.OPEN,
+            ),
+        )
+        assertIs<ReportResult.Sent>(s.sendUserReport(ReportCategory.WONT_PLAY, ReportSurface.VOD, ReportContext(failureCode = "playback_error")))
+        val trail = host.sent.single { it.event == "user_issue_report" }.props["diag_trail"] as String
+        assertTrue(
+            "\"playback_failed\",{\"surface\":\"vod\",\"engine\":\"exoplayer\",\"category\":\"http_403\",\"phase\":\"open\"}" in trail,
+            trail,
+        )
+    }
+
+    @Test
     fun `send report sends one user_issue_report with trail memory and hardware and and returns the display code`() = runTest {
         val (s, host) = service()
         s.record(DiagEntry(host.now - 1000, DiagArea.PLAYBACK, "stall", mapOf("engine" to "mpv")))

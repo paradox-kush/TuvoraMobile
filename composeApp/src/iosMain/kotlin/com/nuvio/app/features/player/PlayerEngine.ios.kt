@@ -511,6 +511,8 @@ private fun PlatformPlayerSurfaceInner(
     // Polling for snapshots
     LaunchedEffect(bridge) {
         var lastReportedError: String? = null
+        // Each failure lands in the flight recorder as closed codes (surface/engine/category/phase), never the text.
+        val failureTrail = PlaybackFailureTrailRecorder(PlaybackFailureTrail.surfaceOf(streamType, isCatchUpPlayback))
         while (isActive) {
             // -1 means the track carries no picture; see NuvioPlayerBridge.getVideoFrameTicks.
             val videoTicks = bridge.getVideoFrameTicks()
@@ -530,9 +532,11 @@ private fun PlatformPlayerSurfaceInner(
                 voDelayedFrameCount = voFrameStats and 0xFFFF_FFFFL,
             )
             latestOnSnapshot.value(snapshot)
+            failureTrail.onSnapshot(snapshot)
             val errorMessage = bridge.getErrorMessage().ifBlank { null }
             if (errorMessage != lastReportedError) {
                 lastReportedError = errorMessage
+                failureTrail.onError(errorMessage, engine = "libmpv")
                 latestOnError.value(errorMessage)
             }
             delay(250L)

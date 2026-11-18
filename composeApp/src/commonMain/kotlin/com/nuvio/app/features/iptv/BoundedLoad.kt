@@ -217,8 +217,8 @@ object BoundedLoad {
             put("surface", surface.key)
             put("outcome", label)
             put("duration_ms", durationMs)
-            // The exception TYPE only: messages can carry hosts or credentials.
-            (outcome as? LoadOutcome.Failed)?.error?.let { put("error_type", it::class.simpleName ?: "unknown") }
+            // The exception TYPE only (messages can carry hosts or credentials), named so R8 cannot rename it.
+            (outcome as? LoadOutcome.Failed)?.error?.let { put("error_type", com.nuvio.app.core.telemetry.api.TelemetryErrorName.of(it)) }
             putAll(extra)
         }
         runCatching { TelemetryAccess.current().emit("iptv_load", properties) }

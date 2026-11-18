@@ -2,6 +2,7 @@ package com.nuvio.app.features.iptv
 
 import com.nuvio.app.core.telemetry.RecordingTelemetryPort
 import com.nuvio.app.core.telemetry.api.TelemetryAccess
+import com.nuvio.app.features.addons.HttpStatusException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
@@ -133,5 +134,17 @@ class BoundedLoadTest {
         assertEquals("xtream", loads.first()["source_type"])
         assertEquals("IllegalStateException", loads.last()["error_type"])
         assertTrue(loads.none { props -> props.values.any { it.toString().contains("pass") } }, "no message, host or credential")
+    }
+
+    // Stands in for an R8-renamed class: phone 1.21.0 sent error_type=fb4 for a guide_history failure.
+    private class fb4(message: String) : IllegalStateException(message)
+
+    @Test
+    fun `a failure of a renamed class reports its readable ancestor not the minified name`(): Unit = runBlocking {
+        BoundedLoad.run<String>(LoadSurface.HUB_ROW) { throw fb4("portal said no") }
+        BoundedLoad.run<String>(LoadSurface.HUB_ROW) { throw HttpStatusException(403, "http://host/x") }
+
+        val loads = events.filter { it.first == "iptv_load" }.map { it.second["error_type"] }
+        assertEquals(listOf<Any?>("IllegalStateException", "http_403"), loads)
     }
 }
