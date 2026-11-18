@@ -570,6 +570,23 @@ fun LiveTvScreen(
             retryTick++
         }
     }
+    // The channel's first open failed with a reason a retry can fix (5xx, unreachable; LiveOpenRetryPolicy): let go of
+    // the attempt and re-open after the reconnector's backoff. The "Reconnecting… (attempt N of M)" line shows meanwhile;
+    // a zap, a replay or the viewer's Retry cancels it, and the ladder's cap ends it in the error + Retry.
+    fun retryOpenAfter(delayMs: Long) {
+        val scheduledFor = currentContentId
+        connectionEndedAtMs = TraktPlatformClock.nowEpochMs()
+        controller = null
+        snapshot = PlayerPlaybackSnapshot()
+        source = null
+        playbackError = null
+        pendingRemint?.cancel()
+        pendingRemint = scope.launch {
+            delay(delayMs)
+            pendingRemint = null
+            if (currentContentId == scheduledFor && !isCatchUp) spacedAutomaticReMint(mint = reResolve)
+        }
+    }
     val onRetry: () -> Unit = {
         // The viewer asked for it now: never delayed, but remembered for the reason line if it lands in the window.
         retriedInsideConnectionWindow = LiveRemintSpacingPolicy.userRetryInsideWindow(
@@ -1174,6 +1191,9 @@ fun LiveTvScreen(
                         it.applySubtitleStyle(PlayerSettingsRepository.uiState.value.subtitleStyle)
                     },
                     onSnapshot = onLiveSnapshot@{
+                        // A re-open is scheduled (retryOpenAfter / a spaced re-mint): the old attempt's trailing end is not
+                        // a new failure. The engine reports the error first, then its ended snapshot, in the same hop.
+                        if (source == null && pendingRemint != null) return@onLiveSnapshot
                         snapshot = it
                         pause.onSnapshot(it.positionMs, it.isPlaying)
                         // The local buffer is not a live channel: none of the live recovery below applies to it.
@@ -1299,6 +1319,11 @@ fun LiveTvScreen(
                             // of the mid-playback token-refresh path just like mpv END_FILE.
                             if (openFailureGate.onErrorText(message) == StalkerOpenFailureGate.Step.Switch) {
                                 switchStalkerProfile()
+                                return@PlayerSurfaceErrors
+                            }
+                            // A 5xx / unreachable open gets the bounded reconnect a mid-stream drop gets.
+                            freezeReconnector.onOpenFailed(message)?.let { delayMs ->
+                                retryOpenAfter(delayMs)
                                 return@PlayerSurfaceErrors
                             }
                             startupFailureMessage = message

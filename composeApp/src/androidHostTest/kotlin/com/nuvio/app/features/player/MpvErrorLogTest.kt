@@ -16,6 +16,17 @@ import org.robolectric.annotation.Config
 class MpvErrorLogTest {
 
     @Test
+    fun liveEndFileErrorWithAStatusIsReported() {
+        // Device pass: a live 458 on Android libmpv read as "The stream did not start" because the end carried no text.
+        assertEquals(458, mpvLiveEndFileHttpStatus(true, false, "error", "[ffmpeg] http: HTTP error 458 "))
+        assertEquals(509, mpvLiveEndFileHttpStatus(true, false, "error", "HTTP error 509 Bandwidth Limit Exceeded"))
+        assertNull(mpvLiveEndFileHttpStatus(true, false, "eof", "HTTP error 458"), "a clean end is the freeze ladder's")
+        assertNull(mpvLiveEndFileHttpStatus(true, false, "error", "[ffmpeg] tcp: Connection refused"), "no status, no report")
+        assertNull(mpvLiveEndFileHttpStatus(false, false, "error", "HTTP error 458"), "VOD has its own error path")
+        assertNull(mpvLiveEndFileHttpStatus(true, true, "error", "HTTP error 503"), "a played stream that drops keeps the freeze ladder")
+    }
+
+    @Test
     fun pixelDrainHotlinkBlockShowsTheHttpStatusAndReason() {
         // mpv's log for a PixelDrain file blocked for hotlinking.
         val log = MpvErrorLog()

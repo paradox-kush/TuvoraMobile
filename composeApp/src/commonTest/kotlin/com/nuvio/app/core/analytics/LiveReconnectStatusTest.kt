@@ -89,4 +89,38 @@ class LiveReconnectStatusTest {
         assertNull(LiveReconnectReasonPolicy.httpStatusIn("Failed to open tcp host 8080 channel 456"))
         assertEquals(456, LiveReconnectReasonPolicy.httpStatusIn("HTTP error 456"))
     }
+
+    @Test
+    fun `an open refused with a 5xx retries with backoff and shows each attempt`() {
+        // Device pass: a 503 at open went straight to the error with one request.
+        val first = reconnector.onOpenFailed("[ffmpeg] http: HTTP error 503 Service Unavailable")
+        assertEquals(LiveOpenRetryPolicy.delayMs(0), first)
+        assertEquals(LiveReconnectStatus(1, max, LiveReconnectReason.PROVIDER_SERVER_ERROR), reconnector.status.value)
+        var attempts = 1
+        while (reconnector.onOpenFailed("Source error (HTTP 503)") != null) attempts++
+        assertEquals(max, attempts, "bounded by the same cap as the freeze ladder")
+        assertEquals(true, reconnector.hasGivenUp)
+        assertNull(reconnector.status.value, "the give-up hands the screen to the error and Retry")
+    }
+
+    @Test
+    fun `an open refused for a reason a retry cannot fix fails at once`() {
+        for (message in listOf("HTTP error 458", "HTTP error 509", "HTTP error 456", "HTTP error 404", "HTTP error 403", null)) {
+            reconnector.onUserRetry()
+            assertNull(reconnector.onOpenFailed(message), "$message")
+            assertNull(reconnector.status.value)
+        }
+    }
+
+    @Test
+    fun `an unreachable provider at open is retried too`() {
+        assertEquals(LiveOpenRetryPolicy.delayMs(0), reconnector.onOpenFailed("Source error (network error)"))
+        assertEquals(LiveReconnectReason.UNREACHABLE, reconnector.status.value?.reason)
+    }
+
+    @Test
+    fun `open retry delays back off and never hammer the provider`() {
+        assertEquals(2_000L, LiveOpenRetryPolicy.delayMs(0))
+        assertEquals(20_000L, LiveOpenRetryPolicy.delayMs(10))
+    }
 }

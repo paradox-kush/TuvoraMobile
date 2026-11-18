@@ -52,6 +52,20 @@ object TvLiveStatusText {
             // A radio channel has no frames to count: playing and not loading is all it can show.
             (!snapshot.hasVideoTrack || (snapshot.videoProgressTicks > 0L && snapshot.videoProgressTicks != ticksAtReconnect))
 
+    /**
+     * A live open (no frame yet) the provider refused for a reason another try cannot fix — firewall (456), connection
+     * cap (458/509/429), missing stream (404): fail at once with the hint, as the phone does, rather than race the
+     * provider through the reconnect ladder. A status-less failure keeps the ladder (a spent Stalker link needs its re-mint).
+     */
+    fun failsAtOpen(started: Boolean, engineError: String?): Boolean =
+        !started && LiveReconnectReasonPolicy.fromFailureText(engineError) in NOT_RETRYABLE_AT_OPEN
+
+    private val NOT_RETRYABLE_AT_OPEN = setOf(
+        LiveReconnectReason.PROVIDER_FIREWALL,
+        LiveReconnectReason.CONNECTION_LIMIT,
+        LiveReconnectReason.STREAM_NOT_FOUND,
+    )
+
     /** The hint for the HTTP status an engine's failure text names, or null when it names none. */
     fun hintFor(engineError: String?): String? =
         LiveReconnectReasonPolicy.httpStatusIn(engineError)?.let(StreamHttpStatusHintPolicy::hintFor)?.let(::hint)

@@ -1080,6 +1080,14 @@ class TvPlayerSession(
                 // Only the reason code and the status hint are kept from the engine text (it can carry a host).
                 lastReconnectReason = com.nuvio.app.core.analytics.LiveReconnectReasonPolicy.fromFailureText(error)
                 lastFailureHint = TvLiveStatusText.hintFor(error)
+                if (TvLiveStatusText.failsAtOpen(playbackStarted, error)) {
+                    log.w { "live open refused (${lastReconnectReason.code}): failing without the ladder" }
+                    _state.value = _state.value.copy(
+                        errorMessage = TvLiveRelinkPolicy.viewerMessage(error), failureHint = lastFailureHint,
+                        reconnectStatus = null, isLoading = false, isPlaying = false,
+                    )
+                    return true
+                }
                 val ended = snapshot.copy(isEnded = true, isPlaying = false, isLoading = false)
                 when (monitor.sample(clock.elapsedNow().inWholeMilliseconds, ended, wantsToPlay = true)) {
                     TvLiveAction.Reconnect -> { publishReconnectAttempt(); reconnectLive() }

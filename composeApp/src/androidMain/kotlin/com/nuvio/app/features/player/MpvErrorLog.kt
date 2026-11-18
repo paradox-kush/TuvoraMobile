@@ -55,6 +55,14 @@ internal class MpvErrorLog {
     fun logLine(): String? = logLine
 }
 
+/**
+ * The HTTP status a live OPEN that ended in error names in mpv's log, or null. Only an open that never [started]
+ * reports it as an error (the reason line and the bounded open retry read it); a stream that played and then
+ * dropped keeps live's own END_FILE recovery (the freeze ladder), as does any end without a status.
+ */
+internal fun mpvLiveEndFileHttpStatus(isLive: Boolean, started: Boolean, endReason: String?, logLine: String?): Int? =
+    if (isLive && !started && endReason.equals("error", ignoreCase = true)) mpvHttpStatusCode(logLine) else null
+
 internal fun mpvHttpStatusCode(logLine: String?): Int? {
     return logLine
         ?.let { MPV_HTTP_ERROR_REGEX.find(it) }

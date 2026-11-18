@@ -150,11 +150,11 @@ object M3UParser {
     ): Entry? {
         val cleanUrl = url.trim()
         if (cleanUrl.isBlank() || cleanUrl.startsWith("#")) return null
-        val attrs = parseAttributes(extInf)
+        // Quote-aware: a User-Agent is full of commas ("KHTML, like Gecko"), and cutting at the first one lost
+        // every attribute after it (group-title included). An explicit #EXTVLCOPT / #EXTHTTP line wins over the attribute.
         val head = quotedHead(extInf)
-        // A User-Agent is full of commas ("KHTML, like Gecko"): read the header attributes quote-aware.
-        // An explicit #EXTVLCOPT / #EXTHTTP line wins over the attribute on the #EXTINF itself.
-        val headers = M3uStreamHeaders.fromAttributes(attributesIn(head)) + lineHeaders
+        val attrs = parseAttributes(extInf)
+        val headers = M3uStreamHeaders.fromAttributes(attrs) + lineHeaders
         // The display name follows the first comma OUTSIDE a quoted value: a quoted User-Agent is full of commas.
         // An unbalanced quote hides every comma: then the old first-comma rule still finds a name.
         val displayName = (if (head.length < extInf.length) extInf.substring(head.length + 1) else extInf.substringAfter(',', "")).trim()
@@ -214,7 +214,11 @@ object M3UParser {
     }
 
     /** Extracts the `key="value"` attributes from an #EXTINF line (before the trailing `,name`). */
-    fun parseAttributes(extInf: String): Map<String, String> = attributesIn(extInf.substringBefore(','))
+    fun parseAttributes(extInf: String): Map<String, String> {
+        val head = quotedHead(extInf)
+        // An unbalanced quote hides every comma: keep the old first-comma cut rather than read the name as attributes.
+        return attributesIn(if (head.length == extInf.length) extInf.substringBefore(',') else head)
+    }
 
     /** An #EXTINF line up to its display-name comma: the first comma outside a quoted value. */
     internal fun quotedHead(extInf: String): String {

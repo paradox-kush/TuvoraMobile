@@ -787,7 +787,16 @@ private struct LiveGuideView: View {
                 }
                 if let status = previewStatus, status.phase != .playing, let channel = previewing {
                     if status.phase == .loading {
-                        ProgressView().tint(.white)
+                        VStack(spacing: dp(8)) {
+                            ProgressView().tint(.white)
+                            // The session's reconnect ladder: "Reconnecting… (attempt N of M)" and why.
+                            if let line = status.message {
+                                Text(line).font(NuvioType.bodySmall).foregroundStyle(colors.textPrimary)
+                                    .multilineTextAlignment(.center).lineLimit(3)
+                                    .accessibilityIdentifier("guide.preview.reconnectStatus")
+                            }
+                        }
+                        .padding(dp(8))
                     } else {
                         VStack(spacing: dp(8)) {
                             Text(status.message ?? "").font(NuvioType.bodySmall).foregroundStyle(colors.textPrimary)
@@ -1114,7 +1123,8 @@ private struct LiveGuideView: View {
             if let current = previewStatus, TvGuidePreviewPolicy.shared.offersRetry(status: current) { return }
             let state = previewSession?.state.value
             let elapsed = Int64(Date().timeIntervalSince(previewOpenedAt) * 1000)
-            let status = TvGuidePreviewPolicy.shared.status(elapsedMs: elapsed, started: state?.hasStarted ?? false, error: state?.errorMessage)
+            let status = TvGuidePreviewPolicy.shared.status(elapsedMs: elapsed, started: state?.hasStarted ?? false, error: state?.errorMessage,
+                                                            hint: state?.failureHint, reconnecting: state?.reconnectStatus)
             if previewStatus?.phase != status.phase || previewStatus?.message != status.message { previewStatus = status }
             if status.phase == .failed { previewRequests.cancel(); return }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -1159,7 +1169,7 @@ private struct LiveGuideView: View {
         previewSession = nil
         previewing = channel
         previewOpenedAt = Date()
-        previewStatus = TvGuidePreviewPolicy.shared.status(elapsedMs: 0, started: false, error: nil)
+        previewStatus = TvGuidePreviewPolicy.shared.status(elapsedMs: 0, started: false, error: nil, hint: nil, reconnecting: nil)
         let request = previewRequests.begin()
         Task {
             let resolved = try? await TvIptvBrowse.shared.playChannel(contentId: channel.contentId, name: channel.name, logo: channel.logo)

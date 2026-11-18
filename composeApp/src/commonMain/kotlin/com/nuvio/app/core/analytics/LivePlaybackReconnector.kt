@@ -161,6 +161,31 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
         }
     }
 
+    /**
+     * The channel's open failed before any frame, with the engine's [message] (or none). Returns the wait before
+     * re-opening it when [LiveOpenRetryPolicy] says a retry can help and the ladder has attempts left (the same
+     * [LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK] cap, counted together with freeze reconnects), and
+     * publishes the attempt; null means fail now (error + Retry). Out of attempts is the terminal give-up.
+     */
+    fun onOpenFailed(message: String?): Long? {
+        if (gaveUp) return null
+        lastReason = LiveReconnectReasonPolicy.fromFailureText(message)
+        if (!LiveOpenRetryPolicy.retries(lastReason)) {
+            _status.value = null
+            return null
+        }
+        if (attemptsWithoutPlayback >= LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK) {
+            gaveUp = true
+            _status.value = null
+            return null
+        }
+        val delay = LiveOpenRetryPolicy.delayMs(attemptsWithoutPlayback)
+        attempts += 1
+        attemptsWithoutPlayback += 1
+        publishAttempt()
+        return delay
+    }
+
     private fun publishAttempt() {
         _status.value = LiveReconnectStatus(
             attempt = attemptsWithoutPlayback.coerceAtMost(LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK),

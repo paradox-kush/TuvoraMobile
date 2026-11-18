@@ -85,3 +85,21 @@ object LiveReconnectReasonPolicy {
         return if (NETWORK_TEXT.any { it in lower }) LiveReconnectReason.UNREACHABLE else LiveReconnectReason.STREAM_STOPPED
     }
 }
+
+/**
+ * Whether a live channel whose FIRST open failed is worth asking again (pure). A provider that answered 5xx or could
+ * not be reached is often back within seconds, so it gets the same bounded ladder as a mid-stream drop; a firewall
+ * (456), a connection cap (458/509/429), a missing stream (404) or any other refusal will answer the same way again,
+ * and racing a connection cap only makes it worse — those fail at once with the reason and Retry.
+ */
+object LiveOpenRetryPolicy {
+
+    fun retries(reason: LiveReconnectReason): Boolean =
+        reason == LiveReconnectReason.PROVIDER_SERVER_ERROR || reason == LiveReconnectReason.UNREACHABLE
+
+    /**
+     * The wait before open retry N (0-based): the freeze ladder's backoff one step on, since the failed open already
+     * made its immediate request — 2 s, 5 s, 10 s, then 20 s.
+     */
+    fun delayMs(attempt: Int): Long = LivePlaybackRecoveryPolicy.backoffMs(attempt.coerceAtLeast(0) + 1)
+}

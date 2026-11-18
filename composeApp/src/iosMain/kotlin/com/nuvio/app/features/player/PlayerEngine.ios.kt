@@ -529,13 +529,15 @@ private fun PlatformPlayerSurfaceInner(
                 voDroppedFrameCount = voFrameStats ushr 32,
                 voDelayedFrameCount = voFrameStats and 0xFFFF_FFFFL,
             )
-            latestOnSnapshot.value(snapshot)
+            // The error first, then the snapshot: a failed live open is classified from its text (reason line,
+            // bounded open retry) before its ended snapshot can read as a silent end.
             val errorMessage = bridge.getErrorMessage().ifBlank { null }
             if (errorMessage != lastReportedError) {
                 lastReportedError = errorMessage
                 // libmpv's text names the status ("HTTP error 456") but not what it means: add the shared hint.
                 latestOnError.value(errorMessage?.let { withHttpStatusHint(it) })
             }
+            latestOnSnapshot.value(snapshot)
             delay(250L)
         }
     }

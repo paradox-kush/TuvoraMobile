@@ -185,6 +185,20 @@ object XtreamItemRegistry {
      * [forceMint] rides the 401-refresh ladder into Stalker's resolver: a static-cmd verdict would
      * rebuild the very URL that just died, so the refresh demands a fresh create_link.
      */
+    /**
+     * A live channel's own playlist headers for playback: the registered item's when it carries them, else (an M3U
+     * channel opened without its list being browsed here: Apple TV's guide, a favourite after a cold launch) the
+     * content DB row's. Empty for Xtream / Stalker and for channels without any.
+     */
+    suspend fun liveRequestHeadersFor(contentId: String): Map<String, String> {
+        get(contentId)?.requestHeaders?.takeIf { it.isNotEmpty() }?.let { return it }
+        val parsed = parseId(contentId)?.takeIf { it.kind == XtreamKind.LIVE } ?: return emptyMap()
+        val streamId = parsed.id.toIntOrNull() ?: return emptyMap()
+        val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return emptyMap()
+        if (account.sourceType != SOURCE_TYPE_M3U_URL && account.sourceType != SOURCE_TYPE_M3U_FILE) return emptyMap()
+        return runCatching { M3UClient.liveHeadersFor(account, streamId) }.getOrDefault(emptyMap())
+    }
+
     suspend fun liveStreamUrlForAsync(contentId: String, forceMint: Boolean = false): String? =
         resolveLiveStreamUrl(contentId, forceMint).also { IptvPanelHosts.note(it) }
 

@@ -1848,6 +1848,26 @@ private fun LibmpvPlayerSurface(
                                     "durationMs=${snapshot.durationMs} eof=${snapshot.isEnded} " +
                                     "data=${diagnosticPlayerMessage(endFileJson)}",
                             )
+                            // A live open the provider refused with a status (456 firewall, 458/509 connection cap,
+                            // 5xx): say so BEFORE the ended snapshot, so the screen classifies it (reason line, the
+                            // bounded open retry) instead of reading a silent end. Without a status, live keeps its own
+                            // END_FILE recovery below.
+                            val liveLogLine = if (isLiveStream) errorLog.logLine() else null
+                            val liveHttpCode = mpvLiveEndFileHttpStatus(
+                                isLiveStream, LivePlaybackStartupPolicy.hasStarted(snapshot), endReason, liveLogLine,
+                            )
+                            if (liveHttpCode != null) {
+                                latestOnError.value(
+                                    mpvErrorMessage(
+                                        fileError = fileError,
+                                        logLine = liveLogLine,
+                                        codecContext = null,
+                                        fallback = getString(Res.string.player_unable_to_play_stream),
+                                        httpExplanation = httpStatusExplanationText(liveHttpCode),
+                                        statusExplanation = "",
+                                    ),
+                                )
+                            }
                             latestOnSnapshot.value(snapshot)
                             nowPlayingController?.syncPlayback(snapshot)
                             view.keepScreenOn = view.shouldKeepScreenOn()

@@ -31,6 +31,16 @@ class TvLiveStatusTextTest {
     }
 
     @Test
+    fun `an open refused by a cap firewall or 404 fails at once and a 5xx keeps the ladder`() {
+        assertTrue(TvLiveStatusText.failsAtOpen(started = false, engineError = "[ffmpeg] http: HTTP error 458"))
+        assertTrue(TvLiveStatusText.failsAtOpen(started = false, engineError = "HTTP error 456"))
+        assertTrue(TvLiveStatusText.failsAtOpen(started = false, engineError = "Server returned 404 Not Found"))
+        assertFalse(TvLiveStatusText.failsAtOpen(started = false, engineError = "HTTP error 503"))
+        assertFalse(TvLiveStatusText.failsAtOpen(started = false, engineError = "[mpv] loading failed"))
+        assertFalse(TvLiveStatusText.failsAtOpen(started = true, engineError = "HTTP error 458"), "a played stream keeps its ladder")
+    }
+
+    @Test
     fun `a 456 failure card advises a custom User-Agent`() {
         assertTrue(TvLiveFailureReason.of("HTTP error 456", offline = false)!!.contains("User-Agent"))
     }

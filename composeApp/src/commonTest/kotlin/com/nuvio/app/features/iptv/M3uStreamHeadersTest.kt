@@ -31,6 +31,17 @@ class M3uStreamHeadersTest {
     }
 
     @Test
+    fun `a comma inside a quoted user agent does not lose the attributes after it`() {
+        val e = parse(
+            "#EXTINF:-1 tvg-id=\"bp.comma\" user-agent=\"Comma, Agent/2.0\" group-title=\"Branch Pass\",BP Comma, Name\nhttp://h/live/1.ts",
+        ).single()
+        assertEquals("Branch Pass", e.group)
+        assertEquals("BP Comma, Name", e.name)
+        assertEquals(mapOf("User-Agent" to "Comma, Agent/2.0"), e.headers)
+        assertEquals("bp.comma", e.tvgId)
+    }
+
+    @Test
     fun `the alternative attribute spellings are read`() {
         val e = parse("#EXTINF:-1 user-agent=\"VLC/3.0.20\" referer=\"https://r/\",A\nhttp://h/1.ts").single()
         assertEquals(mapOf("User-Agent" to "VLC/3.0.20", "Referer" to "https://r/"), e.headers)
