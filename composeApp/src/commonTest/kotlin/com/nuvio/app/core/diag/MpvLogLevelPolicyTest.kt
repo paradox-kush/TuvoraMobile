@@ -26,4 +26,14 @@ class MpvLogLevelPolicyTest {
         assertEquals("no", MpvLogLevelPolicy.levelFor("vdx", "all=no,vd=warn"), "prefix needs a slash boundary")
         assertEquals("warn", MpvLogLevelPolicy.levelFor("stream", "all=warn"), "the old Android setting reproduces the leak")
     }
+
+    @Test
+    fun ffmpegHttpStatusLineReachesTheErrorLogButSiblingsStaySilent() {
+        // Device pass: libmpv only ends a refused live open with "loading failed"; the status ("HTTP error 458")
+        // is FFmpeg's http module warning, which all=no swallowed, so the screen could not name it.
+        assertEquals("warn", MpvLogLevelPolicy.levelFor("ffmpeg/http"), "the HTTP status line")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("ffmpeg/hls"), "hls warns with segment URLs")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("ffmpeg/tcp"), "tcp lines carry hosts")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("stream"), "stream formats the URL")
+    }
 }

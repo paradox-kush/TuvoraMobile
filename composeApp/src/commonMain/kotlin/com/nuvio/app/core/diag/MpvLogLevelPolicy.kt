@@ -15,11 +15,15 @@ package com.nuvio.app.core.diag
  * Matching follows mpv `common/msg.c`: an entry applies to the module and its `/` sub-modules, and
  * the LAST matching entry wins.
  *
+ * `ffmpeg/http=warn` is the one network module let through: libmpv ends a refused open with only
+ * "loading failed", and the provider's status ("HTTP error 458 ...", FFmpeg's http warning, no URL in it)
+ * is the sole carrier of the reason the live screen names and retries on. hls/tcp/stream stay off.
+ *
  * Android only: the iOS bridge prints from Swift, where each line goes through [LogRedaction.text]
  * instead (it keeps the warn/error text that composes the on-screen playback error).
  */
 object MpvLogLevelPolicy {
-    const val MSG_LEVEL = "all=no,vo=warn,ao=warn,vd=warn,ad=warn,ffmpeg/video=warn,ffmpeg/audio=warn"
+    const val MSG_LEVEL = "all=no,vo=warn,ao=warn,vd=warn,ad=warn,ffmpeg/video=warn,ffmpeg/audio=warn,ffmpeg/http=warn"
 
     /** The effective level mpv would apply to [module] under [spec] (default when nothing matches: "status"). */
     fun levelFor(module: String, spec: String = MSG_LEVEL): String {
