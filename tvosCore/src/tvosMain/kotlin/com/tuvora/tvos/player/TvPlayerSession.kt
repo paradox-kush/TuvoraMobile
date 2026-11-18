@@ -245,6 +245,9 @@ class TvPlayerSession(
     private val playbackSession = launch.externalPlaybackSession()
     private val gate = TvProgressGate()
     private var monitor = TvLiveMonitor()
+    /** The bounded retry of a live channel whose first open failed with a 5xx / unreachable (the phone's onOpenFailed). */
+    private val openRetry = TvLiveOpenRetry()
+    private var openRetryJob: kotlinx.coroutines.Job? = null
     /** Why the live stream last failed (reason code only, never the engine text); words the reconnect line. */
     private var lastReconnectReason = com.nuvio.app.core.analytics.LiveReconnectReason.STREAM_STOPPED
     /** The last engine failure's HTTP status hint, kept for the live give-up card (its message is a fixed sentence). */
@@ -621,6 +624,8 @@ class TvPlayerSession(
             // ladder's first attempt and the next poll cannot mint a second link on top of it.
             monitor.onUserRetry()
             identityFallback?.reset()
+            openRetry.reset()
+            openRetryJob?.cancel()
             clearReconnectStatus()
             poll()
         } else {
@@ -1059,6 +1064,37 @@ class TvPlayerSession(
 
     /** Handles a reported error; true means this poll is done (state already updated).*/
     private fun handleFailure(lane: PlaybackLane, error: String): Boolean {
+        // A live open the provider answered 5xx (or never answered): the bounded open retry, with its attempt line.
+        // Before the lane switch: a provider's 5xx is not an engine problem, and another engine is one more request.
+        if (isLive && !closed) {
+            if (openRetryJob?.isActive == true) return true   // already scheduled; the same failure, polled again
+            val retryIn = openRetry.next(playbackStarted, error)
+            val reason = com.nuvio.app.core.analytics.LiveReconnectReasonPolicy.fromFailureText(error)
+            if (retryIn != null) {
+                lastReconnectReason = reason
+                lastFailureHint = TvLiveStatusText.hintFor(error)
+                reconnectTicksBaseline = snapshot.videoProgressTicks
+                val status = com.nuvio.app.core.analytics.LiveReconnectStatus(
+                    attempt = openRetry.attempts,
+                    maxAttempts = com.nuvio.app.core.analytics.LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK,
+                    reason = reason,
+                )
+                log.i { "live open failed (${reason.code}): retry ${openRetry.attempts} in ${retryIn} ms" }
+                _state.value = _state.value.copy(isLoading = true, reconnectStatus = TvLiveStatusText.text(status))
+                openRetryJob = scope.launch {
+                    kotlinx.coroutines.delay(retryIn)
+                    retryLiveOpen()
+                }
+                return true
+            }
+            if (openRetry.exhausted && !playbackStarted && com.nuvio.app.core.analytics.LiveOpenRetryPolicy.retries(reason)) {
+                _state.value = _state.value.copy(
+                    errorMessage = TvLiveRelinkPolicy.viewerMessage(error), failureHint = TvLiveStatusText.hintFor(error),
+                    reconnectStatus = null, isLoading = false, isPlaying = false,
+                )
+                return true
+            }
+        }
         // A spent link (Stalker create_link, live or replay) never moves to another engine: it would open the
         // same dead URL there. Live: the reconnect ladder below mints a fresh one. Replay: it fails with Retry.
         val next = PlaybackLanePolicy.escalation(lane, escalated)
@@ -1196,6 +1232,16 @@ class TvPlayerSession(
         )
         restorePlayIntent(b)
         announceLiveSource(b)
+    }
+
+    /**
+     * The open retry's re-open: a FRESH load of the address (mpv's own retry re-reads `path`, which a failed open never
+     * set, so it did nothing) — or a fresh link for a spent single-use one.
+     */
+    private fun retryLiveOpen() {
+        if (closed) return
+        if (spentLinkAfterOpen && liveReresolve != null) remint(spent = true)
+        else openFreshLiveLink(TvResolvedSource(activeSourceUrl, activeSourceHeaders))
     }
 
     /** Re-opens a stable (Xtream / M3U) live address on the current engine. */
