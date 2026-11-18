@@ -288,4 +288,18 @@ class MpvErrorLogTest {
             )
         )
     }
+
+    @Test
+    fun ffmpegHttpModuleKeepsOnlyTheStatusLine() {
+        // http.c warns with bare host:port ("different host: a.com:8080 != b.net:80"): not stripped by the URL
+        // regex, so only the "HTTP error NNN" form may survive from that module.
+        val log = MpvErrorLog()
+        log.onLog("ffmpeg/http", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "Connection timed out, different host: example.com:8080 != other.net:80")
+        assertNull(log.logLine(), "a non-status http line is dropped")
+        log.onLog("ffmpeg/http", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "HTTP error 458 Connection limit")
+        log.onLog("ffmpeg/http", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "Connection timed out, different host: example.com:8080 != other.net:80")
+        val line = log.logLine().orEmpty()
+        assertTrue("HTTP error 458" in line, "the status survives: $line")
+        assertFalse("example.com" in line || "other.net" in line, "no host survives: $line")
+    }
 }

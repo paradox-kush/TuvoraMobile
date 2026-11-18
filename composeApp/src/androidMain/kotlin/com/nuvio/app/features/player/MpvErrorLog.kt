@@ -41,6 +41,9 @@ internal class MpvErrorLog {
     @Synchronized
     fun onLog(prefix: String, level: Int, text: String) {
         val isHttp = MPV_HTTP_ERROR_REGEX.containsMatchIn(text)
+        // FFmpeg's http module is let through for its "HTTP error NNN" status only; its other warnings name bare
+        // host:port tokens that the URL strip below cannot see.
+        if (mpvLogPrefixIsHttpModule(prefix, text) && !isHttp) return
         if (level > MPV.mpvLogLevel.MPV_LOG_LEVEL_INFO) return
         val isInfo = level > MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN
         if (isInfo && !mpvInfoLineIsUseful(text)) return
@@ -54,6 +57,12 @@ internal class MpvErrorLog {
     @Synchronized
     fun logLine(): String? = logLine
 }
+
+internal fun mpvLogPrefixIsHttpModule(prefix: String, text: String): Boolean =
+    MPV_HTTP_MODULE_REGEX.containsMatchIn(prefix.trim()) || MPV_HTTP_TEXT_REGEX.containsMatchIn(text.trim())
+
+private val MPV_HTTP_MODULE_REGEX = Regex("^(ffmpeg/)?https?$", RegexOption.IGNORE_CASE)
+private val MPV_HTTP_TEXT_REGEX = Regex("^https?:\\s", RegexOption.IGNORE_CASE)
 
 /**
  * The HTTP status a live OPEN that ended in error names in mpv's log, or null. Only an open that never [started]
