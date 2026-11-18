@@ -511,6 +511,7 @@ private fun PlatformPlayerSurfaceInner(
     // Polling for snapshots
     LaunchedEffect(bridge) {
         var lastReportedError: String? = null
+        var endedHeld = false
         while (isActive) {
             // -1 means the track carries no picture; see NuvioPlayerBridge.getVideoFrameTicks.
             val videoTicks = bridge.getVideoFrameTicks()
@@ -529,12 +530,22 @@ private fun PlatformPlayerSurfaceInner(
                 voDroppedFrameCount = voFrameStats ushr 32,
                 voDelayedFrameCount = voFrameStats and 0xFFFF_FFFFL,
             )
-            latestOnSnapshot.value(snapshot)
+            // The error first, then the snapshot: a failed live open is classified from its text (reason line,
+            // bounded open retry) before its ended snapshot can read as a silent end.
             val errorMessage = bridge.getErrorMessage().ifBlank { null }
             if (errorMessage != lastReportedError) {
                 lastReportedError = errorMessage
-                latestOnError.value(errorMessage)
+                // libmpv's text names the status ("HTTP error 456") but not what it means: add the shared hint.
+                latestOnError.value(errorMessage?.let { withHttpStatusHint(it) })
             }
+            // libmpv flags the end just before its error text: give the text one poll to land first.
+            if (EngineEndedReportPolicy.holdEnded(snapshot.isEnded, errorMessage != null, endedHeld)) {
+                endedHeld = true
+                delay(250L)
+                continue
+            }
+            if (!snapshot.isEnded) endedHeld = false
+            latestOnSnapshot.value(snapshot)
             delay(250L)
         }
     }

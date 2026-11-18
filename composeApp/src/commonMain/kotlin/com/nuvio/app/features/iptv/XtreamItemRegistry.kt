@@ -81,7 +81,7 @@ object XtreamItemRegistry {
         XtreamResolvedItem(vodId(accountId, movie.streamId), accountId, XtreamKind.VOD, movie.name, movie.streamUrl, movie.poster)
 
     fun resolvedChannel(accountId: String, channel: XtreamChannel) =
-        XtreamResolvedItem(liveId(accountId, channel.streamId), accountId, XtreamKind.LIVE, channel.name, channel.streamUrl, channel.logo, streamType = "live")
+        XtreamResolvedItem(liveId(accountId, channel.streamId), accountId, XtreamKind.LIVE, channel.name, channel.streamUrl, channel.logo, streamType = "live", requestHeaders = channel.streamHeaders)
 
     fun resolvedSeries(accountId: String, series: XtreamSeriesItem) =
         XtreamResolvedItem(seriesId(accountId, series.seriesId), accountId, XtreamKind.SERIES, series.name, null, series.poster)
@@ -142,7 +142,7 @@ object XtreamItemRegistry {
             SOURCE_TYPE_STALKER, SOURCE_TYPE_M3U_URL, SOURCE_TYPE_M3U_FILE -> {
                 if (sid == null) null else when (parsed.kind) {
                     XtreamKind.LIVE -> com.nuvio.app.features.iptv.content.IptvContentDb.channelRow(account.id, sid)?.let {
-                        XtreamResolvedItem(contentId, account.id, XtreamKind.LIVE, it.name, it.url, logo = it.logo, streamType = "live")
+                        XtreamResolvedItem(contentId, account.id, XtreamKind.LIVE, it.name, it.url, logo = it.logo, streamType = "live", requestHeaders = it.streamHeaders)
                     }
                     XtreamKind.VOD -> com.nuvio.app.features.iptv.content.IptvContentDb.vodRow(account.id, sid)?.let {
                         XtreamResolvedItem(contentId, account.id, XtreamKind.VOD, it.name, it.url, poster = it.logo)
@@ -185,6 +185,20 @@ object XtreamItemRegistry {
      * [forceMint] rides the 401-refresh ladder into Stalker's resolver: a static-cmd verdict would
      * rebuild the very URL that just died, so the refresh demands a fresh create_link.
      */
+    /**
+     * A live channel's own playlist headers for playback: the registered item's when it carries them, else (an M3U
+     * channel opened without its list being browsed here: Apple TV's guide, a favourite after a cold launch) the
+     * content DB row's. Empty for Xtream / Stalker and for channels without any.
+     */
+    suspend fun liveRequestHeadersFor(contentId: String): Map<String, String> {
+        get(contentId)?.requestHeaders?.takeIf { it.isNotEmpty() }?.let { return it }
+        val parsed = parseId(contentId)?.takeIf { it.kind == XtreamKind.LIVE } ?: return emptyMap()
+        val streamId = parsed.id.toIntOrNull() ?: return emptyMap()
+        val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == parsed.accountId } ?: return emptyMap()
+        if (account.sourceType != SOURCE_TYPE_M3U_URL && account.sourceType != SOURCE_TYPE_M3U_FILE) return emptyMap()
+        return runCatching { M3UClient.liveHeadersFor(account, streamId) }.getOrDefault(emptyMap())
+    }
+
     suspend fun liveStreamUrlForAsync(contentId: String, forceMint: Boolean = false): String? =
         resolveLiveStreamUrl(contentId, forceMint).also { IptvPanelHosts.note(it) }
 
@@ -240,9 +254,13 @@ object XtreamItemRegistry {
         val account = XtreamRepository.uiState.value.accounts.firstOrNull { it.id == item.accountId }
         // A Stalker VOD/episode link opens as it did before 1.20.3: the playlist User-Agent override alone, else the
         // engine default. The MAG identity regressed a provider that 401s it (StalkerStreamIdentityPolicy).
+        val playlistUa = account?.let { StreamUserAgentPolicy.resolve(it) }
         return item.toStreamItem(
             accountName = account?.name ?: "Xtream",
-            userAgent = account?.let { StreamUserAgentPolicy.resolve(it) },
+            userAgent = playlistUa,
+            // A channel's own playlist headers win over the playlist-level User-Agent (M3uStreamHeaders.merge).
+            requestHeaders = item.requestHeaders.takeIf { it.isNotEmpty() }
+                ?.let { M3uStreamHeaders.merge(emptyMap(), playlistUa, it) },
         )
     }
 
@@ -278,6 +296,8 @@ data class XtreamResolvedItem(
     val logo: String? = null,
     /** "live" for channels — drives the libmpv engine override in the player. */
     val streamType: String? = null,
+    /** An M3U channel's own request headers (#EXTVLCOPT / #EXTHTTP / http-user-agent; [M3uStreamHeaders]). */
+    val requestHeaders: Map<String, String> = emptyMap(),
 )
 
 /** [requestHeaders], when given, is the whole request header set (it already carries any UA override); else [userAgent] alone. */

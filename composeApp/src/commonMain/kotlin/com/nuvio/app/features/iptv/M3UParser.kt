@@ -36,6 +36,11 @@ object M3UParser {
         val tvgName: String? = null,
         /** Catch-up declared by the entry (or the playlist header); live entries only. */
         val catchUp: M3uCatchUpInfo? = null,
+        /**
+         * The entry's own request headers ([M3uStreamHeaders]: User-Agent / Referer / Origin only), from its
+         * `#EXTINF` attributes and any `#EXTVLCOPT` / `#EXTHTTP` lines around it. Empty for most playlists.
+         */
+        val headers: Map<String, String> = emptyMap(),
     )
 
     /**
@@ -49,6 +54,11 @@ object M3UParser {
         /** `#EXTGRP:` folder for the NEXT entry only (VLC semantics); a `group-title` on the entry wins. */
         private var pendingExtGrp: String? = null
         private var catchUpHeader: Map<String, String> = emptyMap()
+        /**
+         * `#EXTVLCOPT` / `#EXTHTTP` headers seen since the last stream URL, for the NEXT entry only. Collected on
+         * both sides of its `#EXTINF` (VLC writes them after it; some exporters before), so a URL line closes them.
+         */
+        private var pendingLineHeaders: Map<String, String> = emptyMap()
 
         /**
          * The playlist's EPG URL declared on the `#EXTM3U` header (`url-tvg` or `x-tvg-url`), captured
@@ -71,14 +81,19 @@ object M3UParser {
                 line.startsWith("#EXTGRP:", ignoreCase = true) ->
                     // B135: folder-style exports name the group here, not in group-title.
                     pendingExtGrp = line.substring("#EXTGRP:".length).trim().ifBlank { null }
-                line.startsWith("#") -> Unit // #KODIPROP, #EXTVLCOPT, etc. — ignored
+                line.startsWith("#EXTVLCOPT:", ignoreCase = true) ->
+                    pendingLineHeaders = pendingLineHeaders + M3uStreamHeaders.fromVlcOpt(line)
+                line.startsWith("#EXTHTTP:", ignoreCase = true) ->
+                    pendingLineHeaders = pendingLineHeaders + M3uStreamHeaders.fromExtHttp(line)
+                line.startsWith("#") -> Unit // #KODIPROP, other #EXTVLCOPT options, etc. — ignored
                 else -> {
                     val ext = pendingExtInf
                     if (ext != null) {
-                        parseEntry(ext, line, catchUpHeader, pendingExtGrp)?.let(onEntry)
+                        parseEntry(ext, line, catchUpHeader, pendingExtGrp, pendingLineHeaders)?.let(onEntry)
                         pendingExtInf = null
                         pendingExtGrp = null
                     }
+                    pendingLineHeaders = emptyMap()
                     // A bare URL with no preceding #EXTINF is skipped (can't classify/name it well).
                 }
             }
@@ -131,11 +146,18 @@ object M3UParser {
         url: String,
         catchUpHeader: Map<String, String> = emptyMap(),
         extGrp: String? = null,
+        lineHeaders: Map<String, String> = emptyMap(),
     ): Entry? {
         val cleanUrl = url.trim()
         if (cleanUrl.isBlank() || cleanUrl.startsWith("#")) return null
+        // Quote-aware: a User-Agent is full of commas ("KHTML, like Gecko"), and cutting at the first one lost
+        // every attribute after it (group-title included). An explicit #EXTVLCOPT / #EXTHTTP line wins over the attribute.
+        val head = quotedHead(extInf)
         val attrs = parseAttributes(extInf)
-        val displayName = extInf.substringAfter(',', "").trim()
+        val headers = M3uStreamHeaders.fromAttributes(attrs) + lineHeaders
+        // The display name follows the first comma OUTSIDE a quoted value: a quoted User-Agent is full of commas.
+        // An unbalanced quote hides every comma: then the old first-comma rule still finds a name.
+        val displayName = (if (head.length < extInf.length) extInf.substring(head.length + 1) else extInf.substringAfter(',', "")).trim()
             .ifBlank { attrs["tvg-name"] ?: cleanUrl.substringAfterLast('/') }
         val group = attrs["group-title"]?.ifBlank { null } ?: extGrp
         val ext = extensionOf(cleanUrl)
@@ -154,6 +176,7 @@ object M3UParser {
                 season = se?.first,
                 episode = se?.second,
                 tvgName = attrs["tvg-name"]?.ifBlank { null },
+                headers = headers,
             )
         } else {
             Entry(
@@ -166,6 +189,7 @@ object M3UParser {
                 ext = ext,
                 tvgName = attrs["tvg-name"]?.ifBlank { null },
                 catchUp = if (kind == M3UKind.LIVE) M3uCatchUp.fromAttributes(attrs, catchUpHeader) else null,
+                headers = headers,
             )
         }
     }
@@ -190,7 +214,23 @@ object M3UParser {
     }
 
     /** Extracts the `key="value"` attributes from an #EXTINF line (before the trailing `,name`). */
-    fun parseAttributes(extInf: String): Map<String, String> = attributesIn(extInf.substringBefore(','))
+    fun parseAttributes(extInf: String): Map<String, String> {
+        val head = quotedHead(extInf)
+        // An unbalanced quote hides every comma: keep the old first-comma cut rather than read the name as attributes.
+        return attributesIn(if (head.length == extInf.length) extInf.substringBefore(',') else head)
+    }
+
+    /** An #EXTINF line up to its display-name comma: the first comma outside a quoted value. */
+    internal fun quotedHead(extInf: String): String {
+        var quoted = false
+        for (i in extInf.indices) {
+            when (extInf[i]) {
+                '"' -> quoted = !quoted
+                ',' -> if (!quoted) return extInf.substring(0, i)
+            }
+        }
+        return extInf
+    }
 
     /** `key="value"` / `key=value` pairs anywhere in [head]; quoted values may contain commas. */
     internal fun attributesIn(head: String): Map<String, String> {

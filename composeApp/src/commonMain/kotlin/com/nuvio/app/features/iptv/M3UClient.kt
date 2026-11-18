@@ -334,6 +334,10 @@ object M3UClient : IptvClient {
     override fun episodeStreamUrl(acc: XtreamAccount, episodeId: String, ext: String): String = ""
 
     /** Suspend URL resolvers that read the stored M3U line — used by the cold-launch play/meta paths. */
+    /** An M3U channel's own playlist headers ([M3uStreamHeaders]) from the content DB; empty when it has none. */
+    suspend fun liveHeadersFor(acc: XtreamAccount, streamId: Int): Map<String, String> =
+        IptvContentDb.channelRow(acc.id, streamId)?.streamHeaders.orEmpty()
+
     suspend fun liveUrlFor(acc: XtreamAccount, streamId: Int): String? { com.nuvio.app.core.sources.DeviceSources.guard("iptv",acc.id); return IptvContentDb.channelRow(acc.id, streamId)?.url }
     suspend fun movieUrlFor(acc: XtreamAccount, streamId: Int): String? { com.nuvio.app.core.sources.DeviceSources.guard("iptv",acc.id); return IptvContentDb.vodRow(acc.id, streamId)?.url }
     suspend fun episodeUrlFor(acc: XtreamAccount, episodeId: String): String? { com.nuvio.app.core.sources.DeviceSources.guard("iptv",acc.id); return IptvContentDb.episodeUrl(acc.id, episodeId)?.first }
@@ -374,6 +378,7 @@ object M3UClient : IptvClient {
         catchUpDays = catchUp?.days ?: 0,
         streamUrl = url,
         m3uCatchUp = catchUp,
+        streamHeaders = streamHeaders,
     )
 
     private fun IptvStreamRow.toMovie() = XtreamMovie(

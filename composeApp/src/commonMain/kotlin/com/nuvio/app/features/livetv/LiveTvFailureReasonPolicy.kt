@@ -22,6 +22,12 @@ internal object LiveTvFailureReasonPolicy {
         /** 401/403/404/410/451...: the provider turned this line or device away (expired, blocked, channel gone). */
         PROVIDER_REFUSED("provider_refused"),
 
+        /**
+         * HTTP 456: the provider's firewall (Cloudflare-style bot rule) refused the player's request, nearly always
+         * on its User-Agent. A custom User-Agent on the playlist fixes it ([com.nuvio.app.features.iptv.StreamUserAgentPolicy]).
+         */
+        PROVIDER_FIREWALL("provider_firewall"),
+
         /** The provider's connection cap: another device is already streaming on the line. */
         TOO_MANY_CONNECTIONS("too_many_connections"),
 
@@ -101,6 +107,7 @@ internal object LiveTvFailureReasonPolicy {
 
     private val PROVED_REACHABLE = setOf(
         Reason.PROVIDER_REFUSED,
+        Reason.PROVIDER_FIREWALL,
         Reason.TOO_MANY_CONNECTIONS,
         Reason.PROVIDER_DOWN,
         Reason.UNSUPPORTED,
@@ -112,6 +119,7 @@ internal object LiveTvFailureReasonPolicy {
 
         val status = STATUS.find(m)?.groupValues?.get(1)?.toIntOrNull()
         return when {
+            status == 456 -> Reason.PROVIDER_FIREWALL
             status in CONNECTION_LIMIT_STATUSES || CONNECTION_LIMIT_TEXT.any { it in m } -> Reason.TOO_MANY_CONNECTIONS
             status == 408 -> Reason.NETWORK
             status != null && status in 400..499 -> Reason.PROVIDER_REFUSED

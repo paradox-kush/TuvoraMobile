@@ -16,6 +16,29 @@ import org.robolectric.annotation.Config
 class MpvErrorLogTest {
 
     @Test
+    fun liveEndFileErrorWithAStatusIsReported() {
+        // Device pass: a live 458 on Android libmpv read as "The stream did not start" because the end carried no text.
+        assertEquals(458, mpvLiveEndFileHttpStatus(true, false, "error", "[ffmpeg] http: HTTP error 458 "))
+        assertEquals(509, mpvLiveEndFileHttpStatus(true, false, "error", "HTTP error 509 Bandwidth Limit Exceeded"))
+        assertNull(mpvLiveEndFileHttpStatus(true, false, "eof", "HTTP error 458"), "a clean end is the freeze ladder's")
+        assertNull(mpvLiveEndFileHttpStatus(true, false, "error", "[ffmpeg] tcp: Connection refused"), "no status, no report")
+        assertNull(mpvLiveEndFileHttpStatus(false, false, "error", "HTTP error 458"), "VOD has its own error path")
+        assertNull(mpvLiveEndFileHttpStatus(true, true, "error", "HTTP error 503"), "a played stream that drops keeps the freeze ladder")
+    }
+
+    @Test
+    fun theGenericFfmpegModuleKeepsOnlyTheHttpStatusLine() {
+        // The live-open window lets module "ffmpeg" through: its tcp/tls/hls warnings carry hosts and segment URLs.
+        val log = MpvErrorLog()
+        log.onLog("ffmpeg", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "tcp: Connection to tcp://203.0.113.9:8080 failed: Connection refused")
+        log.onLog("ffmpeg", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "hls: keepalive request failed for 'seg1.ts' with error: Connection reset")
+        assertNull(log.logLine(), "no non-status ffmpeg line is kept")
+        log.onLog("ffmpeg", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "http: HTTP error 458 ")
+        assertEquals(458, mpvHttpStatusCode(log.logLine()))
+        assertFalse(log.logLine().orEmpty().contains("203.0.113.9"))
+    }
+
+    @Test
     fun pixelDrainHotlinkBlockShowsTheHttpStatusAndReason() {
         // mpv's log for a PixelDrain file blocked for hotlinking.
         val log = MpvErrorLog()
@@ -276,5 +299,19 @@ class MpvErrorLogTest {
                 fallback = "Playback error"
             )
         )
+    }
+
+    @Test
+    fun ffmpegHttpModuleKeepsOnlyTheStatusLine() {
+        // http.c warns with bare host:port ("different host: a.com:8080 != b.net:80"): not stripped by the URL
+        // regex, so only the "HTTP error NNN" form may survive from that module.
+        val log = MpvErrorLog()
+        log.onLog("ffmpeg/http", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "Connection timed out, different host: example.com:8080 != other.net:80")
+        assertNull(log.logLine(), "a non-status http line is dropped")
+        log.onLog("ffmpeg/http", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "HTTP error 458 Connection limit")
+        log.onLog("ffmpeg/http", MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN, "Connection timed out, different host: example.com:8080 != other.net:80")
+        val line = log.logLine().orEmpty()
+        assertTrue("HTTP error 458" in line, "the status survives: $line")
+        assertFalse("example.com" in line || "other.net" in line, "no host survives: $line")
     }
 }

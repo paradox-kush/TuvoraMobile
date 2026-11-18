@@ -211,9 +211,13 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
         val freezeReconnector = remember { LivePlaybackReconnector(freezeReporter) }
         // The ladder belongs to the channel: a zap or the viewer's Retry starts it over; the
         // pipeline's own reconnects and re-mints (a new URL every time) never do.
-        LaunchedEffect(activeVideoId) { freezeReconnector.onChannelChanged() }
+        LaunchedEffect(activeVideoId) {
+            freezeReconnector.onChannelChanged()
+            liveReconnectStatus = null
+        }
         LaunchedEffect(liveUserRetryGeneration) {
             if (liveUserRetryGeneration > 0) freezeReconnector.onUserRetry()
+            liveReconnectStatus = null
         }
         val liveReconnectFailedMessage = stringResource(Res.string.player_live_reconnect_failed)
         // Reset per source so a reconnect or source switch records a fresh start; the persisted
@@ -370,6 +374,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                                     errorMessage = liveReconnectFailedMessage
                                 },
                             )
+                            liveReconnectStatus = freezeReconnector.status.value
                         }
                         // A live channel has no end: ENDED means the upstream closed, and the
                         // reconnect above is what answers it. Pausing here would fight that, and
@@ -381,6 +386,11 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                     },
                     onError = { message ->
                         if (!active.value || playbackKey != activePlaybackKey) return@PlatformPlayerSurface
+                        // Only the reason code is kept (the text can carry a host): it words the reconnect line.
+                        if (isLiveStream && message != null) {
+                            freezeReconnector.noteFailure(message)
+                            liveReconnectStatus = freezeReconnector.status.value
+                        }
                         if (message != null && tryRefreshExpiredLinkAfterError(message)) {
                             return@PlatformPlayerSurface
                         }
@@ -438,6 +448,14 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                 p2pRebufferProgress = p2pRebufferProgress,
                 folded = fold != null,
             )
+            // The live reconnect ladder is running: which attempt, and why. The error modal owns the give-up.
+            val reconnecting = liveReconnectStatus
+            if (reconnecting != null && errorMessage == null && !isInPip) {
+                LiveReconnectStatusLine(
+                    status = reconnecting,
+                    modifier = Modifier.align(androidx.compose.ui.Alignment.Center),
+                )
+            }
         }
     }
     Box(modifier = panelModifier) {

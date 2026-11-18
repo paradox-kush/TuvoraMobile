@@ -110,6 +110,7 @@ import com.nuvio.app.features.player.HidePlayerSystemBars
 import com.nuvio.app.features.player.ManagePlayerPictureInPicture
 import com.nuvio.app.features.player.LIVE_FREEZE_SURFACE_DOCKED
 import com.nuvio.app.features.player.LivePlaybackStartupPolicy
+import com.nuvio.app.features.player.LiveReconnectStatusLine
 import com.nuvio.app.features.player.LiveReplayLaunch
 import com.nuvio.app.features.player.onLiveSnapshot
 import com.nuvio.app.features.player.onLiveSnapshotStopped
@@ -164,6 +165,7 @@ import com.nuvio.app.core.telemetry.ui.rememberReportSender
 import nuvio.composeapp.generated.resources.report_send
 import nuvio.composeapp.generated.resources.compose_livetv_error_tap_retry
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_connections
+import nuvio.composeapp.generated.resources.player_error_stream_provider_firewall
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_link
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_network
 import nuvio.composeapp.generated.resources.compose_livetv_error_reason_not_started
@@ -247,6 +249,8 @@ fun LiveTvScreen(
     // per channel below rather than recreated.
     val freezeReporter = remember { LivePlaybackFreezeReporter() }
     val freezeReconnector = remember { LivePlaybackReconnector(freezeReporter) }
+    // "Reconnecting… (attempt N of M)" + why; owned by the reconnector, this screen only reads it.
+    val reconnectStatus by freezeReconnector.status.collectAsState()
     // The one automatic re-resolve after a playback error, per tune (never per URL: see the guard).
     val autoRefreshGuard = remember { LiveTvAutoRefreshGuard() }
     // B259 follow-up: a live Stalker tune opens NEUTRAL (the pre-1.20.3 request); a portal-host stream refused before its
@@ -564,6 +568,23 @@ fun LiveTvScreen(
             snapshot = PlayerPlaybackSnapshot()
             source = null
             retryTick++
+        }
+    }
+    // The channel's first open failed with a reason a retry can fix (5xx, unreachable; LiveOpenRetryPolicy): let go of
+    // the attempt and re-open after the reconnector's backoff. The "Reconnecting… (attempt N of M)" line shows meanwhile;
+    // a zap, a replay or the viewer's Retry cancels it, and the ladder's cap ends it in the error + Retry.
+    fun retryOpenAfter(delayMs: Long) {
+        val scheduledFor = currentContentId
+        connectionEndedAtMs = TraktPlatformClock.nowEpochMs()
+        controller = null
+        snapshot = PlayerPlaybackSnapshot()
+        source = null
+        playbackError = null
+        pendingRemint?.cancel()
+        pendingRemint = scope.launch {
+            delay(delayMs)
+            pendingRemint = null
+            if (currentContentId == scheduledFor && !isCatchUp) spacedAutomaticReMint(mint = reResolve)
         }
     }
     val onRetry: () -> Unit = {
@@ -1004,6 +1025,13 @@ fun LiveTvScreen(
             when (openFailureGate.onGraceElapsed()) {
                 StalkerOpenFailureGate.Step.Switch -> switchStalkerProfile()
                 StalkerOpenFailureGate.Step.Proceed -> {
+                    // The open ended and no text named why (Android libmpv: END_FILE "loading failed", and no
+                    // status line landed within the grace). Unknown is not final: the bounded reconnect first,
+                    // then the give-up error + Retry.
+                    freezeReconnector.onOpenFailed(null)?.let { delayMs ->
+                        retryOpenAfter(delayMs)
+                        return@LaunchedEffect
+                    }
                     startupFailed = true
                     snapshot = snapshot.copy(isLoading = false, isPlaying = false)
                     controller = null
@@ -1170,6 +1198,9 @@ fun LiveTvScreen(
                         it.applySubtitleStyle(PlayerSettingsRepository.uiState.value.subtitleStyle)
                     },
                     onSnapshot = onLiveSnapshot@{
+                        // A re-open is scheduled (retryOpenAfter / a spaced re-mint): the old attempt's trailing end is not
+                        // a new failure. The engine reports the error first, then its ended snapshot, in the same hop.
+                        if (source == null && pendingRemint != null) return@onLiveSnapshot
                         snapshot = it
                         pause.onSnapshot(it.positionMs, it.isPlaying)
                         // The local buffer is not a live channel: none of the live recovery below applies to it.
@@ -1286,6 +1317,8 @@ fun LiveTvScreen(
                         }
                     },
                     onError = PlayerSurfaceErrors@{ message ->
+                        // Only the reason code is kept (the text can carry a host): it words the reconnect line.
+                        if (message != null) freezeReconnector.noteFailure(message)
                         if (message != null && !isCatchUp && startupPolicy.sample(
                                 snapshot.copy(isEnded = true, isPlaying = false), elapsedMs = 0L,
                             )) {
@@ -1293,6 +1326,11 @@ fun LiveTvScreen(
                             // of the mid-playback token-refresh path just like mpv END_FILE.
                             if (openFailureGate.onErrorText(message) == StalkerOpenFailureGate.Step.Switch) {
                                 switchStalkerProfile()
+                                return@PlayerSurfaceErrors
+                            }
+                            // A 5xx / unreachable open gets the bounded reconnect a mid-stream drop gets.
+                            freezeReconnector.onOpenFailed(message)?.let { delayMs ->
+                                retryOpenAfter(delayMs)
                                 return@PlayerSurfaceErrors
                             }
                             startupFailureMessage = message
@@ -1362,6 +1400,16 @@ fun LiveTvScreen(
                             onGoLive = pause::goLive,
                             modifier = Modifier.fillMaxSize(),
                         )
+                    // The reconnect ladder is running: say which attempt and why, not just a spinner.
+                    reconnectStatus != null && !isCatchUp -> Box(Modifier.fillMaxSize(), Alignment.Center) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12),
+                        ) {
+                            CircularProgressIndicator(color = colors.accent)
+                            reconnectStatus?.let { LiveReconnectStatusLine(it) }
+                        }
+                    }
                     snapshot.isLoading && !snapshot.isPlaying ->
                         Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = colors.accent) }
                 }
@@ -1823,6 +1871,7 @@ private fun ConnectingBadge() {
 @Composable
 private fun liveFailureReasonText(reason: LiveTvFailureReasonPolicy.Reason): String? = when (reason) {
     LiveTvFailureReasonPolicy.Reason.PROVIDER_REFUSED -> stringResource(Res.string.compose_livetv_error_reason_refused)
+    LiveTvFailureReasonPolicy.Reason.PROVIDER_FIREWALL -> stringResource(Res.string.player_error_stream_provider_firewall)
     LiveTvFailureReasonPolicy.Reason.TOO_MANY_CONNECTIONS -> stringResource(Res.string.compose_livetv_error_reason_connections)
     LiveTvFailureReasonPolicy.Reason.PROVIDER_DOWN -> stringResource(Res.string.compose_livetv_error_reason_provider_down)
     LiveTvFailureReasonPolicy.Reason.LINK_UNAVAILABLE -> stringResource(Res.string.compose_livetv_error_reason_link)

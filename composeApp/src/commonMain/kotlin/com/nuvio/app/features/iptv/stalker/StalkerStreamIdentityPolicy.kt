@@ -227,11 +227,16 @@ class StalkerOpenFailureGate(private val fallback: StalkerStreamFallback) {
     private var waiting = false
     private var decided = false
 
+    /**
+     * Every source waits the grace once, not only one that could switch: the error text is also what names the
+     * reason (a 458 connection limit, a 503 that earns the bounded open retry). Without it, an ended snapshot that
+     * beat "HTTP error 458" to the screen failed the open as "The stream did not start" (device pass, Android
+     * libmpv and iPhone). The switch itself still needs [StalkerStreamFallback.canSwitch].
+     */
     fun onEndedAtOpen(): Step = when {
         decided -> Step.Proceed
         waiting -> Step.Wait(null)
-        fallback.canSwitch -> { waiting = true; Step.Wait(GRACE_MS) }
-        else -> { decided = true; Step.Proceed }
+        else -> { waiting = true; Step.Wait(GRACE_MS) }
     }
 
     fun onErrorText(message: String?): Step {

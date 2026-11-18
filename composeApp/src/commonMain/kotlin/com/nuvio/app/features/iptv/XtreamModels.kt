@@ -333,6 +333,8 @@ data class XtreamChannel(
     val streamUrl: String,
     /** An M3U channel's own catch-up (its `catchup-*` attributes); null for Xtream/Stalker and for M3U channels without. */
     val m3uCatchUp: M3uCatchUpInfo? = null,
+    /** An M3U channel's own request headers ([M3uStreamHeaders]); empty for Xtream/Stalker and most M3U channels. */
+    val streamHeaders: Map<String, String> = emptyMap(),
 )
 
 data class XtreamMovie(

@@ -61,6 +61,9 @@ class TvLiveMonitor {
     private var attempts = 0
     private var lastAttemptAt = Long.MIN_VALUE / 2
 
+    /** Reconnects spent on the current outage (the "attempt N" of the player's reconnect line). */
+    val attemptCount: Int get() = attempts
+
     private companion object {
         const val STABLE_RESET_MS = 30_000L
     }

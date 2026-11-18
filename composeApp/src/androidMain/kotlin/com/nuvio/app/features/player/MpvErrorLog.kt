@@ -41,6 +41,9 @@ internal class MpvErrorLog {
     @Synchronized
     fun onLog(prefix: String, level: Int, text: String) {
         val isHttp = MPV_HTTP_ERROR_REGEX.containsMatchIn(text)
+        // FFmpeg's module is let through (for a live open) for its "HTTP error NNN" status only: the generic "ffmpeg"
+        // module, and its http class, also warn with bare host:port and tcp:// tokens the URL strip below cannot see.
+        if ((mpvLogPrefixIsHttpModule(prefix, text) || prefix.trim().equals("ffmpeg", ignoreCase = true)) && !isHttp) return
         if (level > MPV.mpvLogLevel.MPV_LOG_LEVEL_INFO) return
         val isInfo = level > MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN
         if (isInfo && !mpvInfoLineIsUseful(text)) return
@@ -54,6 +57,20 @@ internal class MpvErrorLog {
     @Synchronized
     fun logLine(): String? = logLine
 }
+
+internal fun mpvLogPrefixIsHttpModule(prefix: String, text: String): Boolean =
+    MPV_HTTP_MODULE_REGEX.containsMatchIn(prefix.trim()) || MPV_HTTP_TEXT_REGEX.containsMatchIn(text.trim())
+
+private val MPV_HTTP_MODULE_REGEX = Regex("^(ffmpeg/)?https?$", RegexOption.IGNORE_CASE)
+private val MPV_HTTP_TEXT_REGEX = Regex("^https?:\\s", RegexOption.IGNORE_CASE)
+
+/**
+ * The HTTP status a live OPEN that ended in error names in mpv's log, or null. Only an open that never [started]
+ * reports it as an error (the reason line and the bounded open retry read it); a stream that played and then
+ * dropped keeps live's own END_FILE recovery (the freeze ladder), as does any end without a status.
+ */
+internal fun mpvLiveEndFileHttpStatus(isLive: Boolean, started: Boolean, endReason: String?, logLine: String?): Int? =
+    if (isLive && !started && endReason.equals("error", ignoreCase = true)) mpvHttpStatusCode(logLine) else null
 
 internal fun mpvHttpStatusCode(logLine: String?): Int? {
     return logLine

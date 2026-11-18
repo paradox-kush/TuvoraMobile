@@ -55,12 +55,25 @@ class StalkerOpenFailureGateTest {
     }
 
     @Test
-    fun `nothing to switch means no wait`() {
+    fun `a stream that cannot switch still waits the grace for its error text`() {
+        // Device pass (Android libmpv and iPhone, a 458 at open): the ended snapshot came before "HTTP error 458", the open
+        // failed with no text and the pill said "The stream did not start" instead of the connection limit. Every
+        // source now waits the grace for the text; only the decision (switch or not) depends on the Stalker fallback.
         val fallback = StalkerStreamFallback("p1", StalkerStreamProfileMemory())
         fallback.onOpened(profileFallbackEligible = false)
         val gate = StalkerOpenFailureGate(fallback)
-        assertEquals(StalkerOpenFailureGate.Step.Proceed, gate.onEndedAtOpen(), "no grace for a stream that cannot switch")
-        assertEquals(StalkerOpenFailureGate.Step.Proceed, gate.onErrorText("Source error (HTTP 401)"))
+        assertEquals(StalkerOpenFailureGate.Step.Wait(StalkerOpenFailureGate.GRACE_MS), gate.onEndedAtOpen())
+        assertEquals(StalkerOpenFailureGate.Step.Proceed, gate.onErrorText("[ffmpeg] http: HTTP error 458"), "the text decides; nothing to switch")
+        assertEquals(StalkerOpenFailureGate.Step.None, gate.onGraceElapsed(), "already decided by the text")
+    }
+
+    @Test
+    fun `a stream that cannot switch and never gets text proceeds when the grace runs out`() {
+        val fallback = StalkerStreamFallback("p1", StalkerStreamProfileMemory())
+        fallback.onOpened(profileFallbackEligible = false)
+        val gate = StalkerOpenFailureGate(fallback)
+        gate.onEndedAtOpen()
+        assertEquals(StalkerOpenFailureGate.Step.Proceed, gate.onGraceElapsed())
     }
 
     @Test

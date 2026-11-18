@@ -41,6 +41,11 @@ internal data class IptvStreamRow(
     val catchUp: M3uCatchUpInfo? = null,
     /** A Stalker portal's archive depth in days (0 = not stated); stored in `catchup_days` with no catch-up type. */
     val archiveDays: Int = 0,
+    /**
+     * An M3U channel's own request headers ([com.nuvio.app.features.iptv.M3uStreamHeaders]: User-Agent / Referer /
+     * Origin only), stored as a JSON object in `stream_headers`. Empty for most channels. Never logged.
+     */
+    val streamHeaders: Map<String, String> = emptyMap(),
 )
 
 /** A series row (one per distinct series within a playlist). */
@@ -231,6 +236,9 @@ internal object IptvContentDb {
         // version bump drops every cached catalog. NULL on rows ingested before this reads as "no catch-up"
         // until the playlist's next refresh writes it.
         for ((column, type) in CATCHUP_COLUMNS) it.ensureColumn("channels", column, "$column $type")
+        // Per-channel playlist headers (#EXTVLCOPT / #EXTHTTP / http-user-agent): added in place like catch-up. NULL on
+        // a catalog ingested before reads as "no headers" until the playlist's next refresh writes them.
+        it.ensureColumn("channels", "stream_headers", "stream_headers TEXT")
         if (version < 5) it.execSQL("PRAGMA user_version = 5")
         // Per-(playlist, channel) EPG fetch stamp — the guide's lazy-fetch gate (v4, but created
         // unconditionally like the other epg tables: IF NOT EXISTS is self-healing).
@@ -308,7 +316,7 @@ internal object IptvContentDb {
             // Inside an ingest the chunk belongs to the generation being built; outside one (the
             // Stalker write-through, which never calls beginIngest) it joins the served generation.
             val gen = pendingGeneration[playlistId] ?: activeGeneration(c, playlistId)
-            if (channels.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing, catchup_type, catchup_source, catchup_days) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
+            if (channels.isNotEmpty()) c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing, catchup_type, catchup_source, catchup_days, stream_headers) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
                 for (r in channels) {
                     st.reset()
                     st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.sid.toLong())
@@ -322,6 +330,7 @@ internal object IptvContentDb {
                     st.bindLong(11, if (r.useHttpTmpLink) 1L else 0L)
                     st.bindLong(12, if (r.useLoadBalancing) 1L else 0L)
                     bindCatchUp(st, 13, r.catchUp, r.archiveDays)
+                    com.nuvio.app.features.iptv.M3uStreamHeaders.encode(r.streamHeaders)?.let { st.bindText(16, it) } ?: st.bindNull(16)
                     st.step()
                 }
             }
@@ -893,10 +902,11 @@ internal object IptvContentDb {
         val cuTypeCol = if (table == "channels") "catchup_type" else "NULL"
         val cuSourceCol = if (table == "channels") "catchup_source" else "NULL"
         val cuDaysCol = if (table == "channels") "catchup_days" else "NULL"
+        val hdrCol = if (table == "channels") "stream_headers" else "NULL"
         val sql = if (categoryId == null)
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol FROM $table WHERE playlist_id = ? AND $GEN ORDER BY name, sid LIMIT ? OFFSET ?"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol, $hdrCol FROM $table WHERE playlist_id = ? AND $GEN ORDER BY name, sid LIMIT ? OFFSET ?"
         else
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol FROM $table WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name, sid LIMIT ? OFFSET ?"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol, $hdrCol FROM $table WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name, sid LIMIT ? OFFSET ?"
         return connection().prepare(sql).use { st ->
             st.bindText(1, playlistId); st.bindText(2, playlistId)
             var i = 3
@@ -918,6 +928,7 @@ internal object IptvContentDb {
                     useLoadBalancing = !st.isNull(10) && st.getLong(10) > 0,
                     catchUp = readCatchUp(st, 11),
                     archiveDays = readArchiveDays(st, 11),
+                    streamHeaders = readStreamHeaders(st, 14),
                 )
             )
             out
@@ -941,10 +952,11 @@ internal object IptvContentDb {
         val cuTypeCol = if (table == "channels") "catchup_type" else "NULL"
         val cuSourceCol = if (table == "channels") "catchup_source" else "NULL"
         val cuDaysCol = if (table == "channels") "catchup_days" else "NULL"
+        val hdrCol = if (table == "channels") "stream_headers" else "NULL"
         val sql = if (categoryId == null)
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol FROM $table WHERE playlist_id = ? AND $GEN ORDER BY name"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol, $hdrCol FROM $table WHERE playlist_id = ? AND $GEN ORDER BY name"
         else
-            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol FROM $table WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name"
+            "SELECT sid, name, logo, $tvgCol, category_id, url, $extCol, cmd, $archiveCol, $tmpLinkCol, $lbCol, $cuTypeCol, $cuSourceCol, $cuDaysCol, $hdrCol FROM $table WHERE playlist_id = ? AND $GEN AND category_id = ? ORDER BY name"
         return connection().prepare(sql).use { st ->
             st.bindText(1, playlistId); st.bindText(2, playlistId)
             if (categoryId != null) st.bindText(3, categoryId)
@@ -964,6 +976,7 @@ internal object IptvContentDb {
                     useLoadBalancing = !st.isNull(10) && st.getLong(10) > 0,
                     catchUp = readCatchUp(st, 11),
                     archiveDays = readArchiveDays(st, 11),
+                    streamHeaders = readStreamHeaders(st, 14),
                 )
             )
             out
@@ -1062,7 +1075,7 @@ internal object IptvContentDb {
             c.prepare("DELETE FROM categories WHERE playlist_id = ? AND generation = ? AND type = ?").use { st ->
                 st.bindText(1, playlistId); st.bindLong(2, gen); st.bindText(3, IptvContentKind.LIVE.slug); st.step()
             }
-            c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing, catchup_type, catchup_source, catchup_days) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
+            c.prepare("INSERT OR REPLACE INTO channels(playlist_id, generation, sid, category_id, name, logo, tvg_id, url, cmd, tv_archive, use_http_tmp_link, use_load_balancing, catchup_type, catchup_source, catchup_days, stream_headers) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").use { st ->
                 for (r in channels) {
                     st.reset()
                     st.bindText(1, playlistId); st.bindLong(2, gen); st.bindLong(3, r.sid.toLong())
@@ -1076,6 +1089,7 @@ internal object IptvContentDb {
                     st.bindLong(11, if (r.useHttpTmpLink) 1L else 0L)
                     st.bindLong(12, if (r.useLoadBalancing) 1L else 0L)
                     bindCatchUp(st, 13, null, r.archiveDays)   // a Stalker row's archive depth rides in catchup_days
+                    st.bindNull(16)   // a Stalker channel's headers come from its portal identity, never the row
                     st.step()
                 }
             }
@@ -1139,7 +1153,7 @@ internal object IptvContentDb {
 
     /** A single channel row by sid — rebuilds a favorited channel's URL (or Stalker cmd) after a cold launch. */
     suspend fun channelRow(playlistId: String, sid: Int): IptvStreamRow? = mutex.withLock {
-        connection().prepare("SELECT sid, name, logo, tvg_id, category_id, url, NULL, cmd, tv_archive, use_http_tmp_link, use_load_balancing, catchup_type, catchup_source, catchup_days FROM channels WHERE playlist_id = ? AND $GEN AND sid = ?").use { st ->
+        connection().prepare("SELECT sid, name, logo, tvg_id, category_id, url, NULL, cmd, tv_archive, use_http_tmp_link, use_load_balancing, catchup_type, catchup_source, catchup_days, stream_headers FROM channels WHERE playlist_id = ? AND $GEN AND sid = ?").use { st ->
             st.bindText(1, playlistId); st.bindText(2, playlistId); st.bindLong(3, sid.toLong())
             if (st.step()) IptvStreamRow(
                 sid = st.getLong(0).toInt(),
@@ -1155,6 +1169,7 @@ internal object IptvContentDb {
                 useLoadBalancing = !st.isNull(10) && st.getLong(10) > 0,
                 catchUp = readCatchUp(st, 11),
                     archiveDays = readArchiveDays(st, 11),
+                streamHeaders = readStreamHeaders(st, 14),
             ) else null
         }
     }
@@ -1184,6 +1199,9 @@ internal object IptvContentDb {
     /** A Stalker channel's archive depth: `catchup_days` with no `catchup_type` (an M3U row has a type, and its days live in [M3uCatchUpInfo]). */
     private fun readArchiveDays(st: SQLiteStatement, index: Int): Int =
         if (st.isNull(index) && !st.isNull(index + 2)) st.getLong(index + 2).toInt().coerceAtLeast(0) else 0
+
+    private fun readStreamHeaders(st: SQLiteStatement, index: Int): Map<String, String> =
+        if (st.isNull(index)) emptyMap() else com.nuvio.app.features.iptv.M3uStreamHeaders.decode(st.getText(index))
 
     private fun readCatchUp(st: SQLiteStatement, index: Int): M3uCatchUpInfo? {
         if (st.isNull(index)) return null

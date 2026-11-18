@@ -26,4 +26,17 @@ class MpvLogLevelPolicyTest {
         assertEquals("no", MpvLogLevelPolicy.levelFor("vdx", "all=no,vd=warn"), "prefix needs a slash boundary")
         assertEquals("warn", MpvLogLevelPolicy.levelFor("stream", "all=warn"), "the old Android setting reproduces the leak")
     }
+
+    @Test
+    fun theHttpStatusLineIsOnlyAskedForWhileALiveOpenIsPending() {
+        // Device pass (Android emulator, verbose log): FFmpeg's status arrives as module "ffmpeg" (NOT "ffmpeg/http"),
+        // text "http: HTTP error 458", level warn. mpv cannot narrow below the module, so the whole ffmpeg module is
+        // let through for the open only; the steady state stays silent (hls/tcp warnings carry segment URLs and hosts).
+        assertEquals("warn", MpvLogLevelPolicy.levelFor("ffmpeg", MpvLogLevelPolicy.specFor(liveOpen = true)), "status line during a live open")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("ffmpeg", MpvLogLevelPolicy.specFor(liveOpen = false)), "steady state")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("ffmpeg", MpvLogLevelPolicy.MSG_LEVEL), "init level")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("stream", MpvLogLevelPolicy.specFor(liveOpen = true)), "stream formats the URL")
+        assertEquals("no", MpvLogLevelPolicy.levelFor("cplayer", MpvLogLevelPolicy.specFor(liveOpen = true)), "cplayer prints the URL")
+        assertEquals("warn", MpvLogLevelPolicy.levelFor("vo/gpu", MpvLogLevelPolicy.specFor(liveOpen = true)), "outputs keep their level")
+    }
 }

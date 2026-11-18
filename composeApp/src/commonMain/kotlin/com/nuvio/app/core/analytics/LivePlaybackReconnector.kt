@@ -1,5 +1,9 @@
 package com.nuvio.app.core.analytics
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 /**
  * Fires the reconnect for a frozen live channel, backed off and capped by
  * [LivePlaybackRecoveryPolicy], and keeps the freeze record open across the attempts so the
@@ -19,12 +23,35 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
     /** Whether the reconnect ladder has been exhausted for the open freeze. */
     val hasGivenUp: Boolean get() = gaveUp
 
+    /** Why the stream last failed, as far as the engine said (see [noteFailure]); "stopped" when it said nothing. */
+    private var lastReason = LiveReconnectReason.STREAM_STOPPED
+
+    private val _status = MutableStateFlow<LiveReconnectStatus?>(null)
+
+    /**
+     * The surface's "Reconnecting… (attempt N of M)" line, or null when no reconnect is running. Attempts count
+     * toward the give-up ([LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK]), so N never passes M; a
+     * rendered frame, a zap or the viewer's Retry clears it, and the give-up hands the screen to the error + Retry.
+     */
+    val status: StateFlow<LiveReconnectStatus?> = _status.asStateFlow()
+
+    /**
+     * The engine reported a failure on this stream. Only the reason code is kept (never [message]: it can
+     * carry a host or a token); it words the next reconnect line, and the one on screen now.
+     */
+    fun noteFailure(message: String?) {
+        lastReason = LiveReconnectReasonPolicy.fromFailureText(message)
+        _status.value = _status.value?.copy(reason = lastReason)
+    }
+
     /** Clears the ladder. Callers use [onUserRetry], [onChannelChanged] or [onPlaybackArmed]. */
     fun reset() {
         attempts = 0
         lastAttemptAtMs = 0L
         gaveUp = false
         attemptsWithoutPlayback = 0
+        lastReason = LiveReconnectReason.STREAM_STOPPED
+        _status.value = null
     }
 
     /** The stream identity (channel / content id, never the URL) the ladder belongs to. */
@@ -62,6 +89,8 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
      */
     fun onPlaybackConfirmed() {
         attemptsWithoutPlayback = 0
+        lastReason = LiveReconnectReason.STREAM_STOPPED
+        _status.value = null
         // Playing again (e.g. after the viewer's Retry) re-opens the ladder for later drops.
         gaveUp = false
     }
@@ -102,6 +131,7 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
                 attemptsWithoutPlayback += 1
                 lastAttemptAtMs = nowMs
                 reporter.onRecoveryAttempt(nowMs)
+                publishAttempt()
                 // An engine that has no video-reset primitive reports false, and the attempt
                 // escalates on the spot rather than being spent on a no-op.
                 if (resetVideo?.invoke() != true) reconnect()
@@ -113,6 +143,8 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
             // channel the provider is no longer serving.
             LivePlaybackRecoveryPolicy.Decision.GiveUp -> {
                 gaveUp = true
+                // The error + Retry owns the screen now: no "reconnecting" line under it.
+                _status.value = null
                 reporter.onRecoveryGaveUp(nowMs)
                 false
             }
@@ -122,9 +154,43 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
                 attemptsWithoutPlayback += 1
                 lastAttemptAtMs = nowMs
                 reporter.onRecoveryAttempt(nowMs)
+                publishAttempt()
                 reconnect()
                 true
             }
         }
+    }
+
+    /**
+     * The channel's open failed before any frame, with the engine's [message] (or none). Returns the wait before
+     * re-opening it when [LiveOpenRetryPolicy] says a retry can help and the ladder has attempts left (the same
+     * [LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK] cap, counted together with freeze reconnects), and
+     * publishes the attempt; null means fail now (error + Retry). Out of attempts is the terminal give-up.
+     */
+    fun onOpenFailed(message: String?): Long? {
+        if (gaveUp) return null
+        lastReason = LiveReconnectReasonPolicy.fromFailureText(message)
+        if (!LiveOpenRetryPolicy.retries(lastReason, message)) {
+            _status.value = null
+            return null
+        }
+        if (attemptsWithoutPlayback >= LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK) {
+            gaveUp = true
+            _status.value = null
+            return null
+        }
+        val delay = LiveOpenRetryPolicy.delayMs(attemptsWithoutPlayback)
+        attempts += 1
+        attemptsWithoutPlayback += 1
+        publishAttempt()
+        return delay
+    }
+
+    private fun publishAttempt() {
+        _status.value = LiveReconnectStatus(
+            attempt = attemptsWithoutPlayback.coerceAtMost(LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK),
+            maxAttempts = LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK,
+            reason = lastReason,
+        )
     }
 }

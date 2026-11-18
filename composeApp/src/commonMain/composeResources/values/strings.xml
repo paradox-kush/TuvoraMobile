@@ -1818,6 +1818,15 @@
     <string name="player_error_stream_removed">The stream link has expired or been removed. Try a different source.</string>
     <string name="player_error_stream_rate_limited">Too many requests to the stream source. Wait a moment and try again.</string>
     <string name="player_error_stream_unavailable">The stream server is currently unavailable. Try a different source.</string>
+    <string name="player_error_stream_provider_firewall">Your provider's firewall blocked this stream (HTTP 456). Set a custom User-Agent on this playlist (for example VLC/3.0.20), then try again.</string>
+    <string name="player_error_stream_connection_limit">Too many connections on this account. Close the stream on another device, or try again in a minute.</string>
+    <string name="player_live_reconnecting_attempt">Reconnecting… (attempt %1$d of %2$d)</string>
+    <string name="player_live_reconnect_reason_provider_firewall">Provider firewall blocked the stream</string>
+    <string name="player_live_reconnect_reason_connection_limit">Connection limit reached on this account</string>
+    <string name="player_live_reconnect_reason_stream_not_found">Stream not found</string>
+    <string name="player_live_reconnect_reason_provider_server_error">Provider server error</string>
+    <string name="player_live_reconnect_reason_unreachable">Can't reach the provider</string>
+    <string name="player_live_reconnect_reason_stream_stopped">Stream stopped</string>
     <string name="player_error_stream_blocked">The stream source is blocked or restricted. Try a different source.</string>
     <string name="player_error_source_invalid_content">Source error: The stream source returned invalid or unplayable content. The link may have expired or the server returned an error page instead of video.\n\nTry a different source. [%1$s]</string>
     <string name="player_error_unsupported_format">This stream uses a format your device may not support. Try a different source. [%1$s]</string>
@@ -2654,7 +2663,7 @@
     <string name="compose_livetv_error_reason_link">The provider did not give a stream link for this channel.</string>
     <string name="compose_livetv_error_reason_network">Couldn't reach the provider. Check your connection.</string>
     <string name="compose_livetv_error_reason_unsupported">This device can't read this stream.</string>
-    <string name="compose_livetv_error_reason_not_started">The stream did not start. Try again or check your playlist.</string>
+    <string name="compose_livetv_error_reason_not_started">The stream did not start, even after a few tries. Try again in a moment.</string>
     <string name="compose_livetv_error_reason_provider_no_data">The provider's server sent no video. Try again later, or check with your provider.</string>
     <string name="compose_livetv_error_reason_connection_held">Your provider may still be holding the previous connection. Wait a few seconds, then try again.</string>
     <string name="compose_livetv_error_tap_retry">Can't play this channel · Tap to retry</string>
