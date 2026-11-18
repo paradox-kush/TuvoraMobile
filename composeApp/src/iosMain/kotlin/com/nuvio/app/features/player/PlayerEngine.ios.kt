@@ -512,6 +512,8 @@ private fun PlatformPlayerSurfaceInner(
     LaunchedEffect(bridge) {
         var lastReportedError: String? = null
         var endedHeld = false
+        // Each failure lands in the flight recorder as closed codes (surface/engine/category/phase), never the text.
+        val failureTrail = PlaybackFailureTrailRecorder(PlaybackFailureTrail.surfaceOf(streamType, isCatchUpPlayback))
         while (isActive) {
             // -1 means the track carries no picture; see NuvioPlayerBridge.getVideoFrameTicks.
             val videoTicks = bridge.getVideoFrameTicks()
@@ -535,6 +537,7 @@ private fun PlatformPlayerSurfaceInner(
             val errorMessage = bridge.getErrorMessage().ifBlank { null }
             if (errorMessage != lastReportedError) {
                 lastReportedError = errorMessage
+                failureTrail.onError(errorMessage, engine = "libmpv")
                 // libmpv's text names the status ("HTTP error 456") but not what it means: add the shared hint.
                 latestOnError.value(errorMessage?.let { withHttpStatusHint(it) })
             }
@@ -546,6 +549,7 @@ private fun PlatformPlayerSurfaceInner(
             }
             if (!snapshot.isEnded) endedHeld = false
             latestOnSnapshot.value(snapshot)
+            failureTrail.onSnapshot(snapshot)
             delay(250L)
         }
     }

@@ -240,6 +240,9 @@ class TvPlayerSession(
     private val log = Logger.withTag("TvPlayerSession")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val isLive = LivePlaybackRejoinPolicy.rejoinsLiveEdge(launch.streamType, launch.liveReplay != null)
+    private val failureTrail = com.nuvio.app.features.player.PlaybackFailureTrailRecorder(
+        com.nuvio.app.features.player.PlaybackFailureTrail.surfaceOf(launch.streamType, isCatchUpPlayback = launch.liveReplay != null),
+    )
     private val liveChannel = launch.streamType == "live"
     private val progressKey = launch.videoId ?: launch.parentMetaId
     private val playbackSession = launch.externalPlaybackSession()
@@ -987,6 +990,9 @@ class TvPlayerSession(
             ServerPlayback.onPlaybackSnapshot(it, snapshot.positionMs, snapshot.isPlaying, snapshot.isLoading, snapshot.isEnded)
         }
         val lane = _state.value.lane
+        // Every engine failure lands in the flight recorder as closed codes, never the engine's text (as on the phone).
+        failureTrail.onSnapshot(snapshot)
+        failureTrail.onError(error, engine = lane.name)
         // A frame showed: this tune's header profile is proven (an IDENTITY trial is remembered for the playlist).
         if (liveTune && LivePlaybackStartupPolicy.hasStarted(snapshot)) identityFallback?.onFirstFrame()
         if (error != null && handleFailure(lane, error)) return

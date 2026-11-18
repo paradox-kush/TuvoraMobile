@@ -238,7 +238,7 @@ internal object EpgMirrorRepository {
             EpgTelemetry.ingestFinished(
                 source = EpgTelemetry.Source.MIRROR,
                 outcome = EpgTelemetry.Outcome.ERROR,
-                errorClass = t::class.simpleName,
+                error = t,
             )
         } finally {
             syncMutex.unlock()

@@ -207,8 +207,8 @@ object XmltvClient {
         EpgTelemetry.ingestFinished(
             source = EpgTelemetry.Source.PLAYLIST_XMLTV,
             outcome = EpgTelemetry.Outcome.ERROR,
-            // Class only — a panel's message routinely quotes the request URL, credentials included.
-            errorClass = it::class.simpleName,
+            // Type only (never the message) — a panel's message routinely quotes the request URL, credentials included.
+            error = it,
         )
     }
 

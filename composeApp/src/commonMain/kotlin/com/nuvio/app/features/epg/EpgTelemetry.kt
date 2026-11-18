@@ -1,6 +1,7 @@
 package com.nuvio.app.features.epg
 
 import com.nuvio.app.core.telemetry.api.TelemetryAccess
+import com.nuvio.app.core.telemetry.api.TelemetryErrorName
 
 /**
  * The one place EPG work reports what it did.
@@ -65,7 +66,8 @@ internal object EpgTelemetry {
         channels: Int = 0,
         channelsCovered: Int = 0,
         durationMs: Long = 0,
-        errorClass: String? = null,
+        /** Reported by type only ([TelemetryErrorName]): a renamed class or the message never leaves. */
+        error: Throwable? = null,
     ) {
         TelemetryAccess.current().emit(
             event = "epg_ingest",
@@ -76,9 +78,9 @@ internal object EpgTelemetry {
                 put("channels", channels)
                 put("channels_covered", channelsCovered)
                 put("duration_ms", durationMs)
-                // Class name only. A panel's error message routinely quotes the request URL,
-                // which carries the host and the credentials in the query string.
-                errorClass?.let { put("error_class", it) }
+                // Type only, by a name R8 cannot rename. A panel's error message routinely quotes the
+                // request URL, which carries the host and the credentials in the query string.
+                error?.let { put("error_class", TelemetryErrorName.of(it)) }
             },
         )
     }
