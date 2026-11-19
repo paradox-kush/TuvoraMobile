@@ -1,6 +1,7 @@
 package com.nuvio.app.core.build
 
 actual object AppFeaturePolicy {
+    actual val buildFlavor: String = "full"
     actual val pluginsEnabled: Boolean = true
     actual val addonsEnabled: Boolean = true
     actual val debridEnabled: Boolean = true

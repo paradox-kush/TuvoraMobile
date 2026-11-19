@@ -45,6 +45,9 @@ internal interface TelemetryHost {
     /** Properties attached to every later event (`support_code`, hardware). */
     fun registerSuperProperties(props: Map<String, Any>)
 
+    /** Android install-source bucket (see [InstallSourcePolicy]); null where the platform has no such signal (iOS, tvOS, desktop). */
+    fun installSource(): String? = null
+
     /** Hardware facts. May be slow (codec probes): call off Main. */
     fun hardwareProfile(): Map<String, Any>
 
