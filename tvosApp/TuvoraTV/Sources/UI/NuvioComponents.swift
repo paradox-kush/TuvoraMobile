@@ -190,6 +190,8 @@ struct NuvioStateMessage: View {
     let title: String
     let message: String
     var retry: (() -> Void)? = nil
+    /// Retry (not the second action) takes focus when the message appears: the empty IPTV hub, where Retry is the primary button.
+    var retryTakesFocus = false
     /// An outlined second action under the message ("I have a setup code" on the empty IPTV hub).
     var actionTitle: String? = nil
     var actionId: String = ""
@@ -214,6 +216,7 @@ struct NuvioStateMessage: View {
                 .focused($focused)
         .reportsFocus(focused)
                 .padding(.top, dp(8))
+                .onAppear { if retryTakesFocus { DispatchQueue.main.async { focused = true } } }
             }
             if let actionTitle, let action {
                 Button(action: action) {
@@ -228,7 +231,7 @@ struct NuvioStateMessage: View {
                 .reportsFocus(actionFocused)
                 .accessibilityIdentifier(actionId)
                 .padding(.top, dp(8))
-                .onAppear { DispatchQueue.main.async { actionFocused = true } }
+                .onAppear { if !(retryTakesFocus && retry != nil) { DispatchQueue.main.async { actionFocused = true } } }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

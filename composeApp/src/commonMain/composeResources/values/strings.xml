@@ -2659,7 +2659,8 @@
     <string name="live_channel_play_failed">Couldn't play this channel.</string>
     <string name="compose_auth_age_terms_confirmation">I confirm I am at least 18 years old and agree to the</string>
     <string name="compose_iptv_hub_add_provider">Add IPTV provider</string>
-    <string name="compose_iptv_hub_empty_message">This playlist has no categories in this section. Try another section, or add a different playlist.</string>
+    <string name="compose_iptv_hub_empty_message">This playlist has no categories in this section. Try again, pick another section, or add a different playlist.</string>
+    <string name="compose_iptv_hub_empty_checked_note">Checked just now, still empty.</string>
     <string name="compose_iptv_hub_empty_title">Nothing here yet</string>
     <string name="compose_iptv_hub_epg_next">Next: %1$s</string>
     <string name="compose_iptv_hub_epg_no_information">No information</string>

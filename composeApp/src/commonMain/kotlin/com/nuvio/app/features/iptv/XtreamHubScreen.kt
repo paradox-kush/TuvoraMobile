@@ -93,6 +93,7 @@ import nuvio.composeapp.generated.resources.compose_iptv_hub_row_failed
 import nuvio.composeapp.generated.resources.provider_hub_contact_label
 import nuvio.composeapp.generated.resources.provider_setup_have_code
 import nuvio.composeapp.generated.resources.compose_iptv_hub_add_provider
+import nuvio.composeapp.generated.resources.compose_iptv_hub_empty_checked_note
 import nuvio.composeapp.generated.resources.compose_iptv_hub_empty_message
 import nuvio.composeapp.generated.resources.compose_iptv_hub_empty_title
 import nuvio.composeapp.generated.resources.compose_iptv_hub_epg_next
@@ -423,13 +424,21 @@ fun XtreamHubScreen(
                     )
                 }
 
-                displayedCategories.isEmpty() -> XtreamHubMessageCard(
-                    title = stringResource(Res.string.compose_iptv_hub_empty_title),
-                    message = stringResource(Res.string.compose_iptv_hub_empty_message),
-                    actionLabel = stringResource(Res.string.compose_settings_page_iptv_add_playlist),
-                    onAction = onAddProvider,
-                    sectionPadding = sectionPadding,
-                )
+                displayedCategories.isEmpty() -> {
+                    // A slow, half-loaded or misread playlist looks like an empty one, so Retry comes first
+                    // (the viewer's own re-ask, never a timer) and "add playlist" is the second way out.
+                    val empty = IptvHubEmptyPolicy.view(userRetried = state.emptyRetried)
+                    val emptyMessage = stringResource(Res.string.compose_iptv_hub_empty_message)
+                    XtreamHubMessageCard(
+                        title = stringResource(Res.string.compose_iptv_hub_empty_title),
+                        message = if (empty.showsStillEmptyNote) "$emptyMessage\n\n${stringResource(Res.string.compose_iptv_hub_empty_checked_note)}" else emptyMessage,
+                        actionLabel = if (empty.offersRetry) stringResource(Res.string.action_retry) else null,
+                        onAction = if (empty.offersRetry) ({ XtreamHubRepository.retryEmpty() }) else null,
+                        secondaryActionLabel = stringResource(Res.string.compose_settings_page_iptv_add_playlist),
+                        onSecondaryAction = onAddProvider,
+                        sectionPadding = sectionPadding,
+                    )
+                }
 
                 else -> {
                     // Xtream panels ship real-world duplicate category ids — duplicate-safe keys.
@@ -1032,6 +1041,8 @@ internal fun XtreamHubMessageCard(
     sectionPadding: Dp,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    secondaryActionLabel: String? = null,
+    onSecondaryAction: (() -> Unit)? = null,
     footer: (@Composable () -> Unit)? = null,
 ) {
     Column(
@@ -1044,6 +1055,8 @@ internal fun XtreamHubMessageCard(
             message = message,
             actionLabel = actionLabel,
             onActionClick = onAction,
+            secondaryActionLabel = secondaryActionLabel,
+            onSecondaryActionClick = onSecondaryAction,
             footer = footer,
         )
     }

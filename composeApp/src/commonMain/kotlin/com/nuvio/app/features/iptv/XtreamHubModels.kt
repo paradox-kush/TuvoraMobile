@@ -26,6 +26,12 @@ data class XtreamHubUiState(
     val loadError: IptvLoadFailurePolicy.Failure? = null,
     /** UX147: playlists whose portal positively has no series section this session; their Series tab is hidden. */
     val seriesUnavailableIds: Set<String> = emptySet(),
+    /**
+     * True once the viewer tapped Retry on the empty state and the list is being (or was) re-asked; the
+     * empty state then says "Checked just now, still empty". Reset by every other reload
+     * ([IptvHubEmptyPolicy]).
+     */
+    val emptyRetried: Boolean = false,
 ) {
     val loadingCategories: Boolean get() = categoriesLoad is LoadStatus.Loading
 

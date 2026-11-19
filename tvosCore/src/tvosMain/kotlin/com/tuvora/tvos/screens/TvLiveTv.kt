@@ -39,6 +39,14 @@ object TvIptvBrowse {
     fun loadMore(categoryId: String) = XtreamHubRepository.loadMore(categoryId)
     fun retry() = XtreamHubRepository.retryCategories()
 
+    /**
+     * The empty state ("Nothing here yet"): Retry re-asks the same bounded load (the viewer's own tap, never a
+     * timer). [showsEmptyState] / [emptyView] are the shared [com.nuvio.app.features.iptv.IptvHubEmptyPolicy] decisions.
+     */
+    fun retryEmpty() = XtreamHubRepository.retryEmpty()
+    fun showsEmptyState(hub: XtreamHubUiState): Boolean = com.nuvio.app.features.iptv.IptvHubEmptyPolicy.showsEmptyState(hub)
+    fun showsStillEmptyNote(hub: XtreamHubUiState): Boolean = com.nuvio.app.features.iptv.IptvHubEmptyPolicy.view(hub.emptyRetried).showsStillEmptyNote
+
     /** A failed row's Retry (the only way, besides a finished import, a failed row is asked again). */
     fun retryCategory(categoryId: String) = XtreamHubRepository.retryCategory(categoryId)
 
