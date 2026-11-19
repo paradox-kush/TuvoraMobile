@@ -48,6 +48,17 @@ struct IptvHubScreen: View {
                         NuvioStateMessage(title: noSectionTitle(hub.section),
                                           message: "Its portal says there is nothing in this section, so there is nothing to retry.")
                     }
+                } else if TvIptvBrowse.shared.showsEmptyState(hub: hub) {
+                    // A slow, half-loaded or misread playlist looks like an empty one: Retry (the viewer's own
+                    // re-ask, focused first) and "Add Playlist" as the second way out.
+                    NuvioStateMessage(title: "Nothing here yet",
+                                      message: TvIptvBrowse.shared.showsStillEmptyNote(hub: hub)
+                                        ? "This playlist has no categories in this section. Try again, pick another section, or add a different playlist.\n\nChecked just now, still empty."
+                                        : "This playlist has no categories in this section. Try again, pick another section, or add a different playlist.",
+                                      retry: { TvIptvBrowse.shared.retryEmpty() }, retryTakesFocus: true,
+                                      actionTitle: "Add Playlist", actionId: "iptv.empty.addPlaylist") {
+                        DeepLinkCenter.shared.openSetupCode = true
+                    }
                 } else if hub.section == .live {
                     LiveGuideView(accountId: hub.selectedAccountId ?? hub.accounts[0].id,
                                   categories: hub.categories.map { ($0.id, $0.name) },
@@ -72,7 +83,7 @@ struct IptvHubScreen: View {
                 hub = next
                 // Only a change in what the hub SHOWS (loading, empty, error, loaded) can change what holds focus; a
                 // ping per emission would re-render the shell and restart its focus check for nothing.
-                let shape = "\(next.accountsLoaded)|\(next.accounts.isEmpty)|\(next.loadError != nil)"
+                let shape = "\(next.accountsLoaded)|\(next.accounts.isEmpty)|\(next.loadError != nil)|\(TvIptvBrowse.shared.showsEmptyState(hub: next))"
                 if shape != lastShape { lastShape = shape; ContentFocusActivity.contentChanged() }
                 // Simulator smoke hook: `-smokeIptvOpen <movies|series>` opens the first loaded title's details.
                 let args = AppArguments.list

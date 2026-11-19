@@ -204,7 +204,9 @@ object StalkerClient : IptvClient {
      */
     override suspend fun seriesCategories(acc: XtreamAccount): Result<List<XtreamCategory>> {
         if (knownDialect(acc) == StalkerSeriesDialect.Dialect.MINISTRA) return categories(acc, "vod", "get_categories")
-        val xc = categories(acc, "series", "get_categories")
+        // A capability probe, not a load: a Ministra portal has no `type=series` module and may answer anything,
+        // so a non-array reply stays "no categories" here and still earns the vod fallback below.
+        val xc = categories(acc, "series", "get_categories", lenient = true)
         if (xc.getOrNull()?.isNotEmpty() == true) {
             rememberDialect(acc, StalkerSeriesDialect.Dialect.XC)
             setSeriesAbsent(acc, false)
@@ -1200,14 +1202,9 @@ object StalkerClient : IptvClient {
 
     // --- request helpers ------------------------------------------------------
 
-    private suspend fun categories(acc: XtreamAccount, type: String, action: String): Result<List<XtreamCategory>> = runCatching {
-        val arr = browse(acc, mapOf("type" to type, "action" to action)) as? JsonArray
-            ?: return@runCatching emptyList()
-        arr.mapNotNull { it as? JsonObject }.mapNotNull { obj ->
-            val id = obj.str("id") ?: return@mapNotNull null
-            if (id == "*") return@mapNotNull null   // "*" = All; the hub adds its own "All"
-            XtreamCategory(id, obj.str("title") ?: obj.str("name").orEmpty())
-        }
+    private suspend fun categories(acc: XtreamAccount, type: String, action: String, lenient: Boolean = false): Result<List<XtreamCategory>> = runCatching {
+        val js = browse(acc, mapOf("type" to type, "action" to action))
+        if (lenient && js !is JsonArray) emptyList() else StalkerCategoryReply.parse(js)
     }
 
     /** Paginated get_ordered_list across pages (js.total_items bounds the loop), capped so an "All"

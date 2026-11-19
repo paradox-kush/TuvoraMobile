@@ -388,8 +388,23 @@ object XtreamHubRepository {
         showSection(accountId, state.section)
     }
 
+    /**
+     * The empty state's Retry: a user-initiated re-ask of the same bounded load (never a timer or a
+     * loop). An empty result is cached like any other, so the catalogue is dropped first or this would
+     * hand the same empty list straight back; a row-level "loaded but empty" screen needs the rows
+     * re-fetched too. The screen then says "Checked just now, still empty" if it comes back empty again.
+     */
+    fun retryEmpty() {
+        val state = _uiState.value
+        val accountId = state.selectedAccountId ?: return
+        accountFor(accountId)?.let { IptvPanelGuard.resetForAccount(it) }
+        invalidateCatalogue(accountId)
+        showSection(accountId, state.section, IptvHubEmptyPolicy.Event.USER_RETRY)
+    }
+
     /** Show cached categories instantly, else fetch the (cheap) category list. */
-    private fun showSection(accountId: String, section: XtreamHubSection) {
+    private fun showSection(accountId: String, section: XtreamHubSection, event: IptvHubEmptyPolicy.Event = IptvHubEmptyPolicy.Event.RELOAD) {
+        _uiState.update { it.copy(emptyRetried = IptvHubEmptyPolicy.retriedAfter(event)) }
         val account = accountFor(accountId)
         val checked = synchronized(categoryLock) { cacheCheckedAt[accountId] }
         if (IptvCatalogFreshness.stale(checked, account?.autoRefreshHours ?: 0, com.nuvio.app.features.trakt.TraktPlatformClock.nowEpochMs())) {
