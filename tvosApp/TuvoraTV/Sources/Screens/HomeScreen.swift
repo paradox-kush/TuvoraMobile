@@ -18,8 +18,22 @@ struct HomeScreen: View {
     @State private var openFolder: FolderTarget?
     @State private var smokeFolderOpened = false
     /// Settings → Layout (NuvioTV "Show Hero Section" / "Show Continue Watching").
-    @AppStorage(NuvioLayoutPrefs.showHeroKey) private var showHero = true
-    @AppStorage(NuvioLayoutPrefs.cwEnabledKey) private var cwEnabled = true
+    @AppStorage(NuvioLayoutPrefs.showHeroKey) private var showHeroPref = true
+    @AppStorage(NuvioLayoutPrefs.cwEnabledKey) private var cwEnabledPref = true
+    /// Home's section order and visibility (`home_sections`, shared with the phone): Settings → Home catalogs.
+    @State private var sectionSettings: HomeCatalogSettingsUiState?
+    /// Recently watched live channels: the Recent Channels row (same store as the phone's Live TV row).
+    @State private var recentChannels: [MetaPreview] = []
+    /// The sections Home draws, top to bottom. Until the settings load, the Layout switches decide.
+    private var sectionIds: [String] {
+        if let sectionSettings {
+            return TvHomeSectionsPolicy.shared.visibleIds(state: sectionSettings, heroEnabled: showHeroPref, continueWatchingVisible: cwEnabledPref)
+        }
+        return (showHeroPref ? ["hero"] : []) + (cwEnabledPref ? ["continue_watching"] : []) + ["new_episodes", "catalogs"]
+    }
+    private var showHero: Bool { sectionIds.contains("hero") }
+    private var cwEnabled: Bool { sectionIds.contains("continue_watching") }
+    private var recentsVisible: Bool { sectionIds.contains("live_recents") && !recentChannels.isEmpty }
     /// Settings → Layout → Home Layout (NuvioTV HomeLayout) and Continue Watching style.
     @AppStorage(NuvioLayoutPrefs.homeLayoutKey) private var homeLayout = "modern"
     @AppStorage(NuvioLayoutPrefs.cwStyleKey) private var cwStyleKey = "card"
@@ -61,6 +75,19 @@ struct HomeScreen: View {
         // only the failures, and no request at all when nothing failed.
         .task { TvHome.shared.retryFailed() }
         .task { for await next in TvHome.shared.continueWatching { continueWatching = Self.smokeEmptyHome ? [] : next; ContentFocusActivity.contentChanged() } }
+        .task { for await next in HomeCatalogSettingsRepository.shared.uiState { sectionSettings = next } }
+        .task { for await next in TvHomeSections.shared.recentChannels { recentChannels = Self.smokeEmptyHome ? [] : next; ContentFocusActivity.contentChanged() } }
+        // Returning viewers (anything in Continue Watching or recent channels) get those rows first by default.
+        .onChange(of: !continueWatching.isEmpty || !recentChannels.isEmpty) { _, has in
+            if has { TvHomeSections.shared.reportWatchHistory(has: true) }
+        }
+        // A customised list is the source of truth for the hero and Continue Watching switches: keep the Layout settings in step.
+        .onChange(of: sectionSettings?.signature) { _, _ in
+            guard let sectionSettings,
+                  let toggles = TvHomeSectionsPolicy.shared.togglesFrom(state: sectionSettings, heroEnabled: showHeroPref, continueWatchingVisible: cwEnabledPref) else { return }
+            showHeroPref = toggles.heroEnabled
+            cwEnabledPref = toggles.continueWatchingVisible
+        }
         .task {
             TvCollections.shared.start()
             for await next in TvCollections.shared.entries { entries = Self.smokeEmptyHome ? [] : next; ContentFocusActivity.contentChanged(); smokeOpenFolder() }
@@ -128,15 +155,40 @@ struct HomeScreen: View {
     private var rowsList: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(alignment: .leading, spacing: NuvioTokens.Layout.rowGap) {
-                if cwEnabled && !continueWatching.isEmpty {
-                    ContinueWatchingRow(items: continueWatching, style: cwStyle, size: cwStyle.modernSize, header: .modern,
-                                        onFocus: focusCw, onOpen: open)
-                }
-                // Calendar: bell reminders card + the opt-in Coming up row (shared Calendar via TvCalendar).
-                CalendarHomeSection(onOpen: { details = PreviewBox(preview: $0) })
+                // The person's order (Settings → Home catalogs); the hero is the backdrop, not a row.
+                ForEach(sectionIds.filter { $0 != "hero" }, id: \.self) { id in sectionView(id) }
+            }
+            .padding(.bottom, dp(48))
+        }
+    }
+
+    @ViewBuilder
+    private func sectionView(_ id: String) -> some View {
+        switch id {
+        case "continue_watching":
+            if !continueWatching.isEmpty {
+                ContinueWatchingRow(items: continueWatching, style: cwStyle, size: cwStyle.modernSize, header: .modern,
+                                    onFocus: focusCw, onOpen: open)
+            }
+        case "live_recents":
+            if recentsVisible {
+                RecentChannelsRow(channels: recentChannels, onPlay: playChannel)
+            }
+        // Calendar: bell reminders card + the opt-in Coming up row (shared Calendar via TvCalendar).
+        case "new_episodes":
+            CalendarHomeSection(onOpen: { details = PreviewBox(preview: $0) })
+        case "catalogs":
+            catalogRows
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var catalogRows: some View {
                 if let rows {
                     // When nothing at all is shown, the empty state below carries the one Retry (never two cards).
-                    if TvHome.shared.showsPartialFailure(state: rows) && !(entries.isEmpty && !(cwEnabled && !continueWatching.isEmpty) && rows.sections.isEmpty) {
+                    if TvHome.shared.showsPartialFailure(state: rows) && !(entries.isEmpty && !(cwEnabled && !continueWatching.isEmpty) && !recentsVisible && rows.sections.isEmpty) {
                         NuvioStateMessage(title: "Some rows didn’t load",
                                           message: "Tuvora tries again each time you come back to Home.",
                                           retry: { TvHome.shared.retryFailed() })
@@ -153,11 +205,18 @@ struct HomeScreen: View {
                                           onFocus: { pendingHero = HeroContent(collection: collection, folder: $0) }) { openFolder = $0 }
                         }
                     }
-                    EmptyHomeState(candidate: entries.isEmpty && !(cwEnabled && !continueWatching.isEmpty) && rows.sections.isEmpty && !rows.isLoading,
+                    EmptyHomeState(candidate: entries.isEmpty && !(cwEnabled && !continueWatching.isEmpty) && !recentsVisible && rows.sections.isEmpty && !rows.isLoading,
                                    errorMessage: rows.errorMessage, failedRows: TvHome.shared.showsPartialFailure(state: rows))
                 }
+    }
+
+    private func playChannel(_ channel: MetaPreview) {
+        Task {
+            if let session = try? await TvIptvBrowse.shared.playChannel(contentId: channel.id, name: channel.name, logo: channel.logo ?? channel.poster) {
+                playback.play(session)
+            } else {
+                playback.notify("\(channel.name) isn't available right now.")
             }
-            .padding(.bottom, dp(48))
         }
     }
 
@@ -314,6 +373,31 @@ private struct HomeHero: View {
 }
 
 // MARK: - Rows
+
+/// Recent Channels: the live channels watched lately, under Continue Watching by default. The same shelf and
+/// poster card as the catalog rows (gold focus ring); OK plays the channel. Order and visibility come from
+/// `home_sections` (`live_recents`).
+private struct RecentChannelsRow: View {
+    let channels: [MetaPreview]
+    let onPlay: (MetaPreview) -> Void
+
+    var body: some View {
+        let size = ModernCardSize.landscape
+        VStack(alignment: .leading, spacing: 0) {
+            NuvioShelfHeader(title: LK("home_section_recent_channels", "Recent Channels")) { EmptyView() }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: NuvioTokens.Layout.itemGap) {
+                    ForEach(channels, id: \.id) { channel in
+                        ExpandingPosterCard(item: channel, size: size, onFocus: {}) { onPlay(channel) }
+                    }
+                }
+                .padding(.horizontal, NuvioTokens.Layout.gutter).padding(.vertical, dp(8))
+            }
+            .scrollClipDisabled()
+            .focusSection()
+        }
+    }
+}
 
 private struct CatalogRow: View {
     let section: HomeCatalogSection

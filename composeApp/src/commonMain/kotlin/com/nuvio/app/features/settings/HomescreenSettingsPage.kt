@@ -99,6 +99,7 @@ internal fun LazyListScope.homescreenSettingsContent(
             selectedHeroSourceCount = selectedHeroSourceCount,
         )
     }
+    item { HomeSectionsOrderSection(isTablet = isTablet) }
     item {
         SettingsSection(
             title = stringResource(Res.string.settings_homescreen_section_hero),

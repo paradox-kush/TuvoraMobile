@@ -719,7 +719,10 @@ private struct LayoutSettingsDetail: View {
             }
             SettingsGroupCard(title: "Home Content", subtitle: "Control what appears on home and search.") {
                 SettingsToggleRow(title: "Collapse Sidebar", subtitle: "Hide sidebar by default; show when focused.", isOn: collapseSidebar) { collapseSidebar.toggle() }
-                SettingsToggleRow(title: "Show Hero Section", subtitle: "Display hero carousel at top of home.", isOn: showHero) { showHero.toggle() }
+                SettingsToggleRow(title: "Show Hero Section", subtitle: "Display hero carousel at top of home.", isOn: showHero) {
+                    showHero.toggle()
+                    HomeCatalogSettingsRepository.shared.mirrorLegacyToggle(id: "hero", enabled: showHero)   // a customised Home order follows
+                }
                 SettingsToggleRow(title: "Show Poster Labels", subtitle: "Show titles under posters in rows, grid, and see-all.", isOn: posterLabels) { posterLabels.toggle() }
             }
             SettingsGroupCard(title: "Poster Card", subtitle: "Tune card width and corner radius.") {
@@ -731,7 +734,10 @@ private struct LayoutSettingsDetail: View {
                 SettingsDialogButton(title: "Reset to Default") { posterWidth = 126 }
             }
             SettingsGroupCard(title: "Continue Watching", subtitle: "Settings for the Continue Watching section.") {
-                SettingsToggleRow(title: "Show Continue Watching", subtitle: "Show the Continue Watching row on the home screen.", isOn: cwEnabled) { cwEnabled.toggle() }
+                SettingsToggleRow(title: "Show Continue Watching", subtitle: "Show the Continue Watching row on the home screen.", isOn: cwEnabled) {
+                    cwEnabled.toggle()
+                    HomeCatalogSettingsRepository.shared.mirrorLegacyToggle(id: "continue_watching", enabled: cwEnabled)
+                }
                 if cwEnabled {
                     HStack(spacing: dp(8)) {
                         ForEach([("card", "Card"), ("wide", "Wide"), ("poster", "Poster")], id: \.0) { key, label in

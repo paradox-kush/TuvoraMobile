@@ -6,6 +6,30 @@ struct HomeRowsSettingsScreen: View {
     @State private var state: HomeCatalogSettingsUiState?
     @State private var renaming: HomeCatalogSettingsItem?
     @State private var name = ""
+    @AppStorage(NuvioLayoutPrefs.showHeroKey) private var showHero = true
+    @AppStorage(NuvioLayoutPrefs.cwEnabledKey) private var cwEnabled = true
+
+    /// Home sections as Apple TV renders them (the hero is pinned to the top: on/off only).
+    private func sections(_ state: HomeCatalogSettingsUiState) -> [HomeSectionEntry] {
+        TvHomeSectionsPolicy.shared.resolve(state: state, heroEnabled: showHero, continueWatchingVisible: cwEnabled)
+    }
+
+    private func sectionTitle(_ id: String) -> String {
+        switch id {
+        case "hero": return LK("home_section_hero", "Hero")
+        case "continue_watching": return LK("home_section_continue_watching", "Continue Watching")
+        case "live_recents": return LK("home_section_recent_channels", "Recent Channels")
+        case "new_episodes": return LK("home_section_new_episodes", "New episodes")
+        default: return LK("home_section_catalogs", "Catalogs and collections")
+        }
+    }
+
+    /// Shown / hidden, then the same switches in Layout settings follow (a customised list is the source of truth).
+    private func setSection(_ id: String, enabled: Bool) {
+        TvHomeSections.shared.setEnabled(id: id, enabled: enabled)
+        if id == "hero" { showHero = enabled }
+        if id == "continue_watching" { cwEnabled = enabled }
+    }
 
     var body: some View {
         NuvioDialog(title: "Home catalogs", subtitle: "Choose which rows appear on Home and their order.", width: dp(660)) {
@@ -19,6 +43,26 @@ struct HomeRowsSettingsScreen: View {
                 SettingsToggleRow(title: "Show Live TV on Home", isOn: state.showLiveOnHome) {
                     HomeCatalogSettingsRepository.shared.setShowLiveOnHome(enabled: !state.showLiveOnHome)
                 }
+                Text(LK("settings_home_order_title", "HOME ORDER")).font(NuvioType.labelLarge)
+                let entries = sections(state)
+                ForEach(entries, id: \.id) { entry in
+                    SettingsActionRow(title: sectionTitle(entry.id), subtitle: entry.id == "catalogs" ? LK("home_section_catalogs_sub_tv", "Their order is set below") : nil,
+                                      value: entry.enabled ? "Shown" : "Hidden", showChevron: false) {
+                        setSection(entry.id, enabled: !entry.enabled)
+                    }.contextMenu {
+                        if let up = TvHomeSectionsPolicy.shared.targetIndex(entries: entries, id: entry.id, direction: -1) {
+                            Button("Move up") { TvHomeSections.shared.move(id: entry.id, toIndex: up.int32Value) }
+                        }
+                        if let down = TvHomeSectionsPolicy.shared.targetIndex(entries: entries, id: entry.id, direction: 1) {
+                            Button("Move down") { TvHomeSections.shared.move(id: entry.id, toIndex: down.int32Value) }
+                        }
+                    }
+                }
+                SettingsActionRow(title: "Reset to Default", showChevron: false) {
+                    HomeCatalogSettingsRepository.shared.resetHomeSections()
+                    showHero = true; cwEnabled = true
+                }
+                Text(LK("settings_home_catalogs_title", "HOME CATALOGS")).font(NuvioType.labelLarge)
                 ForEach(state.items, id: \.key) { item in
                     SettingsActionRow(title: item.displayTitle, subtitle: item.addonName,
                                       value: item.enabled ? "Shown" : "Hidden", showChevron: false) {

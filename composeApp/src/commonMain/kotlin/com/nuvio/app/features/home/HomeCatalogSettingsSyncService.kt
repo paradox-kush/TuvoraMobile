@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -43,6 +44,8 @@ data class SyncHomeCatalogPayload(
     @SerialName("hide_unreleased_content") val hideUnreleasedContent: Boolean = false,
     @SerialName("show_live_on_home") val showLiveOnHome: Boolean = true,
     val items: List<SyncCatalogItem> = emptyList(),
+    /** `home_sections`: Home's section order and visibility (see [HomeSectionOrderPolicy]). Null = not written. */
+    @SerialName("home_sections") val homeSections: HomeSectionsConfig? = null,
 )
 
 @Serializable
@@ -61,12 +64,32 @@ private data class CachedSharedSettings(
     val settingsJson: JsonObject,
 )
 
+internal const val HOME_SECTIONS_KEY = "home_sections"
+
 internal fun mergeHomeCatalogSettingsJson(
     remoteJson: JsonObject?,
     localJson: JsonObject,
 ): JsonObject = buildJsonObject {
     remoteJson?.forEach { (key, value) -> put(key, value) }
-    localJson.forEach { (key, value) -> put(key, value) }
+    localJson.forEach { (key, value) ->
+        // A device that never customised Home encodes `home_sections` as null: that must not erase what
+        // another device wrote (a reset is written explicitly as `customized: false`, never as null).
+        if (key == HOME_SECTIONS_KEY && value is JsonNull) return@forEach
+        put(key, value)
+    }
+}
+
+/**
+ * Decodes the shared blob. `home_sections` is decoded on its own: an older or newer app writing a shape
+ * this one cannot read must cost only that key, never the rest of the person's Home settings.
+ */
+internal fun decodeHomeCatalogPayload(json: Json, settingsJson: JsonObject): SyncHomeCatalogPayload {
+    val withoutSections = JsonObject(settingsJson.filterKeys { it != HOME_SECTIONS_KEY })
+    val decoded = json.decodeFromJsonElement(SyncHomeCatalogPayload.serializer(), withoutSections)
+    val sections = settingsJson[HOME_SECTIONS_KEY]
+        ?.takeIf { it !is JsonNull }
+        ?.let { runCatching { json.decodeFromJsonElement(HomeSectionsConfig.serializer(), it) }.getOrNull() }
+    return decoded.copy(homeSections = sections)
 }
 
 object HomeCatalogSettingsSyncService {
@@ -211,7 +234,7 @@ object HomeCatalogSettingsSyncService {
         settingsJson: JsonObject,
         localPayload: SyncHomeCatalogPayload,
     ): SyncHomeCatalogPayload? = runCatching {
-        val decoded = json.decodeFromJsonElement(SyncHomeCatalogPayload.serializer(), settingsJson)
+        val decoded = decodeHomeCatalogPayload(json, settingsJson)
         decoded.copy(
             showCatalogType = if (settingsJson.containsKey(SHOW_CATALOG_TYPE_KEY)) {
                 decoded.showCatalogType
