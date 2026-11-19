@@ -596,7 +596,7 @@
     <string name="settings_licenses_attributions_mdblist_title">MDBList</string>
     <string name="settings_licenses_attributions_mdblist_body">Nuvio রেটিং, দেখার হিস্ট্রি এবং প্লেব্যাক ট্র্যাকিংয়ের জন্য MDBList ব্যবহার করে। Nuvio MDBList-এর সাথে সম্পর্কিত বা তাদের দ্বারা অনুমোদিত নয়।</string>
     <string name="settings_licenses_attributions_introdb_title">IntroDB</string>
-    <string name="settings_licenses_attributions_introdb_body">Nuvio স্কিপ কন্ট্রোলের মাধ্যমে ইন্ট্রো, রিক্যাপ, ক্রেডিট এবং প্রিভিউ টাইমস্ট্যাম্পের জন্য IntroDB API ব্যবহার করে। Nuvio IntroDB-এর সাথে সম্পর্কিত বা তাদের দ্বারা অনুমোদিত নয়।</string>
+    <string name="settings_licenses_attributions_introdb_body">Nuvio স্কিপ কন্ট্রোলের মাধ্যমে ইন্ট্রো, রিক্যাপ, ক্রেডিট এবং প্রিভিউ টাইমস্ট্যাম্পের জন্য IntroDB API ব্যবহার করে। Nuvio IntroDB-এর সাথে সম্পর্কিত বা তাদের দ্বারা অনুমোদিত নয়। Contains data from IntroDB (introdb.app), available under the ODbL.</string>
     <string name="settings_licenses_attributions_mpvkit_title">MPVKit</string>
     <string name="settings_licenses_attributions_mpvkit_body">iOS বিল্ডে প্লেব্যাকের জন্য ব্যবহৃত হয়।</string>
     <string name="settings_licenses_attributions_mpvkit_license">MPVKit সোর্স একা LGPL v3.0-এর অধীনে লাইসেন্সপ্রাপ্ত। Libmpv এবং FFmpeg লাইব্রেরি সহ MPVKit বান্ডেলগুলোও LGPL v3.0-এর অধীনে লাইসেন্সপ্রাপ্ত।</string>

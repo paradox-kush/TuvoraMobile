@@ -1590,7 +1590,7 @@ Du bruker denne funksjonen helt på eget ansvar. P2P kan deaktiveres når som he
     <string name="settings_licenses_attributions_haze_title">Haze 1.7.2</string>
     <string name="settings_licenses_attributions_imdb_body">Nuvio bruker IMDb Non-Commercial Datasets for vurderinger. Informasjon fra IMDb[](https://www.imdb.com). Brukt med tillatelse.</string>
     <string name="settings_licenses_attributions_imdb_title">IMDb Non-Commercial Datasets</string>
-    <string name="settings_licenses_attributions_introdb_body">Nuvio bruker IntroDB API for intro-, recap-, credits- og preview-tidsstempler. Nuvio er ikke tilknyttet eller godkjent av IntroDB.</string>
+    <string name="settings_licenses_attributions_introdb_body">Nuvio bruker IntroDB API for intro-, recap-, credits- og preview-tidsstempler. Nuvio er ikke tilknyttet eller godkjent av IntroDB. Contains data from IntroDB (introdb.app), available under the ODbL.</string>
     <string name="settings_licenses_attributions_introdb_title">IntroDB</string>
     <string name="settings_licenses_attributions_mdblist_body">Nuvio bruker MDBList for eksterne vurderinger. Nuvio er ikke tilknyttet eller godkjent av MDBList.</string>
     <string name="settings_licenses_attributions_mdblist_title">MDBList</string>

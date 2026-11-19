@@ -603,7 +603,7 @@
     <string name="settings_licenses_attributions_mdblist_title">MDBList</string>
     <string name="settings_licenses_attributions_mdblist_body">NuvioはMDBListを使用して評価と外部スコアプロバイダーデータを取得しています。NuvioはMDBListと提携・承認されたものではありません。</string>
     <string name="settings_licenses_attributions_introdb_title">IntroDB</string>
-    <string name="settings_licenses_attributions_introdb_body">NuvioはIntroDB APIを使用して、スキップコントロールに使用するイントロ・振り返り・エンドクレジット・プレビューのタイムスタンプ（コミュニティ提供）を取得しています。NuvioはIntroDBと提携・承認されたものではありません。</string>
+    <string name="settings_licenses_attributions_introdb_body">NuvioはIntroDB APIを使用して、スキップコントロールに使用するイントロ・振り返り・エンドクレジット・プレビューのタイムスタンプ（コミュニティ提供）を取得しています。NuvioはIntroDBと提携・承認されたものではありません。 Contains data from IntroDB (introdb.app), available under the ODbL.</string>
     <string name="settings_licenses_attributions_mpvkit_title">MPVKit</string>
     <string name="settings_licenses_attributions_mpvkit_body">iOSビルドの再生に使用。</string>
     <string name="settings_licenses_attributions_mpvkit_license">MPVKit単体はLGPL v3.0でライセンスされています。libmpvおよびFFmpegライブラリを含むMPVKitバンドルも同様にLGPL v3.0でライセンスされています。</string>
