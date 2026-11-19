@@ -31,3 +31,4 @@ dependencyResolutionManagement {
 include(":composeApp")
 include(":androidApp")
 include(":tvosCore")
+include(":baselineprofile")

@@ -83,6 +83,9 @@ data class PlayerSettingsUiState(
      */
     val androidPlaybackEngine: AndroidPlaybackEngine = AndroidPlaybackEngine.Libmpv,
     val autoSwitchPlaybackEngineOnError: Boolean = true,
+    val streamAutoPlayFallbackOnFailure: Boolean = false,
+    val streamAutoPlayFallbackMaxSources: Int = DEFAULT_SOURCE_FALLBACK_MAX_SOURCES,
+    val streamAutoPlayFallbackStartupTimeoutSeconds: Int = DEFAULT_SOURCE_STARTUP_TIMEOUT_SECONDS,
     /**
      * `gpu`, NOT `gpu-next`, until our libmpv bundles libplacebo >= v7.360.1.
      *
@@ -178,6 +181,24 @@ data class PlayerSettingsUiState(
     val iosGamma: Int = 0,
 )
 
+/** How many further sources falling back may try after the auto-selected one fails, by default and at most. */
+const val DEFAULT_SOURCE_FALLBACK_MAX_SOURCES = 3
+val SOURCE_FALLBACK_MAX_SOURCES_RANGE = 1..10
+
+/** How long a source may take to start before falling back treats it as failed, by default and the allowed range, in seconds. */
+const val DEFAULT_SOURCE_STARTUP_TIMEOUT_SECONDS = 15
+val SOURCE_STARTUP_TIMEOUT_SECONDS_RANGE = 5..45
+const val SOURCE_STARTUP_TIMEOUT_SECONDS_STEP = 5
+
+/**
+ * Falling back to the next matching source applies only while auto source selection picks the
+ * stream and the internal player plays it.
+ */
+val PlayerSettingsUiState.streamAutoPlayFallbackActive: Boolean
+    get() = streamAutoPlayFallbackOnFailure &&
+        streamAutoPlayMode != StreamAutoPlayMode.MANUAL &&
+        !externalPlayerEnabled
+
 object PlayerSettingsRepository {
     private val _uiState = MutableStateFlow(PlayerSettingsUiState())
     val uiState: StateFlow<PlayerSettingsUiState> = _uiState.asStateFlow()
@@ -211,6 +232,9 @@ object PlayerSettingsRepository {
     // KDoc on the UI-state default.
     private var androidPlaybackEngine = AndroidPlaybackEngine.Libmpv
     private var autoSwitchPlaybackEngineOnError = true
+    private var streamAutoPlayFallbackOnFailure = false
+    private var streamAutoPlayFallbackMaxSources = DEFAULT_SOURCE_FALLBACK_MAX_SOURCES
+    private var streamAutoPlayFallbackStartupTimeoutSeconds = DEFAULT_SOURCE_STARTUP_TIMEOUT_SECONDS
     // gpu, not gpu-next — see the KDoc on the UI-state default: our libplacebo (v7.360.0) leaks
     // one sync_file fd per frame on its OpenGL backend, fixed upstream in v7.360.1.
     private var androidLibmpvVideoOutput = AndroidLibmpvVideoOutput.Gpu
@@ -316,6 +340,9 @@ object PlayerSettingsRepository {
         streamReuseLastLinkCacheHours = 24
         androidPlaybackEngine = AndroidPlaybackEngine.Libmpv
         autoSwitchPlaybackEngineOnError = true
+        streamAutoPlayFallbackOnFailure = false
+        streamAutoPlayFallbackMaxSources = DEFAULT_SOURCE_FALLBACK_MAX_SOURCES
+        streamAutoPlayFallbackStartupTimeoutSeconds = DEFAULT_SOURCE_STARTUP_TIMEOUT_SECONDS
         androidLibmpvVideoOutput = AndroidLibmpvVideoOutput.Gpu
         androidLibmpvHardwareDecodingEnabled = true
         androidLibmpvYuv420pEnabled = false
@@ -440,8 +467,8 @@ object PlayerSettingsRepository {
                 ?: base.outlineColor,
             outlineEnabled = storedOutlineEnabled
                 ?: base.outlineEnabled,
-            outlineWidth = PlayerSettingsStorage.loadSubtitleOutlineWidth()
-                ?: base.outlineWidth,
+            outlineWidth = (PlayerSettingsStorage.loadSubtitleOutlineWidth()
+                ?: base.outlineWidth).coerceIn(subtitleOutlineWidthRange),
             bold = PlayerSettingsStorage.loadSubtitleBold()
                 ?: base.bold,
             fontSizeSp = (PlayerSettingsStorage.loadSubtitleFontSizeSp()
@@ -465,6 +492,13 @@ object PlayerSettingsRepository {
             // Nothing stored -> libmpv. A user who explicitly picked Auto/ExoPlayer keeps it.
             ?: AndroidPlaybackEngine.Libmpv
         autoSwitchPlaybackEngineOnError = PlayerSettingsStorage.loadAutoSwitchPlaybackEngineOnError() ?: true
+        streamAutoPlayFallbackOnFailure = PlayerSettingsStorage.loadStreamAutoPlayFallbackOnFailure() ?: false
+        streamAutoPlayFallbackMaxSources = PlayerSettingsStorage.loadStreamAutoPlayFallbackMaxSources()
+            ?.coerceIn(SOURCE_FALLBACK_MAX_SOURCES_RANGE)
+            ?: DEFAULT_SOURCE_FALLBACK_MAX_SOURCES
+        streamAutoPlayFallbackStartupTimeoutSeconds = PlayerSettingsStorage.loadStreamAutoPlayFallbackStartupTimeoutSeconds()
+            ?.coerceIn(SOURCE_STARTUP_TIMEOUT_SECONDS_RANGE)
+            ?: DEFAULT_SOURCE_STARTUP_TIMEOUT_SECONDS
         androidLibmpvVideoOutput = PlayerSettingsStorage.loadAndroidLibmpvVideoOutput()
             ?.let { runCatching { AndroidLibmpvVideoOutput.valueOf(it) }.getOrNull() }
             // An install with NOTHING stored takes gpu. A user who explicitly picked gpu-next
@@ -775,6 +809,7 @@ object PlayerSettingsRepository {
         val normalized = style.copy(
             fontSizeSp = style.fontSizeSp.coerceIn(subtitleFontSizeRangeSp),
             sideMarginPercent = style.sideMarginPercent.coerceIn(0, SubtitleSideMargin.MAX_PERCENT),
+            outlineWidth = style.outlineWidth.coerceIn(subtitleOutlineWidthRange),
             bottomOffset = style.bottomOffset.coerceIn(0, 200),
             appearance = style.appearance.normalized(),
         )
@@ -826,6 +861,32 @@ object PlayerSettingsRepository {
         autoSwitchPlaybackEngineOnError = enabled
         publish()
         PlayerSettingsStorage.saveAutoSwitchPlaybackEngineOnError(enabled)
+    }
+
+    fun setStreamAutoPlayFallbackOnFailure(enabled: Boolean) {
+        ensureLoaded()
+        if (streamAutoPlayFallbackOnFailure == enabled) return
+        streamAutoPlayFallbackOnFailure = enabled
+        publish()
+        PlayerSettingsStorage.saveStreamAutoPlayFallbackOnFailure(enabled)
+    }
+
+    fun setStreamAutoPlayFallbackMaxSources(count: Int) {
+        ensureLoaded()
+        val normalized = count.coerceIn(SOURCE_FALLBACK_MAX_SOURCES_RANGE)
+        if (streamAutoPlayFallbackMaxSources == normalized) return
+        streamAutoPlayFallbackMaxSources = normalized
+        publish()
+        PlayerSettingsStorage.saveStreamAutoPlayFallbackMaxSources(normalized)
+    }
+
+    fun setStreamAutoPlayFallbackStartupTimeoutSeconds(seconds: Int) {
+        ensureLoaded()
+        val normalized = seconds.coerceIn(SOURCE_STARTUP_TIMEOUT_SECONDS_RANGE)
+        if (streamAutoPlayFallbackStartupTimeoutSeconds == normalized) return
+        streamAutoPlayFallbackStartupTimeoutSeconds = normalized
+        publish()
+        PlayerSettingsStorage.saveStreamAutoPlayFallbackStartupTimeoutSeconds(normalized)
     }
 
     fun setAndroidLibmpvVideoOutput(output: AndroidLibmpvVideoOutput) {
@@ -1461,6 +1522,9 @@ object PlayerSettingsRepository {
             streamReuseLastLinkCacheHours = streamReuseLastLinkCacheHours,
             androidPlaybackEngine = androidPlaybackEngine,
             autoSwitchPlaybackEngineOnError = autoSwitchPlaybackEngineOnError,
+            streamAutoPlayFallbackOnFailure = streamAutoPlayFallbackOnFailure,
+            streamAutoPlayFallbackMaxSources = streamAutoPlayFallbackMaxSources,
+            streamAutoPlayFallbackStartupTimeoutSeconds = streamAutoPlayFallbackStartupTimeoutSeconds,
             androidLibmpvVideoOutput = androidLibmpvVideoOutput,
             androidLibmpvHardwareDecodingEnabled = androidLibmpvHardwareDecodingEnabled,
             androidLibmpvYuv420pEnabled = androidLibmpvYuv420pEnabled,

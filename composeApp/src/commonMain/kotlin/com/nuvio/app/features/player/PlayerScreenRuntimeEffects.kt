@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.nuvio.app.features.addons.AddonPlayerAction
 import com.nuvio.app.features.details.MetaDetailsRepository
 import com.nuvio.app.features.p2p.P2pSettingsRepository
 import com.nuvio.app.features.p2p.P2pStreamRequest
@@ -164,6 +165,16 @@ internal fun PlayerScreenRuntime.BindPlayerRuntimeEffects() {
         PlayerStreamsRepository.clearEpisodeStreams()
         resetAddonSubtitlesIfSourceChanged()
         WatchProgressRepository.ensureLoaded()
+
+        // A source that does not finish loading within the configured time counts as failed when
+        // falling back to the next source. It has an effect only where that fallback applies.
+        val startupTimeoutSeconds = playerSettingsUiState.streamAutoPlayFallbackStartupTimeoutSeconds
+        delay(startupTimeoutSeconds * 1_000L)
+        if (!initialLoadCompleted && errorMessage == null) {
+            tryFallbackToNextSourceAfterError(
+                getString(Res.string.player_error_source_startup_timeout, startupTimeoutSeconds),
+            )
+        }
     }
 
     // Re-arm the credential-refresh counter on a genuinely new stream (channel/content change). This is
@@ -585,6 +596,10 @@ private fun PlayerScreenRuntime.BindPlayerUiVisibilityEffects() {
         if (previousIsPlaying && !playbackSnapshot.isPlaying && !playbackSnapshot.isLoading) {
             pendingSeekScrobbleRestart = false
             flushWatchProgress(TrackingScrobbleAction.PAUSE)
+        }
+
+        if (!previousIsPlaying && playbackSnapshot.isPlaying) {
+            emitAddonPlayerEvent(AddonPlayerAction.START)
         }
 
         if (playbackSnapshot.isPlaying && pendingSeekScrobbleRestart) {
@@ -1104,8 +1119,7 @@ internal fun PlayerScreenRuntime.tryRefreshExpiredLinkAfterError(message: String
             val candidate = refreshedStream
             if (candidate == null) {
                 iptvRefreshLog.w { "no replacement stream found — surfacing the original error" }
-                errorMessage = message
-                controlsVisible = !playerControlsLocked
+                showErrorUnlessSourceFallback(message)
                 return@launch
             }
             // Debrid links are always requested anew; a prepared or in-memory one may be the expired link.
@@ -1120,8 +1134,7 @@ internal fun PlayerScreenRuntime.tryRefreshExpiredLinkAfterError(message: String
             ) {
                 is DirectDebridPlayableResult.Success -> resolved.stream
                 else -> {
-                    errorMessage = message
-                    controlsVisible = !playerControlsLocked
+                    showErrorUnlessSourceFallback(message)
                     return@launch
                 }
             }
@@ -1140,8 +1153,7 @@ internal fun PlayerScreenRuntime.tryRefreshExpiredLinkAfterError(message: String
             }
             if (refreshedUrl.isNullOrBlank() || refreshedUrl == failedUrl) {
                 iptvRefreshLog.w { "replacement URL unusable (blank=${refreshedUrl.isNullOrBlank()} sameAsFailed=${refreshedUrl == failedUrl})" }
-                errorMessage = message
-                controlsVisible = !playerControlsLocked
+                showErrorUnlessSourceFallback(message)
                 return@launch
             }
             iptvRefreshLog.i { "recovered with a fresh link, resuming at ${savedPositionMs}ms" }
@@ -1149,6 +1161,12 @@ internal fun PlayerScreenRuntime.tryRefreshExpiredLinkAfterError(message: String
             if (playerSettingsUiState.streamReuseLastLinkEnabled) {
                 saveDirectStreamForReuse(stream, refreshedUrl, currentVideoId, season, episode)
             }
+            // Upstream (source fallback): the recovered link replaces the auto-selected one in place, so a later
+            // failure still falls back from the right source; the identity/filename/subtitles follow the stream.
+            if (activeSourceUrl == autoSelectedSourceUrl) autoSelectedSourceUrl = refreshedUrl
+            externalSubtitles = stream.externalSubtitles
+            activeSourceIdentityKey = stream.playerSourceIdentityKey() ?: activeSourceIdentityKey
+            activeSourceFilename = stream.behaviorHints.filename
             flushWatchProgress()
             stopActiveP2pStream()
             activeSourceUrl = refreshedUrl

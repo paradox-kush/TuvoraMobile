@@ -161,6 +161,8 @@ struct MPVPlaybackProperties: Equatable {
     var path: String?
     var aid: String?
     var subtitleText: String?
+    /// `sub-text/ass`: the same cue with its ASS formatting, what the styled overlay renders (upstream).
+    var subtitleTextAss: String?
     var subtitleCodec: String?
     var tracks: [MPVTrackShadow] = []
     /// `demuxer-cache-state.seekable-ranges` in mpv's time-pos seconds: the stretches a seek lands in without
@@ -212,6 +214,7 @@ struct MPVPlaybackProperties: Equatable {
         case "aid": aid = value.stringValue
         case "sid": break  // observed only to refresh Main on a subtitle-track change
         case "sub-text": subtitleText = value.stringValue
+        case "sub-text/ass": subtitleTextAss = value.stringValue
         case "current-tracks/sub/codec": subtitleCodec = value.stringValue
         default: return false
         }
@@ -233,7 +236,7 @@ struct MPVPlaybackProperties: Equatable {
         ("pause", .flag), ("paused-for-cache", .flag), ("core-idle", .flag),
         ("eof-reached", .flag), ("seeking", .flag),
         ("track-list", .node), ("aid", .string), ("sid", .string),
-        ("sub-text", .string), ("current-tracks/sub/codec", .string),
+        ("sub-text", .string), ("sub-text/ass", .string), ("current-tracks/sub/codec", .string),
         ("duration", .double), ("time-pos", .double), ("demuxer-cache-time", .double),
         ("speed", .double), ("estimated-vf-fps", .double), ("container-fps", .double),
         ("video-format", .string), ("frame-drop-count", .int64), ("vo-delayed-frame-count", .int64),

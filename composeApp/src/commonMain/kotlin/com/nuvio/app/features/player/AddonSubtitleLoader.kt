@@ -160,6 +160,7 @@ private suspend fun parseAddonSubtitles(response: String, request: SubtitleAddon
             ),
             addonName = request.addonName,
             label = addonProvidedId?.takeIf { it != language && it != url },
+            title = obj.stringValue("label"),
         )
     }
 }

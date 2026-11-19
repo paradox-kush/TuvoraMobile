@@ -238,6 +238,7 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, NuvioPlayerPropert
 
     // State - refreshes position from mpv on each call (polled from Kotlin every 250ms)
     func getIsLoading() -> Bool { playerVC?.refreshPlaybackState(); return playerVC?.isPlayerLoading ?? true }
+    func getIsOpening() -> Bool { !(playerVC?.isFileLoaded ?? false) }
     func getIsPlaying() -> Bool { return playerVC?.isPlayerPlaying ?? false }
     func getIsEnded() -> Bool { return playerVC?.isPlayerEnded ?? false }
     func getDurationMs() -> Int64 { return playerVC?.durationMs ?? 0 }
@@ -359,7 +360,7 @@ final class MPVPlayerViewController: UIViewController {
     /// mpv's sub-add needs a loaded file. An add-on subtitle selected before that (Nuvio restores
     /// the remembered one as soon as add-ons answer, often while the stream still opens) waits here.
     private var pendingSubtitleUrl: String?
-    private var isFileLoaded = false
+    private(set) var isFileLoaded = false
     private var pendingLoadRetryWorkItem: DispatchWorkItem?
     var mpv: OpaquePointer?
     private var cachedNowPlayingMetadata: CachedNowPlayingMetadata?
@@ -1315,7 +1316,7 @@ final class MPVPlayerViewController: UIViewController {
             setStringProperty("sub-visibility", styled ? "no" : "yes")
             styledSubtitleVisible = styled
         }
-        let text = styled ? (snapshot.subtitleText ?? "") : ""
+        let text = styled ? (snapshot.subtitleTextAss ?? snapshot.subtitleText ?? "") : ""
         if text != lastSubtitleText {
             lastSubtitleText = text
             subtitleTextHandler?.onTextChanged(text: text)
@@ -1711,7 +1712,7 @@ final class MPVPlayerViewController: UIViewController {
                     } else {
                         self.propertyShadow.apply(name, Self.decodePropertyValue(property))
                     }
-                    if name == "sub-text" {
+                    if name == "sub-text" || name == "sub-text/ass" {
                         DispatchQueue.main.async { self.updateStyledSubtitle() }
                     } else if MPVPlaybackProperties.mainRefreshProperties.contains(name) {
                         DispatchQueue.main.async { self.updateState() }

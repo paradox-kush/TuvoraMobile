@@ -521,6 +521,7 @@ private fun PlatformPlayerSurfaceInner(
             val voFrameStats = bridge.getVoFrameStats()
             val snapshot = PlayerPlaybackSnapshot(
                 isLoading = bridge.getIsLoading(),
+                isOpening = bridge.getIsOpening(),
                 isPlaying = bridge.getIsPlaying(),
                 isEnded = bridge.getIsEnded(),
                 durationMs = bridge.getDurationMs(),
@@ -591,7 +592,8 @@ private fun PlatformPlayerSurfaceInner(
             },
             interactive = false,
         )
-        StyledSubtitleOverlay(subtitleText, subtitleStyle)
+        val subtitleCues = remember(subtitleText) { parseMpvSubtitleText(subtitleText) }
+        StyledSubtitleOverlay(subtitleCues, subtitleStyle)
         
         if (useNativeController) {
             var isPlayingLocal by remember { mutableStateOf(playWhenReady) }

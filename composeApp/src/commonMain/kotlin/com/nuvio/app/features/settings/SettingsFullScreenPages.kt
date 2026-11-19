@@ -145,6 +145,7 @@ fun ContinueWatchingSettingsScreen(
             splitByType = continueWatchingPreferencesUiState.splitByType,
             showResumePromptOnLaunch = continueWatchingPreferencesUiState.showResumePromptOnLaunch,
             sortMode = continueWatchingPreferencesUiState.sortMode,
+            clickAction = continueWatchingPreferencesUiState.clickAction,
         )
     }
 }

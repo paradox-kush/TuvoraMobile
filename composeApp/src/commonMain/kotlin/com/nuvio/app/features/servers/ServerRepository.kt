@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.builtins.ListSerializer
@@ -50,6 +52,7 @@ object ServerRepository {
     private val tokens = mutableMapOf<String, String>()
     private var syncState = ServerSyncState()
     private var localVersion = 0L
+    private val renewals = mutableMapOf<String, Mutex>()
     private val _localChanges = MutableSharedFlow<Int>(extraBufferCapacity = 8)
     val localChanges: SharedFlow<Int> = _localChanges.asSharedFlow()
 
@@ -133,7 +136,14 @@ object ServerRepository {
         val session = session(connectionId) ?: throw ServerException(ServerFailure.AUTH_REQUIRED)
         val provider = provider(session.connection) ?: throw ServerException(ServerFailure.UNSUPPORTED)
         return try {
-            block(provider, session).also {
+            val current = if (provider.renewalDue(session)) renewedAhead(provider, session) else session
+            try {
+                block(provider, current)
+            } catch (error: ServerException) {
+                if (error.failure != ServerFailure.AUTH_REQUIRED) throw error
+                val renewed = renewed(provider, current, error) ?: throw error
+                block(provider, renewed)
+            }.also {
                 if (startedGeneration != generation || preferenceEpoch != com.nuvio.app.core.sources.DeviceSources.epoch) throw CancellationException("Server scope changed")
                 setFailure(connectionId, null)
             }
@@ -148,12 +158,71 @@ object ServerRepository {
         }
     }
 
+    /**
+     * For a play already running: renews like [call], but carries on when the server list changes, uses [started]
+     * when its connection is gone, and leaves the connection's failure state alone.
+     */
+    suspend fun <T> callForPlayback(
+        started: ServerSession,
+        block: suspend (ServerProvider, ServerSession) -> T,
+    ): T {
+        val session = session(started.connection.id) ?: started
+        val provider = provider(session.connection) ?: throw ServerException(ServerFailure.UNSUPPORTED)
+        val current = if (provider.renewalDue(session)) renewedAhead(provider, session) else session
+        return try {
+            block(provider, current)
+        } catch (error: ServerException) {
+            if (error.failure != ServerFailure.AUTH_REQUIRED) throw error
+            val renewed = renewed(provider, current, error) ?: throw error
+            block(provider, renewed)
+        }
+    }
+
+    /** Renews ahead of time; the current token is kept when the server can't be asked right now. */
+    private suspend fun renewedAhead(provider: ServerProvider, session: ServerSession): ServerSession = try {
+        renewed(provider, session, failure = null) ?: session
+    } catch (error: ServerException) {
+        if (error.failure == ServerFailure.AUTH_REQUIRED) throw error
+        session
+    }
+
+    /** One renewal at a time per connection: a call that waited gets the token the first one saved. */
+    private suspend fun renewed(provider: ServerProvider, session: ServerSession, failure: ServerException?): ServerSession? {
+        val connectionId = session.connection.id
+        val mutex = synchronized(lock) { renewals.getOrPut(connectionId) { Mutex() } }
+        return mutex.withLock {
+            val latest = session(connectionId) ?: return@withLock null
+            if (latest.token != session.token) return@withLock latest
+            val profileId = loadedProfileId ?: return@withLock null
+            val token = provider.renewToken(latest, failure) ?: return@withLock null
+            if (!replaceToken(profileId, latest.connection, latest.token, token)) return@withLock null
+            ServerSession(latest.connection, token)
+        }
+    }
+
+    /** Saves [token] only while [profileId] is loaded and the connection still holds [previous]. */
+    private fun replaceToken(profileId: Int, connection: ServerConnection, previous: String, token: String): Boolean {
+        val saved = synchronized(lock) {
+            val current = tokens[connection.credentialRef] ?: readCredential(connection.credentialRef)
+            if (loadedProfileId != profileId || current != previous) return false
+            runCatching { ServerStorage.write(credentialKey(connection.credentialRef), token) }.isSuccess
+                .also { if (it) tokens[connection.credentialRef] = token }
+        }
+        if (!saved) return false
+        // Fork: tokens never leave this device (ServerConnection.toSynced sends none), so a renewal has nothing to push.
+        return true
+    }
+
     suspend fun connect(provider: ServerProvider, address: String, username: String, password: String): ServerConnection =
         connectWith(provider) { provider.signIn(address, username, password) }
 
     /** Quick Connect sign-in: the token it yields is this device's own and stays on this device (never synced). */
     suspend fun connectWithQuickConnect(provider: ServerProvider, challenge: QuickConnectChallenge): ServerConnection =
         connectWith(provider) { provider.quickConnectComplete(challenge) }
+
+    /** Upstream's Plex sign-in shape: the provider runs its own flow and hands back the sign-in. */
+    suspend fun connect(provider: ServerProvider, signIn: suspend () -> ServerSignIn): ServerConnection =
+        connectWith(provider) { signIn() }
 
     internal suspend fun connectManaged(signIn: ServerSignIn, bridgeId: String, expiresAtMs: Long, revision: Long): ServerConnection =
         connectWith(checkNotNull(ServerProviders.forId("jellyfin")), bridgeId, expiresAtMs, revision) { signIn }

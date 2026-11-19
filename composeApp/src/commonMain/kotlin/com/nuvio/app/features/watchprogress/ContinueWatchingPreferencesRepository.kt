@@ -27,6 +27,8 @@ private data class StoredContinueWatchingPreferences(
     // Device-local like sortMode: the TV app has one row and nothing to sync it with.
     @SerialName("split_continue_watching_by_type")
     val splitByType: Boolean = false,
+    @SerialName("click_action")
+    val clickAction: ContinueWatchingClickAction = ContinueWatchingClickAction.STREAM,
 )
 
 object ContinueWatchingPreferencesRepository {
@@ -71,10 +73,7 @@ object ContinueWatchingPreferencesRepository {
             useEpisodeThumbnails = useEpisodeThumbnails,
             showUnairedNextUp = showUnairedNextUp,
             blurNextUp = blurNextUp,
-            dismissedNextUpKeys = dismissedNextUpKeys
-                .map(String::trim)
-                .filter(String::isNotBlank)
-                .toSet(),
+            dismissedNextUpKeys = normalizeDismissedNextUpKeys(dismissedNextUpKeys),
         )
         persist()
     }
@@ -100,10 +99,11 @@ object ContinueWatchingPreferencesRepository {
                 useEpisodeThumbnails = stored.useEpisodeThumbnails,
                 showUnairedNextUp = stored.showUnairedNextUp,
                 blurNextUp = stored.blurNextUp,
-                dismissedNextUpKeys = stored.dismissedNextUpKeys,
+                dismissedNextUpKeys = normalizeDismissedNextUpKeys(stored.dismissedNextUpKeys),
                 showResumePromptOnLaunch = stored.showResumePromptOnLaunch,
                 sortMode = stored.sortMode,
                 splitByType = stored.splitByType,
+                clickAction = stored.clickAction,
             )
         } else {
             ContinueWatchingPreferencesUiState()
@@ -148,7 +148,7 @@ object ContinueWatchingPreferencesRepository {
 
     fun addDismissedNextUpKey(key: String) {
         ensureLoaded()
-        val normalizedKey = key.trim()
+        val normalizedKey = key.trim().substringBefore("|")
         if (normalizedKey.isBlank()) return
         val current = _uiState.value.dismissedNextUpKeys
         if (normalizedKey in current) return
@@ -176,6 +176,13 @@ object ContinueWatchingPreferencesRepository {
         persist()
     }
 
+    fun setClickAction(action: ContinueWatchingClickAction) {
+        ensureLoaded()
+        if (_uiState.value.clickAction == action) return
+        _uiState.value = _uiState.value.copy(clickAction = action)
+        persist()
+    }
+
     fun removeDismissedNextUpKeysForContent(contentId: String) {
         ensureLoaded()
         val normalizedContentId = contentId.trim()
@@ -188,6 +195,11 @@ object ContinueWatchingPreferencesRepository {
         _uiState.value = _uiState.value.copy(dismissedNextUpKeys = filtered)
         persist()
     }
+
+    private fun normalizeDismissedNextUpKeys(keys: Set<String>): Set<String> =
+        keys.map { it.trim().substringBefore("|") }
+            .filter(String::isNotBlank)
+            .toSet()
 
     private fun persist() {
         ContinueWatchingPreferencesStorage.savePayload(
@@ -203,6 +215,7 @@ object ContinueWatchingPreferencesRepository {
                     showResumePromptOnLaunch = _uiState.value.showResumePromptOnLaunch,
                     sortMode = _uiState.value.sortMode,
                     splitByType = _uiState.value.splitByType,
+                    clickAction = _uiState.value.clickAction,
                 ),
             ),
         )

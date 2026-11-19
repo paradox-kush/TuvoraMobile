@@ -16,6 +16,7 @@ fun readXcconfigValue(file: File, key: String): String? {
 
 plugins {
     alias(libs.plugins.androidApplication)
+    alias(libs.plugins.androidxBaselineProfile)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.sentry.android.gradle)
     id("com.posthog.android") version "1.4.0"
@@ -121,6 +122,7 @@ android {
     }
 
     sourceSets.getByName("androidTest").assets.srcDir("../testFixtures")
+    sourceSets.getByName("main").baselineProfiles.directories.add("src/main/generated/baselineProfiles")
 
     packaging {
         resources {
@@ -171,6 +173,14 @@ android {
                 debugSymbolLevel = "FULL"
             }
         }
+        create("benchmark") {
+            initWith(buildTypes.getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            matchingFallbacks += "release"
+        }
     }
 
     compileOptions {
@@ -184,6 +194,23 @@ androidComponents {
     onVariants(selector().withBuildType("debug")) { variant ->
         variant.applicationId.set("com.nuviodebug.com")
     }
+    onVariants(selector().withBuildType("benchmark")) { variant ->
+        variant.applicationId.set("com.nuviodebug.com")
+    }
+    onVariants { variant ->
+        val buildType = variant.buildType.orEmpty()
+        if (buildType.startsWith("nonMinified") || buildType.startsWith("benchmark") && buildType != "benchmark") {
+            variant.applicationId.set("com.nuviodebug.com")
+            variant.signingConfig.setConfig(android.signingConfigs.getByName("debug"))
+        }
+    }
+}
+
+baselineProfile {
+    automaticGenerationDuringBuild = false
+    saveInSrc = true
+    mergeIntoMain = true
+    baselineProfileOutputDir = "generated/baselineProfiles"
 }
 
 sentry {
@@ -199,7 +226,7 @@ sentry {
     sentryAuthToken?.let(authToken::set)
     sentryOrg?.let(org::set)
     sentryProject?.let(projectName::set)
-    ignoredBuildTypes.set(setOf("debug"))
+    ignoredBuildTypes.set(setOf("debug", "benchmark"))
     autoInstallation {
         enabled.set(false)
     }
@@ -213,6 +240,7 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.compose.runtime)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
+    baselineProfile(project(":baselineprofile"))
     debugImplementation(libs.compose.uiTooling)
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test:core:1.7.0")

@@ -34,6 +34,7 @@ data class AddonSubtitle(
     val addonName: String? = null,
     val isSelected: Boolean = false,
     val label: String? = null,
+    val title: String? = null,
 )
 
 const val SUBTITLE_DELAY_MIN_MS = -60_000
@@ -83,6 +84,9 @@ val PlayerSettingsUiState.effectiveDownmixEnabled: Boolean
 internal fun audioAmplificationGain(db: Int): Double =
     10.0.pow(db.coerceIn(AUDIO_AMPLIFICATION_MIN_DB, AUDIO_AMPLIFICATION_MAX_DB) / 20.0)
 
+internal const val SUBTITLE_OUTLINE_WIDTH_DEFAULT = 2
+internal val subtitleOutlineWidthRange: IntRange = 1..5
+
 internal val subtitleFontSizeRangeSp: IntRange
     get() = if (isIos) 6..40 else 12..40
 
@@ -93,7 +97,7 @@ data class SubtitleStyleState(
     val backgroundColor: Color = Color.Black.copy(alpha = 0.55f),
     val outlineColor: Color = Color.Black,
     val outlineEnabled: Boolean = false,
-    val outlineWidth: Int = 2,
+    val outlineWidth: Int = SUBTITLE_OUTLINE_WIDTH_DEFAULT,
     val bold: Boolean = false,
     val fontSizeSp: Int = 18,
     val bottomOffset: Int = 20,

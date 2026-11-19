@@ -98,6 +98,8 @@ interface NuvioPlayerBridge {
         styledOverlay: Boolean,
     )
     fun getIsLoading(): Boolean
+    /** mpv has not loaded the current file yet. */
+    fun getIsOpening(): Boolean
     fun getIsPlaying(): Boolean
     fun getIsEnded(): Boolean
     fun getDurationMs(): Long

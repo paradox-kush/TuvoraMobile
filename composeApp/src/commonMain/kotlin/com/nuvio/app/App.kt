@@ -16,6 +16,8 @@ import com.nuvio.app.core.ui.NativeProfileSwitcherController
 import com.nuvio.app.core.ui.NuvioTheme
 import com.nuvio.app.core.ui.configurePlatformImageLoader
 import com.nuvio.app.core.ui.platformProvidesImageLoader
+import com.nuvio.app.features.servers.plex.PlexArtworkInterceptor
+import com.nuvio.app.features.servers.silo.SiloArtworkInterceptor
 import com.nuvio.app.features.settings.ThemeSettingsRepository
 import com.nuvio.app.navigation.AppRoute
 import com.nuvio.app.navigation.TabsRoute
@@ -96,6 +98,8 @@ internal fun AppEnvironment(content: @Composable () -> Unit) {
  */
 internal fun coil3.ComponentRegistry.Builder.addSharedImageComponents() {
     add(CustomPosterFallbackInterceptor())
+    add(com.nuvio.app.features.servers.plex.PlexArtworkInterceptor())
+    add(com.nuvio.app.features.servers.silo.SiloArtworkInterceptor())
     add(SvgDecoder.Factory())
     add(com.nuvio.app.features.servers.PinnedServerImageFetcherFactory())
 }

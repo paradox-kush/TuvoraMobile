@@ -33,6 +33,13 @@ enum class ContinueWatchingSortMode {
 }
 
 @Serializable
+enum class ContinueWatchingClickAction {
+    STREAM,
+    DETAILS,
+    DETAILS_FOR_UPCOMING,
+}
+
+@Serializable
 data class WatchProgressEntry(
     val contentType: String,
     val parentMetaId: String,
@@ -247,19 +254,14 @@ data class ContinueWatchingPreferencesUiState(
     val sortMode: ContinueWatchingSortMode = ContinueWatchingSortMode.DEFAULT,
     /** F04: separate Movies and Series rows instead of one Continue Watching row (off by default). */
     val splitByType: Boolean = false,
+    val clickAction: ContinueWatchingClickAction = ContinueWatchingClickAction.STREAM,
 )
 
 internal fun nextUpDismissKey(
     contentId: String,
     seasonNumber: Int?,
     episodeNumber: Int?,
-): String = buildString {
-    append(contentId.trim())
-    append("|")
-    append(seasonNumber ?: -1)
-    append("|")
-    append(episodeNumber ?: -1)
-}
+): String = contentId.trim()
 
 internal fun WatchProgressEntry.toContinueWatchingItem(): ContinueWatchingItem {
     val normalizedEntry = normalizedCompletion()

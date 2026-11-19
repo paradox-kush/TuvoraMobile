@@ -1650,7 +1650,7 @@ private fun ExoPlayerSurface(
                 playerView.applyVideoZoom(videoZoom)
             },
         )
-        StyledSubtitleOverlay(subtitlePresenter.text, currentSubtitleStyle)
+        StyledSubtitleOverlay(subtitlePresenter.cues, currentSubtitleStyle)
     }
 }
 
@@ -1817,6 +1817,7 @@ private fun LibmpvPlayerSurface(
             override fun event(eventId: Int, data: MPVNode) {
                 when (eventId) {
                     MPV.mpvEvent.MPV_EVENT_START_FILE -> {
+                        view.onFileStarted()
                         errorLog.clear()
                         Log.i(
                             PLAYER_DIAGNOSTIC_TAG,
@@ -1834,6 +1835,7 @@ private fun LibmpvPlayerSurface(
                     MPV.mpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
                         if (eventId == MPV.mpvEvent.MPV_EVENT_FILE_LOADED) {
                             view.endLiveOpenLogWindow()
+                            view.onFileLoaded()
                             view.attachStartupSubtitles()
                         }
                         coroutineScope.launch(Dispatchers.Main.immediate) {
@@ -2079,7 +2081,7 @@ private fun LibmpvPlayerSurface(
             view.release()
         },
     )
-        playerViewRef?.let { view -> StyledSubtitleOverlay(view.subtitleText, view.subtitleStyle) }
+        playerViewRef?.let { view -> StyledSubtitleOverlay(view.subtitleCues, view.subtitleStyle) }
     }
 }
 
@@ -2515,7 +2517,7 @@ private class NuvioLibmpvView(
         attachedSurface = null
     }
 
-    var subtitleText by mutableStateOf("")
+    var subtitleCues by mutableStateOf(StyledSubtitleCues())
         private set
     var subtitleStyle by mutableStateOf(SubtitleStyleState.DEFAULT)
         private set
@@ -2531,11 +2533,16 @@ private class NuvioLibmpvView(
                 mpv.setPropertyBoolean("sub-visibility", !styled)
                 styledSubtitleVisible = styled
             }
-            val text = if (styled) mpv.getPropertyString("sub-text").orEmpty() else ""
+            val text = if (styled) {
+                mpv.getPropertyString("sub-text/ass") ?: mpv.getPropertyString("sub-text").orEmpty()
+            } else {
+                ""
+            }
+            val cues = parseMpvSubtitleText(text)
             val style = appliedSubtitleStyle
             post {
                 if (!released.get()) {
-                    subtitleText = text
+                    subtitleCues = cues
                     subtitleStyle = style
                 }
             }
@@ -2787,6 +2794,7 @@ private class NuvioLibmpvView(
         obsVideoFrameTicks = MpvVideoOutputSignal.advance(obsVideoFrameTicks, obsEstimatedVfFps)
         return PlayerPlaybackSnapshot(
             isLoading = isLoading,
+            isOpening = !fileLoaded,
             isPlaying = !paused && !isLoading && !idle && !ended,
             isEnded = ended,
             durationMs = durationMs,
@@ -3355,8 +3363,11 @@ private const val MPV_SUBTITLE_OUTLINE_SIZE_SCALE = 1.5
 
 private fun ExoPlayer.snapshot(): PlayerPlaybackSnapshot {
     val (videoWidth, videoHeight) = videoDimensions()
+    val isLoading = playbackState == Player.STATE_IDLE || playbackState == Player.STATE_BUFFERING
     return PlayerPlaybackSnapshot(
-        isLoading = playbackState == Player.STATE_IDLE || playbackState == Player.STATE_BUFFERING,
+        isLoading = isLoading,
+        // Tracks are known once the source is opened and its container read.
+        isOpening = isLoading && currentTracks.isEmpty,
         isPlaying = isPlaying,
         isEnded = playbackState == Player.STATE_ENDED,
         durationMs = duration.coerceAtLeast(0L),
