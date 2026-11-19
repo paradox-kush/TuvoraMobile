@@ -9,4 +9,6 @@ internal actual object EpisodeReleaseNotificationPlatform {
     actual suspend fun scheduleEpisodeReleaseNotifications(requests: List<EpisodeReleaseNotificationRequest>) = Unit
     actual suspend fun clearScheduledEpisodeReleaseNotifications() = Unit
     actual suspend fun showTestNotification(request: EpisodeReleaseNotificationRequest) = Unit
+    actual suspend fun recordAppOpened(epochMs: Long) = Unit
+    actual fun openNotificationSettings() = Unit
 }

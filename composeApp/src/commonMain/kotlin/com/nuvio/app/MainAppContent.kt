@@ -147,6 +147,7 @@ import com.nuvio.app.features.library.toLibraryItem
 import com.nuvio.app.features.library.toMetaPreview
 import com.nuvio.app.features.membership.MemberAccessRepository
 import com.nuvio.app.features.notifications.EpisodeReleaseNotificationsRepository
+import com.nuvio.app.features.settings.SettingsPage
 import com.nuvio.app.features.p2p.P2pSettingsRepository
 import com.nuvio.app.features.party.PartyEvent
 import com.nuvio.app.features.party.PartyMedia
@@ -417,6 +418,7 @@ internal fun MainAppContent(
     val metaScreenSettingsTitle = stringResource(Res.string.compose_settings_page_meta_screen)
     val continueWatchingSettingsTitle = stringResource(Res.string.compose_settings_page_continue_watching)
     val debridSettingsTitle = stringResource(Res.string.compose_settings_page_debrid)
+    val notificationsSettingsTitle = stringResource(Res.string.compose_settings_page_notifications)
     val downloadsTitle = stringResource(Res.string.compose_settings_root_downloads_title)
     val recordingsTitle = stringResource(Res.string.recordings_title)
     val addonsSettingsTitle = stringResource(Res.string.compose_settings_page_addons)
@@ -607,7 +609,7 @@ internal fun MainAppContent(
         // because nothing about recommendation telemetry may ever affect app startup.
         runCatching { com.nuvio.app.core.contracts.RecTrackingAccess.reporter.startLogging() }
         NetworkStatusRepository.ensureStarted()
-        EpisodeReleaseNotificationsRepository.refreshAsync()
+        EpisodeReleaseNotificationsRepository.onAppOpened()
         kotlinx.coroutines.delay(5_000)
         initialHomeReady = true
     }
@@ -763,6 +765,15 @@ internal fun MainAppContent(
                 runCatching { com.nuvio.app.core.contracts.IptvCatalogAccess.catalog.refreshDuePlaylists() }
                     .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
             }
+        }
+    }
+
+    // Each return to the foreground counts as opening the app for the episode-alert gate (one alert a day, none on a
+    // day the app was already opened). Foreground only: nothing here runs while the app is in the background.
+    LaunchedEffect(ownsAppRuntime) {
+        if (!ownsAppRuntime) return@LaunchedEffect
+        AppForegroundMonitor.events().collectLatest { visibility ->
+            if (visibility == AppVisibility.Foreground) EpisodeReleaseNotificationsRepository.onAppOpened()
         }
     }
 
@@ -1787,6 +1798,20 @@ internal fun MainAppContent(
                                     { navController.navigate(RecordingsRoute(recordingsTitle)) }
                                 } else null,
                                 onCalendarClick = { navController.navigate(CalendarRoute()) },
+                                onNotificationSettingsClick = {
+                                    if (useNativeNavigation && !isTabletLayout) {
+                                        activateTab(AppScreenTab.Settings)
+                                        navController.navigate(
+                                            SettingsPageRoute(
+                                                pageName = SettingsPage.Notifications.name,
+                                                title = notificationsSettingsTitle,
+                                            )
+                                        )
+                                    } else {
+                                        SettingsPageRequest.request(SettingsPage.Notifications.name)
+                                        activateTab(AppScreenTab.Settings)
+                                    }
+                                },
                                 onContinueWatchingClick = onContinueWatchingClick,
                                 onContinueWatchingLongPress = onContinueWatchingLongPress,
                                 onSwitchProfile = onSwitchProfile,

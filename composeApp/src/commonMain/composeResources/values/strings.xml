@@ -2980,4 +2980,52 @@
     <string name="calendar_game_postponed">Postponed</string>
     <string name="calendar_game_watch_now">Watch now</string>
     <string name="calendar_game_versus">%1$s v %2$s</string>
+
+    <!-- Alert controls: Settings > Notifications, the end-of-episode prompt, the Home chip, the alert wording -->
+    <string name="settings_alerts_section_when">WHEN TO NOTIFY</string>
+    <string name="settings_alerts_mode_learned">When I usually watch</string>
+    <string name="settings_alerts_mode_set_time">At a set time</string>
+    <string name="settings_alerts_learned_ready">Usually around %1$s today. Alerts arrive 20 minutes before.</string>
+    <string name="settings_alerts_learned_learning">Still learning when you usually watch. Until it knows, alerts go out at 09:00.</string>
+    <string name="settings_alerts_learned_learning_again">Learning again. Until it knows, alerts go out at 09:00.</string>
+    <string name="settings_alerts_learned_footer">Worked out on this phone from when you start watching here. Never sent anywhere.</string>
+    <string name="settings_alerts_reset">Reset</string>
+    <string name="settings_alerts_quiet_conflict">Usually around %1$s, inside your quiet hours, so alerts come at %2$s. Change it under Quiet hours.</string>
+    <string name="settings_alerts_set_time_label">Send at</string>
+    <string name="settings_alerts_section_quiet">QUIET HOURS</string>
+    <string name="settings_alerts_quiet_title">Quiet hours</string>
+    <string name="settings_alerts_quiet_description">Nothing is shown during these hours.</string>
+    <string name="settings_alerts_quiet_from">From</string>
+    <string name="settings_alerts_quiet_until">Until</string>
+    <string name="settings_alerts_section_often">HOW OFTEN</string>
+    <string name="settings_alerts_cap_title">At most</string>
+    <string name="settings_alerts_cap_description">New episodes on the same day arrive as one notification. Nothing is sent on a day you already opened Tuvora.</string>
+    <string name="settings_alerts_cap_per_day">1 a day</string>
+    <string name="settings_alerts_cap_three_week">3 a week</string>
+    <string name="settings_alerts_cap_one_week">1 a week</string>
+    <string name="settings_alerts_less_often">Sending less often because the last few weren't opened.</string>
+    <string name="settings_alerts_undo">Undo</string>
+    <string name="settings_alerts_shows_title">Shows with alerts</string>
+    <string name="settings_alerts_shows_description">A switch per show, same as the bell on its page</string>
+    <string name="settings_alerts_shows_count">%1$d of %2$d</string>
+    <string name="settings_alerts_shows_empty">Save a show or start watching one and it will appear here.</string>
+    <string name="settings_alerts_prompt_title">Ask at the end of an episode</string>
+    <string name="settings_alerts_prompt_description">When you are nearly caught up on a show, offer to alert you when the next episode is out.</string>
+    <string name="settings_alerts_denied_title">Notifications are off for Tuvora</string>
+    <string name="settings_alerts_denied_body">Turn them on in your phone's settings to get episode alerts.</string>
+    <string name="settings_alerts_denied_button">Open phone settings</string>
+    <string name="alert_prompt_title">Alert me when the next episode is out?</string>
+    <string name="alert_prompt_body">You are nearly caught up on %1$s. One alert a day at most, around %2$s.</string>
+    <string name="alert_prompt_accept">Alert me</string>
+    <string name="alert_prompt_decline">Not now</string>
+    <string name="alert_prompt_change_in_settings">Change this in Settings › Notifications</string>
+    <string name="calendar_alert_chip_on">Alert me · On</string>
+    <string name="calendar_alert_chip_off">Alert me · Off</string>
+    <string name="calendar_alert_change_in_settings">Change in Settings</string>
+    <string name="notifications_alert_title_batch">%1$d new episodes from shows you watch</string>
+    <string name="notifications_alert_body_same_show">%1$d new episodes are out now</string>
+    <string name="notifications_alert_body_list">%1$s are out now</string>
+    <string name="notifications_alert_body_list_more">%1$s and %2$d more are out now</string>
+    <string name="notifications_alert_less_often">Sending these less often. Change in Settings</string>
+
 </resources>

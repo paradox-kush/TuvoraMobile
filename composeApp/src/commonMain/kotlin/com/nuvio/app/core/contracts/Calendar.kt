@@ -13,7 +13,7 @@ import com.nuvio.app.features.home.MetaPreview
 /** Home: the bell reminders card, the opt-in "Coming up" row, and the foreground reminder check. */
 interface HomeCalendarSection {
     @Composable
-    fun Render(onOpenTitle: (MetaPreview) -> Unit, onOpenCalendar: () -> Unit)
+    fun Render(onOpenTitle: (MetaPreview) -> Unit, onOpenCalendar: () -> Unit, onOpenNotificationSettings: () -> Unit)
 }
 
 /**

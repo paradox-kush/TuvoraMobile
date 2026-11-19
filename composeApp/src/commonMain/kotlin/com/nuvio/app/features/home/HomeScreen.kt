@@ -156,6 +156,7 @@ fun HomeScreen(
     onPlaySportsReplay: (com.nuvio.app.core.contracts.SportsReplay) -> Unit = {},
     onAddIptvPlaylist: () -> Unit = {},
     onOpenCalendar: () -> Unit = {},
+    onOpenNotificationSettings: () -> Unit = {},
 ) {
     LaunchedEffect(Unit) {
         AddonRepository.initialize()
@@ -1164,6 +1165,7 @@ fun HomeScreen(
                 com.nuvio.app.core.contracts.HomeCalendarSectionAccess.current()?.Render(
                     onOpenTitle = { onPosterClick?.invoke(it) },
                     onOpenCalendar = onOpenCalendar,
+                    onOpenNotificationSettings = onOpenNotificationSettings,
                 )
             }
 
