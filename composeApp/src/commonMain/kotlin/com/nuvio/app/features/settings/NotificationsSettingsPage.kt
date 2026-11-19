@@ -32,6 +32,7 @@ import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.features.notifications.AlertCap
 import com.nuvio.app.features.notifications.AlertClock
 import com.nuvio.app.features.notifications.AlertTimingMode
+import com.nuvio.app.features.notifications.AwayGroupState
 import com.nuvio.app.features.notifications.AwayReminder
 import com.nuvio.app.features.notifications.EpisodeReleaseNotificationsRepository
 import com.nuvio.app.features.notifications.EpisodeReleaseNotificationsUiState
@@ -240,7 +241,7 @@ internal fun LazyListScope.notificationsSettingsContent(
             isTablet = isTablet,
         ) {
             SettingsGroup(isTablet = isTablet) {
-                if (uiState.permissionDenied) {
+                if (uiState.awayGroup == AwayGroupState.Denied) {
                     // The choice is kept; it takes effect once the phone allows notifications again.
                     PermissionDeniedPanel(isTablet = isTablet, onOpenSettings = actions.openSystemSettings)
                 } else {

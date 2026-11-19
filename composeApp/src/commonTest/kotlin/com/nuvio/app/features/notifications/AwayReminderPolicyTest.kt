@@ -417,3 +417,35 @@ class AwayReminderPolicyTest {
         assertNull(StoredAlertPreferences(awayReminderDays = 9).toModel().awayReminder)
     }
 }
+
+class AwayGroupPolicyTest {
+    @Test
+    fun `the group shows the panel only when the phone refused whatever the episode switch says`() {
+        for (alertsOn in listOf(true, false)) {
+            assertEquals(AwayGroupState.Choices, AwayGroupPolicy.state(NotificationPermission.Granted, alertsOn), "granted, alerts $alertsOn")
+            assertEquals(AwayGroupState.Denied, AwayGroupPolicy.state(NotificationPermission.Denied, alertsOn), "denied, alerts $alertsOn")
+            assertEquals(AwayGroupState.Choices, AwayGroupPolicy.state(NotificationPermission.NotAsked, alertsOn), "not asked, alerts $alertsOn")
+        }
+    }
+
+    @Test
+    fun `picking a day count asks only when the permission was never asked`() {
+        for (choice in listOf(AwayReminder.Days3, AwayReminder.Days7, AwayReminder.Days14)) {
+            assertTrue(AwayGroupPolicy.shouldAskOnPick(choice, NotificationPermission.NotAsked), "$choice not asked")
+            assertFalse(AwayGroupPolicy.shouldAskOnPick(choice, NotificationPermission.Granted), "$choice granted")
+            assertFalse(AwayGroupPolicy.shouldAskOnPick(choice, NotificationPermission.Denied), "$choice denied")
+        }
+        for (permission in NotificationPermission.entries) {
+            assertFalse(AwayGroupPolicy.shouldAskOnPick(AwayReminder.Off, permission), "off never asks: $permission")
+        }
+    }
+
+    @Test
+    fun `the ui state tells granted denied and not asked apart`() {
+        assertEquals(NotificationPermission.NotAsked, EpisodeReleaseNotificationsUiState().osPermission)
+        assertEquals(NotificationPermission.Granted, EpisodeReleaseNotificationsUiState(permissionGranted = true, permissionAsked = true).osPermission)
+        assertEquals(NotificationPermission.Denied, EpisodeReleaseNotificationsUiState(permissionAsked = true).osPermission)
+        assertEquals(NotificationPermission.Denied, EpisodeReleaseNotificationsUiState(isEnabled = true, permissionDenied = true).osPermission)
+        assertEquals(AwayGroupState.Denied, EpisodeReleaseNotificationsUiState(permissionAsked = true, isEnabled = false).awayGroup)
+    }
+}

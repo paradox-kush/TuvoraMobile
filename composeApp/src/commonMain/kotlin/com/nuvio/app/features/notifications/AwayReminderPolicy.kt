@@ -111,6 +111,27 @@ internal object AwayReminderPolicy {
     }
 }
 
+/** What the phone says about showing notifications from Tuvora. */
+enum class NotificationPermission { Granted, Denied, NotAsked }
+
+/** What the "When you've been away" group shows: its choices, or the denied-permission panel. */
+enum class AwayGroupState { Choices, Denied }
+
+internal object AwayGroupPolicy {
+    /**
+     * Decided from the phone's own permission, not from the episode-alert switch: a refused permission shows the
+     * panel (the stored choice is kept and applies once allowed); a permission not asked yet shows the choices,
+     * and picking one asks for it. [episodeAlertsOn] does not change the answer: the reminder is its own choice.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun state(permission: NotificationPermission, episodeAlertsOn: Boolean): AwayGroupState =
+        if (permission == NotificationPermission.Denied) AwayGroupState.Denied else AwayGroupState.Choices
+
+    /** Whether picking [choice] should ask the phone for permission right now. */
+    fun shouldAskOnPick(choice: AwayReminder, permission: NotificationPermission): Boolean =
+        choice != AwayReminder.Off && permission == NotificationPermission.NotAsked
+}
+
 /** Words for the reminder, resolved by the platform's string resources. */
 internal interface AwayTemplates {
     suspend fun titleOne(): String

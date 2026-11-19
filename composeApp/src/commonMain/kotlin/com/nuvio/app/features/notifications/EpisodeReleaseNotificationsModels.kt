@@ -39,7 +39,16 @@ data class EpisodeReleaseNotificationsUiState(
     val shows: List<ShowAlertRow> = emptyList(),
     /** The viewer reset the learned time and there is not yet enough history again. */
     val learningAgain: Boolean = false,
+    /** The permission has been asked for on this device (any answer), so "not granted" means refused, not unasked. */
+    val permissionAsked: Boolean = false,
 ) {
+    val osPermission: NotificationPermission
+        get() = when {
+            permissionGranted -> NotificationPermission.Granted
+            permissionAsked || permissionDenied -> NotificationPermission.Denied
+            else -> NotificationPermission.NotAsked
+        }
+    val awayGroup: AwayGroupState get() = AwayGroupPolicy.state(osPermission, isEnabled)
     /** The away reminder in effect: what the viewer chose, else 7 days only while alerts can reach this phone. */
     val awayReminder: AwayReminder
         get() = AwayReminderPolicy.effective(preferences.awayReminder, permissionGranted, isEnabled)
@@ -87,6 +96,8 @@ internal data class StoredAlertRuntime(
     val lastOpenedAtMs: Long = 0L,
     /** Set by Reset on the learned time; cleared once the habit is ready again. */
     val learningAgain: Boolean = false,
+    /** The OS permission has been asked for on this device. */
+    val permissionAsked: Boolean = false,
 )
 
 @Serializable

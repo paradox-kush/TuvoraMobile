@@ -247,6 +247,7 @@ object EpisodeReleaseNotificationsRepository {
                 log.e(error) { "Failed to request episode release notification permission" }
             }
             .getOrDefault(false)
+        markPermissionAsked()
 
         if (!granted) {
             _uiState.value = _uiState.value.copy(
@@ -300,7 +301,37 @@ object EpisodeReleaseNotificationsRepository {
     fun setDontAskAgain(value: Boolean) = updatePreferences { it.copy(dontAskAgain = value) }
 
     /** "Remind me what's new". Any pick, Off included, is a choice that beats the default from then on. */
-    fun setAwayReminder(choice: AwayReminder) = updatePreferences { it.copy(awayReminder = choice) }
+    fun setAwayReminder(choice: AwayReminder) {
+        updatePreferences { it.copy(awayReminder = choice) }
+        // The choice is stored either way; a permission not asked yet is asked for now, like the episode switch does.
+        if (AwayGroupPolicy.shouldAskOnPick(choice, _uiState.value.osPermission)) {
+            scope.launch { askPermissionForAwayReminder() }
+        }
+    }
+
+    private suspend fun askPermissionForAwayReminder() {
+        if (!permissionMutex.tryLock()) return
+        try {
+            val granted = runCatching { EpisodeReleaseNotificationPlatform.requestAuthorization() }
+                .onFailure { error -> log.e(error) { "Failed to request notification permission" } }
+                .getOrDefault(false)
+            markPermissionAsked()
+            _uiState.value = _uiState.value.copy(
+                permissionGranted = granted,
+                permissionDenied = _uiState.value.isEnabled && !granted,
+            )
+            publish()
+            if (granted) refreshScheduledNotifications()
+        } finally {
+            permissionMutex.unlock()
+        }
+    }
+
+    private fun markPermissionAsked() {
+        if (runtime.permissionAsked) return
+        runtime = runtime.copy(permissionAsked = true)
+        persistRuntime()
+    }
 
     /** Forgets what was learned about when this phone is used: "Learning again" until there is enough history. */
     fun resetLearnedTime() {
@@ -417,6 +448,7 @@ object EpisodeReleaseNotificationsRepository {
                     log.e(error) { "Failed to request permission for test notification" }
                 }
                 .getOrDefault(false)
+            markPermissionAsked()
 
             if (!granted) {
                 _uiState.value = _uiState.value.copy(
@@ -546,6 +578,7 @@ object EpisodeReleaseNotificationsRepository {
         }
         _uiState.value = _uiState.value.copy(
             learningAgain = runtime.learningAgain && ready == null,
+            permissionAsked = runtime.permissionAsked,
             preferences = preferences,
             habitSessions = (habit as? WatchHabitPolicy.Habit.StillLearning)?.sessions
                 ?: WatchHabitPolicy.sessionsOf(ViewingHistory.parse(viewingStarts)).size,
