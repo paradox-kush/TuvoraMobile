@@ -240,21 +240,26 @@ internal fun LazyListScope.notificationsSettingsContent(
             isTablet = isTablet,
         ) {
             SettingsGroup(isTablet = isTablet) {
-                SettingsChipRow(
-                    title = stringResource(Res.string.settings_alerts_away_title),
-                    description = stringResource(Res.string.settings_alerts_away_description),
-                    isTablet = isTablet,
-                ) {
-                    AwayReminder.entries.forEach { choice ->
-                        Chip(
-                            label = if (choice == AwayReminder.Off) {
-                                stringResource(Res.string.settings_alerts_away_off)
-                            } else {
-                                stringResource(Res.string.settings_alerts_away_days, choice.days)
-                            },
-                            selected = uiState.awayReminder == choice,
-                            onClick = { actions.setAwayReminder(choice) },
-                        )
+                if (uiState.permissionDenied) {
+                    // The choice is kept; it takes effect once the phone allows notifications again.
+                    PermissionDeniedPanel(isTablet = isTablet, onOpenSettings = actions.openSystemSettings)
+                } else {
+                    SettingsChipRow(
+                        title = stringResource(Res.string.settings_alerts_away_title),
+                        description = stringResource(Res.string.settings_alerts_away_description),
+                        isTablet = isTablet,
+                    ) {
+                        AwayReminder.entries.forEach { choice ->
+                            Chip(
+                                label = if (choice == AwayReminder.Off) {
+                                    stringResource(Res.string.settings_alerts_away_off)
+                                } else {
+                                    stringResource(Res.string.settings_alerts_away_days, choice.days)
+                                },
+                                selected = uiState.awayReminder == choice,
+                                onClick = { actions.setAwayReminder(choice) },
+                            )
+                        }
                     }
                 }
             }
