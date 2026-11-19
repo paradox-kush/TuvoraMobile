@@ -1,5 +1,7 @@
 package com.nuvio.app.features.watchprogress
 
+import com.nuvio.app.features.home.HomeCatalogSettingsRepository
+import com.nuvio.app.features.home.HomeSectionIds
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,6 +78,7 @@ object ContinueWatchingPreferencesRepository {
             dismissedNextUpKeys = normalizeDismissedNextUpKeys(dismissedNextUpKeys),
         )
         persist()
+        HomeCatalogSettingsRepository.mirrorLegacyToggle(HomeSectionIds.CONTINUE_WATCHING, isVisible)
     }
 
     private fun loadFromDisk() {
@@ -114,6 +117,8 @@ object ContinueWatchingPreferencesRepository {
         ensureLoaded()
         _uiState.value = _uiState.value.copy(isVisible = isVisible)
         persist()
+        // Home's section list has a Continue Watching switch too: keep the two in step.
+        HomeCatalogSettingsRepository.mirrorLegacyToggle(HomeSectionIds.CONTINUE_WATCHING, isVisible)
     }
 
     fun setStyle(style: ContinueWatchingSectionStyle) {

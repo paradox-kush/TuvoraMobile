@@ -8,6 +8,7 @@ import com.nuvio.app.features.collection.Collection
 import com.nuvio.app.features.collection.CollectionRepository
 import com.nuvio.app.features.servers.ServerCatalog
 import com.nuvio.app.features.servers.ServerRepository
+import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesRepository
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,7 +48,17 @@ data class HomeCatalogSettingsUiState(
     // never shows them). Default true = current behaviour.
     val showLiveOnHome: Boolean = true,
     val items: List<HomeCatalogSettingsItem> = emptyList(),
+    /** The stored `home_sections` value (null: never customised). Kept so a write can start from it. */
+    val homeSections: HomeSectionsConfig? = null,
+    /** This profile has had Continue Watching items or recent live channels (drives the default order). */
+    val hasWatchHistory: Boolean = false,
+    /** Home sections this build renders, in order, hidden ones included (the settings list). */
+    val sections: List<HomeSectionEntry> = HomeSectionOrderPolicy.resolve(null, HomeSectionContext(hasWatchHistory = false)),
 ) {
+    /** Ids Home draws, top to bottom ([HomeSectionOrderPolicy]). */
+    val visibleSectionIds: List<String>
+        get() = sections.filter { it.enabled }.map { it.id }
+
     val signature: String
         get() = buildString {
             append(heroEnabled)
@@ -57,6 +68,8 @@ data class HomeCatalogSettingsUiState(
             append(hideUnreleasedContent)
             append('|')
             append(showLiveOnHome)
+            append('|')
+            append(sections.joinToString(separator = ",") { "${it.id}:${it.enabled}" })
             append('|')
             append(
                 items.joinToString(separator = "|") { item ->
@@ -96,6 +109,10 @@ private data class StoredHomeCatalogSettingsPayload(
     val hideUnreleasedContent: Boolean = false,
     val showLiveOnHome: Boolean = true,
     val items: List<StoredHomeCatalogPreference> = emptyList(),
+    val homeSections: HomeSectionsConfig? = null,
+    // Device-local: set once this profile has Continue Watching items or recent live channels, so the
+    // returning-user default order holds from the first frame after a restart (before that data loads).
+    val hasWatchHistory: Boolean = false,
 )
 
 object HomeCatalogSettingsRepository {
@@ -125,6 +142,8 @@ object HomeCatalogSettingsRepository {
     private var showCatalogType = true
     private var hideUnreleasedContent = false
     private var showLiveOnHome = true
+    private var homeSections: HomeSectionsConfig? = null
+    private var hasWatchHistory = false
 
     fun onProfileChanged() {
         hasLoaded = false
@@ -133,6 +152,8 @@ object HomeCatalogSettingsRepository {
         showCatalogType = true
         hideUnreleasedContent = false
         showLiveOnHome = true
+        homeSections = null
+        hasWatchHistory = false
         definitions = emptyList()
         collectionDefinitions = emptyList()
         contributedDefinitions = emptyList()
@@ -153,6 +174,8 @@ object HomeCatalogSettingsRepository {
         showCatalogType = true
         hideUnreleasedContent = false
         showLiveOnHome = true
+        homeSections = null
+        hasWatchHistory = false
         _uiState.value = HomeCatalogSettingsUiState()
     }
 
@@ -238,9 +261,11 @@ object HomeCatalogSettingsRepository {
     fun setHeroEnabled(enabled: Boolean) {
         ensureLoaded()
         heroEnabled = enabled
+        val sectionsChanged = mirrorSection(HomeSectionIds.HERO, enabled)
         publish()
         persist()
         HomeRepository.applyCurrentSettings()
+        if (sectionsChanged) HomeCatalogSettingsSyncService.triggerPush()
     }
 
     fun setShowCatalogType(enabled: Boolean) {
@@ -267,10 +292,115 @@ object HomeCatalogSettingsRepository {
         ensureLoaded()
         if (showLiveOnHome == enabled) return
         showLiveOnHome = enabled
+        mirrorSection(HomeSectionIds.LIVE_RECENTS, enabled)
         publish()
         persist()
         HomeRepository.applyCurrentSettings()
         HomeCatalogSettingsSyncService.triggerPush()
+    }
+
+    /**
+     * Home's sections and their order ([HomeSectionOrderPolicy]). Moving or hiding one writes the full list
+     * as customised and syncs it; the standalone switches (hero, Continue Watching, Live TV on Home) follow,
+     * so two switches never disagree.
+     */
+    fun moveHomeSection(
+        id: String,
+        toIndex: Int,
+        supportedIds: Set<String> = HomeSectionIds.ALL,
+        heroPinnedFirst: Boolean = false,
+    ) {
+        ensureLoaded()
+        commitHomeSections(
+            HomeSectionOrderPolicy.move(homeSections, sectionContext(supportedIds, heroPinnedFirst), legacyToggles(), id, toIndex),
+        )
+    }
+
+    /** [supportedIds] and [heroPinnedFirst] describe the device (Apple TV renders fewer sections and pins the hero). */
+    fun setHomeSectionEnabled(
+        id: String,
+        enabled: Boolean,
+        supportedIds: Set<String> = HomeSectionIds.ALL,
+        heroPinnedFirst: Boolean = false,
+    ) {
+        ensureLoaded()
+        commitHomeSections(
+            HomeSectionOrderPolicy.setEnabled(homeSections, sectionContext(supportedIds, heroPinnedFirst), legacyToggles(), id, enabled),
+        )
+    }
+
+    /** Back to the device default order, with the standalone switches back to shown. */
+    fun resetHomeSections() {
+        ensureLoaded()
+        heroEnabled = true
+        showLiveOnHome = true
+        ContinueWatchingPreferencesRepository.setVisible(true)
+        homeSections = HomeSectionOrderPolicy.reset().takeIf { homeSections != null }
+        finishHomeSectionsChange()
+    }
+
+    /**
+     * Called when a standalone switch that has a section (Continue Watching visibility) changes elsewhere:
+     * a customised list follows it, an uncustomised one just re-derives.
+     */
+    fun mirrorLegacyToggle(id: String, enabled: Boolean) {
+        ensureLoaded()
+        val changed = mirrorSection(id, enabled)
+        publish()
+        if (changed) {
+            persist()
+            HomeCatalogSettingsSyncService.triggerPush()
+        }
+    }
+
+    /** The Home screen reports once the profile has Continue Watching items or recent live channels. */
+    fun reportWatchHistory(has: Boolean) {
+        ensureLoaded()
+        if (!has || hasWatchHistory) return
+        hasWatchHistory = true
+        publish()
+        persist()
+    }
+
+    private fun commitHomeSections(updated: HomeSectionsConfig) {
+        if (updated == homeSections) return
+        homeSections = updated
+        HomeSectionOrderPolicy.togglesFrom(updated, legacyToggles())?.let { toggles ->
+            heroEnabled = toggles.heroEnabled
+            showLiveOnHome = toggles.showLiveOnHome
+            ContinueWatchingPreferencesRepository.setVisible(toggles.continueWatchingVisible)
+        }
+        finishHomeSectionsChange()
+    }
+
+    private fun finishHomeSectionsChange() {
+        publish()
+        persist()
+        HomeRepository.applyCurrentSettings()
+        HomeCatalogSettingsSyncService.triggerPush()
+    }
+
+    /** Updates the customised list's flag for [id]; false when nothing was customised or it already agreed. */
+    private fun mirrorSection(id: String, enabled: Boolean): Boolean {
+        val updated = HomeSectionOrderPolicy.mirrorToggle(
+            homeSections, sectionContext(), legacyToggles(), id, enabled,
+        ) ?: return false
+        homeSections = updated
+        return true
+    }
+
+    private fun sectionContext(
+        supportedIds: Set<String> = HomeSectionIds.ALL,
+        heroPinnedFirst: Boolean = false,
+    ) = HomeSectionContext(hasWatchHistory, supportedIds, heroPinnedFirst)
+
+    private fun legacyToggles(): HomeSectionLegacyToggles {
+        ContinueWatchingPreferencesRepository.ensureLoaded()
+        return HomeSectionLegacyToggles(
+            heroEnabled = heroEnabled,
+            continueWatchingVisible = ContinueWatchingPreferencesRepository.uiState.value.isVisible,
+            showLiveOnHome = showLiveOnHome,
+        )
     }
 
     fun setHeroSourceEnabled(key: String, enabled: Boolean) {
@@ -303,6 +433,7 @@ object HomeCatalogSettingsRepository {
         showCatalogType = true
         hideUnreleasedContent = false
         showLiveOnHome = true
+        homeSections = HomeSectionOrderPolicy.reset().takeIf { homeSections != null }
         preferences = emptyMap()
         normalizePreferences()
         enforcePinnedCollectionsAtTop()
@@ -356,6 +487,8 @@ object HomeCatalogSettingsRepository {
             showCatalogType = parsedPayload.showCatalogType
             hideUnreleasedContent = parsedPayload.hideUnreleasedContent
             showLiveOnHome = parsedPayload.showLiveOnHome
+            homeSections = parsedPayload.homeSections
+            hasWatchHistory = parsedPayload.hasWatchHistory
             preferences = parsedPayload.items.associateBy { it.key }
             publish()
             return
@@ -475,6 +608,9 @@ object HomeCatalogSettingsRepository {
             hideUnreleasedContent = hideUnreleasedContent,
             showLiveOnHome = showLiveOnHome,
             items = items,
+            homeSections = homeSections,
+            hasWatchHistory = hasWatchHistory,
+            sections = HomeSectionOrderPolicy.resolve(homeSections, sectionContext(), legacyToggles()),
         )
     }
 
@@ -487,6 +623,8 @@ object HomeCatalogSettingsRepository {
                     hideUnreleasedContent = hideUnreleasedContent,
                     showLiveOnHome = showLiveOnHome,
                     items = preferences.values.sortedBy { it.order },
+                    homeSections = homeSections,
+                    hasWatchHistory = hasWatchHistory,
                 ),
             ),
         )
@@ -587,6 +725,7 @@ object HomeCatalogSettingsRepository {
             hideUnreleasedContent = hideUnreleasedContent,
             showLiveOnHome = showLiveOnHome,
             items = items,
+            homeSections = homeSections,
         )
     }
 
@@ -595,6 +734,15 @@ object HomeCatalogSettingsRepository {
         showCatalogType = payload.showCatalogType
         hideUnreleasedContent = payload.hideUnreleasedContent
         showLiveOnHome = payload.showLiveOnHome
+        // Absent on the wire = nobody customised Home yet (or an older app wrote the blob): keep what is here.
+        payload.homeSections?.let { remoteSections ->
+            homeSections = remoteSections
+            HomeSectionOrderPolicy.togglesFrom(remoteSections, legacyToggles())?.let { toggles ->
+                heroEnabled = toggles.heroEnabled
+                showLiveOnHome = toggles.showLiveOnHome
+                ContinueWatchingPreferencesRepository.setVisible(toggles.continueWatchingVisible)
+            }
+        }
         if (payload.items.isNotEmpty()) {
             val existingHeroState = preferences.mapValues { it.value.heroSourceEnabled }
             val remotePreferences = payload.items.associate { item ->
