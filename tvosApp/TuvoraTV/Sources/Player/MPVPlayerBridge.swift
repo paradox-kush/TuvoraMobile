@@ -228,6 +228,7 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayContro
 
     // State - refreshes position from mpv on each call (polled from Kotlin every 250ms)
     func getIsLoading() -> Bool { playerVC?.refreshPlaybackState(); return playerVC?.isPlayerLoading ?? true }
+    func getIsOpening() -> Bool { !(playerVC?.isFileLoaded ?? false) }
     func getIsPlaying() -> Bool { return playerVC?.isPlayerPlaying ?? false }
     func getIsEnded() -> Bool { return playerVC?.isPlayerEnded ?? false }
     func getDurationMs() -> Int64 { return playerVC?.durationMs ?? 0 }
@@ -452,6 +453,8 @@ final class MPVPlayerViewController: UIViewController {
 
     // State (polled from Kotlin every 250ms)
     var isPlayerLoading: Bool = true
+    /// mpv has opened the current file and read its tracks (upstream isOpening: the loading screen's step).
+    private(set) var isFileLoaded = false
     var isPlayerPlaying: Bool = false
     var isPlayerEnded: Bool = false
     var durationMs: Int64 = 0
@@ -915,6 +918,7 @@ final class MPVPlayerViewController: UIViewController {
         // per-file loadfile option), so retry()/rejoin reloads of this source keep it.
         setStringProperty("stream-lavf-o", streamLavfOptions)
         isPlayerLoading = true
+        isFileLoaded = false
         isPlayerEnded = false
         // A resume opens the file AT the position (`start=`): a seek sent before playback is
         // initialised is rejected by mpv and left the player stuck at 0:00 (B59b).
@@ -1658,6 +1662,7 @@ final class MPVPlayerViewController: UIViewController {
                     DispatchQueue.main.async {
                         self.clearPlaybackError()
                         self.isPlayerLoading = false
+                        self.isFileLoaded = true
                         self.updateState()
                         self.publishNowPlayingForPlaybackSession()
                         self.logCurrentAudioOutput()

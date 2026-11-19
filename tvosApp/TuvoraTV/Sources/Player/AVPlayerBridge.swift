@@ -184,6 +184,8 @@ final class AVPlayerBridgeImpl: NSObject, NuvioPlayerBridge {
         if item.status != .readyToPlay { return errorMessage.isEmpty }
         return player.timeControlStatus == .waitingToPlayAtSpecifiedRate
     }
+    /// Opening until AVPlayer has the item ready (its tracks are known).
+    func getIsOpening() -> Bool { player.currentItem?.status != .readyToPlay }
     func getIsPlaying() -> Bool { player.timeControlStatus == .playing }
     func getIsEnded() -> Bool { ended }
     func getDurationMs() -> Int64 {
