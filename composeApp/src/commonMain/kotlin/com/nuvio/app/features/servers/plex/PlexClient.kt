@@ -93,7 +93,7 @@ internal class PlexClient(
     }
 
     companion object {
-        const val PRODUCT = "Nuvio"
+        const val PRODUCT = "Tuvora"
         const val TOKEN_HEADER = "X-Plex-Token"
         private const val MAX_HEADER = 64
     }

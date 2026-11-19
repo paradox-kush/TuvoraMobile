@@ -890,6 +890,9 @@ private struct AddonsSettingsDetail: View {
                 switch onEnum(of: result) {
                 case .success(let ok): status = ("Installed \(ok.manifest.name)", false); url = ""
                 case .error(let failure): status = (failure.message, true)
+                // Tracking add-ons need the user's explicit consent, and Apple TV has no consent screen: never install here.
+                case .trackingConsentRequired:
+                    status = ("This add-on tracks what you watch. Install it from the Tuvora phone app, where you can choose to allow that.", true)
                 }
             } catch {
                 status = (error.localizedDescription, true)

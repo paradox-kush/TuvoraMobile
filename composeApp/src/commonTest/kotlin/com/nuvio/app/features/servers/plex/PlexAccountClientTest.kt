@@ -39,7 +39,7 @@ class PlexAccountClientTest {
         assertEquals("account-token", (plex.checkPin(pin) as PlexPinStatus.Linked).accountToken)
         val start = http.requests.first()
         assertEquals("false", start.url.parameters["strong"])
-        assertEquals("Nuvio", start.headers["X-Plex-Product"])
+        assertEquals("Tuvora", start.headers["X-Plex-Product"])
         assertEquals("device-1", start.headers["X-Plex-Client-Identifier"])
     }
 
@@ -56,7 +56,7 @@ class PlexAccountClientTest {
         val fragment = Url("https://x/?" + page.substringAfter("#?")).parameters
         assertEquals("device-1", fragment["clientID"])
         assertEquals("long-code-123", fragment["code"])
-        assertEquals("Nuvio", fragment["context[device][product]"])
+        assertEquals("Tuvora", fragment["context[device][product]"])
     }
 
     @Test
