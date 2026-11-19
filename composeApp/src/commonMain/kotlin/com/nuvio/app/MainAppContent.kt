@@ -147,6 +147,7 @@ import com.nuvio.app.features.library.toLibraryItem
 import com.nuvio.app.features.library.toMetaPreview
 import com.nuvio.app.features.membership.MemberAccessRepository
 import com.nuvio.app.features.notifications.EpisodeReleaseNotificationsRepository
+import com.nuvio.app.features.settings.SettingsPage
 import com.nuvio.app.features.p2p.P2pSettingsRepository
 import com.nuvio.app.features.party.PartyEvent
 import com.nuvio.app.features.party.PartyMedia
@@ -417,6 +418,7 @@ internal fun MainAppContent(
     val metaScreenSettingsTitle = stringResource(Res.string.compose_settings_page_meta_screen)
     val continueWatchingSettingsTitle = stringResource(Res.string.compose_settings_page_continue_watching)
     val debridSettingsTitle = stringResource(Res.string.compose_settings_page_debrid)
+    val notificationsSettingsTitle = stringResource(Res.string.compose_settings_page_notifications)
     val downloadsTitle = stringResource(Res.string.compose_settings_root_downloads_title)
     val recordingsTitle = stringResource(Res.string.recordings_title)
     val addonsSettingsTitle = stringResource(Res.string.compose_settings_page_addons)
@@ -1796,6 +1798,20 @@ internal fun MainAppContent(
                                     { navController.navigate(RecordingsRoute(recordingsTitle)) }
                                 } else null,
                                 onCalendarClick = { navController.navigate(CalendarRoute()) },
+                                onNotificationSettingsClick = {
+                                    if (useNativeNavigation && !isTabletLayout) {
+                                        activateTab(AppScreenTab.Settings)
+                                        navController.navigate(
+                                            SettingsPageRoute(
+                                                pageName = SettingsPage.Notifications.name,
+                                                title = notificationsSettingsTitle,
+                                            )
+                                        )
+                                    } else {
+                                        SettingsPageRequest.request(SettingsPage.Notifications.name)
+                                        activateTab(AppScreenTab.Settings)
+                                    }
+                                },
                                 onContinueWatchingClick = onContinueWatchingClick,
                                 onContinueWatchingLongPress = onContinueWatchingLongPress,
                                 onSwitchProfile = onSwitchProfile,

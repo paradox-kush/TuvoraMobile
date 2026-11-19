@@ -65,6 +65,7 @@ internal fun BoxScope.PlayerPlaybackOverlays(
     errorMessage: String?,
     onDismissError: () -> Unit,
     onRetryError: (() -> Unit)? = null,
+    episodeAlertPrompt: com.nuvio.app.features.notifications.EpisodeAlertPromptInput? = null,
 ) {
     AnimatedVisibility(
         visible = playerControlsLocked && lockedOverlayVisible,
@@ -169,6 +170,15 @@ internal fun BoxScope.PlayerPlaybackOverlays(
             blurred = blurUnwatchedEpisodes && nextEpisodeInfo?.isWatched == false,
             onPlayNext = onPlayNextEpisode,
             onDismiss = onDismissNextEpisode,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = sliderEdgePadding, bottom = overlayBottomPadding),
+        )
+    }
+
+    if (isSeries && !playerControlsLocked) {
+        com.nuvio.app.features.notifications.EpisodeAlertPrompt(
+            input = episodeAlertPrompt,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = sliderEdgePadding, bottom = overlayBottomPadding),

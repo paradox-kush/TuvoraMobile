@@ -41,6 +41,10 @@ import coil3.compose.AsyncImage
 import com.nuvio.app.core.contracts.DetailsCalendarBell
 import com.nuvio.app.core.contracts.DetailsReminderControl
 import com.nuvio.app.core.contracts.HomeCalendarSection
+import com.nuvio.app.core.contracts.ShowAlertSwitch
+import com.nuvio.app.core.contracts.ShowAlertSwitchAccess
+import com.nuvio.app.core.ui.Chip
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.nuvio.app.core.ui.NuvioPrimaryButton
 import com.nuvio.app.core.ui.NuvioSurfaceCard
 import com.nuvio.app.core.ui.NuvioToastController
@@ -59,8 +63,10 @@ private const val HOME_SETTLE_DELAY_MS = 20_000L
 
 internal class CalendarHomeSectionImpl(private val repository: () -> CalendarRepository) : HomeCalendarSection {
     @Composable
-    override fun Render(onOpenTitle: (MetaPreview) -> Unit, onOpenCalendar: () -> Unit) {
+    override fun Render(onOpenTitle: (MetaPreview) -> Unit, onOpenCalendar: () -> Unit, onOpenNotificationSettings: () -> Unit) {
         val repo = remember { repository() }
+        val alertSwitch = remember { ShowAlertSwitchAccess.current() }
+        val alertRevision by (alertSwitch?.revision ?: remember { MutableStateFlow(0L) }).collectAsStateWithLifecycle()
         val state by repo.state.collectAsStateWithLifecycle()
         val scope = rememberCoroutineScope()
         val batcher = remember { CalendarReminderBatcher() }
@@ -119,8 +125,10 @@ internal class CalendarHomeSectionImpl(private val repository: () -> CalendarRep
             card?.let {
                 ReminderCard(
                     card = it,
+                    alert = alertSwitch?.let { sw -> reminderAlertUi(sw, it, alertRevision) },
                     onOpen = { record -> onOpenTitle(record.toMetaPreview()) },
                     onOpenCalendar = onOpenCalendar,
+                    onOpenNotificationSettings = onOpenNotificationSettings,
                     onDismiss = { scope.launch { repo.markRemindersSeen(it.episodeKeys) } },
                 )
             }
@@ -134,8 +142,10 @@ internal class CalendarHomeSectionImpl(private val repository: () -> CalendarRep
 @Composable
 private fun ReminderCard(
     card: CalendarReminderCard,
+    alert: ReminderAlertUi?,
     onOpen: (CalendarTitleRecord) -> Unit,
     onOpenCalendar: () -> Unit,
+    onOpenNotificationSettings: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val tokens = MaterialTheme.nuvio
@@ -176,6 +186,47 @@ private fun ReminderCard(
                 style = MaterialTheme.typography.labelLarge,
                 color = tokens.colors.textMuted,
             )
+        }
+        if (alert != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(tokens.spacing.controlGap), verticalAlignment = Alignment.CenterVertically) {
+                Chip(
+                    label = when {
+                        alert.denied -> stringResource(Res.string.settings_alerts_denied_title)
+                        alert.on -> stringResource(Res.string.calendar_alert_chip_on)
+                        else -> stringResource(Res.string.calendar_alert_chip_off)
+                    },
+                    selected = alert.on,
+                    onClick = alert.onChip,
+                )
+                Text(
+                    text = stringResource(Res.string.calendar_alert_change_in_settings),
+                    modifier = Modifier.clip(tokens.shapes.button).clickable(onClick = onOpenNotificationSettings).padding(10.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = tokens.colors.textMuted,
+                )
+            }
+        }
+    }
+}
+
+/** The New episodes card's alert chip: [on] when alerts will really go out for the shows shown, [denied] when the OS refused. */
+private class ReminderAlertUi(val on: Boolean, val denied: Boolean, val onChip: () -> Unit)
+
+private fun reminderAlertUi(switch: ShowAlertSwitch, card: CalendarReminderCard, revision: Long): ReminderAlertUi? {
+    // The revision is read so the chip recomposes when a switch, the master switch or the permission changes.
+    if (revision < 0L) return null
+    val shows = card.items.map { it.title }
+        .filter { it.type == CalendarTitleType.SERIES }
+        .map { it.toMetaPreview() }
+        .distinctBy { it.id }
+    if (shows.isEmpty()) return null
+    val denied = switch.isPermissionDenied()
+    val on = !denied && shows.all { switch.isDelivering("series", it.id) }
+    return ReminderAlertUi(on = on, denied = denied) {
+        when {
+            denied -> switch.openSystemNotificationSettings()
+            on -> shows.forEach { switch.set("series", it.id, it.name, on = false) }
+            else -> shows.forEach { switch.request("series", it.id, it.name) }
         }
     }
 }
@@ -257,8 +308,18 @@ internal class CalendarDetailsBellImpl(private val repository: () -> CalendarRep
         val repo = remember { repository() }
         val state by repo.state.collectAsStateWithLifecycle()
         LaunchedEffect(repo) { repo.start() }
-        val on = state.settings.bellOn.any { calendarKeyMatches(it, titleType, ids) }
+        val bellOn = state.settings.bellOn.any { calendarKeyMatches(it, titleType, ids) }
         val scope = rememberCoroutineScope()
-        return DetailsReminderControl(on) { scope.launch { repo.setBell(titleType, ids, !on) } }
+        // For a series the bell and the OS alert are ONE switch (Settings > Notifications > Shows with alerts).
+        val alertSwitch = remember { if (titleType == CalendarTitleType.SERIES) ShowAlertSwitchAccess.current() else null }
+        val alertRevision by (alertSwitch?.revision ?: remember { MutableStateFlow(0L) }).collectAsStateWithLifecycle()
+        val on = bellOn || (alertRevision >= 0L && alertSwitch?.isShowOn("series", contentId) == true)
+        return DetailsReminderControl(on) {
+            if (alertSwitch != null) {
+                alertSwitch.set("series", contentId, name, !on)
+            } else {
+                scope.launch { repo.setBell(titleType, ids, !on) }
+            }
+        }
     }
 }
