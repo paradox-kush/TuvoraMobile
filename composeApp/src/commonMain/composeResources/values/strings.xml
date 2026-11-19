@@ -3054,4 +3054,21 @@
     <string name="settings_alerts_away_description">One notification about your own shows if you haven’t opened Tuvora. Only one, never a series.</string>
     <string name="settings_alerts_away_off">Off</string>
     <string name="settings_alerts_away_days">%1$d days</string>
+    <string name="pin_suggest_title">You keep coming back to these %1$d</string>
+    <string name="pin_suggest_pin">Pin</string>
+    <string name="pin_suggest_pin_cd">Pin %1$s</string>
+    <string name="pin_suggest_pin_all">Pin all %1$d</string>
+    <string name="pin_suggest_not_now">Not now</string>
+    <string name="pin_suggest_turn_off">Turn off in Settings</string>
+    <string name="pin_suggest_pinned_one_toast">Pinned %1$s to the top of Live TV</string>
+    <string name="pin_suggest_pinned_many_toast">Pinned %1$d channels to the top of Live TV</string>
+    <string name="pin_suggest_settings_title">Suggestions</string>
+    <string name="pin_suggest_settings_switch">Suggest channels to pin</string>
+    <string name="pin_suggest_settings_switch_description">When you keep returning to the same channels, offer to pin them.</string>
+    <string name="pin_suggest_clear_title">Clear play counts</string>
+    <string name="pin_suggest_clear_description">Forget which channels you play most. Pins and favourites stay.</string>
+    <string name="pin_suggest_clear_action">Clear</string>
+    <string name="pin_suggest_clear_confirm_description">Tap Clear again to forget them. Pins and favourites stay.</string>
+    <string name="pin_suggest_clear_done">Cleared</string>
+    <string name="pin_suggest_settings_footnote">Play counts stay on this device. They are not synced or sent anywhere.</string>
 </resources>

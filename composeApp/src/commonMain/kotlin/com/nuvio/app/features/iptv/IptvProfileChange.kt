@@ -13,6 +13,7 @@ internal object IptvProfileChange : ProfileChangeParticipant {
     override fun onProfileChanged(profileIndex: Int) {
         XtreamRepository.onProfileChanged(profileIndex)
         XtreamLiveRecents.onProfileChanged(profileIndex)
+        PinSuggestions.store.onProfileChanged(profileIndex)
         XtreamItemRegistry.resetForProfile()
         XtreamHubRepository.resetForProfile()
         XtreamSearchIndex.resetForProfile()

@@ -21,6 +21,7 @@ import com.nuvio.app.features.iptv.XtreamHubRepository
 import com.nuvio.app.features.iptv.displayChannelName
 import com.nuvio.app.features.iptv.XtreamItemRegistry
 import com.nuvio.app.features.iptv.XtreamKind
+import com.nuvio.app.features.iptv.PinSuggestions
 import com.nuvio.app.features.iptv.XtreamLiveRecents
 import com.nuvio.app.features.iptv.XtreamRepository
 import com.nuvio.app.features.iptv.XtreamChannel
@@ -143,6 +144,8 @@ object LiveTvData {
     ): LiveChannelSource? {
         val source = resolvePlayable(contentId, forceMint, stalkerProfile) ?: return null
         XtreamLiveRecents.record(contentId, name, logo)
+        // A retry after a playback failure is the same sitting, not another play.
+        if (!forceMint) PinSuggestions.store.recordPlay(contentId, name, logo)
         return source
     }
 

@@ -127,6 +127,7 @@ internal fun LazyListScope.xtreamSettingsContent(
             com.nuvio.app.features.epg.EpgRegionPickerHost(onDismiss = { showRegionPicker = false })
         }
     }
+    item { PinSuggestionSettingsSection(isTablet = isTablet) }
 }
 
 /** "Managed by X · N days left" for a settings row (just "Managed by X" until the panel has answered). */

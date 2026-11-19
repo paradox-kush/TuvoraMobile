@@ -914,8 +914,13 @@ private struct AddonsSettingsDetail: View {
 struct IptvSettingsDetail: View {
     @ObservedObject var model: SettingsModel
     @EnvironmentObject private var dialogs: SettingsDialogs
+    @Environment(\.nuvio) private var colors
     @State private var regionSummary = "—"
     @State private var managedLines: [String: String] = [:]
+    /// "Suggestions": the switch for the Suggested group in the live guide, and the inline "Clear play counts" confirm.
+    @State private var suggestChannels = true
+    @State private var clearArmed = false
+    @State private var playCountsCleared = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: dp(12)) {
@@ -956,6 +961,43 @@ struct IptvSettingsDetail: View {
                     .accessibilityIdentifier("playlist.row.\(account.name)")
                 }
             }
+            SettingsGroupCard(title: "Suggestions") {
+                SettingsToggleRow(title: "Suggest channels to pin",
+                                  subtitle: "When you keep returning to the same channels, offer to pin them.",
+                                  isOn: suggestChannels) {
+                    TvPinSuggestions.shared.setEnabled(enabled: !suggestChannels)
+                }
+                .accessibilityIdentifier("iptv.suggest.toggle")
+                // Confirms on the row itself, no popup: OK once to arm, OK again to clear; it disarms after a few seconds.
+                SettingsActionRow(title: "Clear play counts",
+                                  subtitle: clearArmed ? "Press OK again to forget them. Pins and favourites stay."
+                                                       : "Forget which channels you play most. Pins and favourites stay.",
+                                  value: playCountsCleared ? "Cleared" : (clearArmed ? "Clear again?" : "Clear"),
+                                  showChevron: false,
+                                  valueColor: clearArmed ? colors.error : nil) {
+                    if clearArmed {
+                        TvPinSuggestions.shared.clearPlayCounts()
+                        clearArmed = false
+                        playCountsCleared = true
+                    } else {
+                        playCountsCleared = false
+                        clearArmed = true
+                    }
+                }
+                .accessibilityIdentifier("iptv.suggest.clear")
+                SettingsHelperText(text: "Play counts stay on this device. They are not synced or sent anywhere.")
+            }
+        }
+        .task { for await state in TvPinSuggestions.shared.changes { suggestChannels = state.enabled } }
+        .task(id: clearArmed) {
+            guard clearArmed else { return }
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            clearArmed = false
+        }
+        .task(id: playCountsCleared) {
+            guard playCountsCleared else { return }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            playCountsCleared = false
         }
         .task { for await lines in TvPlaylistRows.shared.managedLines { managedLines = lines } }
         .task(id: model.xtream?.accounts.map(\.id)) { TvPlaylistRows.shared.refresh() }

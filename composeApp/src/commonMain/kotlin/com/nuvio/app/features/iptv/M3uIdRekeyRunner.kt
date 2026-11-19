@@ -125,6 +125,7 @@ internal object M3uIdRekeyRunner {
             null
         })
         XtreamLiveRecents.rekeyIds { id -> if (id.startsWith(prefix)) wanted += id; null }
+        PinSuggestions.store.rekeyIds { id -> if (id.startsWith(prefix)) wanted += id; null }
         if (wanted.isEmpty()) return
         // T1: only ids not yet checked against this catalog need it read (none = a free re-run).
         val toCheck = ledger.toCheck(acc.id, wanted)
@@ -177,6 +178,7 @@ internal object M3uIdRekeyRunner {
         // fully-watched series keys need no rewrite.
         val watched = WatchedRepository.rekeyItems(plan::watched)
         val recents = XtreamLiveRecents.rekeyIds(plan::contentId)
+        PinSuggestions.store.rekeyIds(plan::contentId)
         log.i { "B64 re-key applied playlist=${acc.name}: library=$library progress=$progress watched=$watched recents=$recents" }
     }
 }
