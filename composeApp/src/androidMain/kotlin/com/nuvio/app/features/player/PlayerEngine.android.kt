@@ -2235,7 +2235,8 @@ private class NuvioLibmpvView(
                     runCatching { mpv.command("stop") }
                     detachSurfaceInternal()
                     runCatching { mpv.removeObserver(propertyShadow) }
-                    runCatching { mpv.destroy() }
+                    // mpv-android-lib 0.2: close() replaces destroy() (still on the ctl queue, never Main).
+                    runCatching { mpv.close() }
                         .onSuccess { destroyed = true }
                         .onFailure { Log.w(TAG, "Failed to destroy libmpv cleanly", it) }
                 } finally {
@@ -2346,6 +2347,13 @@ private class NuvioLibmpvView(
     // (no true presented-frames property exists). Snapshot diagnostics only for now.
     @Volatile private var obsVoDroppedFrames = 0L
     @Volatile private var obsVoDelayedFrames = 0L
+
+    /** mpv has opened the current file and read its tracks (upstream isOpening). Written on the event/ctl threads. */
+    @Volatile private var fileLoaded = false
+
+    fun onFileStarted() { fileLoaded = false }
+
+    fun onFileLoaded() { fileLoaded = true }
 
     private fun shadowPositionSec(timePosSec: Double): Double = mpvPlaybackPositionSec(
         timePosSec = timePosSec,
@@ -2551,7 +2559,8 @@ private class NuvioLibmpvView(
 
     override fun initOptions() {
         setVo(videoOutput)
-        mpv.setOptionString("profile", "fast")
+        // 0.2.x creates and initializes mpv in the MPV constructor, so options arrive after init: a profile is applied by command.
+        mpv.command("apply-profile", "fast")
         mpv.setOptionString("hwdec", if (hardwareDecodingEnabled) "auto" else "no")
         if (yuv420pEnabled) {
             mpv.setOptionString("vf", "format=yuv420p")
@@ -2689,6 +2698,7 @@ private class NuvioLibmpvView(
         // A refused live open ends END_FILE "loading failed" with no status; FFmpeg's "HTTP error NNN" warning is the
         // only carrier, in module "ffmpeg", which stays silent otherwise (MpvLogLevelPolicy). Ask for it for this open.
         if (isLiveStream) mpv.setPropertyString("msg-level", MpvLogLevelPolicy.specFor(liveOpen = true))
+        fileLoaded = false
         if (startOption != null) {
             mpv.command("loadfile", sourceUrl.toMpvSource(), "replace", "-1", startOption)
         } else {

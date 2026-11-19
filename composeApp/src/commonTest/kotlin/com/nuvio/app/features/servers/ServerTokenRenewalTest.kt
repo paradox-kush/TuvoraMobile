@@ -88,17 +88,20 @@ class ServerTokenRenewalTest {
         assertEquals(1, provider.renewals)
     }
 
+    // Fork rule (privacy): a media-server token never leaves the device, so a renewal has nothing to upload.
     @Test
-    fun aRenewalIsQueuedForTheAccount() = runTest {
+    fun aRenewalIsNeverQueuedForTheAccount() = runTest {
         install(RenewingProvider().apply { due = true })
         val before = assertNotNull(ServerRepository.syncSnapshot(ProfileRepository.activeProfileId))
         ServerRepository.markPushed(before)
 
         ServerRepository.call(CONNECTION) { _, _ -> Unit }
 
+        assertEquals("token-2", ServerRepository.session(CONNECTION)?.token)
         val after = assertNotNull(ServerRepository.syncSnapshot(ProfileRepository.activeProfileId))
-        assertTrue(after.pendingPush)
-        assertEquals("token-2", after.servers.single().token)
+        assertEquals(before.version, after.version)
+        assertTrue(!after.pendingPush)
+        assertEquals("", after.servers.single().token)
     }
 
     @Test
@@ -118,7 +121,7 @@ class ServerTokenRenewalTest {
     }
 
     @Test
-    fun aKeptTokenSurvivesAnAccountCopy() {
+    fun theAccountCopyCarriesNoTokenWhateverTheProviderOffers() {
         install(
             object : ServerProvider by FakeServerProvider() {
                 override fun keepsLocalToken(local: String, fromAccount: String): Boolean = true
@@ -128,25 +131,8 @@ class ServerTokenRenewalTest {
         )
         val snapshot = assertNotNull(ServerRepository.syncSnapshot(ProfileRepository.activeProfileId))
 
-        assertEquals("account-copy", snapshot.servers.single().token)
+        assertEquals("", snapshot.servers.single().token)
         assertTrue(ServerRepository.applySync(snapshot, snapshot.servers, snapshot.servers.map { it.key }.toSet()))
-        assertEquals("device-token", ServerRepository.session(CONNECTION)?.token)
-    }
-
-    @Test
-    fun anAccountCopyTooLongForTheBackendStaysOnTheDevice() {
-        install(
-            object : ServerProvider by FakeServerProvider() {
-                override fun tokenForAccount(token: String): String = "x".repeat(1_025)
-            },
-            token = "device-token",
-        )
-
-        val snapshot = assertNotNull(ServerRepository.syncSnapshot(ProfileRepository.activeProfileId))
-        assertTrue(snapshot.servers.isEmpty())
-
-        assertTrue(ServerRepository.applySync(snapshot, emptyList(), emptySet()))
-        assertEquals(listOf(CONNECTION), ServerRepository.uiState.value.connections.map { it.id })
         assertEquals("device-token", ServerRepository.session(CONNECTION)?.token)
     }
 

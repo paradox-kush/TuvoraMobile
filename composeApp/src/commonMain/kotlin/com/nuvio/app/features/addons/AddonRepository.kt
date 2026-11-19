@@ -281,6 +281,15 @@ object AddonRepository {
         _pendingTrackingConsent.value = null
     }
 
+    /** Transport urls of the tracking add-ons the user consented to on this device (default: none). */
+    fun trackingConsentedUrls(): Set<String> = AddonStorage.loadTrackingConsentUrls(currentProfileId).toSet()
+
+    private fun setTrackingConsent(transportUrl: String, consented: Boolean) {
+        val current = AddonStorage.loadTrackingConsentUrls(currentProfileId)
+        val updated = if (consented) (current + transportUrl).distinct() else current - transportUrl
+        if (updated != current) AddonStorage.saveTrackingConsentUrls(currentProfileId, updated)
+    }
+
     suspend fun installWithTrackingConsent(manifest: AddonManifest): AddAddonResult {
         _pendingTrackingConsent.value = null
         if (isUsingPrimaryAddonsFromSecondaryProfile()) {
@@ -289,6 +298,8 @@ object AddonRepository {
         if (_uiState.value.addons.any { it.manifestUrl == manifest.transportUrl }) {
             return AddAddonResult.Error(getString(Res.string.addon_already_installed))
         }
+        // The dialog the user just confirmed is the explicit consent, recorded for exactly this add-on.
+        setTrackingConsent(manifest.transportUrl, consented = true)
         return installManifest(manifest.transportUrl, manifest)
     }
 
@@ -345,6 +356,7 @@ object AddonRepository {
         if (isUsingPrimaryAddonsFromSecondaryProfile()) return
         log.i { "removeAddon() — $manifestUrl" }
         var changed = false
+        setTrackingConsent(manifestUrl, consented = false)
         _uiState.update { current ->
             val updatedAddons = current.addons.filterNot { it.manifestUrl == manifestUrl }
             changed = updatedAddons.size != current.addons.size

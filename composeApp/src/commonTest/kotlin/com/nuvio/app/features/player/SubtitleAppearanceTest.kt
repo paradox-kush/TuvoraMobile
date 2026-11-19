@@ -18,9 +18,12 @@ class SubtitleAppearanceTest {
 
     @Test
     fun customOutlineWidthUsesStyledOverlay() {
-        assertTrue(SubtitleStyleState(outlineWidth = 4).usesStyledOverlay)
-        assertFalse(SubtitleStyleState(outlineWidth = 4, outlineEnabled = false).usesStyledOverlay)
-        assertFalse(SubtitleStyleState(outlineWidth = SUBTITLE_OUTLINE_WIDTH_DEFAULT).usesStyledOverlay)
+        // Fork default (F47): a soft box and no outline, which already use the overlay; this test is about the
+        // outline alone, so it starts from the native baseline (no box) with the outline flag explicit.
+        val native = SubtitleStyleState(backgroundColor = Color.Transparent)
+        assertTrue(native.copy(outlineEnabled = true, outlineWidth = 4).usesStyledOverlay)
+        assertFalse(native.copy(outlineWidth = 4, outlineEnabled = false).usesStyledOverlay)
+        assertFalse(native.copy(outlineEnabled = true, outlineWidth = SUBTITLE_OUTLINE_WIDTH_DEFAULT).usesStyledOverlay)
     }
 
     @Test

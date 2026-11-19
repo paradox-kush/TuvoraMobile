@@ -107,20 +107,23 @@ object AddonEventDispatcher {
         id: String,
         extra: List<Pair<String, String>>,
     ) {
-        if (type.isBlank() || id.isBlank() || ServerItemRef.isServerId(id)) return
+        if (type.isBlank() || !AddonEventPolicy.mayDescribe(id, ServerItemRef::isServerId)) return
         events.trySend(AddonEvent(resource, type, id, extra))
     }
 
     private fun route(event: AddonEvent) {
+        // Consent defaults to OFF: only add-ons the user explicitly consented to on this device get an event.
+        val consented = AddonRepository.trackingConsentedUrls()
         AddonRepository.uiState.value.addons
             .asSequence()
             .filter(ManagedAddon::isActive)
             .mapNotNull(ManagedAddon::manifest)
             .filter { manifest -> manifest.supportsResource(event.resource, event.type, event.id) }
+            .filter { manifest -> AddonEventPolicy.mayDeliver(manifest.transportUrl, consented) }
             .distinctBy(AddonManifest::transportUrl)
             .forEach { manifest ->
                 val url = buildAddonEventUrl(manifest.transportUrl, event.resource, event.type, event.id, event.extra)
-                queueFor(manifest.transportUrl).trySend(AddonDelivery(manifest.id, event.resource, url))
+                queueFor(manifest.transportUrl).trySend(AddonDelivery(manifest.id, manifest.transportUrl, event.resource, url))
             }
     }
 
@@ -136,6 +139,8 @@ object AddonEventDispatcher {
         }
 
     private suspend fun send(delivery: AddonDelivery) {
+        // Consent can be withdrawn (the add-on removed) while an event waits in its queue.
+        if (!AddonEventPolicy.mayDeliver(delivery.transportUrl, AddonRepository.trackingConsentedUrls())) return
         try {
             withTimeout(EVENT_TIMEOUT_MS) {
                 httpGetTextWithHeaders(
@@ -185,6 +190,7 @@ private data class AddonEvent(
 
 private data class AddonDelivery(
     val addonId: String,
+    val transportUrl: String,
     val resource: String,
     val url: String,
 )

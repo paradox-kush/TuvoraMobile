@@ -40,11 +40,28 @@ actual object AddonStorage {
     private const val addonUrlsKey = "installed_manifest_urls"
     private const val addonEnabledStatesKey = "installed_manifest_enabled_states"
     private const val syncedAddonUrlsKey = "synced_manifest_urls"
+    private const val trackingConsentKey = "tracking_consent_urls"
 
     private var preferences: SharedPreferences? = null
 
     fun initialize(context: Context) {
         preferences = context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
+    }
+
+    actual fun loadTrackingConsentUrls(profileId: Int): List<String> =
+        preferences
+            ?.getString("${trackingConsentKey}_$profileId", null)
+            .orEmpty()
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toList()
+
+    actual fun saveTrackingConsentUrls(profileId: Int, urls: List<String>) {
+        preferences
+            ?.edit()
+            ?.putString("${trackingConsentKey}_$profileId", urls.joinToString(separator = "\n"))
+            ?.apply()
     }
 
     actual fun loadInstalledAddonUrls(profileId: Int): List<String> =

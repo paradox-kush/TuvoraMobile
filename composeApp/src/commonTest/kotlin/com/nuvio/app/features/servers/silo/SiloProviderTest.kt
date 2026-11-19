@@ -80,7 +80,8 @@ class SiloProviderTest {
 
         val server = silo.findServer("silo.example.com/")
 
-        assertEquals("http://silo.example.com", server.address)
+        // Fork: an address typed without a scheme is https-first (ServerAddressPolicy); plain http is never assumed.
+        assertEquals("https://silo.example.com", server.address)
         assertEquals("server-1", server.serverId)
         assertEquals("Paul's Silo", server.name)
         assertTrue(server.passwordSignIn)

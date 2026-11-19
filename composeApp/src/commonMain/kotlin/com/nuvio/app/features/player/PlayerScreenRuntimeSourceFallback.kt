@@ -74,6 +74,8 @@ internal fun PlayerScreenRuntime.tryFallbackToNextSourceAfterError(message: Stri
     if (!settings.streamAutoPlayFallbackActive) return false
     if (!isIos && settings.autoSwitchPlaybackEngineOnError) return false
     if (initialLoadCompleted) return false
+    // Own sources (IPTV/Stalker/media server) and live content have their own bounded reconnect: never auto-switch.
+    if (!SourceFallbackPolicy.mayFallBackFrom(activeProviderAddonId, contentType ?: parentMetaType, activeStreamType)) return false
     val failedUrl = activeSourceUrl
     if (failedUrl.isBlank() || failedUrl != autoSelectedSourceUrl) return false
     if (sourceFallbackAttempts >= settings.streamAutoPlayFallbackMaxSources) return false
@@ -155,7 +157,7 @@ internal fun nextSourceFallbackCandidate(
     debridEnabled: Boolean = DebridSettingsRepository.snapshot().canResolvePlayableLinks,
     activeResolverProviderId: String? = DebridSettingsRepository.snapshot().activeResolverProviderId,
 ): StreamItem? {
-    val untried = streams.filterNot { stream ->
+    val untried = streams.filter { SourceFallbackPolicy.mayFallBackTo(it.addonId) }.filterNot { stream ->
         val key = stream.playerSourceIdentityKey()
         (key != null && key in triedKeys) ||
             (failedInfoHash != null && stream.addonId == failedAddonId &&

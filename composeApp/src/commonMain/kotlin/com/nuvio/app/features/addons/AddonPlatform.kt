@@ -9,6 +9,10 @@ internal expect object AddonStorage {
     /** The list this device and the server last agreed on, or null if it never synced. See [AddonSyncMerge]. */
     fun loadSyncedAddonUrls(profileId: Int): List<String>?
     fun saveSyncedAddonUrls(profileId: Int, urls: List<String>)
+
+    /** Tracking add-ons the user consented to ON THIS DEVICE (never synced): transport urls. Default: none. */
+    fun loadTrackingConsentUrls(profileId: Int): List<String>
+    fun saveTrackingConsentUrls(profileId: Int, urls: List<String>)
 }
 
 data class RawHttpResponse(

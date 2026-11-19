@@ -33,6 +33,23 @@ actual object AddonStorage {
     private const val addonUrlsKey = "installed_manifest_urls"
     private const val addonEnabledStatesKey = "installed_manifest_enabled_states"
     private const val syncedAddonUrlsKey = "synced_manifest_urls"
+    private const val trackingConsentKey = "tracking_consent_urls"
+
+    actual fun loadTrackingConsentUrls(profileId: Int): List<String> =
+        NSUserDefaults.standardUserDefaults
+            .stringForKey("${trackingConsentKey}_$profileId")
+            .orEmpty()
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toList()
+
+    actual fun saveTrackingConsentUrls(profileId: Int, urls: List<String>) {
+        NSUserDefaults.standardUserDefaults.setObject(
+            urls.joinToString(separator = "\n"),
+            forKey = "${trackingConsentKey}_$profileId",
+        )
+    }
 
     actual fun loadInstalledAddonUrls(profileId: Int): List<String> =
         NSUserDefaults.standardUserDefaults

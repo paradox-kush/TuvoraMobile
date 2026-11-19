@@ -756,7 +756,7 @@ internal fun MainAppContent(
 
     // Check on foreground/profile entry, not only the first iOS composition. A fresh playlist
     // makes no request; Android's periodic worker shares the scheduler's single-flight lock.
-    LaunchedEffect(ownsAppRuntime, profileState.activeProfile?.profileIndex) {
+    LaunchedEffect(ownsAppRuntime, activeProfileIndex) {
         if (!ownsAppRuntime) return@LaunchedEffect
         AppForegroundMonitor.events().collectLatest { visibility ->
             if (visibility == AppVisibility.Foreground) {
@@ -767,7 +767,7 @@ internal fun MainAppContent(
     }
 
     // Fork: realtime sync invalidation (upstream removed realtime; the self-hosted backend keeps it).
-    LaunchedEffect(authState, profileState.activeProfile?.profileIndex) {
+    LaunchedEffect(authState, activeProfileIndex) {
         if (!ownsAppRuntime) return@LaunchedEffect
         if (!RealtimeSyncConfig.ENABLED) {
             RealtimeSyncInvalidationService.stop()
@@ -775,20 +775,20 @@ internal fun MainAppContent(
         }
         val authenticatedState = authState as? AuthState.Authenticated ?: return@LaunchedEffect
         if (authenticatedState.isAnonymous) return@LaunchedEffect
-        val activeProfileId = profileState.activeProfile?.profileIndex ?: return@LaunchedEffect
+        val activeProfileId = activeProfileIndex ?: return@LaunchedEffect
         RealtimeSyncInvalidationService.start(
             userId = authenticatedState.userId,
             profileId = activeProfileId,
         )
     }
 
-    DisposableEffect(authState, profileState.activeProfile?.profileIndex) {
+    DisposableEffect(authState, activeProfileIndex) {
         val authenticatedState = authState as? AuthState.Authenticated
         if (ownsAppRuntime && (
             !RealtimeSyncConfig.ENABLED ||
                 authenticatedState == null ||
                 authenticatedState.isAnonymous ||
-                profileState.activeProfile == null
+                activeProfileIndex == null
             )
         ) {
             RealtimeSyncInvalidationService.stop()
@@ -816,7 +816,7 @@ internal fun MainAppContent(
         // Live TV always needs the network. With no internet the player would open, fail, and tear
         // its Compose scene down mid-setup — which trips the CMP-iOS "ComposeScene is closed" race
         // (#4916) into an unhandled abort. Refuse up front instead.
-        if (networkStatusUiState.condition == NetworkCondition.NoInternet) {
+        if (networkCondition == NetworkCondition.NoInternet) {
             NuvioToastController.show(noInternetToastText)
             return
         }
