@@ -37,6 +37,7 @@ object TvServerAddErrorPolicy {
         ServerFailure.UNREACHABLE -> TvAddError.UNREACHABLE
         ServerFailure.AUTH_REQUIRED, ServerFailure.FORBIDDEN -> if (duringSignIn) TvAddError.WRONG_CREDENTIALS else TvAddError.SIGN_IN_FAILED
         ServerFailure.CERTIFICATE_UNTRUSTED, ServerFailure.CERTIFICATE_CHANGED -> TvAddError.CERTIFICATE_REFUSED
-        ServerFailure.INCOMPLETE, ServerFailure.FAILED -> TvAddError.SIGN_IN_FAILED
+        // A server that refuses remote playback is a playback matter (Plex remote streaming off), not an add-flow step.
+        ServerFailure.INCOMPLETE, ServerFailure.FAILED, ServerFailure.REMOTE_PLAYBACK_BLOCKED -> TvAddError.SIGN_IN_FAILED
     }
 }

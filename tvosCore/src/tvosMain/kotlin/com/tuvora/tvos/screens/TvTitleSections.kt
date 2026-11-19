@@ -103,7 +103,12 @@ object TvTitleSections {
         val tmdbId = extractTmdbId(meta.id)
             ?: TmdbService.ensureTmdbId(meta.id, meta.type, fallbackImdbId = meta.imdbId)?.toIntOrNull()
         if (imdbId == null && tmdbId == null) return emptyList()
-        return ImdbEpisodeRatingsRepository.getEpisodeRatings(imdbId = imdbId, tmdbId = tmdbId)
+        return ImdbEpisodeRatingsRepository.getEpisodeRatings(
+            imdbId = imdbId,
+            tmdbId = tmdbId,
+            // Upstream (sync 16): ratings are aligned to the add-on's own episode air dates.
+            addonEpisodes = meta.videos.map { com.nuvio.app.features.details.AddonEpisodeAirDate(it.season, it.episode, it.released) },
+        )
             .filter { (key, _) ->
                 MetaScreenSettingsRepository.uiState.value.episodeRatingsVisibility.showRating(
                     com.nuvio.app.features.watched.WatchedRepository.isWatched(meta.id, meta.type, key.first, key.second) ||
