@@ -73,4 +73,11 @@ internal actual object XtreamAccountStorage {
     actual fun saveManagedInfoJson(profileId: Int, json: String) {
         NSUserDefaults.standardUserDefaults.setObject(json, forKey = "xtream_managed_info_$profileId")
     }
+
+    actual fun loadPinSuggestionsJson(profileId: Int): String? =
+        NSUserDefaults.standardUserDefaults.stringForKey("xtream_pin_suggestions_$profileId")
+
+    actual fun savePinSuggestionsJson(profileId: Int, json: String) {
+        NSUserDefaults.standardUserDefaults.setObject(json, forKey = "xtream_pin_suggestions_$profileId")
+    }
 }

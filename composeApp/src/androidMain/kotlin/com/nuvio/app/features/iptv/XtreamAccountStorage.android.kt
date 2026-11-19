@@ -82,4 +82,11 @@ internal actual object XtreamAccountStorage {
     actual fun saveManagedInfoJson(profileId: Int, json: String) {
         preferences?.edit()?.putString("xtream_managed_info_$profileId", json)?.apply()
     }
+
+    actual fun loadPinSuggestionsJson(profileId: Int): String? =
+        preferences?.getString("xtream_pin_suggestions_$profileId", null)
+
+    actual fun savePinSuggestionsJson(profileId: Int, json: String) {
+        preferences?.edit()?.putString("xtream_pin_suggestions_$profileId", json)?.apply()
+    }
 }

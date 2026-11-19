@@ -145,9 +145,11 @@ fun XtreamHubScreen(
     val state by XtreamHubRepository.uiState.collectAsStateWithLifecycle()
     val localLibraryItems by LibraryRepository.localItems.collectAsStateWithLifecycle()
     val liveRecents by XtreamLiveRecents.recents.collectAsStateWithLifecycle()
+    val pinState by PinSuggestions.state.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) {
         LibraryRepository.ensureLoaded()
         XtreamLiveRecents.ensureLoaded()
+        PinSuggestions.store.ensureLoaded()
     }
     // The tab stays composed after its first visit, so a one-shot load here went stale (a playlist
     // added in Settings never showed until restart). Follow the playlist store while visible instead.
@@ -233,6 +235,10 @@ fun XtreamHubScreen(
         }
     }
     val displayedCategories = liveSpecialCategories + renderableCategories
+    // "You keep coming back to these 4": the channels played most, of the selected playlist, that are not pinned yet.
+    val pinSuggested = remember(isLive, pinState, localLibraryItems, accountPrefix) {
+        if (isLive && accountPrefix != null) PinSuggestions.suggestionsFor(pinState, accountPrefix) else emptyList()
+    }
     var openCategoryId by remember(state.selectedAccountId, state.section) { mutableStateOf<String?>(null) }
     val toastScope = rememberCoroutineScope()
     // F48: search inside the selected playlist's Movies / Series. State lives in the controller (thin composable).
@@ -444,7 +450,13 @@ fun XtreamHubScreen(
                     // Xtream panels ship real-world duplicate category ids — duplicate-safe keys.
                     val keyedCategories = displayedCategories.withDuplicateSafeLazyKeys { it.id }
                     // K9: a row restored at the top (its only hidden channel un-hidden) comes back into view.
-                    KeepRestoredItemsInView(listState, remember(keyedCategories) { keyedCategories.map { it.lazyKey } })
+                    KeepRestoredItemsInView(
+                        listState,
+                        remember(keyedCategories, pinSuggested.isNotEmpty()) {
+                            // The suggestion shelf is the list's first item, so the rows' slots are one further on.
+                            listOfNotNull<Any>(PIN_SUGGESTIONS_KEY.takeIf { pinSuggested.isNotEmpty() }) + keyedCategories.map { it.lazyKey }
+                        },
+                    )
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -457,6 +469,17 @@ fun XtreamHubScreen(
                             bottom = nuvioSafeBottomPadding(tokens.spacing.screenBottom),
                         ),
                     ) {
+                        if (pinSuggested.isNotEmpty()) {
+                            item(key = PIN_SUGGESTIONS_KEY) {
+                                PinSuggestionShelf(
+                                    suggested = pinSuggested,
+                                    sectionPadding = sectionPadding,
+                                    onPlay = onPlayLiveChannel,
+                                    // Same destination as "add a playlist": the IPTV settings page, where the switch lives.
+                                    onOpenSettings = onAddProvider,
+                                )
+                            }
+                        }
                         itemsIndexed(
                             items = keyedCategories,
                             key = { _, entry -> entry.lazyKey },
@@ -1101,6 +1124,7 @@ private const val SKELETON_SHELF_COUNT = 3
 private const val ADD_PLAYLIST_OPTION_KEY = "__add_playlist__"
 private const val SPECIAL_CATEGORY_PREFIX = "__live_"
 private const val SPECIAL_FAVORITES_ID = "${SPECIAL_CATEGORY_PREFIX}favorites__"
+private const val PIN_SUGGESTIONS_KEY = "pin_suggestions"
 private const val SPECIAL_RECENT_ID = "${SPECIAL_CATEGORY_PREFIX}recent__"
 private const val SPECIAL_ALL_FAVORITES_ID = "${SPECIAL_CATEGORY_PREFIX}all_favorites__"
 

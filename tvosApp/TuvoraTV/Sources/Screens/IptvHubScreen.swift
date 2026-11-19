@@ -444,6 +444,12 @@ private struct LiveGuideView: View {
     @FocusState private var categoryFocus: String?
     @State private var revealCategories = false
     @State private var recents: [XtreamLiveRecent] = []
+    /// The channels played most that are not pinned yet (TvPinSuggestions): the "Suggested · N" group. Empty = no group.
+    @State private var suggested: [LiveGuideChannel] = []
+    /// Pin all / Stop suggesting were chosen, so leaving the Suggested group is not a "Not now".
+    @State private var suggestionHandled = false
+    /// Focus is on Pin all / Stop suggesting (not a channel): the pane explains the group instead of describing a programme.
+    @State private var suggestedActionFocused = false
     @State private var favorites: Set<String> = []
     /// F03: every playlist's favourites, in the synced favourites order (the All favorites row; this
     /// playlist's Favorites row is its part of it).
@@ -494,6 +500,8 @@ private struct LiveGuideView: View {
             let ids = TvFavouriteRows.shared.visibleIds(rowIds: rows.map(\.contentId), pending: pendingRemoval, nowMs: now)
             let held = TvFavouriteRows.shared.heldIds(rowIds: rows.map(\.contentId), pending: pendingRemoval)
             return ((undoInFlight || holdRemoved) ? held : ids).compactMap { byId[$0] }
+        case "suggested":
+            return suggested.map { row in channels.first { $0.contentId == row.contentId } ?? row }
         case "recent":
             let ids = recents.map(\.contentId)
             return ids.compactMap { id in channels.first { $0.contentId == id } }
@@ -572,6 +580,9 @@ private struct LiveGuideView: View {
             }
         }
         .task { for await next in TvLiveGuide.shared.recents { recents = next } }
+        // A play counted, a Not now or the Settings switch: the Suggested group appears or goes. It only ever appears in the
+        // list; it never opens or takes focus by itself.
+        .task { for await _ in TvPinSuggestions.shared.changes { refreshSuggested() } }
         .task {
             for await _ in TvLiveGuide.shared.libraryChanges {
                 refreshFavorites()
@@ -624,6 +635,16 @@ private struct LiveGuideView: View {
         .task(id: previewing?.contentId) { await watchPreview() }
         // P5: leaving the favourites row lets a held removed row go.
         .onChange(of: category) { _, _ in if !undoInFlight { dropHeldRemoval() } }
+        // Leaving the Suggested group without pressing Pin all or Stop suggesting is "not now" (it asks again in two weeks).
+        .onChange(of: category) { old, new in
+            if new == "suggested" {
+                suggestionHandled = false
+                focusedChannel = nil
+                suggestedActionFocused = false
+            } else if old == "suggested", !suggestionHandled, !suggested.isEmpty {
+                TvPinSuggestions.shared.notNow()
+            }
+        }
         // The guide keeps a display mode the fullscreen player matched (it never switches one itself, as
         // on Android TV): fullscreen <-> guide costs no HDMI blackout. Leaving the guide gives it back.
         .onAppear {
@@ -660,6 +681,29 @@ private struct LiveGuideView: View {
         if undoInFlight, let held = pendingRemoval, favoriteOrder.contains(where: { $0.contentId == held.contentId }) {
             dropHeldRemoval()
         }
+        // A channel pinned from its hold-OK menu is no longer a suggestion.
+        refreshSuggested()
+    }
+
+    private func refreshSuggested() {
+        suggested = TvPinSuggestions.shared.suggested(accountId: accountId)
+        // Fewer than two left (or the switch went off) while the group is open: it is gone, so leave it for the full list.
+        if category == "suggested" && suggested.isEmpty { category = "all" }
+    }
+
+    /// "Pin all N": every suggested channel becomes a favourite in one step, then the Favorites group shows them.
+    private func pinAllSuggested() {
+        suggestionHandled = true
+        _ = TvPinSuggestions.shared.pinAll(accountId: accountId)
+        category = "favorites"
+        refreshFavorites()
+    }
+
+    /// "Stop suggesting": the Settings switch goes off; the group leaves the list.
+    private func stopSuggesting() {
+        suggestionHandled = true
+        TvPinSuggestions.shared.stop()
+        category = "all"
     }
 
     /// P5: the removed row leaves (window closed and focus moved on, or the favourite is back).
@@ -765,6 +809,11 @@ private struct LiveGuideView: View {
                 GuideCategoryRow(title: guideQuery.isEmpty ? "Search channels" : "Search: “\(guideQuery)”", selected: category == "search") { searchOpen = true }
                     .focused($categoryFocus, equals: "search")
                     .accessibilityIdentifier("guide.search")
+                if !suggested.isEmpty {
+                    GuideCategoryRow(title: "Suggested \u{00B7} \(suggested.count)", selected: category == "suggested") { category = "suggested" }
+                        .focused($categoryFocus, equals: "suggested")
+                        .accessibilityIdentifier("guide.suggested")
+                }
                 GuideCategoryRow(title: "All favorites", selected: category == "allfavorites") { category = "allfavorites" }
                     .focused($categoryFocus, equals: "allfavorites")
                 GuideCategoryRow(title: "Favorites", selected: category == "favorites") { category = "favorites" }
@@ -831,7 +880,13 @@ private struct LiveGuideView: View {
     /// playback / catch-up notice takes the programme's slot.
     private var infoPane: some View {
         VStack(alignment: .leading, spacing: dp(4)) {
-            if let channel = focusedChannel ?? previewing {
+            if category == "suggested" && (focusedChannel == nil || suggestedActionFocused) {
+                Text("Suggested").font(NuvioType.labelLargeSemi).foregroundStyle(colors.primary).lineLimit(1)
+                Text("You keep coming back to these \(suggested.count). Pin them so they sit at the top of Live TV.")
+                    .font(NuvioType.bodyMedium).foregroundStyle(colors.textPrimary).lineLimit(3)
+                Text("Leave this group to decide later \u{00B7} Turn off in Settings \u{203A} IPTV playlists")
+                    .font(NuvioType.bodySmall).foregroundStyle(colors.textSecondary).lineLimit(2)
+            } else if let channel = focusedChannel ?? previewing {
                 Text(channel.name).font(NuvioType.labelLargeSemi).foregroundStyle(colors.primary).lineLimit(1)
                 if let notice {
                     Text(notice).font(NuvioType.bodySmall).foregroundStyle(colors.error).lineLimit(4)
@@ -913,6 +968,12 @@ private struct LiveGuideView: View {
             } else {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: dp(4)) {
+                        if category == "suggested" {
+                            SuggestedActionRow(title: "Pin all \(visible.count)", icon: "pin.fill", primary: true,
+                                               onFocus: { focusedChannel = nil; suggestedActionFocused = true },
+                                               onLeft: showCategories, action: pinAllSuggested)
+                                .accessibilityIdentifier("guide.suggested.pinAll")
+                        }
                         ForEach(Array(visible.enumerated()), id: \.element.contentId) { index, channel in
                             let cells = timeline.cells(programmes: rowProgrammes(channel), channel: channel,
                                                        startMs: windowStart, nowMs: now, catchUpSupported: catchUpSupported)
@@ -921,6 +982,7 @@ private struct LiveGuideView: View {
                                                 && TvIptvEntryFocus.shared.claimsFirstChannel(section: .live, hasChannels: true, viewerMoved: viewerMoved),
                                             cells: cells,
                                             favorite: favorites.contains(channel.contentId),
+                                            suggestedMark: category == "suggested",
                                             removed: pendingRemoval?.contentId == channel.contentId && !undoInFlight,
                                             interactive: timelineChannel == channel.contentId,
                                             nowFraction: timeline.containsNow(startMs: windowStart, nowMs: now)
@@ -929,6 +991,7 @@ private struct LiveGuideView: View {
                                             cellFocus: $cellFocus,
                                             onFocus: {
                                                 focusedChannel = channel
+                                                suggestedActionFocused = false
                                                 focusedCell = nil
                                                 // F03 (device pass 2026-10-05): the hold-OK menu closing hands
                                                 // focus back to this row, which wiped "Hold OK to undo" at once —
@@ -984,6 +1047,12 @@ private struct LiveGuideView: View {
                                         smokeLog("SMOKE guide hid channel=%@", channel.name)
                                     }
                                 }
+                        }
+                        if category == "suggested" {
+                            SuggestedActionRow(title: "Stop suggesting", icon: nil, primary: false,
+                                               onFocus: { focusedChannel = nil; suggestedActionFocused = true },
+                                               onLeft: showCategories, action: stopSuggesting)
+                                .accessibilityIdentifier("guide.suggested.stop")
                         }
                     }
                     .padding(.vertical, dp(4))
@@ -1305,6 +1374,43 @@ private struct GuideCategoryRow: View {
     }
 }
 
+/// "Pin all N" / "Stop suggesting" at the ends of the Suggested group's list: a full-width row in the guide's row look
+/// (focused Primary 22% fill + 2dp Primary border, radius 8). LEFT reopens the categories, like a channel row.
+private struct SuggestedActionRow: View {
+    let title: String
+    let icon: String?
+    let primary: Bool
+    let onFocus: () -> Void
+    let onLeft: () -> Void
+    let action: () -> Void
+    @Environment(\.nuvio) private var colors
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: dp(8)) {
+                if let icon {
+                    Image(systemName: icon).resizable().scaledToFit().frame(width: dp(14), height: dp(14))
+                        .foregroundStyle(primary ? colors.primary : colors.textSecondary)
+                }
+                Text(ui: title).font(primary ? NuvioType.labelLargeSemi : NuvioType.bodyMedium)
+                    .foregroundStyle(primary ? colors.primary : colors.textSecondary).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, dp(12))
+            .frame(height: dp(44))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: dp(8)).fill(focused ? colors.primary.opacity(0.22) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: dp(8)).stroke(focused ? colors.primary : .clear, lineWidth: NuvioTokens.Stroke.focus))
+        }
+        .buttonStyle(PlainNoChromeButtonStyle())
+        .focused($focused)
+        .reportsFocus(focused)
+        .onChange(of: focused) { _, isFocused in if isFocused { onFocus() } }
+        .onMoveCommand { direction in if direction == .left { onLeft() } }
+    }
+}
+
 /// Channel row: number (30dp), logo (30dp, radius 4), name (bodySmall) in a 230dp label block, then the
 /// programme cells (radius 4, 2dp gaps; now-airing Primary 20%, others BackgroundElevated, gaps 40%).
 /// Focused row: Primary 22% fill + 2dp Primary border, radius 8. In the timeline, the actionable cells
@@ -1315,6 +1421,8 @@ private struct GuideChannelRow: View {
     var autoFocus = false
     let cells: [TvGuideCell]
     let favorite: Bool
+    /// The row is in the Suggested group: a pin mark says what Pin all will do with it.
+    var suggestedMark: Bool = false
     /// P5: a favourite just removed, kept in its favourites row while Undo is offered.
     var removed: Bool = false
     let interactive: Bool
@@ -1366,6 +1474,9 @@ private struct GuideChannelRow: View {
                 .strikethrough(removed).lineLimit(1)
             if channel.hasArchive {
                 Text("⟲").font(NuvioType.labelSmall.weight(.bold)).foregroundStyle(colors.primary)
+            }
+            if suggestedMark && !favorite {
+                Image(systemName: "pin.fill").resizable().scaledToFit().frame(width: dp(10), height: dp(10)).foregroundStyle(colors.primary)
             }
             if favorite {
                 Image("md_star").renderingMode(.template).resizable().frame(width: dp(10), height: dp(10)).foregroundStyle(colors.primary)

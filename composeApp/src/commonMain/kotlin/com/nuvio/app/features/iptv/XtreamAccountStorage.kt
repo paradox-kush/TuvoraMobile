@@ -41,4 +41,8 @@ internal expect object XtreamAccountStorage {
      *  `get_managed_playlists`: it lets an offline cold start still protect a managed playlist from a silent detach. */
     fun loadManagedInfoJson(profileId: Int): String?
     fun saveManagedInfoJson(profileId: Int, json: String)
+    /** Pin-suggestion state (JSON PinSuggestionState: per-channel play times, the switch, the snooze), profile-scoped.
+     *  Device-local by design: play counts are never synced and never reported. */
+    fun loadPinSuggestionsJson(profileId: Int): String?
+    fun savePinSuggestionsJson(profileId: Int, json: String)
 }

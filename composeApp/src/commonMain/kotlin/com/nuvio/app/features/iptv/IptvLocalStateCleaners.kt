@@ -4,7 +4,11 @@ import com.nuvio.app.core.contracts.LocalStateCleaner
 
 internal object XtreamRecentsCleaner : LocalStateCleaner {
     override val name = "Xtream live recents"
-    override fun clearLocalState() = XtreamLiveRecents.clearLocalState()
+    override fun clearLocalState() {
+        XtreamLiveRecents.clearLocalState()
+        // The play counts behind pin suggestions are per-account local state too.
+        PinSuggestions.store.clearLocalState()
+    }
 }
 
 internal object XtreamAccountsCleaner : LocalStateCleaner {

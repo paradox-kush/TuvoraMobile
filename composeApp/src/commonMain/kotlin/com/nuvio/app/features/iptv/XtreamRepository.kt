@@ -621,6 +621,7 @@ object XtreamRepository : IptvCatalog {
         WatchProgressRepository.migrateIdPrefix(oldPrefix, newPrefix)
         WatchedRepository.migrateIdPrefix(oldPrefix, newPrefix)
         XtreamLiveRecents.migrateIdPrefix(oldPrefix, newPrefix)
+        PinSuggestions.store.migrateIdPrefix(oldPrefix, newPrefix)
     }
 
     /**
@@ -691,7 +692,10 @@ object XtreamRepository : IptvCatalog {
                     PlaylistRemovalTarget.HubSelection -> forgetHubSelection(profileId, id)
                     PlaylistRemovalTarget.Overlay ->
                         com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.onPlaylistRemoved(id)
-                    PlaylistRemovalTarget.LiveChannels -> XtreamLiveRecents.migrateIdPrefix(prefix, null)
+                    PlaylistRemovalTarget.LiveChannels -> {
+                        XtreamLiveRecents.migrateIdPrefix(prefix, null)
+                        PinSuggestions.store.migrateIdPrefix(prefix, null)
+                    }
                     PlaylistRemovalTarget.SavedRefs -> {
                         // Live favourites are library entries here, so they ride this step.
                         LibraryRepository.migrateIdPrefix(prefix, null)
