@@ -3,6 +3,7 @@ package com.nuvio.app.core.telemetry.internal
 import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import android.os.Debug
 import com.nuvio.app.core.build.AppVersionConfig
 import com.nuvio.app.features.settings.SentrySettingsRepository
@@ -72,6 +73,22 @@ internal class AndroidTelemetryHost(private val app: Application) : TelemetryHos
     override fun registerSuperProperties(props: Map<String, Any>) {
         for ((k, v) in props) PostHog.register(k, v)
     }
+
+    override fun installSource(): String = InstallSourcePolicy.bucket(installerPackageName())
+
+    /**
+     * API 30+: PackageManager.getInstallSourceInfo(...).installingPackageName (getInstallerPackageName is deprecated
+     * from API 30). Below 30 the old call is the only one. Any failure is "unknown".
+     */
+    @Suppress("DEPRECATION")
+    private fun installerPackageName(): String? = runCatching {
+        val pm = app.packageManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            pm.getInstallSourceInfo(app.packageName).installingPackageName
+        } else {
+            pm.getInstallerPackageName(app.packageName)
+        }
+    }.getOrNull()
 
     override fun hardwareProfile(): Map<String, Any> = AndroidHardwareProfile.collect(app)
 

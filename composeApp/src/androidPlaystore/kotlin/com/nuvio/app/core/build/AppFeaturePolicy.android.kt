@@ -1,6 +1,7 @@
 package com.nuvio.app.core.build
 
 actual object AppFeaturePolicy {
+    actual val buildFlavor: String = "store"
     actual val pluginsEnabled: Boolean = false
     // Store builds hide the addon system: pure BYO-IPTV player posture (Play policy 4.2.2).
     actual val addonsEnabled: Boolean = false

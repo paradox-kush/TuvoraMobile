@@ -1,6 +1,7 @@
 package com.nuvio.app.core.sync
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.core.build.AppVersionConfig
 import com.nuvio.app.core.network.SupabaseProvider
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
@@ -9,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -37,11 +39,10 @@ object SyncDeviceReporter {
 
         scope.launch {
             runCatching {
-                SupabaseProvider.client.postgrest.rpc("report_device", buildJsonObject {
-                    put("p_client_id", clientId)
-                    put("p_device_name", syncDeviceName())
-                    put("p_platform", MOBILE_SYNC_PLATFORM)
-                })
+                SupabaseProvider.client.postgrest.rpc(
+                    "report_device",
+                    reportDeviceParams(clientId, syncDeviceName(), AppVersionConfig.VERSION_NAME),
+                )
                 log.d { "reported device name" }
             }.onFailure { e ->
                 // An older backend without the RPC, or simply offline. Neither is worth a retry:
@@ -56,6 +57,14 @@ object SyncDeviceReporter {
     fun clearAccountState() {
         reportedForClientId = null
     }
+}
+
+/** Arguments of the `report_device` RPC. `p_app_version` lets the backend split devices by app version. */
+internal fun reportDeviceParams(clientId: String, deviceName: String, appVersion: String): JsonObject = buildJsonObject {
+    put("p_client_id", clientId)
+    put("p_device_name", deviceName)
+    put("p_platform", MOBILE_SYNC_PLATFORM)
+    put("p_app_version", appVersion)
 }
 
 /**

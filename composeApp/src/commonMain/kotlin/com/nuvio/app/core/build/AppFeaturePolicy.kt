@@ -6,6 +6,8 @@ enum class TrailerPlaybackMode {
 }
 
 expect object AppFeaturePolicy {
+    /** Distribution flavor for analytics (`build_flavor`): "store" or "full". Must match the TV and Desktop apps. */
+    val buildFlavor: String
     val pluginsEnabled: Boolean
     /** Stremio-style addon system (user-installable catalog/stream sources). Off in store builds. */
     val addonsEnabled: Boolean

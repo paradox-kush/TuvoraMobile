@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.channels.Channel
 import com.nuvio.app.core.analytics.PostHogPrivacy
+import com.nuvio.app.core.build.AppFeaturePolicy
 
 /**
  * The one place that decides what leaves the device. Every SDK call in the shared code goes through here via
@@ -68,7 +69,7 @@ internal class TelemetryService(
      * once, then the hardware profile when its probe (codec lists, display modes) finishes off the caller's thread.
      */
     fun onSdkReady() {
-        runCatching { host.registerSuperProperties(mapOf(SUPPORT_CODE_PROPERTY to supportCode)) }
+        runCatching { host.registerSuperProperties(mapOf(SUPPORT_CODE_PROPERTY to supportCode) + buildProperties()) }
         scope.launch {
             val hw = runCatching { host.hardwareProfile() }.getOrDefault(emptyMap())
             hardware.value = hw
@@ -78,8 +79,13 @@ internal class TelemetryService(
 
     /** Re-register after any SDK reset (a reset clears super properties). */
     fun reRegisterSuperProperties() {
-        runCatching { host.registerSuperProperties(hardware.value + (SUPPORT_CODE_PROPERTY to supportCode)) }
+        runCatching { host.registerSuperProperties(hardware.value + buildProperties() + (SUPPORT_CODE_PROPERTY to supportCode)) }
     }
+
+    private fun buildProperties(): Map<String, Any> = TelemetryBuildProperties.of(
+        buildFlavor = AppFeaturePolicy.buildFlavor,
+        installSource = runCatching { host.installSource() }.getOrNull(),
+    )
 
     override fun displaySupportCode(): String = SupportCodeGenerator.display(supportCode)
 
