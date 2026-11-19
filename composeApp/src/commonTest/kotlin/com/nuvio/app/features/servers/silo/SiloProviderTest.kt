@@ -102,7 +102,7 @@ class SiloProviderTest {
         silo.findServer("silo.example.com")
 
         val sent = http.requests("/api/v2/auth/providers").single()
-        assertEquals("Tuvora", sent.headers["X-Client-Name"])
+        assertTrue(sent.headers["User-Agent"].orEmpty().startsWith("Tuvora"), "User-Agent=${sent.headers["User-Agent"]}")
     }
 
     @Test
