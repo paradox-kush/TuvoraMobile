@@ -27,10 +27,10 @@ class LiveReconnectStatusTest {
     @Test
     fun `the engine's failure names the reason and updates the line already on screen`() {
         frozen(60_000L)
-        reconnector.noteFailure("Source error (HTTP 456)")
-        assertEquals(LiveReconnectReason.PROVIDER_FIREWALL, reconnector.status.value?.reason)
+        reconnector.noteFailure("Source error (HTTP 503)")
+        assertEquals(LiveReconnectReason.PROVIDER_SERVER_ERROR, reconnector.status.value?.reason)
         frozen(120_000L)
-        assertEquals(LiveReconnectStatus(2, max, LiveReconnectReason.PROVIDER_FIREWALL), reconnector.status.value)
+        assertEquals(LiveReconnectStatus(2, max, LiveReconnectReason.PROVIDER_SERVER_ERROR), reconnector.status.value)
     }
 
     @Test

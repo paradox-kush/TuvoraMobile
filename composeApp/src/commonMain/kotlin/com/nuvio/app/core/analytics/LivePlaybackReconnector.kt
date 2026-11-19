@@ -109,6 +109,14 @@ class LivePlaybackReconnector(private val reporter: LivePlaybackFreezeReporter) 
     ): Boolean {
         // Terminal until the viewer retries (which resets this): a Failed channel is not re-asked on a timer.
         if (gaveUp) return false
+        // A failure that named a firewall or a connection cap (456, 458, 509, 429) is final: stop at once, whatever
+        // the attempt count, so the viewer sees the reason + Retry instead of more requests against a capped account.
+        if (LiveOpenRetryPolicy.neverRetries(lastReason)) {
+            gaveUp = true
+            _status.value = null
+            reporter.onRecoveryGaveUp(nowMs)
+            return false
+        }
         val sinceLastAttemptMs = if (lastAttemptAtMs == 0L) Long.MAX_VALUE else nowMs - lastAttemptAtMs
         return when (
             LivePlaybackRecoveryPolicy.evaluate(

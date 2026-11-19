@@ -39,6 +39,10 @@ class LivePlaybackFreezeReporter(
     /** Whether a live channel is currently being watched for freezes. */
     val isArmed: Boolean get() = armed
 
+    /** The channel the armed watch belongs to (set by the snapshot adapter), or null when unnamed / not armed. */
+    var armedContentId: String? = null
+        internal set
+
     /**
      * Whether a freeze is open. A reconnect tears playback down and builds it back up, so the
      * wiring uses this to keep one freeze record spanning every attempt rather than closing it
@@ -260,6 +264,7 @@ class LivePlaybackFreezeReporter(
             )
         }
         armed = false
+        armedContentId = null
         profile = null
         resetFreezeState()
     }

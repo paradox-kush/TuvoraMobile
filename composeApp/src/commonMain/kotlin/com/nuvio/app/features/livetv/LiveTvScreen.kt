@@ -222,6 +222,10 @@ fun LiveTvScreen(
     }
 
     var source by remember { mutableStateOf<LiveChannelSource?>(null) }
+    // The channel [source] was resolved FOR. After a zap, [currentContentId] moves on at once while the previous channel's
+    // engine keeps reporting until the resolve effect swaps the source: those snapshots are that channel's, not the new
+    // tune's (LivePlaybackStartupPolicy.isStale), and counting them armed the freeze watcher / latched "started" for it.
+    var sourceContentId by remember { mutableStateOf<String?>(null) }
     var resolveError by remember { mutableStateOf(false) }
     var playbackError by remember { mutableStateOf<String?>(null) }
     // The reconnect ladder ran out (several reconnects in a row never rendered a frame). Kept apart
@@ -470,6 +474,9 @@ fun LiveTvScreen(
     LaunchedEffect(currentContentId, retryTick, isCatchUp, pendingInitialReplay) {
         if (isCatchUp || pendingInitialReplay) return@LaunchedEffect
         source = null
+        sourceContentId = null
+        // A zap must not keep the previous channel's frames: they would read as this attempt having started.
+        snapshot = PlayerPlaybackSnapshot()
         resolveError = false
         playbackError = null
         reconnectGaveUp = false
@@ -489,6 +496,7 @@ fun LiveTvScreen(
         if (resolved == null) resolveError = true else {
             stalkerFallback.onOpened(resolved.profileFallback)
             source = resolved
+            sourceContentId = currentContentId
             connectionEndedAtMs = null
         }
     }
@@ -1007,9 +1015,18 @@ fun LiveTvScreen(
         val dockedPlayerHeight = maxHeight * DOCKED_PLAYER_HEIGHT_FRACTION
         // One deadline per resolved source attempt, cancelled on switch/Retry/screen exit.
         // Startup failures have their own latch so they never enter the token-refresh loop.
+        // The channel whose source is on screen right now; an engine snapshot is only meaningful while it is the channel
+        // being tuned (see LivePlaybackStartupPolicy.isStale). A replay owns its own source and is never judged by it.
+        val attemptContentId = sourceContentId
         val startupPolicy = remember(source, retryTick, isCatchUp) {
             // Armed = this channel already played; a re-resolve now is the freeze watcher's reconnect.
-            LivePlaybackStartupPolicy(recoveringPlayedChannel = freezeReporter.isArmed)
+            LivePlaybackStartupPolicy(
+                recoveringPlayedChannel = LivePlaybackStartupPolicy.recoversPlayedChannel(
+                    armed = freezeReporter.isArmed,
+                    armedContentId = freezeReporter.armedContentId,
+                    contentId = currentContentId,
+                ),
+            )
         }
         var startupFailed by remember(startupPolicy) { mutableStateOf(false) }
         // UX191: the engine's text for a failed first open, kept ONLY to classify the reason line. It is not
@@ -1200,6 +1217,7 @@ fun LiveTvScreen(
                     onSnapshot = onLiveSnapshot@{
                         // A re-open is scheduled (retryOpenAfter / a spaced re-mint): the old attempt's trailing end is not
                         // a new failure. The engine reports the error first, then its ended snapshot, in the same hop.
+                        if (!isCatchUp && LivePlaybackStartupPolicy.isStale(attemptContentId, currentContentId)) return@onLiveSnapshot
                         if (source == null && pendingRemint != null) return@onLiveSnapshot
                         snapshot = it
                         pause.onSnapshot(it.positionMs, it.isPlaying)
@@ -1319,9 +1337,7 @@ fun LiveTvScreen(
                     onError = PlayerSurfaceErrors@{ message ->
                         // Only the reason code is kept (the text can carry a host): it words the reconnect line.
                         if (message != null) freezeReconnector.noteFailure(message)
-                        if (message != null && !isCatchUp && startupPolicy.sample(
-                                snapshot.copy(isEnded = true, isPlaying = false), elapsedMs = 0L,
-                            )) {
+                        if (message != null && !isCatchUp && startupPolicy.sampleError()) {
                             // ExoPlayer reports a failed open as IDLE, not ENDED. Keep it out
                             // of the mid-playback token-refresh path just like mpv END_FILE.
                             if (openFailureGate.onErrorText(message) == StalkerOpenFailureGate.Step.Switch) {

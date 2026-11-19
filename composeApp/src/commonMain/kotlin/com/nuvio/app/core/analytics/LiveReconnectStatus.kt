@@ -97,6 +97,15 @@ object LiveOpenRetryPolicy {
     fun retries(reason: LiveReconnectReason): Boolean =
         reason == LiveReconnectReason.PROVIDER_SERVER_ERROR || reason == LiveReconnectReason.UNREACHABLE
 
+    /**
+     * A reason no timer may ever re-ask, whatever ladder is running (open retry or freeze reconnect): a firewall
+     * (456) or a connection cap / rate limit (429, 458, 509). Each re-ask against a capped provider grabs another
+     * slot, so the first failure that names one ends the wait, even when its status arrives after earlier,
+     * status-less failures.
+     */
+    fun neverRetries(reason: LiveReconnectReason): Boolean =
+        reason == LiveReconnectReason.CONNECTION_LIMIT || reason == LiveReconnectReason.PROVIDER_FIREWALL
+
     private val NAMES_A_FORMAT_PROBLEM = listOf("unrecognized", "unsupported", "decoder", "decoding", "codec", "malformed")
 
     /**

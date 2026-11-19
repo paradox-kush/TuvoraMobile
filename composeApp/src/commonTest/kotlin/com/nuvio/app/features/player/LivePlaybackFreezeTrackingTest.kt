@@ -39,4 +39,21 @@ class LivePlaybackFreezeTrackingTest {
         feed(PlayerPlaybackSnapshot(isLoading = false, isPlaying = true, videoProgressTicks = 1))
         assertTrue(reporter.isArmed)
     }
+
+    @Test
+    fun `a trailing frame from a torn-down engine does not arm the watcher for the next channel`() {
+        // Device pass 2026-11-18: zap from a playing channel to a refused one. The old engine's last snapshot lands
+        // after the screen dropped its source, armed the watcher under the NEW channel's id, and the refused open
+        // was then read as a mid-stream drop (freeze ladder, or a spinner that never ended). No source, no arming.
+        reporter.onLiveSnapshot(
+            snapshot = PlayerPlaybackSnapshot(positionMs = 11_000, videoProgressTicks = 3),
+            engine = { "libmpv" },
+            streamUrl = null,
+            contentId = "xtream:a:live:2",
+            surface = LIVE_FREEZE_SURFACE_DOCKED,
+            reconnector = reconnector,
+            reconnect = { reconnects++ },
+        )
+        assertFalse(reporter.isArmed, "a frame with no source on screen belongs to no channel")
+    }
 }

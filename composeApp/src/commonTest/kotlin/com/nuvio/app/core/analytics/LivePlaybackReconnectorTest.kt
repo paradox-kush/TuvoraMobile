@@ -127,4 +127,52 @@ class LivePlaybackReconnectorTest {
         assertFalse(frozen(now + 60_000L))
         assertTrue(reconnector.hasGivenUp)
     }
+
+    @Test
+    fun `a connection limit never reconnects even when its status arrives after the first drop`() {
+        // 2026-11-18 device pass: a refused open (HTTP 458) was re-asked 4 more times, each grabbing a provider slot.
+        // The first failure may read status-less (the log line can trail the end), so one reconnect is tolerated;
+        // the moment ANY failure names a connection cap the ladder stops at once.
+        reconnector.noteFailure("loading failed")
+        assertTrue(frozen(1_000L), "a status-less end is still worth one ask")
+        reconnector.noteFailure("Your provider allows fewer connections than you are using.\n\nHTTP 458 [loading failed]")
+        assertFalse(frozen(100_000L), "458 revealed: no second request")
+        assertTrue(reconnector.hasGivenUp, "the surface shows the terminal error + Retry")
+        assertEquals(1, reconnects)
+        assertEquals(null, reconnector.status.value, "no reconnecting line under the error")
+    }
+
+    @Test
+    fun `429 456 458 and 509 are never reconnected on a timer`() {
+        for (status in listOf(429, 456, 458, 509)) {
+            val r = LivePlaybackReconnector(LivePlaybackFreezeReporter(capture = { _, _ -> }))
+            var calls = 0
+            r.noteFailure("HTTP $status")
+            assertFalse(
+                r.onFrozen(1_000L, LivePlaybackFreezePolicy.Kind.ENDED, reconnect = { calls++ }),
+                "HTTP $status must not reconnect",
+            )
+            assertEquals(0, calls, "HTTP $status made a request")
+            assertTrue(r.hasGivenUp, "HTTP $status is terminal")
+        }
+    }
+
+    @Test
+    fun `a provider 503 still gets the bounded reconnect ladder`() {
+        reconnector.noteFailure("HTTP 503 Service Unavailable")
+        var now = 1_000L
+        repeat(LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK) {
+            now += 60_000L
+            assertTrue(frozen(now), "503 attempt ${it + 1}")
+        }
+        assertEquals(LivePlaybackRecoveryPolicy.MAX_ATTEMPTS_WITHOUT_PLAYBACK, reconnects)
+    }
+
+    @Test
+    fun `an open that fails with a connection limit after a status-less ask stops the open retry`() {
+        assertTrue(reconnector.onOpenFailed(null) != null, "no status: one bounded ask")
+        assertEquals(null, reconnector.onOpenFailed("HTTP 458"), "458 revealed: fail now")
+        assertEquals(null, reconnector.onOpenFailed("HTTP 429"), "429 never retries")
+        assertEquals(null, reconnector.onOpenFailed("HTTP 509"), "509 never retries")
+    }
 }

@@ -74,4 +74,29 @@ class LivePlaybackStartupPolicyTest {
         }
         assertFalse(LivePlaybackStartupPolicy.endFileSnapshot(pending, "error", false).isEnded)
     }
+    @Test fun `a stale armed watcher from the previous channel does not make a new tune a recovery`() {
+        // 2026-11-18 device pass: play channel A, zap to a refused channel B. The watcher is still armed for A when B's
+        // startup policy is built, so B's refusal was judged a mid-stream drop and the freeze ladder re-asked it 4 times.
+        assertFalse(LivePlaybackStartupPolicy.recoversPlayedChannel(armed = true, armedContentId = "A", contentId = "B"))
+        assertTrue(LivePlaybackStartupPolicy.recoversPlayedChannel(armed = true, armedContentId = "A", contentId = "A"))
+        assertFalse(LivePlaybackStartupPolicy.recoversPlayedChannel(armed = false, armedContentId = "A", contentId = "A"))
+        assertTrue(
+            LivePlaybackStartupPolicy.recoversPlayedChannel(armed = true, armedContentId = null, contentId = "A"),
+            "an unnamed watcher keeps the old behaviour",
+        )
+    }
+    @Test fun `an engine error on an attempt that drew nothing fails the open whatever the screen showed before`() {
+        // Zap from a playing channel to a refused one: the screen's snapshot still holds the old channel's frame.
+        // The error is judged by this attempt's own latch, so a fresh policy fails; one that drew a frame does not.
+        assertTrue(LivePlaybackStartupPolicy().sampleError())
+        val played = LivePlaybackStartupPolicy()
+        played.sample(PlayerPlaybackSnapshot(positionMs = 5_000), 0)
+        assertFalse(played.sampleError(), "a stream that played and dropped is the freeze ladder's, not a failed open")
+        assertFalse(LivePlaybackStartupPolicy(recoveringPlayedChannel = true).sampleError())
+    }
+    @Test fun `a snapshot delivered to a closure built for the previous channel is stale`() {
+        assertTrue(LivePlaybackStartupPolicy.isStale("A", "B"))
+        assertFalse(LivePlaybackStartupPolicy.isStale("B", "B"))
+        assertFalse(LivePlaybackStartupPolicy.isStale(null, null))
+    }
 }
