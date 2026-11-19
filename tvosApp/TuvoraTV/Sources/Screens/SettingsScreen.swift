@@ -1647,6 +1647,7 @@ private struct LicencesDialog: View {
         ("Tuvora", "Source code and license terms are available in the project repository. Licensed under the GNU General Public License v3.0."),
         ("The Movie Database (TMDB)", "Tuvora uses the TMDB API for movie and TV metadata, artwork, trailers, cast, production details, collections, and recommendations. This product uses the TMDB API but is not endorsed or certified by TMDB."),
         ("IMDb Non-Commercial Datasets", "Tuvora uses IMDb Non-Commercial Datasets, including title.ratings.tsv.gz, for IMDb ratings and vote counts. Information courtesy of IMDb (https://www.imdb.com). Used with permission. IMDb data is for personal and non-commercial use under IMDb terms."),
+        ("IntroDB", "Tuvora uses the IntroDB API for community-provided intro, recap, credits, and preview timestamps used by skip controls. Tuvora is not affiliated with or endorsed by IntroDB. Contains data from IntroDB (introdb.app), available under the ODbL."),
         ("libmpv / MPVKit", "Used as a playback engine. mpv/libmpv and bundled native components retain their upstream license terms."),
     ]
 
