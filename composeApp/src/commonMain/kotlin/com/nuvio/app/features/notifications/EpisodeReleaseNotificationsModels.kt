@@ -39,7 +39,19 @@ data class EpisodeReleaseNotificationsUiState(
     val shows: List<ShowAlertRow> = emptyList(),
     /** The viewer reset the learned time and there is not yet enough history again. */
     val learningAgain: Boolean = false,
+    /** The permission has been asked for on this device (any answer), so "not granted" means refused, not unasked. */
+    val permissionAsked: Boolean = false,
 ) {
+    val osPermission: NotificationPermission
+        get() = when {
+            permissionGranted -> NotificationPermission.Granted
+            permissionAsked || permissionDenied -> NotificationPermission.Denied
+            else -> NotificationPermission.NotAsked
+        }
+    val awayGroup: AwayGroupState get() = AwayGroupPolicy.state(osPermission, isEnabled)
+    /** The away reminder in effect: what the viewer chose, else 7 days only while alerts can reach this phone. */
+    val awayReminder: AwayReminder
+        get() = AwayReminderPolicy.effective(preferences.awayReminder, permissionGranted, isEnabled)
     val isLearning: Boolean get() = usualMinute == null
     val showsOnCount: Int get() = shows.count { it.on }
 }
@@ -84,6 +96,8 @@ internal data class StoredAlertRuntime(
     val lastOpenedAtMs: Long = 0L,
     /** Set by Reset on the learned time; cleared once the habit is ready again. */
     val learningAgain: Boolean = false,
+    /** The OS permission has been asked for on this device. */
+    val permissionAsked: Boolean = false,
 )
 
 @Serializable
@@ -108,6 +122,8 @@ internal data class EpisodeReleaseNotificationRequest(
     val fireAtEpochMs: Long = 0L,
     /** Quiet hours as chosen when this was scheduled, so a platform that runs code at fire time can re-check. */
     val quietHours: QuietHours = QuietHours(enabled = false),
+    /** The one-per-absence reminder: a platform that runs code at fire time also skips it if another alert went out that day. */
+    val isAwayReminder: Boolean = false,
 )
 internal const val MinReasonableSavedAtEpochMs = 946684800000L
 

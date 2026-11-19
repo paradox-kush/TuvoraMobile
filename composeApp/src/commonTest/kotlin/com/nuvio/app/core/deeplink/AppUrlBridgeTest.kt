@@ -52,6 +52,13 @@ class AppUrlBridgeTest {
     }
 
     @Test
+    fun `the home link opens home in either scheme`() {
+        assertEquals(AppDeepLink.Home, parseAppDeepLink("tuvora://home"))
+        assertEquals(AppDeepLink.Home, parseAppDeepLink("nuvio://home"))
+        assertEquals(AppDeepLink.Home, parseAppDeepLink(buildHomeDeepLinkUrl()))
+    }
+
+    @Test
     fun `parses existing notification meta deeplink`() {
         assertEquals(
             AppDeepLink.Meta(type = "series", id = "tt0944947"),

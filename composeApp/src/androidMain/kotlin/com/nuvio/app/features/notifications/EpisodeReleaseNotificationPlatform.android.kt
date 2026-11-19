@@ -52,7 +52,9 @@ internal actual object EpisodeReleaseNotificationPlatform {
     internal const val workerQuietEnabledKey = "quiet_enabled"
     internal const val workerQuietStartKey = "quiet_start_minute"
     internal const val workerQuietEndKey = "quiet_end_minute"
+    internal const val workerAwayReminderKey = "away_reminder"
     private const val lastOpenedKey = "last_app_open_epoch_ms"
+    private const val lastAlertSentKey = "last_alert_sent_epoch_ms"
     private const val lateSuffix = ":late"
 
     private var appContext: Context? = null
@@ -163,6 +165,7 @@ internal actual object EpisodeReleaseNotificationPlatform {
                     .putBoolean(workerQuietEnabledKey, request.quietHours.enabled)
                     .putInt(workerQuietStartKey, request.quietHours.startMinute)
                     .putInt(workerQuietEndKey, request.quietHours.endMinute)
+                    .putBoolean(workerAwayReminderKey, request.isAwayReminder)
                     .build()
 
                 val workRequest = OneTimeWorkRequestBuilder<EpisodeReleaseNotificationWorker>()
@@ -209,6 +212,14 @@ internal actual object EpisodeReleaseNotificationPlatform {
 
     internal fun lastAppOpenedEpochMs(context: Context): Long? =
         preferences(context).getLong(lastOpenedKey, 0L).takeIf { it > 0L }
+
+    /** Remembered so a late-delivered away reminder can tell that an episode alert already went out today. */
+    internal fun recordAlertSent(context: Context, epochMs: Long) {
+        preferences(context).edit().putLong(lastAlertSentKey, epochMs).apply()
+    }
+
+    internal fun lastAlertSentEpochMs(context: Context): Long? =
+        preferences(context).getLong(lastAlertSentKey, 0L).takeIf { it > 0L }
 
     actual fun openNotificationSettings() {
         val context = currentActivity ?: appContext ?: return
