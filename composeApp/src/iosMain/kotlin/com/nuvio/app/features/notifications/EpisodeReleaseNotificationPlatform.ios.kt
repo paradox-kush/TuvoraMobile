@@ -12,6 +12,14 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import kotlinx.coroutines.suspendCancellableCoroutine
 import platform.Foundation.NSCalendar
+import platform.Foundation.NSCalendarUnitDay
+import platform.Foundation.NSCalendarUnitHour
+import platform.Foundation.NSCalendarUnitMinute
+import platform.Foundation.NSCalendarUnitMonth
+import platform.Foundation.NSCalendarUnitSecond
+import platform.Foundation.NSCalendarUnitYear
+import platform.UIKit.UIApplication
+import platform.UIKit.UIApplicationOpenSettingsURLString
 import platform.Foundation.NSDate
 import platform.Foundation.NSDateComponents
 import platform.Foundation.NSFileManager
@@ -37,6 +45,8 @@ import kotlin.coroutines.resume
 
 @OptIn(ExperimentalForeignApi::class)
 internal actual object EpisodeReleaseNotificationPlatform {
+    /** Seconds between the Unix epoch and Apple's reference date (2001-01-01). */
+    private const val AppleReferenceDateOffsetSeconds = 978307200.0
     private const val scheduledIdsKey = "episode_release_notification_scheduled_ids"
     private const val attachmentDirectoryName = "episode_release_notification_attachments"
     private val httpClient = HttpClient(Darwin) {
@@ -71,9 +81,10 @@ internal actual object EpisodeReleaseNotificationPlatform {
         val scheduledIds = mutableListOf<String>()
 
         requests.forEach { request ->
-            val dateComponents = buildDateComponents(request.releaseDateIso) ?: return@forEach
-            val scheduledDate = NSCalendar.currentCalendar.dateFromComponents(dateComponents) ?: return@forEach
+            if (request.fireAtEpochMs <= 0L) return@forEach
+            val scheduledDate = NSDate(timeIntervalSinceReferenceDate = request.fireAtEpochMs / 1000.0 - AppleReferenceDateOffsetSeconds)
             if (scheduledDate.timeIntervalSince1970 <= NSDate().timeIntervalSince1970) return@forEach
+            val dateComponents = buildDateComponents(scheduledDate)
 
             val content = buildNotificationContent(request)
             val trigger = UNCalendarNotificationTrigger.triggerWithDateMatchingComponents(
@@ -102,6 +113,14 @@ internal actual object EpisodeReleaseNotificationPlatform {
                 .removePendingNotificationRequestsWithIdentifiers(identifiers)
         }
         NSUserDefaults.standardUserDefaults.removeObjectForKey(ProfileScopedKey.of(scheduledIdsKey))
+    }
+
+    /** iOS cannot run code when an alert is due; the repository reschedules on every app open instead. */
+    actual suspend fun recordAppOpened(epochMs: Long) = Unit
+
+    actual fun openNotificationSettings() {
+        val url = NSURL.URLWithString(UIApplicationOpenSettingsURLString) ?: return
+        UIApplication.sharedApplication.openURL(url, emptyMap<Any?, Any?>(), null)
     }
 
     actual suspend fun showTestNotification(request: EpisodeReleaseNotificationRequest) {
@@ -193,23 +212,13 @@ internal actual object EpisodeReleaseNotificationPlatform {
             }
         }
 
-    private fun buildDateComponents(releaseDateIso: String): NSDateComponents? {
-        val parts = releaseDateIso.split('-')
-        if (parts.size != 3) return null
-
-        val year = parts[0].toLongOrNull() ?: return null
-        val month = parts[1].toLongOrNull() ?: return null
-        val day = parts[2].toLongOrNull() ?: return null
-
-        return NSDateComponents().apply {
-            this.year = year
-            this.month = month
-            this.day = day
-            this.hour = EpisodeReleaseNotificationHour.toLong()
-            this.minute = EpisodeReleaseNotificationMinute.toLong()
-            this.second = 0
-            this.calendar = NSCalendar.currentCalendar
-            setTimeZone(NSCalendar.currentCalendar.timeZone)
+    private fun buildDateComponents(date: NSDate): NSDateComponents {
+        val calendar = NSCalendar.currentCalendar
+        val units = NSCalendarUnitYear or NSCalendarUnitMonth or NSCalendarUnitDay or
+            NSCalendarUnitHour or NSCalendarUnitMinute or NSCalendarUnitSecond
+        return calendar.components(units, fromDate = date).apply {
+            this.calendar = calendar
+            setTimeZone(calendar.timeZone)
         }
     }
 }

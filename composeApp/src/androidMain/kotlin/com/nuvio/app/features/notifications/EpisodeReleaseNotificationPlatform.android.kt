@@ -32,8 +32,6 @@ import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
-import java.time.LocalDate
-import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +49,11 @@ internal actual object EpisodeReleaseNotificationPlatform {
     internal const val workerBodyKey = "body"
     internal const val workerDeepLinkKey = "deep_link"
     internal const val workerBackdropUrlKey = "backdrop_url"
+    internal const val workerQuietEnabledKey = "quiet_enabled"
+    internal const val workerQuietStartKey = "quiet_start_minute"
+    internal const val workerQuietEndKey = "quiet_end_minute"
+    private const val lastOpenedKey = "last_app_open_epoch_ms"
+    private const val lateSuffix = ":late"
 
     private var appContext: Context? = null
     private var currentActivity: ComponentActivity? = null
@@ -147,7 +150,7 @@ internal actual object EpisodeReleaseNotificationPlatform {
             val scheduledIds = mutableListOf<String>()
 
             requests.forEach { request ->
-                val triggerAtEpochMs = triggerAtEpochMs(request.releaseDateIso) ?: return@forEach
+                val triggerAtEpochMs = request.fireAtEpochMs.takeIf { it > 0L } ?: return@forEach
                 val initialDelayMs = triggerAtEpochMs - nowEpochMs
                 if (initialDelayMs <= 0L) return@forEach
 
@@ -157,6 +160,9 @@ internal actual object EpisodeReleaseNotificationPlatform {
                     .putString(workerBodyKey, request.notificationBody)
                     .putString(workerDeepLinkKey, request.deepLinkUrl)
                     .putString(workerBackdropUrlKey, request.backdropUrl)
+                    .putBoolean(workerQuietEnabledKey, request.quietHours.enabled)
+                    .putInt(workerQuietStartKey, request.quietHours.startMinute)
+                    .putInt(workerQuietEndKey, request.quietHours.endMinute)
                     .build()
 
                 val workRequest = OneTimeWorkRequestBuilder<EpisodeReleaseNotificationWorker>()
@@ -193,6 +199,37 @@ internal actual object EpisodeReleaseNotificationPlatform {
                 .remove(scopedScheduledIdsKey())
                 .apply()
         }
+    }
+
+    /** Remembered here, not in the repository, so a worker started in a cold process can still re-check "opened today". */
+    actual suspend fun recordAppOpened(epochMs: Long) {
+        val context = appContext ?: return
+        preferences(context).edit().putLong(lastOpenedKey, epochMs).apply()
+    }
+
+    internal fun lastAppOpenedEpochMs(context: Context): Long? =
+        preferences(context).getLong(lastOpenedKey, 0L).takeIf { it > 0L }
+
+    actual fun openNotificationSettings() {
+        val context = currentActivity ?: appContext ?: return
+        val intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+        if (context !is android.app.Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }
+
+    /** Runs the same alert again once quiet hours are over; used by the worker when the OS delivered it late. */
+    internal fun enqueueLate(context: Context, requestId: String, inputData: Data, delayMs: Long) {
+        val workRequest = OneTimeWorkRequestBuilder<EpisodeReleaseNotificationWorker>()
+            .setInputData(inputData)
+            .setInitialDelay(delayMs.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
+            .addTag(workTag)
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            uniqueWorkName(requestId) + lateSuffix,
+            ExistingWorkPolicy.REPLACE,
+            workRequest,
+        )
     }
 
     actual suspend fun showTestNotification(request: EpisodeReleaseNotificationRequest) {
@@ -270,6 +307,7 @@ internal actual object EpisodeReleaseNotificationPlatform {
             .orEmpty()
             .forEach { requestId ->
                 awaitOperation(workManager.cancelUniqueWork(uniqueWorkName(requestId)))
+                awaitOperation(workManager.cancelUniqueWork(uniqueWorkName(requestId) + lateSuffix))
             }
     }
 
@@ -281,14 +319,6 @@ internal actual object EpisodeReleaseNotificationPlatform {
         context.getSharedPreferences(platformPreferencesName, Context.MODE_PRIVATE)
 
     private fun scopedScheduledIdsKey(): String = ProfileScopedKey.of(scheduledIdsKey)
-
-    private fun triggerAtEpochMs(releaseDateIso: String): Long? = runCatching {
-        LocalDate.parse(releaseDateIso)
-            .atTime(EpisodeReleaseNotificationHour, EpisodeReleaseNotificationMinute)
-            .atZone(ZoneId.systemDefault())
-            .toInstant()
-            .toEpochMilli()
-    }.getOrNull()
 
     private fun ensureNotificationChannel() {
         val context = appContext ?: return

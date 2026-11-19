@@ -14,20 +14,51 @@ import org.jetbrains.compose.resources.getString
 import kotlin.math.abs
 
 data class EpisodeReleaseNotificationsUiState(
+    /** The master switch. Off for every new install; a stored opt-out is never turned back on by the app. */
     val isEnabled: Boolean = false,
     val isLoading: Boolean = false,
     val permissionGranted: Boolean = false,
+    /** The OS permission was refused or revoked: every alert control says so and offers the phone's settings. */
+    val permissionDenied: Boolean = false,
     val scheduledCount: Int = 0,
     val testTargetTitle: String? = null,
     val isSendingTest: Boolean = false,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
+    val preferences: AlertPreferences = AlertPreferences(),
+    /** Viewing sessions and distinct days seen so far, for the "learning" line. */
+    val habitSessions: Int = 0,
+    val habitDays: Int = 0,
+    /** The usual start time for today's kind of day (weekday or weekend), or null while still learning. */
+    val usualMinute: Int? = null,
+    /** When an alert would go out today under the current timing choice and quiet hours. */
+    val alertMinute: Int = AlertTimes.DefaultMinute,
+    val quietConflict: QuietHoursConflict? = null,
+    /** Alerts are being sent less often because several were not opened; Undo returns to the chosen cap. */
+    val sendingLessOften: Boolean = false,
+    val shows: List<ShowAlertRow> = emptyList(),
+    /** The viewer reset the learned time and there is not yet enough history again. */
+    val learningAgain: Boolean = false,
+) {
+    val isLearning: Boolean get() = usualMinute == null
+    val showsOnCount: Int get() = shows.count { it.on }
+}
+
+/** One followed show in Settings › Notifications › Shows with alerts. */
+data class ShowAlertRow(
+    val contentType: String,
+    val contentId: String,
+    val title: String,
+    val on: Boolean,
 )
 
 @Serializable
 internal data class StoredEpisodeReleaseNotificationsPayload(
     val enabled: Boolean = false,
     val followedShows: List<TrackedFollowedShow> = emptyList(),
+    val preferences: StoredAlertPreferences = StoredAlertPreferences(),
+    /** Shows the end-of-episode prompt has already been shown for (once per show). */
+    val promptedShowKeys: List<String> = emptyList(),
 )
 
 @Serializable
@@ -35,6 +66,35 @@ internal data class TrackedFollowedShow(
     val contentId: String,
     val contentType: String,
     val followedOnIsoDate: String,
+    val title: String? = null,
+    /** [FollowSource.wire]. Payloads written before alert controls existed decode as saved (library) shows. */
+    val source: String = FollowSource.Library.wire,
+    /** The viewer's own choice; null means the default for [source]. */
+    val alertsOn: Boolean? = null,
+)
+
+/** Device-local bookkeeping that is never synced: what was scheduled, what was sent and what the viewer did about it. */
+@Serializable
+internal data class StoredAlertRuntime(
+    val ignoredStreak: Int = 0,
+    val backOffNoticeShown: Boolean = false,
+    val sentDates: List<String> = emptyList(),
+    val openedDates: List<String> = emptyList(),
+    val scheduled: List<ScheduledAlertRecord> = emptyList(),
+    val lastOpenedAtMs: Long = 0L,
+    /** Set by Reset on the learned time; cleared once the habit is ready again. */
+    val learningAgain: Boolean = false,
+)
+
+@Serializable
+internal data class ScheduledAlertRecord(
+    val fireAtMs: Long,
+    val withNotice: Boolean = false,
+)
+
+@Serializable
+internal data class StoredViewingHistory(
+    val starts: List<String> = emptyList(),
 )
 
 internal data class EpisodeReleaseNotificationRequest(
@@ -44,10 +104,11 @@ internal data class EpisodeReleaseNotificationRequest(
     val releaseDateIso: String,
     val deepLinkUrl: String,
     val backdropUrl: String? = null,
+    /** When to show it, in epoch milliseconds. Zero for a request that is shown at once (the test notification). */
+    val fireAtEpochMs: Long = 0L,
+    /** Quiet hours as chosen when this was scheduled, so a platform that runs code at fire time can re-check. */
+    val quietHours: QuietHours = QuietHours(enabled = false),
 )
-
-internal const val EpisodeReleaseNotificationHour = 9
-internal const val EpisodeReleaseNotificationMinute = 0
 internal const val MinReasonableSavedAtEpochMs = 946684800000L
 
 internal fun buildTrackedShowKey(
@@ -78,18 +139,25 @@ internal fun buildEpisodeReleaseNotificationId(
     return "episode-release-$profileId-$contentHash-$episodeHash-$releaseDateIso"
 }
 
-internal fun buildEpisodeReleaseNotificationBody(
+internal fun buildEpisodeCodeText(
     seasonNumber: Int?,
     episodeNumber: Int?,
-    episodeTitle: String?,
 ): String = runBlocking {
-    val code = when {
+    when {
         seasonNumber != null && episodeNumber != null ->
             getString(Res.string.compose_player_episode_code_full, seasonNumber, episodeNumber)
         episodeNumber != null ->
             getString(Res.string.compose_player_episode_code_episode_only, episodeNumber)
         else -> ""
     }
+}
+
+internal fun buildEpisodeReleaseNotificationBody(
+    seasonNumber: Int?,
+    episodeNumber: Int?,
+    episodeTitle: String?,
+): String = runBlocking {
+    val code = buildEpisodeCodeText(seasonNumber, episodeNumber)
     val title = episodeTitle?.trim().takeUnless { it.isNullOrBlank() }
 
     when {

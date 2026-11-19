@@ -600,6 +600,10 @@ private fun PlayerScreenRuntime.BindPlayerUiVisibilityEffects() {
 
         if (!previousIsPlaying && playbackSnapshot.isPlaying) {
             emitAddonPlayerEvent(AddonPlayerAction.START)
+            // When episode alerts arrive is learned from when playback starts on this phone (never leaves it).
+            if (!activeStreamType.equals("live", ignoreCase = true)) {
+                com.nuvio.app.features.notifications.EpisodeReleaseNotificationsRepository.recordPlaybackStart()
+            }
         }
 
         if (playbackSnapshot.isPlaying && pendingSeekScrobbleRestart) {

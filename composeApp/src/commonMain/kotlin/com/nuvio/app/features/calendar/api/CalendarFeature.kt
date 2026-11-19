@@ -32,6 +32,10 @@ object CalendarFeature {
         this.sports = sports
     }
 
+    /** The Calendar's half of the shared per-show alert switch (see core/contracts/ShowAlerts.kt). */
+    fun alertBellMirror(): com.nuvio.app.core.contracts.ShowAlertBellMirror =
+        com.nuvio.app.features.calendar.internal.CalendarAlertBellMirror { repository }
+
     val isRegistered: Boolean get() = sources != null && accounts != null
 
     @OptIn(ExperimentalTime::class)

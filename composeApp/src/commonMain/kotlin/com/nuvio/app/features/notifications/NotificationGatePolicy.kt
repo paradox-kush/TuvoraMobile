@@ -14,7 +14,7 @@ import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 
 /** The hours in which Tuvora never shows an alert. Wall-clock minutes after local midnight; may span midnight. */
-internal data class QuietHours(
+data class QuietHours(
     val enabled: Boolean = true,
     val startMinute: Int = 22 * 60,
     val endMinute: Int = 8 * 60,
@@ -39,7 +39,7 @@ internal data class QuietHours(
 }
 
 /** How many alerts the viewer allows. [windowDays] is a rolling window ending on the alert's day. */
-internal enum class AlertCap(val maxAlerts: Int, val windowDays: Int) {
+enum class AlertCap(val maxAlerts: Int, val windowDays: Int) {
     PerDay(1, 1),
     ThreePerWeek(3, 7),
     OnePerWeek(1, 7);
@@ -49,7 +49,7 @@ internal enum class AlertCap(val maxAlerts: Int, val windowDays: Int) {
 }
 
 /** When the alert goes out on a weekday and on a weekend day, as minutes after local midnight. */
-internal data class AlertTimes(val weekdayMinute: Int, val weekendMinute: Int) {
+data class AlertTimes(val weekdayMinute: Int, val weekendMinute: Int) {
     fun minuteFor(date: LocalDate): Int =
         if (WatchHabitPolicy.isWeekend(date)) weekendMinute else weekdayMinute
 
@@ -65,6 +65,12 @@ internal data class AlertCandidate(
     val showTitle: String,
     val episodeKey: String,
     val releaseDate: LocalDate,
+    /** What a batched alert lists for this episode, e.g. "Severance S3E4". */
+    val label: String = showTitle,
+    /** The wording when this is the only episode in the alert. */
+    val bodyText: String = "",
+    val deepLinkUrl: String = "",
+    val backdropUrl: String? = null,
 )
 
 internal data class GateInput(

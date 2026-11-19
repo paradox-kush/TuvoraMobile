@@ -607,7 +607,7 @@ internal fun MainAppContent(
         // because nothing about recommendation telemetry may ever affect app startup.
         runCatching { com.nuvio.app.core.contracts.RecTrackingAccess.reporter.startLogging() }
         NetworkStatusRepository.ensureStarted()
-        EpisodeReleaseNotificationsRepository.refreshAsync()
+        EpisodeReleaseNotificationsRepository.onAppOpened()
         kotlinx.coroutines.delay(5_000)
         initialHomeReady = true
     }
@@ -763,6 +763,15 @@ internal fun MainAppContent(
                 runCatching { com.nuvio.app.core.contracts.IptvCatalogAccess.catalog.refreshDuePlaylists() }
                     .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
             }
+        }
+    }
+
+    // Each return to the foreground counts as opening the app for the episode-alert gate (one alert a day, none on a
+    // day the app was already opened). Foreground only: nothing here runs while the app is in the background.
+    LaunchedEffect(ownsAppRuntime) {
+        if (!ownsAppRuntime) return@LaunchedEffect
+        AppForegroundMonitor.events().collectLatest { visibility ->
+            if (visibility == AppVisibility.Foreground) EpisodeReleaseNotificationsRepository.onAppOpened()
         }
     }
 
