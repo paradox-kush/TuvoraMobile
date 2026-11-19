@@ -23,6 +23,9 @@ internal sealed interface AppDeepLink {
 
     data object Downloads : AppDeepLink
 
+    /** Opens Home (the away reminder's target): the Home tab, with any open screen closed. */
+    data object Home : AppDeepLink
+
     /**
      * A provider's setup link (`https://tuvora.co/s/<code>`, or `nuvio://s/<code>`). Carries the code
      * text IN MEMORY ONLY (this repository's pending link is never persisted, logged or reported); the
@@ -75,6 +78,8 @@ fun buildMetaDeepLinkUrl(
 
 fun buildDownloadsDeepLinkUrl(): String = "$APP_URL_SCHEME://downloads"
 
+fun buildHomeDeepLinkUrl(): String = "$APP_URL_SCHEME://home"
+
 /** The scheme of every app link Tuvora generates. Both [APP_URL_SCHEMES] open the app on every platform. */
 const val APP_URL_SCHEME = "tuvora"
 
@@ -124,6 +129,8 @@ internal fun parseAppDeepLink(url: String): AppDeepLink? {
         "imdb", "tmdb" -> parseProviderMetaDeepLink(host, pathSegments, parsedUrl)
 
         "downloads" -> AppDeepLink.Downloads
+
+        "home" -> AppDeepLink.Home
 
         // nuvio://s/<code> — the same setup link in the app's own scheme.
         "s" -> pathSegments.firstOrNull()?.let(AppDeepLink::SetupCode)

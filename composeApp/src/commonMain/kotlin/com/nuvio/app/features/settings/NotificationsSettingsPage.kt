@@ -32,9 +32,15 @@ import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.features.notifications.AlertCap
 import com.nuvio.app.features.notifications.AlertClock
 import com.nuvio.app.features.notifications.AlertTimingMode
+import com.nuvio.app.features.notifications.AwayReminder
 import com.nuvio.app.features.notifications.EpisodeReleaseNotificationsRepository
 import com.nuvio.app.features.notifications.EpisodeReleaseNotificationsUiState
 import nuvio.composeapp.generated.resources.Res
+import nuvio.composeapp.generated.resources.settings_alerts_away_days
+import nuvio.composeapp.generated.resources.settings_alerts_away_description
+import nuvio.composeapp.generated.resources.settings_alerts_away_off
+import nuvio.composeapp.generated.resources.settings_alerts_away_title
+import nuvio.composeapp.generated.resources.settings_alerts_section_away
 import nuvio.composeapp.generated.resources.settings_alerts_cap_description
 import nuvio.composeapp.generated.resources.settings_alerts_cap_one_week
 import nuvio.composeapp.generated.resources.settings_alerts_cap_per_day
@@ -94,6 +100,7 @@ internal class NotificationsSettingsActions(
     val setQuietEnabled: (Boolean) -> Unit,
     val setQuietRange: (startMinute: Int, endMinute: Int) -> Unit,
     val setCap: (AlertCap) -> Unit,
+    val setAwayReminder: (AwayReminder) -> Unit,
     val undoSendingLessOften: () -> Unit,
     val setAskAtEndOfEpisode: (Boolean) -> Unit,
     val setShowAlert: (contentType: String, contentId: String, title: String, on: Boolean) -> Unit,
@@ -109,6 +116,7 @@ internal class NotificationsSettingsActions(
             setQuietEnabled = EpisodeReleaseNotificationsRepository::setQuietHoursEnabled,
             setQuietRange = EpisodeReleaseNotificationsRepository::setQuietHoursRange,
             setCap = EpisodeReleaseNotificationsRepository::setCap,
+            setAwayReminder = EpisodeReleaseNotificationsRepository::setAwayReminder,
             undoSendingLessOften = EpisodeReleaseNotificationsRepository::undoSendingLessOften,
             setAskAtEndOfEpisode = { ask -> EpisodeReleaseNotificationsRepository.setDontAskAgain(!ask) },
             setShowAlert = { type, id, title, on -> EpisodeReleaseNotificationsRepository.setShowAlert(type, id, title, on) },
@@ -221,6 +229,33 @@ internal fun LazyListScope.notificationsSettingsContent(
                 if (uiState.sendingLessOften) {
                     SettingsGroupDivider(isTablet = isTablet)
                     SendingLessOftenRow(isTablet = isTablet, onUndo = actions.undoSendingLessOften)
+                }
+            }
+        }
+    }
+
+    item {
+        SettingsSection(
+            title = stringResource(Res.string.settings_alerts_section_away),
+            isTablet = isTablet,
+        ) {
+            SettingsGroup(isTablet = isTablet) {
+                SettingsChipRow(
+                    title = stringResource(Res.string.settings_alerts_away_title),
+                    description = stringResource(Res.string.settings_alerts_away_description),
+                    isTablet = isTablet,
+                ) {
+                    AwayReminder.entries.forEach { choice ->
+                        Chip(
+                            label = if (choice == AwayReminder.Off) {
+                                stringResource(Res.string.settings_alerts_away_off)
+                            } else {
+                                stringResource(Res.string.settings_alerts_away_days, choice.days)
+                            },
+                            selected = uiState.awayReminder == choice,
+                            onClick = { actions.setAwayReminder(choice) },
+                        )
+                    }
                 }
             }
         }

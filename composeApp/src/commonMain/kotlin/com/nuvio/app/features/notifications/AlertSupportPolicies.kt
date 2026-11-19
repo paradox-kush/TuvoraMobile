@@ -53,11 +53,23 @@ internal sealed interface FireDecision {
 internal object FireTimeGate {
     /**
      * Re-checks an alert at the moment it is due: skipped if the app was opened today, delayed to the end of quiet
-     * hours if the OS delivered it late into them.
+     * hours if the OS delivered it late into them. The away reminder is also skipped when another Tuvora notification
+     * already went out today ([lastAlertSentAt]): Android may deliver a throttled job a day late, onto a day that
+     * has an episode alert, and the two must never arrive together.
      */
-    fun decide(now: Instant, zone: TimeZone, quietHours: QuietHours, lastOpenedAt: Instant?): FireDecision {
+    fun decide(
+        now: Instant,
+        zone: TimeZone,
+        quietHours: QuietHours,
+        lastOpenedAt: Instant?,
+        isAwayReminder: Boolean = false,
+        lastAlertSentAt: Instant? = null,
+    ): FireDecision {
         val local = now.toLocalDateTime(zone)
         if (lastOpenedAt != null && lastOpenedAt.toLocalDateTime(zone).date == local.date) return FireDecision.Skip
+        if (isAwayReminder && lastAlertSentAt != null && lastAlertSentAt.toLocalDateTime(zone).date == local.date) {
+            return FireDecision.Skip
+        }
         if (quietHours.contains(local.hour * 60 + local.minute)) {
             return FireDecision.DelayUntil(quietHours.endOfQuietFor(local).toInstant(zone))
         }

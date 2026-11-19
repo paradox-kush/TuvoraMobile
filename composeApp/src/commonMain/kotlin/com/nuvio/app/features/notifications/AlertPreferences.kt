@@ -17,6 +17,22 @@ enum class AlertTimingMode(val wire: String) {
     }
 }
 
+/**
+ * "Remind me what's new": one notification after this many days without opening Tuvora. [Off] is a choice the viewer
+ * made; no choice at all (null in [AlertPreferences.awayReminder]) takes the default from [AwayReminderPolicy.effective].
+ */
+enum class AwayReminder(val days: Int) {
+    Off(0),
+    Days3(3),
+    Days7(7),
+    Days14(14);
+
+    companion object {
+        /** Only the four listed values are valid; anything else (a stranger's 5, a string, a negative) is not a choice. */
+        fun fromDays(days: Int?): AwayReminder? = entries.firstOrNull { it.days == days }
+    }
+}
+
 /** Every choice the viewer can make about alerts, with the defaults a new install gets. */
 data class AlertPreferences(
     val timingMode: AlertTimingMode = AlertTimingMode.Learned,
@@ -26,6 +42,8 @@ data class AlertPreferences(
     val cap: AlertCap = AlertCap.PerDay,
     /** The end-of-episode prompt is never shown while this is on. */
     val dontAskAgain: Boolean = false,
+    /** The away reminder the viewer picked, or null for "never chose": then the default applies (see [AwayReminderPolicy.effective]). */
+    val awayReminder: AwayReminder? = null,
 ) {
     /** The send times in effect: the set time, the learned habit, or 09:00 while the habit is still being learned. */
     internal fun timesFor(habit: WatchHabitPolicy.Habit): AlertTimes = when (timingMode) {
@@ -46,6 +64,8 @@ internal data class StoredAlertPreferences(
     val quietEndMinute: Int = 8 * 60,
     val cap: String = AlertCap.PerDay.name,
     val dontAskAgain: Boolean = false,
+    /** [AwayReminder.days], or null when the viewer never chose (an invalid stored value reads the same). */
+    val awayReminderDays: Int? = null,
 ) {
     fun toModel(): AlertPreferences = AlertPreferences(
         timingMode = AlertTimingMode.fromWire(timingMode) ?: AlertTimingMode.Learned,
@@ -57,6 +77,7 @@ internal data class StoredAlertPreferences(
         ),
         cap = AlertCap.entries.firstOrNull { it.name == cap } ?: AlertCap.PerDay,
         dontAskAgain = dontAskAgain,
+        awayReminder = AwayReminder.fromDays(awayReminderDays),
     )
 
     companion object {
@@ -68,6 +89,7 @@ internal data class StoredAlertPreferences(
             quietEndMinute = model.quietHours.endMinute,
             cap = model.cap.name,
             dontAskAgain = model.dontAskAgain,
+            awayReminderDays = model.awayReminder?.days,
         )
     }
 }
@@ -82,8 +104,11 @@ internal const val MinutesPerDay = 24 * 60
  * travel: they describe this phone.
  */
 internal object AlertPreferencesSyncCodec {
+    /** `away_reminder_days` is written only once the viewer has chosen: an unchosen default depends on this device's permission, so it must not travel. */
     fun encode(preferences: AlertPreferences): JsonObject = JsonObject(
-        mapOf(
+        listOfNotNull(
+            preferences.awayReminder?.let { "away_reminder_days" to JsonPrimitive(it.days) },
+        ).toMap() + mapOf(
             "timing_mode" to JsonPrimitive(preferences.timingMode.wire),
             "set_time_minute" to JsonPrimitive(preferences.setTimeMinute),
             "quiet_hours_enabled" to JsonPrimitive(preferences.quietHours.enabled),
@@ -111,6 +136,9 @@ internal object AlertPreferencesSyncCodec {
             ),
             cap = cap ?: current.cap,
             dontAskAgain = flag("dont_ask_again") ?: current.dontAskAgain,
+            awayReminder = AwayReminder.fromDays(
+                (remote["away_reminder_days"] as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull,
+            ) ?: current.awayReminder,
         )
     }
 }

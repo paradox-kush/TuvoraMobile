@@ -44,12 +44,16 @@ class EpisodeReleaseNotificationWorker(
         )
         val lastOpened = EpisodeReleaseNotificationPlatform.lastAppOpenedEpochMs(applicationContext)
             ?.let { Instant.fromEpochMilliseconds(it) }
+        val lastAlertSent = EpisodeReleaseNotificationPlatform.lastAlertSentEpochMs(applicationContext)
+            ?.let { Instant.fromEpochMilliseconds(it) }
         when (
             val decision = FireTimeGate.decide(
                 now = Instant.fromEpochMilliseconds(System.currentTimeMillis()),
                 zone = TimeZone.currentSystemDefault(),
                 quietHours = quietHours,
                 lastOpenedAt = lastOpened,
+                isAwayReminder = inputData.getBoolean(EpisodeReleaseNotificationPlatform.workerAwayReminderKey, false),
+                lastAlertSentAt = lastAlertSent,
             )
         ) {
             FireDecision.Skip -> return Result.success()
@@ -81,6 +85,7 @@ class EpisodeReleaseNotificationWorker(
 
         NotificationManagerCompat.from(applicationContext)
             .notify(abs(requestId.hashCode()), notification)
+        EpisodeReleaseNotificationPlatform.recordAlertSent(applicationContext, System.currentTimeMillis())
 
         return Result.success()
     }

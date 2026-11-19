@@ -1010,6 +1010,16 @@ internal fun MainAppContent(
                         AppDeepLinkRepository.markConsumed(deepLink)
                     }
 
+                    AppDeepLink.Home -> {
+                        activateTab(AppScreenTab.Home)
+                        // Over a detail page or the player: leave the way Back does, until the tabs are showing.
+                        var guard = navController.routes.size
+                        while (navController.currentRoute !is TabsRoute && guard-- > 0) {
+                            if (!navController.popBackStack()) break
+                        }
+                        AppDeepLinkRepository.markConsumed(deepLink)
+                    }
+
                     is AppDeepLink.SetupCode -> {
                         // The code is held in memory by the setup port (never in the route). While the profile
                         // picker / launch loader is showing there is no shell to open the preview in, so the code

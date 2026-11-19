@@ -3015,7 +3015,7 @@
     <string name="settings_alerts_quiet_until">Until</string>
     <string name="settings_alerts_section_often">HOW OFTEN</string>
     <string name="settings_alerts_cap_title">At most</string>
-    <string name="settings_alerts_cap_description">New episodes on the same day arrive as one notification. Nothing is sent on a day you already opened Tuvora.</string>
+    <string name="settings_alerts_cap_description">Alerts and reminders count together. New episodes on the same day arrive as one notification. Nothing is sent on a day you already opened Tuvora.</string>
     <string name="settings_alerts_cap_per_day">1 a day</string>
     <string name="settings_alerts_cap_three_week">3 a week</string>
     <string name="settings_alerts_cap_one_week">1 a week</string>
@@ -3044,4 +3044,14 @@
     <string name="notifications_alert_body_list_more">%1$s and %2$d more are out now</string>
     <string name="notifications_alert_less_often">Sending these less often. Change in Settings</string>
 
+    <string name="notifications_away_title_one">A show you watch has new episodes</string>
+    <string name="notifications_away_title_many">%1$d shows you watch have new episodes</string>
+    <string name="notifications_away_names_two">%1$s and %2$s</string>
+    <string name="notifications_away_body_names">%1$s. Turn this off in Settings › Notifications.</string>
+    <string name="notifications_away_body_count">Open Tuvora to see them. Turn this off in Settings › Notifications.</string>
+    <string name="settings_alerts_section_away">WHEN YOU’VE BEEN AWAY</string>
+    <string name="settings_alerts_away_title">Remind me what’s new</string>
+    <string name="settings_alerts_away_description">One notification about your own shows if you haven’t opened Tuvora. Only one, never a series.</string>
+    <string name="settings_alerts_away_off">Off</string>
+    <string name="settings_alerts_away_days">%1$d days</string>
 </resources>
