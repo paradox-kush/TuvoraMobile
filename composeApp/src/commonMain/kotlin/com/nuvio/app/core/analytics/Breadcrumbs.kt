@@ -1,5 +1,6 @@
 package com.nuvio.app.core.analytics
 
+import com.nuvio.app.core.telemetry.api.firstPlayback
 import com.nuvio.app.core.journal.StartupJournal
 import com.nuvio.app.core.telemetry.api.TelemetryAccess
 
@@ -56,6 +57,7 @@ object Breadcrumbs {
         // The persisted note always updates: it must reflect reality at the moment of death
         // even when the analytics event below is deduped or rate-capped.
         crashWriter?.onPlaybackStarted(kind, engine, surface)
+        TelemetryAccess.current().firstPlayback(kind, engine)
         // Memory sampling runs only while a playback scope is open (and is cancelled when it closes).
         TelemetryAccess.current().onPlaybackScopeOpened()
 

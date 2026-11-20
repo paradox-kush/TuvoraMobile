@@ -1,5 +1,8 @@
 package com.nuvio.app.features.addons
 
+import com.nuvio.app.core.telemetry.api.FirstRunVocab
+import com.nuvio.app.core.telemetry.api.firstSourceAdded
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.core.build.AppFeaturePolicy
 import co.touchlab.kermit.Logger
 import com.nuvio.app.core.network.SupabaseProvider
@@ -232,6 +235,7 @@ object AddonRepository {
                 },
             )
             persist()
+            if (existingByUrl.isEmpty() && urls.isNotEmpty()) TelemetryAccess.current().firstSourceAdded(FirstRunVocab.KIND_ADDON, FirstRunVocab.VIA_SYNC)
             urls.forEach { url ->
                 val existing = existingByUrl[url]
                 val addon = _uiState.value.addons.firstOrNull { it.manifestUrl == url }
@@ -348,6 +352,7 @@ object AddonRepository {
             )
         }
         persist()
+        TelemetryAccess.current().firstSourceAdded(FirstRunVocab.KIND_ADDON, FirstRunVocab.VIA_MANUAL)
         pushToServer()
         return AddAddonResult.Success(manifest)
     }

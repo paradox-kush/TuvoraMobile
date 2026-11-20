@@ -31,7 +31,7 @@ internal object NSUserDefaultsKeyValue : TvKeyValue {
 internal class TvDurableMirrorFileStore(
     private val inner: TelemetryFileStore,
     private val kv: TvKeyValue,
-    private val mirrored: Set<String> = setOf("pending_crash.json", "sending.json"),
+    private val mirrored: Set<String> = setOf("pending_crash.json", "sending.json", "first_run_funnel.json"),
 ) : TelemetryFileStore {
     private fun key(name: String) = KEY_PREFIX + name
 

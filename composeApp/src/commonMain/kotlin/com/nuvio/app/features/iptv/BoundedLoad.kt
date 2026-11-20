@@ -1,5 +1,6 @@
 package com.nuvio.app.features.iptv
 
+import com.nuvio.app.core.telemetry.api.firstContentLoaded
 import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.features.trakt.TraktPlatformClock
 import kotlinx.coroutines.CoroutineScope
@@ -202,6 +203,11 @@ object BoundedLoad {
 
     private fun reportOutcome(surface: LoadSurface, outcome: LoadOutcome<*>, durationMs: Long, extra: Map<String, Any>) {
         val failed = outcome is LoadOutcome.Failed
+        // First-run funnel: BEFORE the per-surface report filter, so a quiet surface's success still counts. Settings and
+        // Calendar loads are not IPTV content (a setup-code preview must not use up the one-time step).
+        if (outcome is LoadOutcome.Loaded && surface != LoadSurface.SETTINGS && surface != LoadSurface.CALENDAR) {
+            runCatching { TelemetryAccess.current().firstContentLoaded(surface.key) }
+        }
         if (!surface.reportsEveryOutcome) {
             if (!failed) return
             val sent = reportedFailures[surface] ?: 0

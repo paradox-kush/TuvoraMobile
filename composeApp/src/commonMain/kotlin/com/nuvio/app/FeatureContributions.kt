@@ -2,6 +2,12 @@ package com.nuvio.app
 
 import com.nuvio.app.core.diag.installLogRedaction
 import com.nuvio.app.core.telemetry.api.TelemetryStartup
+import com.nuvio.app.core.telemetry.internal.FirstRunInstallSignals
+import com.nuvio.app.features.addons.AddonStorage
+import com.nuvio.app.features.iptv.XtreamAccountStorage
+import com.nuvio.app.features.profiles.MAX_PROFILES
+import com.nuvio.app.features.watched.WatchedStorage
+import com.nuvio.app.features.watchprogress.WatchProgressStorage
 import com.nuvio.app.core.contracts.IptvCatalogAccess
 import com.nuvio.app.core.contracts.IptvSubtitleIdAccess
 import com.nuvio.app.core.contracts.LivePlaybackAccess
@@ -67,6 +73,8 @@ fun registerLogicFeatureContributions() {
     installLogRedaction()
     // Telemetry v2: publish the service the platform started first (crash handler up before DI) as the app's port.
     TelemetryStartup.registerPort()
+    // First-run funnel: decides new vs existing install ONCE, here, before anything else creates user state.
+    TelemetryStartup.startFirstRunFunnel(FirstRunExistingInstallProbe::hasUserState)
     // S10: app-wide memory port (AppMemory + BudgetRegistry) — image loaders, player buffer
     // sizing, and the platform startup probes size their budgets through this.
     MemoryPortAccess.register(MemoryPortImpl)
@@ -97,6 +105,20 @@ fun registerLogicFeatureContributions() {
     // Calendar + reminders: the followed-title and account ports (this file is the one place that may name the
     // library / progress / watched / Trakt / TMDB / profile objects). Lazy: nothing is read until a surface asks.
     CalendarFeature.register(CalendarSourcesAdapter, CalendarAccountsAdapter, CalendarSportsAdapter)
+}
+
+/**
+ * "Does this install already hold user state?" for the first-run funnel: any playlist, user add-on or watch
+ * history in ANY profile slot, straight from storage (no repository load, no network). The support-code signal is
+ * read by the telemetry service itself, before it generates one.
+ */
+private object FirstRunExistingInstallProbe {
+    fun hasUserState(): Boolean = (1..MAX_PROFILES).any { profile ->
+        FirstRunInstallSignals.playlistsPresent(XtreamAccountStorage.loadAccountsJson(profile)) ||
+            AddonStorage.loadInstalledAddonUrls(profile).isNotEmpty() ||
+            FirstRunInstallSignals.hasEntries(WatchProgressStorage.loadPayload(profile)) ||
+            FirstRunInstallSignals.hasEntries(WatchedStorage.loadPayload(profile))
+    }
 }
 
 /** Local reads only — no network. Maps the app's own models to the Calendar's neutral types. */

@@ -1,5 +1,8 @@
 package com.nuvio.app.features.iptv
 
+import com.nuvio.app.core.telemetry.api.FirstRunVocab
+import com.nuvio.app.core.telemetry.api.firstSourceAdded
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
 import com.nuvio.app.core.build.AppFeaturePolicy
@@ -368,6 +371,7 @@ internal class SetupCodeController(
 
     private suspend fun onRedeemed(preview: SetupPreview, profile: Int, summary: RedeemSummary) {
         telemetry.redeemed(summary.added, summary.updated, if (summary.alreadyRedeemed) "already_redeemed" else "redeemed")
+        if (summary.added > 0 || summary.addedAddons > 0) TelemetryAccess.current().firstSourceAdded(if (summary.added > 0) FirstRunVocab.KIND_UNKNOWN else FirstRunVocab.KIND_ADDON, FirstRunVocab.VIA_SETUP_CODE)
         // ONE playlist pull, for the profile that received the playlists. The pull brings the rows in
         // (and refreshes the managed map through the sync participant); another profile's playlists
         // arrive when that profile is next used, so only its managed map is refreshed.

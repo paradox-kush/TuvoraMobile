@@ -1,5 +1,8 @@
 package com.nuvio.app.features.servers
 
+import com.nuvio.app.core.telemetry.api.FirstRunVocab
+import com.nuvio.app.core.telemetry.api.firstSourceAdded
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import co.touchlab.kermit.Logger
 import com.nuvio.app.features.profiles.ProfileRepository
 import kotlinx.atomicfu.locks.SynchronizedObject
@@ -268,6 +271,7 @@ object ServerRepository {
         }
         val connection = draft.copy(libraries = mergeLibraries(existing?.libraries.orEmpty(), libraries))
         store(connection, signIn.token, local = managedBridgeId == null)
+        TelemetryAccess.current().firstSourceAdded(FirstRunVocab.KIND_MEDIA_SERVER, if (managedBridgeId == null) FirstRunVocab.VIA_MANUAL else FirstRunVocab.VIA_UNKNOWN)
         existing?.let { deleteCredential(it.credentialRef) }
         return connection
     }
@@ -359,6 +363,7 @@ object ServerRepository {
         }
         syncState = ServerSyncState(pendingPush = false, syncedKeys = keys.toList())
         if (connections + managed != current) saveConnections(connections + managed, invalidate = true, local = false)
+        if (current.isEmpty() && connections.isNotEmpty()) TelemetryAccess.current().firstSourceAdded(FirstRunVocab.KIND_MEDIA_SERVER, FirstRunVocab.VIA_SYNC)
         persistSyncState()
         markUnauthenticated(connections)
         return true

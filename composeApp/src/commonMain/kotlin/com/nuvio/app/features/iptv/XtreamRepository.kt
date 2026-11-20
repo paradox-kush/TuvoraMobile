@@ -1,5 +1,8 @@
 package com.nuvio.app.features.iptv
 
+import com.nuvio.app.core.telemetry.api.FirstRunVocab
+import com.nuvio.app.core.telemetry.api.firstSourceAdded
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.features.iptv.content.IptvContentDb
 import com.nuvio.app.features.iptv.match.XtreamMatchIndex
 import com.nuvio.app.features.iptv.match.XtreamTmdbResolver
@@ -310,6 +313,7 @@ object XtreamRepository : IptvCatalog {
                 .onSuccess {
                     val updated = _uiState.value.accounts.filterNot { it.id == account.id } + account
                     _uiState.update { it.copy(accounts = updated, isValidating = false) }
+                    if (existingId == null) TelemetryAccess.current().firstSourceAdded(FirstRunVocab.KIND_M3U, FirstRunVocab.VIA_MANUAL)
                     recordPending { it.recordAdd(account) }   // B24 v2: durable add intent (file playlist)
                     persistAndReport(onResult)
                 }
@@ -399,6 +403,7 @@ object XtreamRepository : IptvCatalog {
                     }
                     val updated = _uiState.value.accounts.filterNot { it.id == account.id } + toStore
                     _uiState.update { it.copy(accounts = updated, isValidating = false) }
+                    if (existing == null) TelemetryAccess.current().firstSourceAdded(FirstRunVocab.kindOfPlaylist(toStore.sourceType), FirstRunVocab.VIA_MANUAL)
                     // Start the catalog index now, not on first play — minutes on budget devices.
                     XtreamTmdbResolver.warmUp(listOf(toStore))
                     if (existing != null && toStore != account) {
@@ -437,6 +442,7 @@ object XtreamRepository : IptvCatalog {
             return -1
         }
         for (account in fresh) recordPending { it.recordAdd(account) }
+        TelemetryAccess.current().firstSourceAdded(FirstRunVocab.kindOfPlaylist(fresh.first().sourceType), FirstRunVocab.VIA_SETUP_CODE)
         return fresh.size
     }
 
@@ -789,6 +795,7 @@ object XtreamRepository : IptvCatalog {
         currentProfileId = profileId
         val before = _uiState.value.accounts
         _uiState.update { it.copy(accounts = accounts) }
+        if (before.isEmpty() && accounts.isNotEmpty()) TelemetryAccess.current().firstSourceAdded(FirstRunVocab.kindOfPlaylist(accounts.first().sourceType), FirstRunVocab.VIA_SYNC)
         // Step 0.3: a server list changed on another device restarts this device on the main server.
         val beforeById = before.associateBy { it.id }
         for (acc in accounts) {

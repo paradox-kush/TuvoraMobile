@@ -9,6 +9,15 @@ object TelemetryStartup {
         TelemetryRuntime.service?.let { TelemetryAccess.register(it) }
     }
 
+    /**
+     * First-run funnel start: call once per process, early (the logic-feature registration does), before anything
+     * creates user state. [otherExistingSignals] answers "does this install already hold a playlist, add-on or watch
+     * history?" and is asked only on the first launch of a build that has the funnel.
+     */
+    fun startFirstRunFunnel(otherExistingSignals: () -> Boolean) {
+        TelemetryRuntime.service?.startFirstRunFunnel(otherExistingSignals)
+    }
+
     /** Crash hook body for platform uncaught-exception handlers (iOS `setUnhandledExceptionHook`). Never throws. */
     fun onUncaught(threadName: String, error: Throwable) = TelemetryRuntime.onUncaught(threadName, error)
 }

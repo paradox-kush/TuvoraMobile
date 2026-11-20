@@ -28,6 +28,13 @@ interface TelemetryPort {
      */
     fun emit(event: String, props: Map<String, Any>)
 
+    /**
+     * First-run funnel step (`first_run_step`): at most once per install, never on an install that predates the
+     * feature, consent-gated. Use the [firstSourceAdded] / [firstContentLoaded] / [firstPlayback] helpers; the step
+     * props are reduced to closed vocabularies in the policy.
+     */
+    fun firstRunStep(step: FirstRunStep, props: Map<String, Any> = emptyMap())
+
     /** Mirrors an abnormal process exit as an exception so error tracking groups it (host SDK permitting). */
     fun reportException(error: Throwable, props: Map<String, Any>)
 
@@ -109,6 +116,7 @@ private object NoopTelemetryPort : TelemetryPort {
     override fun record(entry: DiagEntry) {}
     override fun reportError(event: String, props: Map<String, Any>) {}
     override fun emit(event: String, props: Map<String, Any>) {}
+    override fun firstRunStep(step: FirstRunStep, props: Map<String, Any>) {}
     override fun reportException(error: Throwable, props: Map<String, Any>) {}
     override suspend fun sendUserReport(category: ReportCategory, surface: ReportSurface, context: ReportContext) = ReportResult.Failed
     override fun consentEnabled(): Boolean = false

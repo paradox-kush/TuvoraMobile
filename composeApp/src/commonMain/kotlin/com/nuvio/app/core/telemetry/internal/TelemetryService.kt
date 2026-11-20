@@ -7,7 +7,10 @@ import com.nuvio.app.core.telemetry.api.ReportContext
 import com.nuvio.app.core.telemetry.api.ReportResult
 import com.nuvio.app.core.telemetry.api.ReportSurface
 import com.nuvio.app.core.telemetry.api.TelemetryPort
+import com.nuvio.app.core.telemetry.api.FirstRunStep
 import kotlinx.atomicfu.atomic
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,6 +36,9 @@ internal class TelemetryService(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : TelemetryPort {
 
+    // Read BEFORE the code is generated: a code already on disk is an existing-install signal (first-run funnel).
+    private val supportCodeExistedAtStart: Boolean = SupportCodeGenerator.isValid(runCatching { host.loadSupportCode() }.getOrNull())
+
     override val supportCode: String = resolveSupportCode()
 
     private val health = SessionHealth(host.nowMs())
@@ -41,6 +47,13 @@ internal class TelemetryService(
     private val hardware = atomic<Map<String, Any>>(emptyMap())
     private val samplerJob = atomic<Job?>(null)
     private val sentCrashIds = atomic<Set<String>>(emptySet())
+
+    // First-run funnel: state is read-modify-written under this lock so a step can never be emitted twice.
+    private val funnelLock = SynchronizedObject()
+    private var funnelState: FirstRunState? = null
+    private var funnelStarted = false
+    private val sdkReady = atomic(false)
+    private val heldFunnelEvents = atomic<List<Map<String, Any>>>(emptyList())
 
     // Freed first thing in the crash handler so an OutOfMemoryError still leaves room to write a record.
     private val memoryReserve = atomic<ByteArray?>(ByteArray(MEMORY_RESERVE_BYTES))
@@ -69,12 +82,71 @@ internal class TelemetryService(
      * once, then the hardware profile when its probe (codec lists, display modes) finishes off the caller's thread.
      */
     fun onSdkReady() {
+        sdkReady.value = true
+        flushHeldFunnelEvents()
         runCatching { host.registerSuperProperties(mapOf(SUPPORT_CODE_PROPERTY to supportCode) + buildProperties()) }
         scope.launch {
             val hw = runCatching { host.hardwareProfile() }.getOrDefault(emptyMap())
             hardware.value = hw
             if (hw.isNotEmpty()) runCatching { host.registerSuperProperties(hw) }
         }
+    }
+
+    /**
+     * First-run funnel start, once per process (a second call is ignored). Decides new vs existing ONCE when no state is
+     * persisted: existing = a support code was already on disk when this service started, or [otherExistingSignals]
+     * (playlists, add-ons, watch history; only asked then). Call it before anything else creates user state.
+     */
+    fun startFirstRunFunnel(otherExistingSignals: () -> Boolean) {
+        val emit = synchronized(funnelLock) {
+            if (funnelStarted) return
+            funnelStarted = true
+            val stored = FirstRunStateCodec.decode(runCatching { host.store.read(FIRST_RUN_FILE) }.getOrNull())
+            val t = FirstRunFunnel.start(stored, host.nowMs()) {
+                supportCodeExistedAtStart || runCatching(otherExistingSignals).getOrDefault(true)
+            }
+            commitFunnel(stored, t)
+        }
+        emit?.let(::deliverFunnelEvent)
+    }
+
+    override fun firstRunStep(step: FirstRunStep, props: Map<String, Any>) {
+        val emit = synchronized(funnelLock) {
+            val t = FirstRunFunnel.record(funnelState, step, host.nowMs(), props)
+            commitFunnel(funnelState, t)
+        }
+        emit?.let(::deliverFunnelEvent)
+    }
+
+    /** Caller holds [funnelLock]. Persists a changed state (best effort: a failed write keeps the in-memory gate). */
+    private fun commitFunnel(before: FirstRunState?, t: FirstRunTransition): Map<String, Any>? {
+        val next = t.state
+        if (next != null) {
+            funnelState = next
+            if (next != before) runCatching { host.store.writeAtomic(FIRST_RUN_FILE, FirstRunStateCodec.encode(next)) }
+        } else if (funnelState == null) {
+            funnelState = before
+        }
+        return t.emit
+    }
+
+    /** Before the SDK is up (Android registers features first) a step waits; the consent check runs when it is sent. */
+    private fun deliverFunnelEvent(props: Map<String, Any>) {
+        if (!sdkReady.value) {
+            while (true) {
+                val cur = heldFunnelEvents.value
+                if (heldFunnelEvents.compareAndSet(cur, cur + props)) break
+            }
+            if (!sdkReady.value) return
+            flushHeldFunnelEvents()
+            return
+        }
+        emit(FirstRunFunnel.EVENT, props)
+    }
+
+    private fun flushHeldFunnelEvents() {
+        val held = heldFunnelEvents.getAndSet(emptyList())
+        for (props in held) emit(FirstRunFunnel.EVENT, props)
     }
 
     /** Re-register after any SDK reset (a reset clears super properties). */
@@ -371,6 +443,7 @@ internal class TelemetryService(
         const val PENDING_CRASH_FILE = "pending_crash.json"
         const val SENDING_CRASH_FILE = "sending.json"
         const val RING_FILE = "ring.json"
+        const val FIRST_RUN_FILE = "first_run_funnel.json"
         const val SCHEMA_VERSION = 1
         const val ERROR_TRAIL_ENTRIES = 40
         const val REPORT_TRAIL_ENTRIES = 80

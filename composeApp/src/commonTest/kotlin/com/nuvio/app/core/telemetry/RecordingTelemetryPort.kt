@@ -15,6 +15,7 @@ internal class RecordingTelemetryPort(private val onEmit: (String, Map<String, A
     override fun record(entry: DiagEntry) { entries += entry }
     override fun reportError(event: String, props: Map<String, Any>) = onEmit(event, props)
     override fun emit(event: String, props: Map<String, Any>) = onEmit(event, props)
+    override fun firstRunStep(step: com.nuvio.app.core.telemetry.api.FirstRunStep, props: Map<String, Any>) {}
     override fun reportException(error: Throwable, props: Map<String, Any>) {}
     override suspend fun sendUserReport(category: ReportCategory, surface: ReportSurface, context: ReportContext): ReportResult =
         ReportResult.Sent(displaySupportCode())
