@@ -41,7 +41,10 @@ fun LivePlaybackFreezeReporter.onLiveSnapshot(
      * rendered a frame). The surface must show a terminal error with Retry — never a black screen.
      */
     onGaveUp: () -> Unit = {},
+    /** The stream's shape (codec, resolution, fps, hdr) for the failure events, pulled only when one is built. */
+    streamShape: (() -> com.nuvio.app.core.analytics.DecodeHealthPolicy.StreamShape?)? = null,
 ) {
+    shapeProvider = streamShape
     val nowMs = TraktPlatformClock.nowEpochMs()
     val started = LivePlaybackStartupPolicy.hasStarted(snapshot)
 

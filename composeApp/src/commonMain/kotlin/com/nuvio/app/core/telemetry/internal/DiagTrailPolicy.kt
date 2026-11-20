@@ -22,7 +22,7 @@ internal object DiagTrailPolicy {
     val ALLOWED_FIELDS: Set<String> = setOf(
         "engine", "phase", "outcome", "kind", "surface", "source", "lane", "reason", "state", "level", "screen",
         "from", "to", "bucket", "error_type", "error_class", "code", "container", "category",
-        "attempt", "count", "total", "programmes", "channels", "channels_covered", "duration_ms", "position_ms",
+        "issue", "fault", "attempt", "count", "total", "programmes", "channels", "channels_covered", "duration_ms", "position_ms",
         "java_mb", "java_max_mb", "native_mb", "pss_mb", "ram_free_mb", "ram_total_mb", "trim_level",
     )
 

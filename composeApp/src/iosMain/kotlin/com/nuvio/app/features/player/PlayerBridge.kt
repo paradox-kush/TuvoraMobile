@@ -204,6 +204,24 @@ interface NuvioPlayerLiveCacheBridge {
 }
 
 /**
+ * Optional capability of an mpv-backed [NuvioPlayerBridge]: decode-health facts for telemetry
+ * ([com.nuvio.app.core.analytics.DecodeHealthPolicy], reporting only). One text line in the format
+ * [com.nuvio.app.core.analytics.DecodeHealthBridgeWire] parses, read from a lock-guarded copy of observed mpv
+ * properties and ad/ao/vd warning counts, never from mpv itself. Hand-mirrored in Swift (iPhone and Apple TV
+ * `MPVPlayerBridgeImpl`), which Gradle cannot check. A separate interface (checked with `as?`) so a bridge
+ * without it, the Apple TV AVPlayer lane, keeps compiling and simply feeds no decode-health signals.
+ */
+interface NuvioPlayerDecodeHealthBridge {
+    fun getDecodeHealthLine(): String
+}
+
+/** The bridge's decode-health signals for this poll, or null when it has none to give. */
+internal fun NuvioPlayerBridge.decodeHealthSignals(): com.nuvio.app.core.analytics.DecodeHealthPolicy.Signals? =
+    (this as? NuvioPlayerDecodeHealthBridge)
+        ?.let { runCatching { it.getDecodeHealthLine() }.getOrNull() }
+        ?.let(com.nuvio.app.core.analytics.DecodeHealthBridgeWire::parse)
+
+/**
  * Registry for the player bridge factory.
  * Swift calls [registerFactory] during app startup before Compose is initialized.
  */

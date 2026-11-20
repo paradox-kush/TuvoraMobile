@@ -214,6 +214,8 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
         // can wedge the same way, with no error for any existing report path to see.
         val isLiveStream = activeStreamType.equals("live", ignoreCase = true)
         val freezeReporter = remember { LivePlaybackFreezeReporter() }
+        // Decode-health telemetry (reporting only): one reporter per player session, fed from the same snapshots.
+        val decodeHealthReporter = remember { newDecodeHealthReporter() }
         val singleUseLink = remember(activeVideoId, isLiveStream) {
             LiveLinkReconnectPolicy.modeFor(
                 isStalkerSource = activeVideoId?.let {
@@ -383,6 +385,13 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                             )
                         }
                         if (isLiveStream) {
+                            decodeHealthReporter.onLiveSnapshot(
+                                snapshot = snapshot,
+                                streamInfo = { playerController?.getStreamInfo() },
+                                streamUrl = playerSurfaceSourceUrl,
+                                contentId = activeVideoId,
+                                surface = LIVE_FREEZE_SURFACE_PLAYER,
+                            )
                             freezeReporter.onLiveSnapshot(
                                 snapshot = snapshot,
                                 engine = { playerController?.getStreamInfo()?.playerEngine },
@@ -391,6 +400,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                                 surface = LIVE_FREEZE_SURFACE_PLAYER,
                                 reconnector = freezeReconnector,
                                 reconnect = { playerController?.retry() },
+                                streamShape = { decodeHealthShape(playerController?.getStreamInfo(), playerSurfaceSourceUrl) },
                                 // Video-only freeze: the stream is still delivering audio, so reset
                                 // the decoder before spending a live link on a re-resolve.
                                 resetVideo = { playerController?.resetVideoPipeline() == true },

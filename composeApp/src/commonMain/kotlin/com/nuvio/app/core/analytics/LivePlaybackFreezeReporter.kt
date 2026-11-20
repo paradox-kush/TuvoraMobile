@@ -36,6 +36,17 @@ class LivePlaybackFreezeReporter(
     private var profile: Profile? = null
     private var armed = false
 
+    /**
+     * Stream-shape facts for the failure events (codec, resolution, fps, hdr, decode mode; tracker B265),
+     * read only when an event is built. Set by the snapshot adapter. Never a host or URL.
+     */
+    internal var shapeProvider: (() -> DecodeHealthPolicy.StreamShape?)? = null
+
+    private fun MutableMap<String, Any>.putShape() {
+        val shape = runCatching { shapeProvider?.invoke() }.getOrNull() ?: return
+        for ((key, value) in DecodeHealthPolicy.shapeProperties(shape)) if (key !in this) put(key, value)
+    }
+
     /** Whether a live channel is currently being watched for freezes. */
     val isArmed: Boolean get() = armed
 
@@ -101,6 +112,7 @@ class LivePlaybackFreezeReporter(
                 put("iptv_kind", activeProfile.iptvKind)
                 put("freeze_kind", (freezeKind ?: LivePlaybackFreezePolicy.Kind.VIDEO_STALLED).name.lowercase())
                 put("frozen_ms", (nowMs - freezeStartedAtMs).coerceAtLeast(0L))
+                putShape()
             },
         )
     }
@@ -356,6 +368,7 @@ class LivePlaybackFreezeReporter(
 
             put("stream_container", activeProfile.streamContainer)
             put("iptv_kind", activeProfile.iptvKind)
+            putShape()
         }
 
         capture(EVENT, properties)

@@ -6,7 +6,7 @@ import TuvoraCore
 
 // MARK: - Player Bridge Implementation (Kotlin protocol conformance)
 
-final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayControl, TvVideoFormatSource, NuvioPlayerLinkReconnectBridge, NuvioPlayerLiveCacheBridge {
+final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayControl, TvVideoFormatSource, NuvioPlayerLinkReconnectBridge, NuvioPlayerLiveCacheBridge, NuvioPlayerDecodeHealthBridge {
     func setAudioDelayMs(delayMs: Int32) { playerVC?.setAudioDelayMs(Int(delayMs)) }
     /// Live display frame-rate matching (LiveDisplayCriteriaPolicy): the cached format, no mpv read.
     func videoFormat() -> TvVideoFormat? { playerVC?.liveVideoFormat }
@@ -254,6 +254,9 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayContro
         return (dropped << 32) | delayed
     }
     func getErrorMessage() -> String { playerVC?.currentErrorMessage ?? "" }
+    /// NuvioPlayerDecodeHealthBridge (Kotlin, hand-mirrored): one text line of decode-health facts, read from a
+    /// lock-guarded copy (DecodeHealthShadow), never from mpv. See DecodeHealthBridgeWire in Kotlin for the format.
+    func getDecodeHealthLine() -> String { playerVC?.decodeHealthLine() ?? "" }
     func getStreamInfoJson() -> String { playerVC?.streamInfoJson() ?? "" }
 
     func destroy() {
@@ -471,6 +474,13 @@ final class MPVPlayerViewController: UIViewController {
     /// these are the closest mpv has to "the picture reached the screen" (there is no true
     /// presented-frames property). Snapshot diagnostics only for now.
     var voDroppedFrames: Int64 = 0
+
+    /// Decode-health telemetry facts (reporting only); see DecodeHealthShadow.
+    let decodeHealth = DecodeHealthShadow()
+
+    func decodeHealthLine() -> String {
+        decodeHealth.line(voDropped: voDroppedFrames, fps: cachedRenderFrameRate)
+    }
     var voDelayedFrames: Int64 = 0
     var currentErrorMessage: String {
         errorStateLock.lock()
@@ -836,6 +846,10 @@ final class MPVPlayerViewController: UIViewController {
         mpv_observe_property(mpv, 0, "seeking", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "track-list", MPV_FORMAT_NODE)
         mpv_observe_property(mpv, 0, "aid", MPV_FORMAT_INT64)
+        // Decode-health telemetry: handled on the event queue into DecodeHealthShadow, never forwarded to Main.
+        for (name, format) in DecodeHealthShadow.observed {
+            mpv_observe_property(mpv, 0, name, format)
+        }
 
         mpv_set_wakeup_callback(mpv, { ctx in
             let vc = unsafeBitCast(ctx, to: MPVPlayerViewController.self)
@@ -1069,6 +1083,7 @@ final class MPVPlayerViewController: UIViewController {
     }
 
     func setMuted(_ muted: Bool) {
+        decodeHealth.setMuted(muted)
         guard mpv != nil else { return }
         setFlag("mute", muted)
     }
@@ -1508,6 +1523,10 @@ final class MPVPlayerViewController: UIViewController {
             put("audioBitrate", getDouble("audio-bitrate"))
         }
 
+        let facts = decodeHealth.streamFacts
+        put("decodeMode", facts.decodeMode ?? "")
+        if let hdr = facts.hdr { fields.append("\"hdr\":\(hdr ? "true" : "false")") }
+
         return fields.isEmpty ? "" : "{" + fields.joined(separator: ",") + "}"
     }
 
@@ -1652,6 +1671,8 @@ final class MPVPlayerViewController: UIViewController {
                     // ranges here and skip the Main refresh the playback properties trigger.
                     if let data = eventPtr.pointee.data {
                         let property = UnsafePointer<mpv_event_property>(OpaquePointer(data)).pointee
+                        // Per-frame decode-health properties stay on this queue: no Main refresh for them.
+                        if self.decodeHealth.apply(name: String(cString: property.name), property: property) { break }
                         if String(cString: property.name) == "demuxer-cache-state" {
                             self.seekableRanges.set(MPVLiveCacheDecoder.seekableRanges(property))
                             break
@@ -1694,6 +1715,7 @@ final class MPVPlayerViewController: UIViewController {
                         // provider credentials included. Redact before the line is printed or
                         // composed into the on-screen playback error.
                         let text = LogRedaction.shared.text(message: String(cString: msg.pointee.text!))
+                        self.decodeHealth.noteLog(prefix: prefix, level: level)
                         self.appendPlaybackLog(prefix: prefix, level: level, text: text)
                         print("[MPV][\(prefix)] \(level): \(text)", terminator: "")
                     }

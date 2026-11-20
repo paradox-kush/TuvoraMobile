@@ -96,6 +96,9 @@ object TelemetryAccess {
     /** Function-reference form of [TelemetryPort.emit] for call sites that inject a `(String, Map) -> Unit`. */
     fun emit(event: String, props: Map<String, Any>) = port.emit(event, props)
 
+    /** Function-reference form of [TelemetryPort.reportError] (an error-class event, sent with the trail). */
+    fun reportError(event: String, props: Map<String, Any>) = port.reportError(event, props)
+
     /** Tests: back to the no-op port. */
     fun resetForTest() { port = NoopTelemetryPort }
 }

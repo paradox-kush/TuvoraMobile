@@ -1,5 +1,6 @@
 package com.nuvio.app.features.player
 
+import com.nuvio.app.core.analytics.DecodeHealthPolicy
 import com.nuvio.app.core.diag.MpvLogLevelPolicy
 import com.nuvio.app.core.diag.LogRedaction
 import androidx.compose.foundation.layout.Box
@@ -855,6 +856,12 @@ private fun ExoPlayerSurface(
         player
     }
 
+    // Decode-health telemetry feed (reporting only): counts sink/codec errors, underruns and drops for this player.
+    val decodeHealth = remember(exoPlayer) { ExoDecodeHealth().also { exoPlayer.addAnalyticsListener(it) } }
+    DisposableEffect(exoPlayer, decodeHealth) {
+        onDispose { runCatching { exoPlayer.removeAnalyticsListener(decodeHealth) } }
+    }
+
     val nowPlayingController = remember(context, exoPlayer) {
         AndroidPlayerNowPlayingController(
             context = context,
@@ -873,7 +880,7 @@ private fun ExoPlayerSurface(
     }
 
     fun dispatchExoPlayerSnapshot() {
-        val snapshot = exoPlayer.snapshot()
+        val snapshot = exoPlayer.snapshot(decodeHealth)
         latestOnSnapshot.value(snapshot)
         nowPlayingController.syncPlayback(snapshot)
     }
@@ -1167,7 +1174,7 @@ private fun ExoPlayerSurface(
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
-                latestOnSnapshot.value(exoPlayer.snapshot())
+                latestOnSnapshot.value(exoPlayer.snapshot(decodeHealth))
                 if (videoSize.width > 0 && videoSize.height > 0) {
                     videoAspectRatio = videoSize.width.toFloat() / videoSize.height.toFloat()
                 }
@@ -1366,6 +1373,10 @@ private fun ExoPlayerSurface(
                         audioSampleRate = audio?.sampleRate?.takeIf { it > 0 },
                         audioBitrate = audio?.bitrate?.takeIf { it > 0 },
                         playerEngine = ENGINE_LABEL_EXOPLAYER,
+                        hdr = video?.colorInfo?.colorTransfer?.let { it == C.COLOR_TRANSFER_ST2084 || it == C.COLOR_TRANSFER_HLG },
+                        decodeMode = decodeHealth.videoDecodeMode,
+                        // Format.NO_VALUE (-1) when the stream did not declare it (most live MPEG-TS): unknown.
+                        videoReorderDepth = video?.maxNumReorderSamples?.takeIf { it >= 0 },
                     )
                 }.getOrElse {
                     Log.w(TAG, "Failed to read ExoPlayer stream info: ${it.message}")
@@ -1938,6 +1949,7 @@ private fun LibmpvPlayerSurface(
                         "message=${diagnosticPlayerMessage(text)}",
                 )
                 errorLog.onLog(prefix, level, text)
+                view.noteDecodeLog(prefix, level)
             }
         }
         view.mpv.addObserver(observer)
@@ -2348,6 +2360,47 @@ private class NuvioLibmpvView(
     @Volatile private var obsVoDroppedFrames = 0L
     @Volatile private var obsVoDelayedFrames = 0L
 
+    // Decode-health telemetry shadows (reporting only). Same rule as every obs* field: written on the mpv event
+    // thread, read from snapshot() on Main, never an mpv call.
+    @Volatile private var obsAvSyncSec: Double? = null
+    @Volatile private var obsDecoderDroppedFrames = 0L
+    @Volatile private var obsHwdecCurrent: String? = null
+    @Volatile private var obsAudioSelected = false
+    @Volatile private var obsHdr: Boolean? = null
+    @Volatile private var obsAudioPtsChangedAtMs = 0L
+    @Volatile private var obsMuted = false
+    private val decodeAudioWarns = java.util.concurrent.atomic.AtomicInteger()
+    private val decodeVideoWarns = java.util.concurrent.atomic.AtomicInteger()
+
+    /**
+     * A warn-or-worse line from mpv's `ad`/`ao` (audio decoder, audio output) or `vd` (video decoder) module,
+     * counted only: the text never leaves the log observer (it can quote a URL). Called from the log observer.
+     */
+    fun noteDecodeLog(prefix: String, level: Int) {
+        if (level > MPV.mpvLogLevel.MPV_LOG_LEVEL_WARN) return
+        when (DecodeHealthPolicy.mpvLogSide(prefix)) {
+            DecodeHealthPolicy.MpvLogSide.AUDIO -> decodeAudioWarns.incrementAndGet()
+            DecodeHealthPolicy.MpvLogSide.VIDEO -> decodeVideoWarns.incrementAndGet()
+            null -> Unit
+        }
+    }
+
+    private fun decodeHealthSignals(): DecodeHealthPolicy.Signals {
+        val audioPtsAt = obsAudioPtsChangedAtMs
+        val advancing = obsAudioPtsSec != null &&
+            android.os.SystemClock.elapsedRealtime() - audioPtsAt < DECODE_HEALTH_AUDIO_FLAT_MS
+        return DecodeHealthPolicy.Signals(
+            audioDecoderErrors = decodeAudioWarns.get(),
+            videoDecoderErrors = decodeVideoWarns.get(),
+            droppedFrames = obsVoDroppedFrames + obsDecoderDroppedFrames,
+            audioAdvancing = if (obsAudioSelected) advancing else null,
+            audioSelected = obsAudioSelected,
+            audioMuted = obsMuted,
+            avSyncMs = obsAvSyncSec?.let { (it * 1000.0).toLong() },
+            videoFps = obsEstimatedVfFps.toFloat().takeIf { it > 0f } ?: 0f,
+        )
+    }
+
     /** mpv has opened the current file and read its tracks (upstream isOpening). Written on the event/ctl threads. */
     @Volatile private var fileLoaded = false
 
@@ -2406,6 +2459,9 @@ private class NuvioLibmpvView(
                 // Unavailable means no active VO — the same 0 a fresh core reports.
                 "frame-drop-count" -> obsVoDroppedFrames = 0L
                 "vo-delayed-frame-count" -> obsVoDelayedFrames = 0L
+                "decoder-frame-drop-count" -> obsDecoderDroppedFrames = 0L
+                "avsync" -> obsAvSyncSec = null
+                "hwdec-current" -> obsHwdecCurrent = null
             }
         }
 
@@ -2414,6 +2470,7 @@ private class NuvioLibmpvView(
                 "cache-buffering-state" -> obsCacheBufferingState = value.toInt()
                 "frame-drop-count" -> obsVoDroppedFrames = value
                 "vo-delayed-frame-count" -> obsVoDelayedFrames = value
+                "decoder-frame-drop-count" -> obsDecoderDroppedFrames = value
             }
         }
 
@@ -2434,7 +2491,14 @@ private class NuvioLibmpvView(
                     obsTimePosSec = value
                     obsPositionMs = shadowPositionSec(value).toMillis()
                 }
-                "audio-pts" -> obsAudioPtsSec = value
+                "audio-pts" -> {
+                    val previous = obsAudioPtsSec
+                    if (previous == null || kotlin.math.abs(value - previous) > 0.0005) {
+                        obsAudioPtsChangedAtMs = android.os.SystemClock.elapsedRealtime()
+                    }
+                    obsAudioPtsSec = value
+                }
+                "avsync" -> obsAvSyncSec = value
                 "audio-delay" -> obsAudioDelaySec = value
                 "demuxer-cache-time" -> obsCachePositionMs = value.toMillis()
                 "speed" -> obsSpeed = value
@@ -2445,12 +2509,22 @@ private class NuvioLibmpvView(
             }
         }
 
-        override fun eventProperty(property: String, value: String) = Unit
+        override fun eventProperty(property: String, value: String) {
+            if (property == "hwdec-current") obsHwdecCurrent = value
+        }
 
         override fun eventProperty(property: String, value: MPVNode) {
             when (property) {
-                "track-list" -> obsTrackList = value
-                "video-params" -> obsVideoParams = value
+                "track-list" -> {
+                    obsTrackList = value
+                    obsAudioSelected = runCatching {
+                        value.asArray()?.toList().orEmpty().any { it.nodeString("type") == "audio" && it.nodeBoolean("selected") == true }
+                    }.getOrDefault(false)
+                }
+                "video-params" -> {
+                    obsVideoParams = value
+                    obsHdr = runCatching { value.nodeString("gamma") }.getOrNull()?.let { it == "pq" || it == "hlg" }
+                }
                 "demuxer-cache-state" -> obsSeekableRanges = value.seekableRanges()
             }
         }
@@ -2639,6 +2713,10 @@ private class NuvioLibmpvView(
             // they are near-silent during healthy playback.
             "frame-drop-count" to MPV.mpvFormat.MPV_FORMAT_INT64,
             "vo-delayed-frame-count" to MPV.mpvFormat.MPV_FORMAT_INT64,
+            // Decode-health telemetry: decoder-side drops, the audio/video offset and the hwdec in use.
+            "decoder-frame-drop-count" to MPV.mpvFormat.MPV_FORMAT_INT64,
+            "avsync" to MPV.mpvFormat.MPV_FORMAT_DOUBLE,
+            "hwdec-current" to MPV.mpvFormat.MPV_FORMAT_STRING,
             "sid" to MPV.mpvFormat.MPV_FORMAT_INT64,
             "sub-text" to MPV.mpvFormat.MPV_FORMAT_STRING,
         )
@@ -2817,6 +2895,7 @@ private class NuvioLibmpvView(
             hasVideoTrack = obsVideoParams != null,
             voDroppedFrameCount = obsVoDroppedFrames,
             voDelayedFrameCount = obsVoDelayedFrames,
+            decodeHealth = decodeHealthSignals(),
             // ponytail: videoWidth/videoHeight left at their 0 defaults. Upstream read them via
             // mpv.getPropertyInt here, but snapshot() runs on the main thread and must stay mpv-free
             // (the ANR fix). To restore PiP aspect ratio, observe video-params/dw,dh in the property
@@ -2906,6 +2985,8 @@ private class NuvioLibmpvView(
             audioBitrate = (obsAudioBitrate ?: audio?.nodeDouble("demux-bitrate"))
                 ?.takeIf { it > 0.0 }?.toInt(),
             playerEngine = ENGINE_LABEL_LIBMPV,
+            hdr = obsHdr,
+            decodeMode = obsHwdecCurrent?.let { if (it.isBlank()) null else if (it == "no") "sw" else "hw" },
         )
     }.getOrElse {
         Log.w(TAG, "Failed to read libmpv stream info: ${it.message}")
@@ -3010,6 +3091,7 @@ private class NuvioLibmpvView(
             }
 
             override fun setMuted(muted: Boolean) {
+                obsMuted = muted
                 ctl { mpv.setPropertyBoolean("mute", muted) }
             }
 
@@ -3237,6 +3319,9 @@ private class NuvioLibmpvView(
 
 private const val MPV_DESTROY_WATCHDOG_MS = 20_000L
 
+/** The audio clock is "flat" (decode-health) once `audio-pts` has not moved for this long. */
+private const val DECODE_HEALTH_AUDIO_FLAT_MS = 2_000L
+
 private data class LibmpvTrack(
     val id: Int,
     val label: String,
@@ -3371,7 +3456,7 @@ private const val MPV_SUBTITLE_FONT_SIZE_MIN = 36
 private const val MPV_SUBTITLE_FONT_SIZE_MAX = 122
 private const val MPV_SUBTITLE_OUTLINE_SIZE_SCALE = 1.5
 
-private fun ExoPlayer.snapshot(): PlayerPlaybackSnapshot {
+private fun ExoPlayer.snapshot(decodeHealth: ExoDecodeHealth? = null): PlayerPlaybackSnapshot {
     val (videoWidth, videoHeight) = videoDimensions()
     val isLoading = playbackState == Player.STATE_IDLE || playbackState == Player.STATE_BUFFERING
     return PlayerPlaybackSnapshot(
@@ -3390,6 +3475,7 @@ private fun ExoPlayer.snapshot(): PlayerPlaybackSnapshot {
         // cannot keep alive, and the direct analogue of libvlc's `i_displayed_pictures`.
         videoProgressTicks = videoDecoderCounters?.renderedOutputBufferCount?.toLong() ?: 0L,
         hasVideoTrack = videoFormat != null,
+        decodeHealth = decodeHealth?.signals(this),
     )
 }
 

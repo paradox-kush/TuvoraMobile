@@ -532,6 +532,7 @@ private fun PlatformPlayerSurfaceInner(
                 hasVideoTrack = videoTicks >= 0L,
                 voDroppedFrameCount = voFrameStats ushr 32,
                 voDelayedFrameCount = voFrameStats and 0xFFFF_FFFFL,
+                decodeHealth = bridge.decodeHealthSignals(),
             )
             // The error first, then the snapshot: a failed live open is classified from its text (reason line,
             // bounded open retry) before its ended snapshot can read as a silent end.

@@ -112,6 +112,8 @@ import com.nuvio.app.features.player.LIVE_FREEZE_SURFACE_DOCKED
 import com.nuvio.app.features.player.LivePlaybackStartupPolicy
 import com.nuvio.app.features.player.LiveReconnectStatusLine
 import com.nuvio.app.features.player.LiveReplayLaunch
+import com.nuvio.app.features.player.decodeHealthShape
+import com.nuvio.app.features.player.newDecodeHealthReporter
 import com.nuvio.app.features.player.onLiveSnapshot
 import com.nuvio.app.features.player.onLiveSnapshotStopped
 import com.nuvio.app.features.player.PlatformPlayerSurface
@@ -252,6 +254,7 @@ fun LiveTvScreen(
     // Survives channel switches (this composable stays alive), so the reporter is re-armed
     // per channel below rather than recreated.
     val freezeReporter = remember { LivePlaybackFreezeReporter() }
+    val decodeHealthReporter = remember { newDecodeHealthReporter() }
     val freezeReconnector = remember { LivePlaybackReconnector(freezeReporter) }
     // "Reconnecting… (attempt N of M)" + why; owned by the reconnector, this screen only reads it.
     val reconnectStatus by freezeReconnector.status.collectAsState()
@@ -1315,6 +1318,13 @@ fun LiveTvScreen(
                         // armed against a replay it would report a freeze on every successful
                         // catch-up and spend a provider connection re-minting a working URL.
                         if (CatchUpPlayback.armsFreezeWatchdog(replayOnScreen())) {
+                            decodeHealthReporter.onLiveSnapshot(
+                                snapshot = it,
+                                streamInfo = { controller?.getStreamInfo() },
+                                streamUrl = source?.url,
+                                contentId = currentContentId,
+                                surface = LIVE_FREEZE_SURFACE_DOCKED,
+                            )
                             freezeReporter.onLiveSnapshot(
                                 snapshot = it,
                                 engine = { controller?.getStreamInfo()?.playerEngine },
@@ -1326,6 +1336,7 @@ fun LiveTvScreen(
                                 // expiring tokens, so replaying the same URL can reconnect to a
                                 // link the provider has already invalidated.
                                 reconnect = { spacedAutomaticReMint(mint = reResolve) },
+                                streamShape = { decodeHealthShape(controller?.getStreamInfo(), source?.url) },
                                 // Video-only freeze: the stream is still delivering audio, so reset
                                 // the decoder before spending a live link on a re-resolve.
                                 resetVideo = { controller?.resetVideoPipeline() == true },

@@ -352,6 +352,12 @@ data class PlayerPlaybackSnapshot(
      * per the manual. Same caveats and purpose as [voDroppedFrameCount].
      */
     val voDelayedFrameCount: Long = 0L,
+    /**
+     * Cumulative decoder-health facts for [com.nuvio.app.core.analytics.DecodeHealthPolicy] (reporting
+     * only). Null on engines that feed none. Each engine fills what it can observe; see the policy for
+     * the meaning of every field.
+     */
+    val decodeHealth: com.nuvio.app.core.analytics.DecodeHealthPolicy.Signals? = null,
 )
 
 data class PlayerNowPlayingInfo(
@@ -385,6 +391,12 @@ data class PlayerStreamInfo(
     val audioBitrate: Int? = null,
     /** Which engine produced these values, e.g. "ExoPlayer" or "libmpv". */
     val playerEngine: String? = null,
+    /** HDR transfer in use (PQ / HLG), when the engine knows; null when unknown. */
+    val hdr: Boolean? = null,
+    /** `hw` or `sw` video decoding, when the engine knows; null when unknown. */
+    val decodeMode: String? = null,
+    /** Video reorder depth (0 = no B-frames), when the engine can say; null otherwise. */
+    val videoReorderDepth: Int? = null,
 ) {
     val hasAnyValue: Boolean
         get() = videoCodec != null || videoWidth != null || videoFrameRate != null ||
