@@ -137,8 +137,6 @@ internal fun normalizeSeriesType(type: String): String = when (type.trim().lower
     else -> type.trim().lowercase()
 }
 
-internal fun isSeriesLibraryType(type: String): Boolean = normalizeSeriesType(type) == "series"
-
 internal fun releaseDateIso(rawValue: String?): String? {
     return parseEpisodeReleaseLocalDate(rawValue)
 }

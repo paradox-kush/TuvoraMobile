@@ -377,6 +377,8 @@ object EpisodeReleaseNotificationsRepository {
 
     /** Flips one show's switch. Quiet: never asks for the OS permission. Mirrors the Calendar's bell. */
     fun setShowAlert(contentType: String, contentId: String, title: String?, on: Boolean) {
+        // A live channel or movie has no episodes: it is never enrolled, and its bell is never set.
+        if (!TrackedShows.isTrackable(contentType, contentId)) return
         ensureLoaded()
         val key = buildTrackedShowKey(contentType, contentId)
         val existing = trackedShowsByKey[key]
@@ -396,6 +398,7 @@ object EpisodeReleaseNotificationsRepository {
 
     /** The viewer asked for alerts on this show: turn it on, and the master switch too (asking permission now). */
     fun requestShowAlert(contentType: String, contentId: String, title: String?) {
+        if (!TrackedShows.isTrackable(contentType, contentId)) return
         ensureLoaded()
         setShowAlert(contentType, contentId, title, on = true)
         if (_uiState.value.isEnabled) return
@@ -414,7 +417,7 @@ object EpisodeReleaseNotificationsRepository {
     /** Whether the end-of-episode prompt may appear for this show now. [nextEpisodeAired] is null with no later episode. */
     fun shouldOfferEndOfEpisodePrompt(contentType: String, contentId: String, nextEpisodeAired: Boolean?): Boolean {
         ensureLoaded()
-        if (!isSeriesLibraryType(contentType)) return false
+        if (!TrackedShows.isTrackable(contentType, contentId)) return false
         val state = _uiState.value
         return EndOfEpisodePromptPolicy.shouldOffer(
             dontAskAgain = preferences.dontAskAgain,
@@ -514,11 +517,15 @@ object EpisodeReleaseNotificationsRepository {
                 }.getOrNull()
             }
 
+        // Older installs stored live channels here (a favourite put them in the Library as type "tv"): prune them.
+        val storedShows = stored?.followedShows.orEmpty()
+        val keptShows = TrackedShows.prune(storedShows)
         trackedShowsByKey = buildMap {
-            stored?.followedShows.orEmpty().forEach { trackedShow ->
+            keptShows.forEach { trackedShow ->
                 put(buildTrackedShowKey(trackedShow.contentType, trackedShow.contentId), trackedShow)
             }
         }
+        val prunedStored = keptShows.size != storedShows.size
         preferences = stored?.preferences?.toModel() ?: AlertPreferences()
         promptedShowKeys = stored?.promptedShowKeys.orEmpty().toSet()
         runtime = loadAux<StoredAlertRuntime>(runtimeAuxName) ?: StoredAlertRuntime()
@@ -531,6 +538,7 @@ object EpisodeReleaseNotificationsRepository {
             testTargetTitle = null,
             errorMessage = null,
         )
+        if (prunedStored) persist()
         publish()
     }
 
@@ -590,16 +598,7 @@ object EpisodeReleaseNotificationsRepository {
             ).let { it.hour * 60 + it.minute },
             quietConflict = AlertTimingExplainer.conflict(habit, preferences),
             sendingLessOften = BackOff.effective(preferences.cap, streak).tightened,
-            shows = trackedShowsByKey.values
-                .map { show ->
-                    ShowAlertRow(
-                        contentType = show.contentType,
-                        contentId = show.contentId,
-                        title = show.title?.takeIf { it.isNotBlank() } ?: show.contentId,
-                        on = showIsOn(show),
-                    )
-                }
-                .sortedBy { it.title.lowercase() },
+            shows = TrackedShows.rows(trackedShowsByKey.values, ::showIsOn),
         )
         _revision.value = _revision.value + 1
     }
@@ -631,39 +630,13 @@ object EpisodeReleaseNotificationsRepository {
         ShowAlertDefaults.isOn(show.alertsOn, FollowSource.fromWire(show.source))
 
     private fun reconcileTrackedShows(state: LibraryUiState, progress: WatchProgressUiState): Boolean {
-        if (!state.isLoaded) return false
-
-        val nextTrackedShows = linkedMapOf<String, TrackedFollowedShow>()
-
-        state.items.filter { item -> isSeriesLibraryType(item.type) }.forEach { item ->
-            val key = buildTrackedShowKey(item.type, item.id)
-            val existing = trackedShowsByKey[key]
-            nextTrackedShows[key] = (existing ?: TrackedFollowedShow(
-                contentId = item.id,
-                contentType = item.type,
-                followedOnIsoDate = inferFollowedOnIsoDate(item),
-            )).copy(title = item.name.ifBlank { existing?.title }, source = FollowSource.Library.wire)
-        }
-
-        // Series being watched, whether or not they are saved. They are listed with their switch off until the
-        // viewer turns one on (see ShowAlertDefaults).
-        progress.entries
-            .filter { entry -> isSeriesLibraryType(entry.parentMetaType) && entry.parentMetaId !in progress.hiddenContentIds }
-            .forEach { entry ->
-                val key = buildTrackedShowKey(entry.parentMetaType, entry.parentMetaId)
-                if (key in nextTrackedShows) return@forEach
-                val existing = trackedShowsByKey[key]
-                nextTrackedShows[key] = (existing ?: TrackedFollowedShow(
-                    contentId = entry.parentMetaId,
-                    contentType = entry.parentMetaType,
-                    followedOnIsoDate = CurrentDateProvider.todayIsoDate(),
-                )).copy(title = entry.title.ifBlank { existing?.title }, source = FollowSource.ContinueWatching.wire)
-            }
-
-        // A show the viewer switched on stays, even if it has left both lists: dropping it would silently end alerts.
-        trackedShowsByKey.forEach { (key, show) ->
-            if (key !in nextTrackedShows && show.alertsOn == true) nextTrackedShows[key] = show
-        }
+        val nextTrackedShows = TrackedShows.reconcile(
+            existing = trackedShowsByKey,
+            library = state,
+            progress = progress,
+            today = CurrentDateProvider.todayIsoDate(),
+            followedOn = ::inferFollowedOnIsoDate,
+        ) ?: return false
 
         val changed = nextTrackedShows != trackedShowsByKey
         if (changed) {
@@ -868,8 +841,7 @@ object EpisodeReleaseNotificationsRepository {
     private fun currentTestTarget(): LibraryItem? {
         LibraryRepository.ensureLoaded()
         val libraryItems = LibraryRepository.uiState.value.items
-        return libraryItems.firstOrNull { item -> isSeriesLibraryType(item.type) }
-            ?: libraryItems.firstOrNull()
+        return TrackedShows.testTarget(libraryItems)
     }
 
     private suspend fun buildCandidatesForShow(trackedShow: TrackedFollowedShow): List<AlertCandidate> {
