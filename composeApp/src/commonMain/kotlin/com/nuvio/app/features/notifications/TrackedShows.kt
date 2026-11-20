@@ -11,11 +11,11 @@ import com.nuvio.app.features.watchprogress.WatchProgressUiState
  * "N of M" count, the test-notification picker and the load-time migration all go through here.
  */
 internal object TrackedShows {
-    fun isTrackable(type: String): Boolean = isEpisodicShowType(type)
+    fun isTrackable(type: String, contentId: String): Boolean = isEpisodicShowType(type, contentId)
 
     /** Drops what is not an episodic show, keeping everything about the shows that stay (their switches, dates). */
     fun prune(shows: List<TrackedFollowedShow>): List<TrackedFollowedShow> =
-        shows.filter { isTrackable(it.contentType) }
+        shows.filter { isTrackable(it.contentType, it.contentId) }
 
     /**
      * The next set of tracked shows from the Library and Continue Watching, or null while the Library has not loaded.
@@ -32,7 +32,7 @@ internal object TrackedShows {
 
         val next = linkedMapOf<String, TrackedFollowedShow>()
 
-        library.items.filter { isTrackable(it.type) }.forEach { item ->
+        library.items.filter { isTrackable(it.type, it.id) }.forEach { item ->
             val key = buildTrackedShowKey(item.type, item.id)
             val old = existing[key]
             next[key] = (old ?: TrackedFollowedShow(
@@ -45,7 +45,7 @@ internal object TrackedShows {
         // Series being watched, whether or not they are saved. They are listed with their switch off until the
         // viewer turns one on (see ShowAlertDefaults).
         progress.entries
-            .filter { isTrackable(it.parentMetaType) && it.parentMetaId !in progress.hiddenContentIds }
+            .filter { isTrackable(it.parentMetaType, it.parentMetaId) && it.parentMetaId !in progress.hiddenContentIds }
             .forEach { entry ->
                 val key = buildTrackedShowKey(entry.parentMetaType, entry.parentMetaId)
                 if (key in next) return@forEach
@@ -59,14 +59,14 @@ internal object TrackedShows {
 
         // A show the viewer switched on stays, even if it has left both lists: dropping it would silently end alerts.
         existing.forEach { (key, show) ->
-            if (key !in next && show.alertsOn == true && isTrackable(show.contentType)) next[key] = show
+            if (key !in next && show.alertsOn == true && isTrackable(show.contentType, show.contentId)) next[key] = show
         }
         return next
     }
 
     /** The rows of Settings > Notifications > Shows with alerts; their count is the "M" of "N of M". */
     fun rows(shows: Collection<TrackedFollowedShow>, isOn: (TrackedFollowedShow) -> Boolean): List<ShowAlertRow> =
-        shows.filter { isTrackable(it.contentType) }
+        shows.filter { isTrackable(it.contentType, it.contentId) }
             .map { show ->
                 ShowAlertRow(
                     contentType = show.contentType,
@@ -78,5 +78,5 @@ internal object TrackedShows {
             .sortedBy { it.title.lowercase() }
 
     /** What the Send-test notification is about: the first saved show. A channel or movie is never the pick. */
-    fun testTarget(items: List<LibraryItem>): LibraryItem? = items.firstOrNull { isTrackable(it.type) }
+    fun testTarget(items: List<LibraryItem>): LibraryItem? = items.firstOrNull { isTrackable(it.type, it.id) }
 }

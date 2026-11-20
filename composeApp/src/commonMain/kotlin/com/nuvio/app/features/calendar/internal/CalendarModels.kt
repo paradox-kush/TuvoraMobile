@@ -2,7 +2,6 @@
 // Ported to kotlinx-datetime; TheTVDB, add-on dates, art and the tracker-specific origins are dropped.
 package com.nuvio.app.features.calendar.internal
 
-import com.nuvio.app.core.contracts.isEpisodicShowType
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.serialization.SerialName
@@ -15,10 +14,9 @@ enum class CalendarTitleType { SERIES, MOVIE }
  * The map from the app's content type to what the Calendar can follow; null = it cannot. Pure and Compose-free, so
  * tvosCore (which compiles the calendar tests but not the Compose files) has it.
  */
-internal fun calendarTitleTypeFor(type: String): CalendarTitleType? = when {
-    // Not "tv": a live channel has no episodes to remind about.
-    isEpisodicShowType(type) -> CalendarTitleType.SERIES
-    type.lowercase() == "movie" -> CalendarTitleType.MOVIE
+internal fun calendarTitleTypeFor(type: String): CalendarTitleType? = when (type.lowercase()) {
+    "series", "tv", "show", "anime" -> CalendarTitleType.SERIES
+    "movie" -> CalendarTitleType.MOVIE
     else -> null
 }
 

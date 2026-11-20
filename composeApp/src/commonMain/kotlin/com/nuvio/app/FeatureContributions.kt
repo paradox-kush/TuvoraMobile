@@ -157,10 +157,9 @@ private object CalendarSourcesAdapter : CalendarFollowedSources {
         )
     }
 
-    private fun calendarTypeOf(type: String?): CalendarFollowType? = when {
-        // Not "tv": a live channel (a favourite puts it in the Library) has no episodes to follow.
-        com.nuvio.app.core.contracts.isEpisodicShowType(type) -> CalendarFollowType.SERIES
-        type?.lowercase() == "movie" -> CalendarFollowType.MOVIE
+    private fun calendarTypeOf(type: String?): CalendarFollowType? = when (type?.lowercase()) {
+        "series", "tv", "show", "anime" -> CalendarFollowType.SERIES
+        "movie" -> CalendarFollowType.MOVIE
         else -> null
     }
 }

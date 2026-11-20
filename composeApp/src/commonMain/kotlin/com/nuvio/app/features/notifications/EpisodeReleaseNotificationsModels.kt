@@ -133,8 +133,7 @@ internal fun buildTrackedShowKey(
 ): String = "${normalizeSeriesType(type)}:${id.trim()}"
 
 internal fun normalizeSeriesType(type: String): String = when (type.trim().lowercase()) {
-    // Not "tv": that is a live channel, which is not a show (see isEpisodicShowType).
-    "show", "series", "tvshow" -> "series"
+    "tv", "show", "series", "tvshow" -> "series"
     else -> type.trim().lowercase()
 }
 

@@ -378,7 +378,7 @@ object EpisodeReleaseNotificationsRepository {
     /** Flips one show's switch. Quiet: never asks for the OS permission. Mirrors the Calendar's bell. */
     fun setShowAlert(contentType: String, contentId: String, title: String?, on: Boolean) {
         // A live channel or movie has no episodes: it is never enrolled, and its bell is never set.
-        if (!TrackedShows.isTrackable(contentType)) return
+        if (!TrackedShows.isTrackable(contentType, contentId)) return
         ensureLoaded()
         val key = buildTrackedShowKey(contentType, contentId)
         val existing = trackedShowsByKey[key]
@@ -398,7 +398,7 @@ object EpisodeReleaseNotificationsRepository {
 
     /** The viewer asked for alerts on this show: turn it on, and the master switch too (asking permission now). */
     fun requestShowAlert(contentType: String, contentId: String, title: String?) {
-        if (!TrackedShows.isTrackable(contentType)) return
+        if (!TrackedShows.isTrackable(contentType, contentId)) return
         ensureLoaded()
         setShowAlert(contentType, contentId, title, on = true)
         if (_uiState.value.isEnabled) return
@@ -417,7 +417,7 @@ object EpisodeReleaseNotificationsRepository {
     /** Whether the end-of-episode prompt may appear for this show now. [nextEpisodeAired] is null with no later episode. */
     fun shouldOfferEndOfEpisodePrompt(contentType: String, contentId: String, nextEpisodeAired: Boolean?): Boolean {
         ensureLoaded()
-        if (!TrackedShows.isTrackable(contentType)) return false
+        if (!TrackedShows.isTrackable(contentType, contentId)) return false
         val state = _uiState.value
         return EndOfEpisodePromptPolicy.shouldOffer(
             dontAskAgain = preferences.dontAskAgain,
