@@ -133,11 +133,10 @@ internal fun buildTrackedShowKey(
 ): String = "${normalizeSeriesType(type)}:${id.trim()}"
 
 internal fun normalizeSeriesType(type: String): String = when (type.trim().lowercase()) {
-    "tv", "show", "series", "tvshow" -> "series"
+    // Not "tv": that is a live channel, which is not a show (see isEpisodicShowType).
+    "show", "series", "tvshow" -> "series"
     else -> type.trim().lowercase()
 }
-
-internal fun isSeriesLibraryType(type: String): Boolean = normalizeSeriesType(type) == "series"
 
 internal fun releaseDateIso(rawValue: String?): String? {
     return parseEpisodeReleaseLocalDate(rawValue)
