@@ -45,7 +45,10 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.nuvio.app.core.contracts.IptvSettingsSectionAccess
 import com.nuvio.app.core.ui.LocalScreenActive
 import com.nuvio.app.core.ui.ScreenActivityEffect
@@ -291,6 +294,17 @@ fun SettingsScreen(
                 ?: SettingsPage.Root
         }
         val previousPage = page.previousPage()
+
+        // The OS notification permission changes outside the app: re-read it each time the Notifications page is
+        // resumed (RESUMED lifecycle hook, no timer), so a re-granted permission does not leave the "off" banner.
+        val notificationsLifecycleOwner = LocalLifecycleOwner.current
+        val onNotificationsPage = page == SettingsPage.Notifications
+        LaunchedEffect(onNotificationsPage, notificationsLifecycleOwner) {
+            if (!onNotificationsPage) return@LaunchedEffect
+            notificationsLifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                EpisodeReleaseNotificationsRepository.refreshPermissionState()
+            }
+        }
 
         fun openPage(targetPage: SettingsPage) {
             if (!targetPage.isEnabledByPolicy()) return
