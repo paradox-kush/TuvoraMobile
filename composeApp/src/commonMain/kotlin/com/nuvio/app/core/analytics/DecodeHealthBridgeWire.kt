@@ -14,6 +14,8 @@ package com.nuvio.app.core.analytics
 object DecodeHealthBridgeWire {
     const val VERSION = "v1"
     private const val FIELD_COUNT = 9
+    private const val SHAPE_VERSION = "s1"
+    private const val SHAPE_FIELD_COUNT = 10
 
     fun parse(line: String?): DecodeHealthPolicy.Signals? {
         if (line.isNullOrBlank()) return null
@@ -43,6 +45,41 @@ object DecodeHealthBridgeWire {
     }
 
     private const val UNKNOWN = "-"
+
+    /**
+     * The stream-shape line: `s1,<video codec|->,<w|->,<h|->,<fps x100|->,<audio codec|->,<channels|->,<sample rate|->,<hdr 1|0|->,<hw|sw|->`.
+     * Written by `DecodeHealthShadow.wireShapeLine`. Codec names come back as raw lowercase tokens (`hevc`, `eac3`);
+     * callers map them to display labels. Null for an empty line, another version or a malformed one.
+     */
+    fun parseShape(line: String?): DecodeHealthPolicy.StreamShape? {
+        if (line.isNullOrBlank()) return null
+        val f = line.trim().split(',')
+        if (f.size != SHAPE_FIELD_COUNT || f[0] != SHAPE_VERSION) return null
+        fun text(t: String): String? = if (t == UNKNOWN) null else t
+        fun num(t: String): Int? = if (t == UNKNOWN) null else (t.toIntOrNull() ?: return null).takeIf { it > 0 }
+        for (i in intArrayOf(2, 3, 4, 6, 7)) if (f[i] != UNKNOWN && f[i].toLongOrNull() == null) return null
+        val hdr = when (f[8]) {
+            "1" -> true
+            "0" -> false
+            UNKNOWN -> null
+            else -> return null
+        }
+        val mode = when (f[9]) {
+            "hw", "sw" -> f[9]
+            UNKNOWN -> null
+            else -> return null
+        }
+        return DecodeHealthPolicy.StreamShape(
+            videoCodec = text(f[1]),
+            videoHeight = num(f[3]),
+            videoFps = number(f[4])?.let { it / 100f },
+            audioCodec = text(f[5]),
+            audioChannels = num(f[6]),
+            audioSampleRate = num(f[7]),
+            hdr = hdr,
+            decodeMode = mode,
+        )
+    }
 
     private fun number(text: String): Long? = if (text == UNKNOWN) null else text.toLongOrNull()
 

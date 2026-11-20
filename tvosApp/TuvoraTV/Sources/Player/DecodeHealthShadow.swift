@@ -25,6 +25,16 @@ final class DecodeHealthShadow {
         ("video-params/gamma", MPV_FORMAT_STRING),
         // Present only while an audio track is selected; unavailable (format none) otherwise.
         ("current-tracks/audio/id", MPV_FORMAT_INT64),
+        // Stream shape (codec, size, rate, channels): observed here so nothing ever reads it synchronously from mpv.
+        // These are the current-tracks aliases, which no other observer in either app uses, so this shadow can
+        // consume them without starving another one.
+        ("current-tracks/video/codec", MPV_FORMAT_STRING),
+        ("current-tracks/video/demux-w", MPV_FORMAT_INT64),
+        ("current-tracks/video/demux-h", MPV_FORMAT_INT64),
+        ("current-tracks/video/demux-fps", MPV_FORMAT_DOUBLE),
+        ("current-tracks/audio/codec", MPV_FORMAT_STRING),
+        ("current-tracks/audio/demux-channel-count", MPV_FORMAT_INT64),
+        ("current-tracks/audio/demux-samplerate", MPV_FORMAT_INT64),
     ]
 
     static let observedNames: Set<String> = Set(observed.map { $0.name })
@@ -45,6 +55,13 @@ final class DecodeHealthShadow {
     private var audioWarns = 0
     private var videoWarns = 0
     private var muted = false
+    private var videoCodec: String?
+    private var videoWidth: Int64 = 0
+    private var videoHeight: Int64 = 0
+    private var videoFps: Double = 0
+    private var audioCodec: String?
+    private var audioChannels: Int64 = 0
+    private var audioSampleRate: Int64 = 0
 
     // MARK: - Writes (mpv event queue, or Main for the mute flag)
 
@@ -72,6 +89,13 @@ final class DecodeHealthShadow {
             gamma = Self.string(property)
         case "current-tracks/audio/id":
             audioSelected = Self.int64(property) != nil
+        case "current-tracks/video/codec": videoCodec = Self.string(property)
+        case "current-tracks/video/demux-w": videoWidth = Self.int64(property) ?? 0
+        case "current-tracks/video/demux-h": videoHeight = Self.int64(property) ?? 0
+        case "current-tracks/video/demux-fps": videoFps = Self.double(property) ?? 0
+        case "current-tracks/audio/codec": audioCodec = Self.string(property)
+        case "current-tracks/audio/demux-channel-count": audioChannels = Self.int64(property) ?? 0
+        case "current-tracks/audio/demux-samplerate": audioSampleRate = Self.int64(property) ?? 0
         default:
             break
         }
@@ -119,6 +143,23 @@ final class DecodeHealthShadow {
         )
     }
 
+    /// The stream-shape wire line for NuvioPlayerDecodeHealthBridge.getDecodeHealthShapeLine, from the observed
+    /// copies (lock only, never mpv). Empty until mpv has reported a track.
+    func shapeLine() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        let mode: String? = {
+            guard let hwdec, !hwdec.isEmpty else { return nil }
+            return hwdec == "no" ? "sw" : "hw"
+        }()
+        let hdr: Bool? = gamma.map { $0 == "pq" || $0 == "hlg" }
+        return Self.wireShapeLine(
+            videoCodec: videoCodec, width: videoWidth, height: videoHeight, fps: videoFps,
+            audioCodec: audioCodec, channels: audioChannels, sampleRate: audioSampleRate,
+            hdr: hdr, decodeMode: mode
+        )
+    }
+
     /// `decodeMode` / `hdr` for the stream info (read on Main, from the copied values).
     var streamFacts: (decodeMode: String?, hdr: Bool?) {
         lock.lock()
@@ -153,6 +194,28 @@ final class DecodeHealthShadow {
         let fpsText: String = (fps.isFinite && fps > 0) ? String(Int64((fps * 100).rounded())) : "-"
         return ["v1", avSync, String(max(dropped, 0)), String(audioWarns), String(videoWarns),
                 audioSelected ? "1" : "0", advancing, muted ? "1" : "0", fpsText].joined(separator: ",")
+    }
+
+    /// `s1,<video codec|->,<w|->,<h|->,<fps x100|->,<audio codec|->,<channels|->,<sample rate|->,<hdr 1|0|->,<hw|sw|->`
+    /// Parsed by Kotlin's DecodeHealthBridgeWire.parseShape. Codec names are reduced to a short clean token
+    /// (letters, digits, `.`, `_`, `-`, at most 24) or `-`: nothing free-form can cross the bridge.
+    static func wireShapeLine(
+        videoCodec: String?, width: Int64, height: Int64, fps: Double,
+        audioCodec: String?, channels: Int64, sampleRate: Int64,
+        hdr: Bool?, decodeMode: String?
+    ) -> String {
+        func token(_ value: String?) -> String {
+            guard let raw = value?.lowercased(), !raw.isEmpty, raw.count <= 24,
+                  raw.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "_" || $0 == "-") })
+            else { return "-" }
+            return raw
+        }
+        func number(_ value: Int64) -> String { value > 0 ? String(value) : "-" }
+        let fpsText = (fps.isFinite && fps > 0) ? String(Int64((fps * 100).rounded())) : "-"
+        let hdrText = hdr.map { $0 ? "1" : "0" } ?? "-"
+        let mode = (decodeMode == "hw" || decodeMode == "sw") ? decodeMode! : "-"
+        return ["s1", token(videoCodec), number(width), number(height), fpsText,
+                token(audioCodec), number(channels), number(sampleRate), hdrText, mode].joined(separator: ",")
     }
 
     /// Mirrors Kotlin's DecodeHealthPolicy.mpvLogSide: `ad`/`ao` are audio, `vd` is video, with or without a

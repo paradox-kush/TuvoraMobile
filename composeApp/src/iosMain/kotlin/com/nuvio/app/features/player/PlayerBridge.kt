@@ -213,7 +213,33 @@ interface NuvioPlayerLiveCacheBridge {
  */
 interface NuvioPlayerDecodeHealthBridge {
     fun getDecodeHealthLine(): String
+
+    /**
+     * The stream's shape in the format [com.nuvio.app.core.analytics.DecodeHealthBridgeWire.parseShape] reads,
+     * from the same lock-guarded copy of observed properties: never a synchronous mpv read, so it is safe on Main
+     * at any moment, including while a stalled demuxer holds mpv's core lock.
+     */
+    fun getDecodeHealthShapeLine(): String
 }
+
+/** The stream shape for decode-health events, from observed copies only; null when the bridge has none yet. */
+internal fun NuvioPlayerBridge.decodeHealthStreamInfo(): PlayerStreamInfo? =
+    (this as? NuvioPlayerDecodeHealthBridge)
+        ?.let { runCatching { it.getDecodeHealthShapeLine() }.getOrNull() }
+        ?.let(com.nuvio.app.core.analytics.DecodeHealthBridgeWire::parseShape)
+        ?.let { shape ->
+            PlayerStreamInfo(
+                videoCodec = StreamCodecNames.display(shape.videoCodec),
+                videoHeight = shape.videoHeight,
+                videoFrameRate = shape.videoFps,
+                audioCodec = StreamCodecNames.display(shape.audioCodec),
+                audioChannelCount = shape.audioChannels,
+                audioSampleRate = shape.audioSampleRate,
+                playerEngine = ENGINE_LABEL_LIBMPV,
+                hdr = shape.hdr,
+                decodeMode = shape.decodeMode,
+            )
+        }
 
 /** The bridge's decode-health signals for this poll, or null when it has none to give. */
 internal fun NuvioPlayerBridge.decodeHealthSignals(): com.nuvio.app.core.analytics.DecodeHealthPolicy.Signals? =

@@ -11,8 +11,8 @@ import com.nuvio.app.features.player.LivePlaybackStartupPolicy
 import com.nuvio.app.features.iptv.stalker.StalkerStreamFallback
 import com.nuvio.app.features.player.MpvStartPosition
 import com.nuvio.app.features.player.NuvioPlayerBridge
-import com.nuvio.app.features.player.ENGINE_LABEL_LIBMPV
 import com.nuvio.app.features.player.decodeHealthSignals
+import com.nuvio.app.features.player.decodeHealthStreamInfo
 import com.nuvio.app.features.player.decodePlayerStreamInfo
 import com.nuvio.app.features.player.onLiveSnapshot
 import com.nuvio.app.features.player.NuvioPlayerBridgeCreator
@@ -36,7 +36,6 @@ import com.nuvio.app.features.player.addonSubtitleRequests
 import com.nuvio.app.features.addons.AddonRepository
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import com.nuvio.app.features.player.decodePlayerStreamInfo
 import com.nuvio.app.features.player.skip.SkipInterval
 import com.nuvio.app.features.player.skip.SkipIntroRepository
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
@@ -254,7 +253,6 @@ class TvPlayerSession(
     private var monitor = TvLiveMonitor()
     /** Decode-health telemetry for this live tune (reporting only; shared policy, fed by the libmpv bridge's observed facts). */
     private val decodeHealth = com.nuvio.app.core.analytics.DecodeHealthReporter(platform = "tvos")
-    private var decodeHealthShape: com.nuvio.app.features.player.PlayerStreamInfo? = null
     /** The bounded retry of a live channel whose first open failed with a 5xx / unreachable (the phone's onOpenFailed). */
     private val openRetry = TvLiveOpenRetry()
     private var openRetryJob: kotlinx.coroutines.Job? = null
@@ -1059,14 +1057,10 @@ class TvPlayerSession(
                 snapshot.copy(isEnded = false, isLoading = true)
             } else snapshot
             if (liveTune && !displayModeSwitching) {
-                // The stream's shape is read ONCE, at the first frame (a healthy moment), and reused: this bridge's stream
-                // info is synchronous mpv reads, which must not run later, while a stalled demuxer may hold the core lock.
-                if (decodeHealthShape == null && LivePlaybackStartupPolicy.hasStarted(snapshot)) {
-                    decodeHealthShape = runCatching { decodePlayerStreamInfo(b.getStreamInfoJson(), ENGINE_LABEL_LIBMPV) }.getOrNull()
-                }
                 decodeHealth.onLiveSnapshot(
                     snapshot = snapshot,
-                    streamInfo = { decodeHealthShape },
+                    // Observed copies only (DecodeHealthShadow): no synchronous mpv read, so safe on Main on every zap.
+                    streamInfo = { b.decodeHealthStreamInfo() },
                     streamUrl = activeSourceUrl,
                     contentId = sessionVideoId,
                     surface = "player",

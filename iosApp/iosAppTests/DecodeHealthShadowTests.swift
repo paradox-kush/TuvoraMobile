@@ -71,4 +71,30 @@ final class DecodeHealthShadowTests: XCTestCase {
         XCTAssertNil(facts.decodeMode)
         XCTAssertNil(facts.hdr)
     }
+
+    func testShapeLineMatchesTheKotlinFormat() {
+        XCTAssertEqual(
+            DecodeHealthShadow.wireShapeLine(
+                videoCodec: "HEVC", width: 3840, height: 2160, fps: 50,
+                audioCodec: "eac3", channels: 6, sampleRate: 48000, hdr: true, decodeMode: "hw"),
+            "s1,hevc,3840,2160,5000,eac3,6,48000,1,hw"
+        )
+        XCTAssertEqual(
+            DecodeHealthShadow.wireShapeLine(
+                videoCodec: nil, width: 0, height: 0, fps: 0,
+                audioCodec: "", channels: 0, sampleRate: 0, hdr: nil, decodeMode: nil),
+            "s1,-,-,-,-,-,-,-,-,-"
+        )
+    }
+
+    func testFreeFormCodecTextNeverCrossesTheBridge() {
+        let line = DecodeHealthShadow.wireShapeLine(
+            videoCodec: "Some Channel Name HD", width: 1920, height: 1080, fps: 25,
+            audioCodec: "http://provider.example/x", channels: 2, sampleRate: 44100, hdr: false, decodeMode: "sw")
+        XCTAssertEqual(line, "s1,-,1920,1080,2500,-,2,44100,0,sw")
+    }
+
+    func testShapeLineIsEmptyOfFactsUntilMpvReportsTracks() {
+        XCTAssertEqual(DecodeHealthShadow().shapeLine(), "s1,-,-,-,-,-,-,-,-,-")
+    }
 }

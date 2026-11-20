@@ -64,4 +64,35 @@ class DecodeHealthBridgeWireTest {
         )
         assertEquals(expected, DecodeHealthBridgeWire.parse("v1,6200,120,2,1,1,0,0,5000"))
     }
+
+    @Test
+    fun `a full shape line parses to a stream shape`() {
+        val shape = DecodeHealthBridgeWire.parseShape("s1,hevc,3840,2160,5000,eac3,6,48000,1,hw")!!
+        assertEquals("hevc", shape.videoCodec)
+        assertEquals(2160, shape.videoHeight)
+        assertEquals(50f, shape.videoFps)
+        assertEquals("eac3", shape.audioCodec)
+        assertEquals(6, shape.audioChannels)
+        assertEquals(48_000, shape.audioSampleRate)
+        assertEquals(true, shape.hdr)
+        assertEquals("hw", shape.decodeMode)
+    }
+
+    @Test
+    fun `a shape line of dashes is an empty shape`() {
+        val shape = DecodeHealthBridgeWire.parseShape("s1,-,-,-,-,-,-,-,-,-")!!
+        assertEquals(DecodeHealthPolicy.StreamShape(), shape)
+        assertEquals(false, shape.hasVideo)
+    }
+
+    @Test
+    fun `malformed shape lines parse to null`() {
+        assertNull(DecodeHealthBridgeWire.parseShape(null))
+        assertNull(DecodeHealthBridgeWire.parseShape(""))
+        assertNull(DecodeHealthBridgeWire.parseShape("s2,-,-,-,-,-,-,-,-,-"))
+        assertNull(DecodeHealthBridgeWire.parseShape("s1,hevc,1"))
+        assertNull(DecodeHealthBridgeWire.parseShape("s1,hevc,x,2160,5000,eac3,6,48000,1,hw"))
+        assertNull(DecodeHealthBridgeWire.parseShape("s1,hevc,3840,2160,5000,eac3,6,48000,2,hw"))
+        assertNull(DecodeHealthBridgeWire.parseShape("s1,hevc,3840,2160,5000,eac3,6,48000,1,gpu"))
+    }
 }

@@ -257,6 +257,9 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge, TvAudioDelayContro
     /// NuvioPlayerDecodeHealthBridge (Kotlin, hand-mirrored): one text line of decode-health facts, read from a
     /// lock-guarded copy (DecodeHealthShadow), never from mpv. See DecodeHealthBridgeWire in Kotlin for the format.
     func getDecodeHealthLine() -> String { playerVC?.decodeHealthLine() ?? "" }
+    /// The stream's shape (codec, size, rate, channels, hdr, decode mode) from the same lock-guarded copy: observed
+    /// on the mpv event queue, never read from mpv on Main. See DecodeHealthBridgeWire.parseShape in Kotlin.
+    func getDecodeHealthShapeLine() -> String { playerVC?.decodeHealth.shapeLine() ?? "" }
     func getStreamInfoJson() -> String { playerVC?.streamInfoJson() ?? "" }
 
     func destroy() {
