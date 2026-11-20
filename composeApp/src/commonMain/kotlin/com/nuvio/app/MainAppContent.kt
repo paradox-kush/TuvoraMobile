@@ -76,6 +76,7 @@ import com.nuvio.app.core.auth.isLocalOnly
 import com.nuvio.app.core.contracts.SetupCodeEntryAccess
 import com.nuvio.app.core.deeplink.AppDeepLink
 import com.nuvio.app.core.deeplink.AppDeepLinkRepository
+import com.nuvio.app.core.deeplink.DeepLinkShellPolicy
 import com.nuvio.app.core.deeplink.DeferredSetupLink
 import com.nuvio.app.core.deeplink.LinkTiming
 import com.nuvio.app.core.deeplink.SetupLinkDeferralPolicy
@@ -959,6 +960,13 @@ internal fun MainAppContent(
         LaunchedEffect(navController) {
             if (!ownsAppRuntime) return@LaunchedEffect
             AppDeepLinkRepository.pendingDeepLink.collectLatest { deepLink ->
+                // A title / Downloads / add-on link that arrives while the profile picker or loader covers the
+                // shell stays pending until Home is on screen; routing earlier loses it to the profile switch.
+                if (deepLink != null &&
+                    DeepLinkShellPolicy.shouldWaitForShell(deepLink, hasGate = ownsAppRuntime, shellReady = shellReadyNow)
+                ) {
+                    snapshotFlow { shellReadyNow }.first { it }
+                }
                 when (deepLink) {
                     is AppDeepLink.Meta -> {
                         activateTab(AppScreenTab.Home)

@@ -603,25 +603,37 @@ object EpisodeReleaseNotificationsRepository {
         _revision.value = _revision.value + 1
     }
 
-    private suspend fun syncAuthorizationState(refreshIfEnabled: Boolean) {
+    /** The page resumed (or the app came back from system settings): re-read the OS permission. No network. */
+    fun refreshPermissionState() {
+        ensureLoaded()
+        scope.launch { syncAuthorizationState(refreshIfEnabled = false, rescheduleWhenRegranted = true) }
+    }
+
+    private suspend fun syncAuthorizationState(refreshIfEnabled: Boolean, rescheduleWhenRegranted: Boolean = false) {
         val granted = runCatching { EpisodeReleaseNotificationPlatform.notificationsAuthorized() }
             .onFailure { error ->
                 log.w { "Failed to read episode release notification permission: ${error.message}" }
             }
             .getOrDefault(false)
 
-        _uiState.value = _uiState.value.copy(
-            permissionGranted = granted,
-            permissionDenied = _uiState.value.isEnabled && !granted,
+        val before = _uiState.value
+        val view = NotificationPermissionPolicy.reconcile(
+            isEnabled = before.isEnabled,
+            granted = granted,
+            currentError = before.errorMessage,
+            disabledMessage = getString(Res.string.settings_notifications_permission_disabled),
+        )
+        _uiState.value = before.copy(
+            permissionGranted = view.granted,
+            permissionDenied = view.denied,
             testTargetTitle = currentTestTarget()?.name,
-            errorMessage = when {
-                _uiState.value.isEnabled && !granted -> runBlocking { getString(Res.string.settings_notifications_permission_disabled) }
-                else -> _uiState.value.errorMessage
-            },
+            errorMessage = view.errorMessage,
         )
         _revision.value = _revision.value + 1
 
-        if (refreshIfEnabled && _uiState.value.isEnabled) {
+        val reschedule = refreshIfEnabled && _uiState.value.isEnabled ||
+            rescheduleWhenRegranted && NotificationPermissionPolicy.shouldReschedule(before.permissionGranted, granted, before.isEnabled)
+        if (reschedule) {
             refreshScheduledNotifications()
         }
     }
