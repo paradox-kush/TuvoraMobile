@@ -1,5 +1,6 @@
 package com.nuvio.app.features.settings
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BugReport
@@ -23,7 +24,6 @@ import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.core.telemetry.ui.rememberReportSender
 import com.nuvio.app.core.telemetry.ui.reportCategoryLabel
 import com.nuvio.app.core.ui.nuvio
-import androidx.compose.runtime.collectAsState
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.report_consent_off
 import nuvio.composeapp.generated.resources.report_pick_category
@@ -65,7 +65,7 @@ internal fun SupportCodeRow(isTablet: Boolean) {
  */
 @Composable
 internal fun SendReportRows(isTablet: Boolean) {
-    val consent by SentrySettingsRepository.enabled.collectAsState()
+    val consent by SentrySettingsRepository.enabled.collectAsStateWithLifecycle()
     val sender = rememberReportSender()
     var pickerOpen by rememberSaveable { mutableStateOf(false) }
 

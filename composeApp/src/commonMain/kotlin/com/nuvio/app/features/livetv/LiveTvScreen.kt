@@ -308,7 +308,7 @@ fun LiveTvScreen(
         else com.nuvio.app.features.iptv.IptvChannelSearchPolicy.search(channels, guideQuery) { it.name }
     }
     // Personalization overlay: reload the guide when a hide/pin/reorder edit lands (native toggle or synced from the web).
-    val overlaySnapshot by com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.uiState.collectAsState()
+    val overlaySnapshot by com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.uiState.collectAsStateWithLifecycle()
     androidx.compose.runtime.LaunchedEffect(Unit) {
         com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.ensureLoaded()
         com.nuvio.app.features.iptv.overlay.IptvOverlayRepository.pullFromServer()
@@ -330,13 +330,18 @@ fun LiveTvScreen(
     var nowMs by remember { mutableStateOf(TraktPlatformClock.nowEpochMs()) }
     // Where the guide's five-hour window sits. Starts live; travels back through the archive.
     var guideAnchorMs by remember { mutableStateOf(GuideTimeTravel.anchorForNow(nowMs)) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(30_000)
-            val next = TraktPlatformClock.nowEpochMs()
-            // The live window follows the clock; a window the viewer travelled to stays put.
-            guideAnchorMs = GuideTimeTravel.onClockTick(guideAnchorMs, nowMs, next)
-            nowMs = next
+    // Lifecycle-bound (B274 follow-up): ticks only while the screen is RESUMED, reads the clock at once on every
+    // resume (never stale after another app), cannot stack across navigations. No network call in the body.
+    val clockLifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(clockLifecycleOwner) {
+        clockLifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val next = TraktPlatformClock.nowEpochMs()
+                // The live window follows the clock; a window the viewer travelled to stays put.
+                guideAnchorMs = GuideTimeTravel.onClockTick(guideAnchorMs, nowMs, next)
+                nowMs = next
+                delay(GuideClockPolicy.delayToNextTickMs(next))
+            }
         }
     }
 
@@ -829,7 +834,7 @@ fun LiveTvScreen(
     // New guide data landed while the guide was open (typically: the playlist's XMLTV ingest
     // finished after the rows had already asked and been stamped empty). Re-ask the focused
     // channel and the visible rows that answered empty — see GuideDataRefreshPolicy.
-    val guideDataGeneration by LiveTvData.guideDataGeneration.collectAsState()
+    val guideDataGeneration by LiveTvData.guideDataGeneration.collectAsStateWithLifecycle()
     val seenGuideDataGeneration = remember { guideDataGeneration }
     LaunchedEffect(guideDataGeneration) {
         if (!GuideDataRefreshPolicy.changedSince(seenGuideDataGeneration, guideDataGeneration)) return@LaunchedEffect
@@ -1100,7 +1105,7 @@ fun LiveTvScreen(
         }
         // UX343: the device's own connectivity (the same probe Home and Details use); re-asked once per failure,
         // never on a timer, so a failed channel with no network says so instead of blaming the playlist.
-        val networkStatus by NetworkStatusRepository.uiState.collectAsState()
+        val networkStatus by NetworkStatusRepository.uiState.collectAsStateWithLifecycle()
         LaunchedEffect(hasError) { if (hasError) NetworkStatusRepository.requestRefresh(force = true) }
         // B259: the provider connection ended with this failure (the one-connection window starts now).
         LaunchedEffect(startupFailed, reconnectGaveUp) {

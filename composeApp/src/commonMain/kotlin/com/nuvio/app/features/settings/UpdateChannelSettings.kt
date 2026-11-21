@@ -1,5 +1,6 @@
 package com.nuvio.app.features.settings
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,7 +37,7 @@ import org.jetbrains.compose.resources.stringResource
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun UpdateChannelSettingsRow(isTablet: Boolean) {
-    val channel by UpdatePreferences.shared.channel.collectAsState()
+    val channel by UpdatePreferences.shared.channel.collectAsStateWithLifecycle()
     var showDialog by rememberSaveable { mutableStateOf(false) }
     val tokens = MaterialTheme.nuvio
     SettingsNavigationRow(

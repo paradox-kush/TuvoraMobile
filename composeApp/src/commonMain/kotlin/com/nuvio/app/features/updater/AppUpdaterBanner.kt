@@ -36,10 +36,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -79,6 +82,16 @@ import nuvio.composeapp.generated.resources.updates_title_allow_installs
 import nuvio.composeapp.generated.resources.updates_title_available
 import org.jetbrains.compose.resources.stringResource
 
+/**
+ * What the host's own layout needs from the updater state. Progress ticks (every download report) change
+ * [AppUpdaterUiState] but not this, so the host, and the whole app content it wraps, stay out of the recomposition
+ * (B274: the state used to be read here, so every progress tick recomposed [content]).
+ */
+private data class UpdaterHostLayout(
+    val hasUpdate: Boolean,
+    val dialogRequested: Boolean,
+)
+
 @Composable
 fun AppUpdaterHost(
     controller: AppUpdaterController,
@@ -90,25 +103,29 @@ fun AppUpdaterHost(
         return
     }
 
-    val state by controller.uiState.collectAsStateWithLifecycle()
-    var showReleaseNotes by rememberSaveable { mutableStateOf(false) }
+    // The State object itself, never `by`: only leaves and the derived layout below read .value.
+    val stateHolder = controller.uiState.collectAsStateWithLifecycle()
+    val layout by remember(stateHolder) {
+        derivedStateOf {
+            val s = stateHolder.value
+            UpdaterHostLayout(hasUpdate = s.update != null, dialogRequested = s.showDialog)
+        }
+    }
 
     LaunchedEffect(controller) {
         controller.ensureAutoCheckStarted()
     }
-    LaunchedEffect(state.update?.tag) {
-        showReleaseNotes = false
-    }
+    // Never read in the host (only written through a leaf callback), so toggling it does not recompose [content].
+    val showReleaseNotes = rememberSaveable { mutableStateOf(false) }
 
-    val update = state.update
     // The banner is a Column sibling of the whole app content (below), so it SHRINKS the UI rather
     // than floating over it. Over video that is destructive — in PiP it squeezed the picture into a
     // sliver, which reads as "PiP plays audio but shows no video". Ask the policy, don't inline it.
     val immersivePlaybackActive by ImmersivePlaybackGate.isActive.collectAsStateWithLifecycle()
     val inPictureInPicture = rememberIsInPictureInPicture()
     val showBanner = UpdateBannerVisibilityPolicy.mayOccupyLayout(
-        hasUpdate = update != null,
-        dialogRequested = state.showDialog,
+        hasUpdate = layout.hasUpdate,
+        dialogRequested = layout.dialogRequested,
         immersivePlaybackActive = immersivePlaybackActive,
         inPictureInPicture = inPictureInPicture,
     )
@@ -125,16 +142,8 @@ fun AppUpdaterHost(
                 animationSpec = tween(durationMillis = 240),
             ) + fadeOut(animationSpec = tween(durationMillis = 150)),
         ) {
-            update?.let { availableUpdate ->
-                AppUpdateBanner(
-                    state = state,
-                    update = availableUpdate,
-                    onDownload = controller::downloadUpdate,
-                    onInstall = controller::installDownloadedUpdate,
-                    onShowReleaseNotes = { showReleaseNotes = true },
-                    onDismiss = controller::dismissDialog,
-                )
-            }
+            // Leaf: the only place the full state (download progress) is read.
+            UpdaterBannerLeaf(controller = controller, stateHolder = stateHolder, showReleaseNotes = showReleaseNotes)
         }
 
         Box(
@@ -153,10 +162,41 @@ fun AppUpdaterHost(
         }
     }
 
-    if (showReleaseNotes && update != null) {
+    UpdaterDialogsLeaf(controller = controller, stateHolder = stateHolder, showReleaseNotes = showReleaseNotes)
+}
+
+@Composable
+private fun UpdaterBannerLeaf(
+    controller: AppUpdaterController,
+    stateHolder: State<AppUpdaterUiState>,
+    showReleaseNotes: MutableState<Boolean>,
+) {
+    val state = stateHolder.value
+    val update = state.update ?: return
+    AppUpdateBanner(
+        state = state,
+        update = update,
+        onDownload = controller::downloadUpdate,
+        onInstall = controller::installDownloadedUpdate,
+        onShowReleaseNotes = { showReleaseNotes.value = true },
+        onDismiss = controller::dismissDialog,
+    )
+}
+
+@Composable
+private fun UpdaterDialogsLeaf(
+    controller: AppUpdaterController,
+    stateHolder: State<AppUpdaterUiState>,
+    showReleaseNotes: MutableState<Boolean>,
+) {
+    val state = stateHolder.value
+    val update = state.update
+    LaunchedEffect(update?.tag) { showReleaseNotes.value = false }
+
+    if (showReleaseNotes.value && update != null) {
         ReleaseNotesDialog(
             update = update,
-            onDismiss = { showReleaseNotes = false },
+            onDismiss = { showReleaseNotes.value = false },
         )
     }
 

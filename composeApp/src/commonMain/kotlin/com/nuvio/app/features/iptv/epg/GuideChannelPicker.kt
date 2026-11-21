@@ -3,6 +3,7 @@ package com.nuvio.app.features.iptv.epg
 // F14 picker dialog (Compose; phone/tablet/desktop). Its state holder is GuideChannelPickerController.kt,
 // which has no UI import so Apple TV's tvosCore compiles it for a SwiftUI picker.
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -20,7 +21,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,7 +34,7 @@ import kotlinx.coroutines.delay
 
 @Composable
 internal fun GuideChannelPickerHost() {
-    val req by GuideChannelPickerController.request.collectAsState()
+    val req by GuideChannelPickerController.request.collectAsStateWithLifecycle()
     val current = req ?: return
     GuideChannelPickerDialog(current)
 }

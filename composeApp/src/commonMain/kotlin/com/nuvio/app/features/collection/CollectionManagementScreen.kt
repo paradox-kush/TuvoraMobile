@@ -1,5 +1,6 @@
 package com.nuvio.app.features.collection
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,7 +35,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -73,7 +73,7 @@ fun CollectionManagementScreen(
     onBack: () -> Unit,
     onNavigateToEditor: (String?) -> Unit,
 ) {
-    val collections by CollectionRepository.collections.collectAsState()
+    val collections by CollectionRepository.collections.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboardManager.current
     var showImportDialog by remember { mutableStateOf(false) }
     var importText by remember { mutableStateOf("") }

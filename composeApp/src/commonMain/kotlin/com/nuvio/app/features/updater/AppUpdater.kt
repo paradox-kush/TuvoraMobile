@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.time.TimeSource
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
 
@@ -228,16 +229,19 @@ class AppUpdaterController internal constructor(
                 )
             }
 
+            // B274: whole percent AND >= 250 ms, not a state change per 8 KB read.
+            val throttle = UpdateProgressThrottle()
+            val startedAt = TimeSource.Monotonic.markNow()
             val result = AppUpdaterPlatform.downloadApk(
                 assetUrl = update.assetUrl,
                 assetName = update.assetName,
             ) { downloadedBytes, totalBytes ->
                 downloadContext.ensureActive()
-                val progress = if (totalBytes != null && totalBytes > 0L) {
-                    (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                } else {
-                    null
-                }
+                val progress = throttle.accept(
+                    downloadedBytes = downloadedBytes,
+                    totalBytes = totalBytes,
+                    nowMs = startedAt.elapsedNow().inWholeMilliseconds,
+                ) ?: return@downloadApk
                 _uiState.update { state ->
                     if (state.updateChannel == channel) state.copy(downloadProgress = progress) else state
                 }

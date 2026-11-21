@@ -1,5 +1,6 @@
 package com.nuvio.app.features.settings
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -38,7 +39,6 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -175,7 +175,7 @@ internal fun LazyListScope.posterCustomizationSettingsContent(
     }
     item {
         CustomPosterUrlRepository.ensureLoaded()
-        val currentPattern by CustomPosterUrlRepository.pattern.collectAsState()
+        val currentPattern by CustomPosterUrlRepository.pattern.collectAsStateWithLifecycle()
         var editingPattern by rememberSaveable(currentPattern) { mutableStateOf(currentPattern) }
         val isActive = currentPattern.isNotBlank()
 
@@ -245,7 +245,7 @@ internal fun LazyListScope.posterCustomizationSettingsContent(
                             color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.SemiBold,
                         )
-                        val enabledScreens by CustomPosterUrlRepository.enabledScreens.collectAsState()
+                        val enabledScreens by CustomPosterUrlRepository.enabledScreens.collectAsStateWithLifecycle()
                         val screenEntries = listOf(
                             com.nuvio.app.core.poster.CustomPosterScreen.HOME to stringResource(Res.string.settings_custom_poster_screen_home),
                             com.nuvio.app.core.poster.CustomPosterScreen.CONTINUE_WATCHING to stringResource(Res.string.settings_custom_poster_screen_continue_watching),
@@ -270,7 +270,7 @@ internal fun LazyListScope.posterCustomizationSettingsContent(
     }
     item {
         CardDepthStyleRepository.ensureLoaded()
-        val cardDepthState by CardDepthStyleRepository.uiState.collectAsState()
+        val cardDepthState by CardDepthStyleRepository.uiState.collectAsStateWithLifecycle()
         SettingsSection(
             title = stringResource(Res.string.settings_card_depth_title),
             isTablet = isTablet,
