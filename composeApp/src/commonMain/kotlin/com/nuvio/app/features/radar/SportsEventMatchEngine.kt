@@ -31,9 +31,11 @@ internal object SportsEventMatchEngine {
 
     fun normalize(raw: String?): String {
         val input = raw.orEmpty()
-        val compatibility = if (input.all { it.code < 128 }) input else input.map { c ->
-            if (c in '\uFF01'..'\uFF5E') (c.code - 0xFEE0).toChar() else c
-        }.joinToString("")
+        // Same output as before, without a per-character list (this runs for every channel of a 55k lineup on
+        // non-ASCII names).
+        val compatibility = if (input.all { it.code < 128 }) input else buildString(input.length) {
+            for (c in input) append(if (c in '\uFF01'..'\uFF5E') (c.code - 0xFEE0).toChar() else c)
+        }
         val folded = if (compatibility.all { it.code < 128 }) compatibility else stripCombiningMarks(compatibility)
         return buildString {
             for (c in folded.lowercase()) {
@@ -69,6 +71,33 @@ internal object SportsEventMatchEngine {
         val awayAliases = aliases(fixture.away, fixture.awayAliases, sport).ifEmpty { parsedPair?.get(1)?.let { listOf(personSuffix(it)) } ?: emptyList() }
         val searchTokens = (homeAliases + awayAliases + listOf(event)).flatMap { it.split(' ') }
             .filter { it.length > 3 && it !in generic && it !in sportWords && it !in setOf("vs", "night", "fight", "open", "championships") }.distinct().take(8)
+
+        // [nameMayMatch]'s word lists: every phrase whose presence [name] needs before it can score above 0.
+        internal val gateHome = homeAliases.filter { it.isNotBlank() }.map { it.split(' ') }
+        internal val gateAway = awayAliases.filter { it.isNotBlank() }.map { it.split(' ') }
+        internal val gateAlone = buildList {
+            this@Prepared.keywords.forEach { add(it.split(' ')) }
+            card.find(event)?.value?.let { add(it.split(' ')) }
+            if (sport == "motorsport" || has(event, "grand prix")) add("${event.substringBefore(" grand prix")} grand prix".split(' ').filter { it.isNotBlank() })
+        }
+    }
+
+    /**
+     * A cheap, SOUND pre-check for [name]: false only when [name] would certainly score 0, because the channel name
+     * carries neither both opponents, nor a competition keyword, nor the fight card or the race. It runs over every
+     * channel of every playlist on each game open (55k on a 4-core Onn box, where evaluating all of them took 6.9 s
+     * and ran the bounded lookup out of time). For a plain-ASCII name it only lower-cases: each word of a normalised
+     * phrase is a run of letters/digits of the lower-cased name, so it is a substring of it. Names with any non-ASCII
+     * character take [normalize]'s folding first (accents, full-width).
+     */
+    fun nameMayMatch(p: Prepared, raw: String): Boolean {
+        var ascii = true
+        for (c in raw) if (c.code >= 128) { ascii = false; break }
+        // One lower-casing beats case-insensitive scanning: contains(ignoreCase) compares char by char.
+        val text = if (ascii) raw.lowercase() else normalize(raw)
+        fun all(words: List<String>) = words.all { text.contains(it) }
+        if (p.gateAlone.any(::all)) return true
+        return p.gateHome.any(::all) && p.gateAway.any(::all)
     }
 
     private fun personSuffix(raw: String): String {

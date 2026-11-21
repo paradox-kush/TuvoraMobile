@@ -88,6 +88,24 @@ class SportsChannelVisibilityPolicyTest {
     private fun visible(overlay: OverlaySnapshot) =
         SportsChannelVisibilityPolicy.filter(account, channels, categories, overlay).map { it.streamId }
 
+    @Test
+    fun a_hidden_channel_is_decided_only_for_the_channels_asked_about() {
+        var hashed = 0
+        val overlay = OverlaySnapshot(channels = mapOf(entity(channels[0]) to ChannelOverlay(hidden = true)))
+        val hidden = SportsChannelVisibilityPolicy.hiddenChannels(overlay) { p, n, e -> hashed++; IptvIdentity.entityId(p, n, e) }!!
+        assertEquals(channels, SportsChannelVisibilityPolicy.groupVisible(account, channels, categories, overlay), "groups and selection never hash the lineup")
+        assertEquals(0, hashed)
+        assertTrue(hidden(account.id, channels[0].name, channels[0].epgChannelId))
+        assertFalse(hidden(account.id, channels[1].name, channels[1].epgChannelId))
+        assertEquals(2, hashed, "one hash per channel asked about")
+    }
+
+    @Test
+    fun pins_alone_need_no_identity_check() {
+        val overlay = OverlaySnapshot(channels = mapOf(entity(channels[0]) to ChannelOverlay(pinned = true)))
+        assertEquals(null, SportsChannelVisibilityPolicy.hiddenChannels(overlay))
+    }
+
     private fun entity(channel: XtreamChannel) = IptvIdentity.entityId(account.id, channel.name, channel.epgChannelId)
     private fun channel(id: Int, name: String, category: String?) = XtreamChannel(
         streamId = id, name = name, logo = null, epgChannelId = "shared", categoryId = category,

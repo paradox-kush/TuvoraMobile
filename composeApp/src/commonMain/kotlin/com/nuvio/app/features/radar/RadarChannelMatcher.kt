@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Semaphore
@@ -129,16 +130,27 @@ object RadarChannelMatcher {
         val keywords = league?.keywords.orEmpty()
         val prepared = SportsEventMatchEngine.prepare(fixture, keywords)
         val homeRegion = SportsBroadcastRegionPolicy.regionOfCountry(fixture.country)
-        val candidates = assembleCandidates()
-        val named = candidates.mapNotNull { c ->
+        val (candidates, hiddenChannels) = assembleCandidates()
+        // What the viewer hid is decided per MATCHED channel (one identity hash each, memoised for this lookup), never
+        // for the whole lineup: see SportsChannelVisibilityPolicy.
+        val hiddenMemo = HashMap<String, Boolean>()
+        fun visible(c: CandidateChannel) = hiddenChannels == null ||
+            !hiddenMemo.getOrPut(c.contentId) { hiddenChannels(c.playlistId, c.name, c.epgChannelId) }
+        fun merge(matches: List<ChannelMatch>) = mergeMatches(matches.filter { visible(it.channel) })
+        val named = ArrayList<ChannelMatch>()
+        candidates.forEachIndexed { i, c ->
+            // Cooperative: a 55k-channel lineup must not hold a cancelled (timed-out) lookup on the CPU.
+            if (i % 4096 == 0) ensureActive()
+            if (!SportsEventMatchEngine.nameMayMatch(prepared, c.name)) return@forEachIndexed
             val evidence = SportsEventMatchEngine.name(prepared, c.name)
-            if (evidence.strength == 0) return@mapNotNull null
-            ChannelMatch(c, programme = null,
+            if (evidence.strength == 0) return@forEachIndexed
+            named += ChannelMatch(c, programme = null,
                 score = evidence.strength + SportsBroadcastRegionPolicy.homeRegionBoost(c.name, homeRegion),
                 confidence = evidence.confidence, evidence = evidence)
-        }.sortedWith(matchOrder).take(NAME_POOL_CAP)
+        }
+        val namedPool = named.sortedWith(matchOrder).asSequence().filter { visible(it.channel) }.take(NAME_POOL_CAP).toList()
         if (generation != matcherGeneration.value) return@withContext emptyList()
-        onPartial(mergeMatches(named))
+        onPartial(merge(namedPool))
 
         // Read the local guides before any provider probes. These queries never fetch a catalog.
         val cached = coroutineScope {
@@ -147,18 +159,19 @@ object RadarChannelMatcher {
             mirror.await() + provider.await() + stationMatches(candidates, stations, homeRegion)
         }
         if (generation != matcherGeneration.value) return@withContext emptyList()
-        onPartial(mergeMatches(named + cached))
+        onPartial(merge(namedPool + cached))
         val local = cached + stationMatches(candidates, stationTask?.await().orEmpty(), homeRegion)
         if (generation != matcherGeneration.value) return@withContext emptyList()
-        onPartial(mergeMatches(named + local))
+        onPartial(merge(namedPool + local))
         val resolved = local.filter { it.via == MatchVia.EPG && it.confidence == MatchConfidence.CONFIRMED }
             .map { it.channel.contentId }.toSet()
         // Generic sports channels are probe candidates only. They never pad displayed results.
         // B141: one normalisation per channel (was one per marker, per channel, per fixture open).
-        val probeCandidates = (named.map { it.channel } +
-            SportsGenericChannelPolicy.genericSportChannels(candidates, { it.name })
-        ).distinctBy { it.contentId }.filterNot { it.contentId in resolved }.take(EPG_PROBE_CAP)
+        // Lazy: the generic-channel scan stops at the first few visible candidates instead of normalising the lineup.
         val probed = if (fixture.startEpochMs == null || resolved.isNotEmpty()) emptyList() else coroutineScope {
+            val probeCandidates = (namedPool.asSequence().map { it.channel } +
+                candidates.asSequence().filter { SportsGenericChannelPolicy.isGenericSportName(it.name) }
+            ).distinctBy { it.contentId }.filterNot { it.contentId in resolved }.filter(::visible).take(EPG_PROBE_CAP).toList()
             val semaphore = Semaphore(EPG_CONCURRENCY)
             probeCandidates.map { c -> async {
                 semaphore.withPermit {
@@ -171,7 +184,7 @@ object RadarChannelMatcher {
                 }
             } }.awaitAll().filterNotNull()
         }
-        if (generation != matcherGeneration.value) emptyList() else mergeMatches(named + local + probed)
+        if (generation != matcherGeneration.value) emptyList() else merge(namedPool + local + probed)
     }
 
     private val matchOrder = compareByDescending<ChannelMatch> { SportsEventMatchEngine.rank(it.confidence) }
@@ -284,9 +297,16 @@ object RadarChannelMatcher {
         homeRegion: String?,
     ): List<ChannelMatch> {
         if (stations.isEmpty()) return emptyList()
+        // coreNorm costs ~130 us a name on a 4-core Android TV box (7.3 s for a 55k lineup, per lookup). A channel can
+        // equal a station (whole core, squashed core, or brand) only if its core's first token and the station core's
+        // first token are prefixes of one another, so only those channels pay for coreNorm.
+        val stationLeads = stations.mapNotNull { st -> st.channel?.let { EpgNorm.coreNorm(it).substringBefore(' ') } }
+            .filter { it.isNotEmpty() }.toSet()
+        if (stationLeads.isEmpty()) return emptyList()
         val byCore = HashMap<String, MutableList<CandidateChannel>>()
         val bySquash = HashMap<String, MutableList<CandidateChannel>>()
         for (c in candidates) {
+            if (EpgNorm.coreLeadCandidates(c.name).none { lead -> stationLeads.any { lead.startsWith(it) || it.startsWith(lead) } }) continue
             val core = EpgNorm.coreNorm(c.name)
             if (core.isEmpty()) continue
             byCore.getOrPut(core) { mutableListOf() }.add(c)
@@ -327,7 +347,13 @@ object RadarChannelMatcher {
 
     // --- source assembly (the ONLY source-specific part) ----------------------
 
-    private suspend fun assembleCandidates(): List<CandidateChannel> {
+    /** The visible lineup (selection and hidden groups applied) and the hidden-channel test for matched channels. */
+    private data class Assembled(
+        val candidates: List<CandidateChannel>,
+        val hiddenChannels: ((playlistId: String, name: String, epgChannelId: String?) -> Boolean)?,
+    )
+
+    private suspend fun assembleCandidates(): Assembled {
         XtreamRepository.ensureLoaded()
         val overlay = try { IptvOverlayRepository.freshSnapshot() }
             catch (error: CancellationException) { throw error }
@@ -335,7 +361,7 @@ object RadarChannelMatcher {
         val accounts = XtreamRepository.uiState.value.accounts.filter {
             it.availableOnDevice && it.typeEnabled(CONTENT_TYPE_LIVE) && it.categorySelections.live?.isEmpty() != true
         }
-        return buildList {
+        val candidates = buildList {
             for (account in accounts) {
                 // Ktor and the platform stores are suspend/non-blocking. This runs on Default,
                 // the platform-neutral background dispatcher, via match() above.
@@ -358,7 +384,7 @@ object RadarChannelMatcher {
                         }
                     }
                 } else emptyList()
-                for (ch in SportsChannelVisibilityPolicy.filter(account, channels, categoryNames, overlay)) {
+                for (ch in SportsChannelVisibilityPolicy.groupVisible(account, channels, categoryNames, overlay)) {
                     add(
                         CandidateChannel(
                             playlistId = account.id,
@@ -375,6 +401,7 @@ object RadarChannelMatcher {
                 }
             }
         }
+        return Assembled(candidates, SportsChannelVisibilityPolicy.hiddenChannels(overlay))
     }
 
     private suspend fun epgFor(channel: CandidateChannel): List<XtreamProgram> {

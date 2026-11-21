@@ -227,4 +227,26 @@ class EpgChannelMapperTest {
         // And a short garbage prefix that shares the first token stays unmatched.
         assertNull(index.match("SKY S", null))
     }
+
+    /** The Sports station tier pays for coreNorm only on channels this pre-check keeps: it must never drop the real first token. */
+    @Test
+    fun coreLeadCandidates_always_contains_the_first_token_of_coreNorm() {
+        val names = listOf(
+            "UK FHD : BBC One", "UK: BBC 1", "UKSD MTV HITS", "US: ESPN 2 HD", "ESPN2", "USA | ESPN HD 2", "HD Sky Sports",
+            "us uk de fr sky", "|NO| CNBC (ALLENTE)", "AT&T SportsNet", "Canal+ Sport 1", "FR: beIN SPORTS 1 \u1D34\u1D30",
+            "\uFF2E\uFF22\uFF21 \uFF34\uFF36", "ES: Movistar LaLiga", "Atl\u00E9tico TV", "4K", "HD", "uk hd fhd 4k sky", "DE: Sport1+", "ATANDT", "",
+        )
+        for (name in names) {
+            val first = EpgNorm.coreNorm(name).substringBefore(' ')
+            if (first.isEmpty()) continue
+            val leads = EpgNorm.coreLeadCandidates(name)
+            assertEquals(true, first in leads, "'$name' -> '$first' in $leads")
+        }
+    }
+
+    @Test
+    fun coreLeadCandidates_stops_at_the_first_token_that_cannot_be_a_stripped_prefix() {
+        assertEquals(listOf("us", "sky"), EpgNorm.coreLeadCandidates("US: Sky Sports Main Event"))
+        assertEquals(listOf("espn"), EpgNorm.coreLeadCandidates("ESPN 2"))
+    }
 }
