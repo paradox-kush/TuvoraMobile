@@ -40,6 +40,12 @@ class TelemetrySendPolicyTest {
     }
 
     @Test
+    fun `our own tagged exit is counted even at foreground importance`() {
+        assertEquals(SendDecision.COUNT, decide("app_exit", "reason" to "self_exit", "importance" to 100))
+        assertEquals(SendDecision.SEND, decide("app_exit", "reason" to "signaled", "importance" to 100))
+    }
+
+    @Test
     fun `app_exit sends crashes anrs and foreground kills and counts background kills`() {
         assertEquals(SendDecision.SEND, decide("app_exit", "reason" to "crash"))
         assertEquals(SendDecision.SEND, decide("app_exit", "reason" to "native_crash"))

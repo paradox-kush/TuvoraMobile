@@ -18,6 +18,8 @@ internal object TelemetrySendPolicy {
     /** Exit reasons worth a single event each; the rest (cached/background kills) become a count. */
     private const val USER_VISIBLE_IMPORTANCE_MAX = 270
 
+    private const val SELF_EXIT_REASON = "self_exit"
+
     private val individualExitReasons = setOf(
         "crash", "native_crash", "anr", "initialization_failure", "user_requested_crash",
     )
@@ -52,6 +54,8 @@ internal object TelemetrySendPolicy {
     private fun decideExit(props: Map<String, Any>): SendDecision {
         val reason = (props["reason"] as? String)?.lowercase() ?: (props["exit_reason"] as? String)?.lowercase()
         if (reason == null) return SendDecision.SEND
+        // Our own deliberate kill (user Exit, restart, icon change), tagged by the Android reporter: a rate, never an event.
+        if (reason == SELF_EXIT_REASON) return SendDecision.COUNT
         if (reason in individualExitReasons) return SendDecision.SEND
         // Android passes the raw ActivityManager importance (<= 270 is user-visible); other hosts pass a name.
         val raw = props["importance"]
