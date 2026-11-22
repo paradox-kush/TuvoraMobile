@@ -40,6 +40,9 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        // Unconditional (not consent-gated): a user who turns consent on mid-session and then presses Exit must still
+        // leave a self-exit marker, or the next launch files our own SIGKILL as fatal. Assignment only.
+        AppExitReporter.attachContext(this)
         // Telemetry v2 FIRST, before DI: the crash handler must exist for a crash during startup. It uses
         // no coroutines or DI; the SDK is configured later (configurePostHog) once consent is loaded.
         SentrySettingsStorage.initialize(this)

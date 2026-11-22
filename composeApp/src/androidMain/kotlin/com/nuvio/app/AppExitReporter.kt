@@ -48,9 +48,18 @@ object AppExitReporter {
      *  deliberate-exit path never waits on breadcrumb or sampler writes. */
     private val markerLock = Any()
 
-    /** Set by [reportPendingExits]; lets deliberate-exit call sites mark without threading a Context through. */
+    /** Set by [attachContext]; lets deliberate-exit call sites mark without threading a Context through. */
     @Volatile
     private var appContext: Context? = null
+
+    /**
+     * Call first thing in Application.onCreate, regardless of consent: consent can be turned on mid-session, and
+     * [markSelfExit] from a context-less call site (platformExitApp) must still be able to write the marker. A plain
+     * assignment, no I/O.
+     */
+    fun attachContext(context: Context) {
+        appContext = context.applicationContext ?: context
+    }
 
     /**
      * Call immediately before a deliberate self-kill (user Exit, restart, icon change). Written with `commit()`: an
@@ -86,7 +95,7 @@ object AppExitReporter {
     fun reportPendingExits(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         val appContext = context.applicationContext
-        this.appContext = appContext
+        attachContext(appContext)
 
         // Snapshot the new run immediately, before it can fail. The binder query and trace reads
         // remain off the main thread and can never delay startup.
