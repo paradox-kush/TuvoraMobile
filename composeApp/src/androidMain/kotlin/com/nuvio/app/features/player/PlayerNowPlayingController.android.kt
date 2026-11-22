@@ -114,7 +114,7 @@ internal class AndroidPlayerNowPlayingController(
 
     init {
         if (AppFeaturePolicy.mediaPlaybackForegroundServiceEnabled) {
-            createNotificationChannel(appContext)
+            ensureNowPlayingChannel(appContext)
         }
         AndroidNowPlayingActionDispatcher.register(this)
     }
@@ -360,7 +360,7 @@ private object AndroidNowPlayingActionDispatcher {
     }
 }
 
-private fun createNotificationChannel(context: Context) {
+internal fun ensureNowPlayingChannel(context: Context) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     val manager = context.getSystemService(NotificationManager::class.java) ?: return
     val channel = NotificationChannel(

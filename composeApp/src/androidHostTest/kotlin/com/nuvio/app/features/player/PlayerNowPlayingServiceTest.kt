@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
@@ -37,22 +38,83 @@ class PlayerNowPlayingServiceTest {
             NotificationChannel(NOW_PLAYING_CHANNEL_ID, "Playback", NotificationManager.IMPORTANCE_LOW),
         )
         PlayerNowPlayingService.hide(context)
-        context.takeCall("stop")
+        PlayerNowPlayingService.resetForTest()
+        context.drain()
     }
 
     @Test
-    fun eachDelayedStartStillPromotesAfterRapidPublishHideCycles() {
-        val first = startThenHide("First")
-        val second = startThenHide("Second")
+    fun hideWhileForegroundStartPendingDefersStopUntilPromoted() {
+        // Crash order on 1.22.0: the background fallback start is foreground-required, and a hide
+        // that stops the service before onStartCommand promotes it crashes the app with
+        // ForegroundServiceDidNotStartInTimeException (AOSP ActiveServices.bringDownServiceLocked).
+        // The old test blockedBackgroundStartFallsBackToForegroundStart asserted exactly that
+        // order (foreground-start, then stop) and is replaced by this one.
+        context.blockBackgroundStart = true
+        PlayerNowPlayingService.publish(context, notification("Background"))
+        val request = context.takeCall("foreground-start")
+        context.blockBackgroundStart = false
+        PlayerNowPlayingService.hide(context)
+        context.assertNoCall()
+
         val controller = Robolectric.buildService(PlayerNowPlayingService::class.java).create()
-        val service = controller.get()
         try {
-            service.onStartCommand(first, 0, 1)
-            assertEquals("First", shadowOf(service).lastForegroundNotification?.extras?.getString(Notification.EXTRA_TITLE))
-            service.onStartCommand(second, 0, 2)
-            assertEquals("Second", shadowOf(service).lastForegroundNotification?.extras?.getString(Notification.EXTRA_TITLE))
-            assertTrue(shadowOf(service).isStoppedBySelf)
+            controller.get().onStartCommand(request, 0, 1)
+            assertNotNull(shadowOf(controller.get()).lastForegroundNotification)
+            context.takeCall("stop")
         } finally {
+            controller.destroy()
+        }
+    }
+
+    @Test
+    fun startCommandWithoutNotificationStillPromotesBeforeStopping() {
+        val bare = Intent(context, PlayerNowPlayingService::class.java)
+            .setAction("com.nuvio.app.nowplaying.START_FOREGROUND")
+        val controller = Robolectric.buildService(PlayerNowPlayingService::class.java).create()
+        try {
+            controller.get().onStartCommand(bare, 0, 1)
+            assertNotNull(shadowOf(controller.get()).lastForegroundNotification)
+            assertTrue(shadowOf(controller.get()).isStoppedBySelf)
+        } finally {
+            controller.destroy()
+        }
+    }
+
+    @Test
+    fun rapidPublishHideCyclesKeepOneStartInFlightAndStopOnlyAfterPromotion() {
+        PlayerNowPlayingService.publish(context, notification("First"))
+        val request = context.takeCall("start")
+        PlayerNowPlayingService.hide(context)
+        PlayerNowPlayingService.publish(context, notification("Second"))
+        PlayerNowPlayingService.hide(context)
+        context.assertNoCall()
+
+        val controller = Robolectric.buildService(PlayerNowPlayingService::class.java).create()
+        try {
+            controller.get().onStartCommand(request, 0, 1)
+            assertEquals("First", shadowOf(controller.get()).lastForegroundNotification?.extras?.getString(Notification.EXTRA_TITLE))
+            context.takeCall("stop")
+        } finally {
+            controller.destroy()
+        }
+    }
+
+    @Test
+    fun publishWhileStartPendingCancelsTheDeferredStop() {
+        PlayerNowPlayingService.publish(context, notification("Paused"))
+        val request = context.takeCall("start")
+        PlayerNowPlayingService.hide(context)
+        PlayerNowPlayingService.publish(context, notification("Resumed"))
+        val controller = Robolectric.buildService(PlayerNowPlayingService::class.java).create()
+        try {
+            controller.get().onStartCommand(request, 0, 1)
+            context.assertNoCall()
+            val manager = context.getSystemService(NotificationManager::class.java)
+            val current = assertNotNull(shadowOf(manager).getNotification(NOW_PLAYING_NOTIFICATION_ID))
+            assertEquals("Resumed", current.extras.getString(Notification.EXTRA_TITLE))
+        } finally {
+            PlayerNowPlayingService.hide(context)
+            context.takeCall("stop")
             controller.destroy()
         }
     }
@@ -62,6 +124,7 @@ class PlayerNowPlayingServiceTest {
         val request = startThenHide("Restarted")
         val first = Robolectric.buildService(PlayerNowPlayingService::class.java).create()
         first.get().onStartCommand(request, 0, 1)
+        context.takeCall("stop")
         first.destroy()
 
         val parcel = Parcel.obtain()
@@ -72,11 +135,13 @@ class PlayerNowPlayingServiceTest {
         } finally {
             parcel.recycle()
         }
+        // A late copy of an answered start reaches a new instance: it still promotes first,
+        // and the controller stops the untracked service instead of letting it run forever.
         val recreated = Robolectric.buildService(PlayerNowPlayingService::class.java).create()
         try {
             recreated.get().onStartCommand(restored, 0, 1)
             assertEquals("Restarted", shadowOf(recreated.get()).lastForegroundNotification?.extras?.getString(Notification.EXTRA_TITLE))
-            assertTrue(shadowOf(recreated.get()).isStoppedBySelf)
+            context.takeCall("stop")
         } finally {
             recreated.destroy()
         }
@@ -100,24 +165,11 @@ class PlayerNowPlayingServiceTest {
         }
     }
 
-    @Test
-    fun blockedBackgroundStartFallsBackToForegroundStart() {
-        context.blockBackgroundStart = true
-        try {
-            PlayerNowPlayingService.publish(context, notification("Background"))
-            context.takeCall("foreground-start")
-        } finally {
-            context.blockBackgroundStart = false
-            PlayerNowPlayingService.hide(context)
-            context.takeCall("stop")
-        }
-    }
-
     private fun startThenHide(title: String): Intent {
         PlayerNowPlayingService.publish(context, notification(title))
         val request = context.takeCall("start")
         PlayerNowPlayingService.hide(context)
-        context.takeCall("stop")
+        context.assertNoCall()
         return request
     }
 
@@ -149,6 +201,15 @@ class PlayerNowPlayingServiceTest {
         override fun stopService(service: Intent): Boolean {
             calls.put("stop" to service)
             return true
+        }
+
+        fun drain() {
+            while (calls.poll(200, TimeUnit.MILLISECONDS) != null) Unit
+        }
+
+        fun assertNoCall(waitMs: Long = 500) {
+            val call = calls.poll(waitMs, TimeUnit.MILLISECONDS)
+            assertNull(call, "unexpected service call ${call?.first}")
         }
 
         fun takeCall(expected: String): Intent {
