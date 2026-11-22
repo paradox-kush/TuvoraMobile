@@ -44,6 +44,10 @@ object AppExitReporter {
     private const val PROCESS_SAMPLE_INTERVAL_SECONDS = 30L
     private val lock = Any()
 
+    /** Guards the self-exit marker's write and the report's read-compare-clear; separate from [lock] so the
+     *  deliberate-exit path never waits on breadcrumb or sampler writes. */
+    private val markerLock = Any()
+
     /** Set by [reportPendingExits]; lets deliberate-exit call sites mark without threading a Context through. */
     @Volatile
     private var appContext: Context? = null
@@ -56,7 +60,9 @@ object AppExitReporter {
         runCatching {
             val ctx = (context?.applicationContext ?: appContext) ?: return
             val raw = SelfExitMarker.encode(tag, Process.myPid(), System.currentTimeMillis()) ?: return
-            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_SELF_EXIT, raw).commit()
+            synchronized(markerLock) {
+                ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_SELF_EXIT, raw).commit()
+            }
         }
     }
     private val diagnosticsSampler = Executors.newSingleThreadScheduledExecutor { runnable ->
@@ -170,14 +176,19 @@ object AppExitReporter {
 
     private fun doReport(context: Context) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val selfExitMarker = SelfExitMarker.decode(prefs.getString(KEY_SELF_EXIT, null))
+        val rawMarker = synchronized(markerLock) { prefs.getString(KEY_SELF_EXIT, null) }
+        var completed = false
         try {
-            doReport(context, prefs, selfExitMarker)
+            doReport(context, prefs, SelfExitMarker.decode(rawMarker))
+            completed = true
         } finally {
-            // Consumed: one marker explains at most one earlier process. Never clear a marker this very process
-            // wrote (it is about to kill itself).
-            if (prefs.contains(KEY_SELF_EXIT) && selfExitMarker?.pid != Process.myPid()) {
-                prefs.edit().remove(KEY_SELF_EXIT).commit()
+            // Consumed: one marker explains at most one earlier process. Compare-and-clear under the marker lock so a
+            // marker written meanwhile by markSelfExit (Exit pressed mid-report) is never deleted.
+            synchronized(markerLock) {
+                val storedNow = prefs.getString(KEY_SELF_EXIT, null)
+                if (SelfExitMarker.shouldClearAfterReport(rawMarker, storedNow, Process.myPid(), completed)) {
+                    prefs.edit().remove(KEY_SELF_EXIT).commit()
+                }
             }
         }
     }

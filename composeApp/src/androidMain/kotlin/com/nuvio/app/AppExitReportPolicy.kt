@@ -96,5 +96,24 @@ data class SelfExitMarker(val tag: String, val pid: Int, val atMs: Long) {
             // Small negative slack: the exit record is stamped by system_server, the marker by this process.
             return if (gap in -1_000L..MATCH_WINDOW_MS) marker.tag else null
         }
+
+        /**
+         * Whether the post-report cleanup may remove the stored marker.
+         * @param readAtStart the raw marker the report read and matched exits against.
+         * @param storedNow the raw marker stored at cleanup time (read under the marker lock).
+         *
+         * Clears only the exact value that was consumed: a marker written after the read (the user pressed Exit while
+         * the report ran) is a different value and survives. A failed report keeps it, because its exits are retried
+         * next launch and still need the tag. A marker this very process wrote is never cleared (it is about to die).
+         */
+        fun shouldClearAfterReport(
+            readAtStart: String?,
+            storedNow: String?,
+            currentPid: Int,
+            reportCompleted: Boolean,
+        ): Boolean = reportCompleted &&
+            storedNow != null &&
+            storedNow == readAtStart &&
+            decode(storedNow)?.pid != currentPid
     }
 }

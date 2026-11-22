@@ -2,7 +2,9 @@ package com.nuvio.app
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** Our own deliberate process kill must be counted but never filed as a fatal `signaled` issue. */
 class SelfExitPolicyTest {
@@ -73,5 +75,53 @@ class SelfExitPolicyTest {
         assertNull(SelfExitMarker.tagFor(m, 2973, 1_000_000L + SelfExitMarker.MATCH_WINDOW_MS + 1), "a stale marker must not mask a later kill")
         assertNull(SelfExitMarker.tagFor(m, 2973, 900_000L), "an exit before the marker is not ours")
         assertNull(SelfExitMarker.tagFor(null, 2973, 1_000_050L))
+    }
+    // --- post-report cleanup: one marker explains at most one earlier process, and never eats a newer one ---
+
+    private val stale = "user_exit|100|1000"
+    private val fresh = "user_exit|200|5000"
+
+    @Test
+    fun `a marker this process writes while the report runs is kept`() {
+        assertFalse(
+            SelfExitMarker.shouldClearAfterReport(stale, fresh, currentPid = 200, reportCompleted = true),
+            "Exit pressed mid-report: deleting the fresh marker makes the next launch report a fatal SIGKILL",
+        )
+    }
+
+    @Test
+    fun `a marker written after an empty read is kept`() {
+        assertFalse(
+            SelfExitMarker.shouldClearAfterReport(null, fresh, currentPid = 200, reportCompleted = true),
+            "nothing was consumed so nothing may be cleared",
+        )
+    }
+
+    @Test
+    fun `the consumed marker is cleared once the report completes`() {
+        assertTrue(SelfExitMarker.shouldClearAfterReport(stale, stale, currentPid = 200, reportCompleted = true))
+    }
+
+    @Test
+    fun `a failed report keeps the marker for the next launch`() {
+        assertFalse(
+            SelfExitMarker.shouldClearAfterReport(stale, stale, currentPid = 200, reportCompleted = false),
+            "the unreported exit is retried next launch and still needs its tag",
+        )
+    }
+
+    @Test
+    fun `a marker this process wrote before the read is kept`() {
+        assertFalse(SelfExitMarker.shouldClearAfterReport(fresh, fresh, currentPid = 200, reportCompleted = true))
+    }
+
+    @Test
+    fun `nothing stored means nothing to clear`() {
+        assertFalse(SelfExitMarker.shouldClearAfterReport(null, null, currentPid = 200, reportCompleted = true))
+    }
+
+    @Test
+    fun `an unreadable marker that was read is cleared`() {
+        assertTrue(SelfExitMarker.shouldClearAfterReport("junk", "junk", currentPid = 200, reportCompleted = true))
     }
 }
