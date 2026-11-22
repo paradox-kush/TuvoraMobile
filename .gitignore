@@ -33,6 +33,8 @@ AGENTS.md
 PERFORMANCE_FINDINGS.md
 scripts/*
 !scripts/sign-ios-device-app.py
+!scripts/archive-mapping.sh
+!scripts/retrace-crash.sh
 iosApp/Configuration/DeviceSigning.local.json
 
 # Local MPVKit iOS build environment (sparse APFS image, see MPVKit docs)
