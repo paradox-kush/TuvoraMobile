@@ -48,6 +48,7 @@ import com.nuvio.app.features.streams.StreamLaunchStore
 import com.nuvio.app.features.streams.ExternalPlayerAvailability
 import com.nuvio.app.features.streams.StreamLinkCacheRepository
 import com.nuvio.app.features.streams.StreamsRepository
+import com.nuvio.app.features.streams.messageRes
 import com.nuvio.app.features.streams.StreamsScreen
 import com.nuvio.app.features.streams.shouldShowAutoPlayLoading
 import com.nuvio.app.features.streams.shouldUseLandscapeAutoPlayLoading
@@ -103,6 +104,10 @@ internal fun StreamDestination(
 
     var autoPlayNavigationStarted by remember(route.launchId) { mutableStateOf(false) }
     val providerResolveFailureMessage = stringResource(Res.string.provider_source_resolve_failed)
+    // B02: the reason a source gave no link, in plain words (one text per named refusal; the rest is the line above).
+    val providerRefusalMessages = com.nuvio.app.core.contracts.DeferredResolveRefusal.entries.associateWith {
+        stringResource(it.messageRes())
+    }
     var resolvingProviderStream by remember(route.launchId) { mutableStateOf(false) }
     var resolvingDebridStream by rememberSaveable(route.launchId) { mutableStateOf(false) }
     var resolvingYouTubeStream by rememberSaveable(route.launchId) { mutableStateOf(false) }
@@ -527,10 +532,14 @@ internal fun StreamDestination(
         // Fork: auto-play of a Stalker source mints its link now (listing left it deferred).
         val streamSources = com.nuvio.app.core.contracts.StreamSourceAccess.current()
         val playableStream = if (streamSources.isDeferredUrl(stream.playableDirectUrl)) {
-            val minted = streamSources.resolveDeferredUrl(stream.playableDirectUrl.orEmpty(), forceMint = false)
+            val result = streamSources.resolveDeferred(stream.playableDirectUrl.orEmpty(), forceMint = false)
+            val minted = (result as? com.nuvio.app.core.contracts.DeferredResolveResult.Minted)?.url
             if (minted.isNullOrBlank()) {
                 val hasNext = StreamsRepository.skipAutoPlayStream(selectedStream)
-                if (!hasNext) NuvioToastController.show(providerResolveFailureMessage)
+                if (!hasNext) {
+                    val reason = (result as? com.nuvio.app.core.contracts.DeferredResolveResult.Refused)?.reason
+                    NuvioToastController.show(providerRefusalMessages[reason] ?: providerResolveFailureMessage)
+                }
                 return@LaunchedEffect
             }
             streamSources.withMintedUrl(stream, minted)
@@ -690,8 +699,14 @@ internal fun StreamDestination(
         // for this edition only, then re-enter with the real URL.
         if (com.nuvio.app.core.contracts.StreamSourceAccess.current().isDeferredUrl(stream.playableDirectUrl)) {
             resolvingProviderStream = true
+            var refusal: com.nuvio.app.core.contracts.DeferredResolveRefusal? = null   // why the last mint gave no link
             providerSelection.select(stream,
-                resolve = { url -> com.nuvio.app.core.contracts.StreamSourceAccess.current().resolveDeferredUrl(url, forceMint = false) },
+                resolve = { url ->
+                    when (val r = com.nuvio.app.core.contracts.StreamSourceAccess.current().resolveDeferred(url, forceMint = false)) {
+                        is com.nuvio.app.core.contracts.DeferredResolveResult.Minted -> r.url
+                        is com.nuvio.app.core.contracts.DeferredResolveResult.Refused -> { refusal = r.reason; null }
+                    }
+                },
                 onReady = { minted ->
                     resolvingProviderStream = false
                     openSelectedStream(minted, resolvedResumePositionMs, resolvedResumeProgressFraction, forceExternal, forceInternal)
@@ -699,7 +714,7 @@ internal fun StreamDestination(
                 onFailure = {
                     resolvingProviderStream = false
                     StreamsRepository.cancelLoading()
-                    NuvioToastController.show(providerResolveFailureMessage)
+                    NuvioToastController.show(providerRefusalMessages[refusal] ?: providerResolveFailureMessage)
                 },
                 repoint = { deferred, minted -> com.nuvio.app.core.contracts.StreamSourceAccess.current().withMintedUrl(deferred, minted) },
             )

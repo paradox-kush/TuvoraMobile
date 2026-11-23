@@ -9,6 +9,8 @@ import com.nuvio.app.features.iptv.XtreamClient
 import com.nuvio.app.features.iptv.XtreamMovie
 import com.nuvio.app.features.iptv.XtreamSeriesItem
 import com.nuvio.app.features.iptv.stalker.StalkerClient
+import com.nuvio.app.features.iptv.stalker.StalkerLinkRefusal
+import com.nuvio.app.features.iptv.stalker.StalkerLinkResult
 import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.tmdb.TmdbService
 import com.nuvio.app.features.tmdb.TmdbTitleBundle
@@ -55,17 +57,31 @@ internal object XtreamStreamSource {
      * [forceMint] — the 401-refresh path only: bypass a static-cmd verdict (the static URL just
      * died); the normal pick-time resolve keeps the policy's static shortcut.
      */
-    suspend fun resolveDeferredUrl(url: String, forceMint: Boolean = false): String? {
-        if (!isDeferred(url)) return url
-        val d = parseDeferred(url) ?: return null
+    suspend fun resolveDeferredUrl(url: String, forceMint: Boolean = false): String? =
+        (resolveDeferredLink(url, forceMint) as? StalkerLinkResult.Link)?.url
+
+    /** [resolveDeferredUrl] that keeps the portal's named refusal (B02): a failure is never an unexplained null. */
+    suspend fun resolveDeferredLink(url: String, forceMint: Boolean = false): StalkerLinkResult {
+        if (!isDeferred(url)) return StalkerLinkResult.Link(url)
+        val none = StalkerLinkResult.Refused(StalkerLinkRefusal.NO_LINK)
+        val d = parseDeferred(url) ?: return none
         com.nuvio.app.features.iptv.XtreamRepository.ensureLoaded()
         val acc = com.nuvio.app.features.iptv.XtreamRepository.uiState.value.accounts
-            .firstOrNull { it.id == d.accountId } ?: return null
+            .firstOrNull { it.id == d.accountId } ?: return none
         return if (d.isMovie) {
-            StalkerClient.resolveMovieUrl(acc, d.a, d.name, forceMint)
+            StalkerClient.resolveMovieLink(acc, d.a, d.name, forceMint)
         } else {
-            StalkerClient.resolveEpisodeUrl(acc, d.a, d.b, d.c)
+            StalkerClient.resolveEpisodeLink(acc, d.a, d.b, d.c)
         }
+    }
+
+    /** Pure: the neutral reason the shared UI names for a portal refusal. */
+    fun refusalOf(reason: StalkerLinkRefusal): com.nuvio.app.core.contracts.DeferredResolveRefusal = when (reason) {
+        StalkerLinkRefusal.SESSION_LIMIT -> com.nuvio.app.core.contracts.DeferredResolveRefusal.SESSION_LIMIT
+        StalkerLinkRefusal.NOTHING_TO_PLAY -> com.nuvio.app.core.contracts.DeferredResolveRefusal.NOTHING_TO_PLAY
+        StalkerLinkRefusal.ACCESS_DENIED -> com.nuvio.app.core.contracts.DeferredResolveRefusal.ACCESS_DENIED
+        StalkerLinkRefusal.LINK_FAULT, StalkerLinkRefusal.PORTAL_ERROR, StalkerLinkRefusal.NO_LINK,
+        StalkerLinkRefusal.REQUEST_FAILED -> com.nuvio.app.core.contracts.DeferredResolveRefusal.OTHER
     }
 
     internal data class Deferred(
