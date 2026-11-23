@@ -102,7 +102,7 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
     /** Retry after Failed/Empty (the only way back from them: an event, never a timer). */
     fun retry() {
         if (_state.value !is TvGameDetailState.Loaded) _state.value = TvGameDetailState.Loading
-        _shown.value = _state.value
+        republish(RadarRepository.uiState.value.scoreSpoiler)
         retrySignal.trySend(Unit)
     }
 
@@ -111,20 +111,28 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
      * Cancelling the caller's task (screen gone, app backgrounded) ends it: no free-running poll.
      */
     suspend fun runWhileVisible(): Unit = coroutineScope {
-        // Re-render on a settings change, a new snapshot, or ONCE when the next delayed snapshot is due. Local only (no
-        // request), and it lives exactly as long as the caller's visible task.
-        launch {
-            var settings = RadarRepository.uiState.value.scoreSpoiler
-            launch { RadarRepository.uiState.map { it.scoreSpoiler }.distinctUntilChanged().collect { settings = it; republish(it) } }
-            launch { _state.collect { republish(settings) } }
-            while (true) {
-                val due = gate.nextChangeAtMs(settings, RadarTime.nowMs())
-                if (due == null) { redraw.receive(); continue }
-                withTimeoutOrNull((due - RadarTime.nowMs()).coerceAtLeast(0L) + 50L) { redraw.receive() }
-                republish(settings, wake = false)
-            }
-        }
+        // The spoiler redraw lives as long as the poll; it ends with it (a FINAL game still returns at once).
+        val spoilerJob = launch { runScoreSpoilerWhileVisible() }
         poll()
+        spoilerJob.cancel()
+    }
+
+    /**
+     * Keeps [state] in step with Hide scores / score delay: re-renders on a settings change, a new snapshot, or ONCE when
+     * the next delayed snapshot falls due. Local only (no request). [runWhileVisible] runs it while polling; Swift runs it
+     * in its own task tied to the screen's visibility so the reveal chip and a due final score still apply after the
+     * poll went idle. Cancel to stop.
+     */
+    suspend fun runScoreSpoilerWhileVisible(): Unit = coroutineScope {
+        var settings = RadarRepository.uiState.value.scoreSpoiler
+        launch { RadarRepository.uiState.map { it.scoreSpoiler }.distinctUntilChanged().collect { settings = it; republish(it) } }
+        launch { _state.collect { republish(settings) } }
+        while (true) {
+            val due = gate.nextChangeAtMs(settings, RadarTime.nowMs())
+            if (due == null) { redraw.receive(); continue }
+            withTimeoutOrNull((due - RadarTime.nowMs()).coerceAtLeast(0L) + 50L) { redraw.receive() }
+            republish(settings, wake = false)
+        }
     }
 
     private val redraw = Channel<Unit>(Channel.CONFLATED)
@@ -169,6 +177,7 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
             // Where the fetch result lands: time-stamp it for the score delay (never in Swift).
             if (load is DetailLoad.Loaded) gate.record(load.detail, at)
             _state.value = TvGameDetailReducer.reduce(_state.value, load)
+            republish(RadarRepository.uiState.value.scoreSpoiler)
             val after = _state.value
             if (after !is TvGameDetailState.Loaded) {
                 retrySignal.receive()          // Failed / Empty wait for Retry (or the screen going away)
