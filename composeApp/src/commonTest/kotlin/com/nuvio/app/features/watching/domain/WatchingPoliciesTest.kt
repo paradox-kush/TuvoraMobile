@@ -263,7 +263,11 @@ class WatchingPoliciesTest {
 
     @Test
     fun `isoCalendarDateOrNull parses various date formats`() {
-        assertEquals("2026-05-23", isoCalendarDateOrNull("2026-05-23T12:00:00Z"))
+        // A zoned timestamp becomes the VIEWER's calendar date: 12:00Z is already 2026-05-24 at UTC+12.
+        assertEquals(
+            com.nuvio.app.core.time.EpisodeReleaseDatePlatform.localIsoDateAtEpochMs(1_779_537_600_000L),
+            isoCalendarDateOrNull("2026-05-23T12:00:00Z"),
+        )
         assertEquals("2026-05-23", isoCalendarDateOrNull(" 2026-05-23 "))
         assertEquals(null, isoCalendarDateOrNull("2026-5-23"))
         assertEquals(null, isoCalendarDateOrNull("2026-5-9"))
