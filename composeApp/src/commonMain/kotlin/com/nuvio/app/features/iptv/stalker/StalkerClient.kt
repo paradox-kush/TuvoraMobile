@@ -833,8 +833,9 @@ object StalkerClient : IptvClient {
         mintMovieLink(acc, streamId, nameHint, forceMint).also { if (it is StalkerLinkResult.Link) rememberStreamIdentity(acc) }
 
     /**
-     * B02: the create_link cmd comes from [StalkerVodCommandPolicy] (ids, never a custom URL). A direct cmd that the
-     * portal refuses falls back to the movie's file rows once, unless the refusal is a session cap or access denial
+     * B02: the create_link cmd comes from [StalkerVodCommandPolicy] (ids for proven Ministra custom rows; an unproven
+     * raw cmd is sent unchanged). A direct cmd that the
+     * portal refuses falls back to the movie's file rows, then the id cmd, once, unless the refusal is a session cap or access denial
      * (a second ask cannot change those).
      */
     private suspend fun mintMovieLink(acc: XtreamAccount, streamId: Int, nameHint: String?, forceMint: Boolean): StalkerLinkResult {
@@ -847,7 +848,7 @@ object StalkerClient : IptvClient {
             is StalkerVodCommandPolicy.Plan.Direct -> {
                 val first = createLinkResult(acc, "vod", plan.cmd)
                 if (first is StalkerLinkResult.Link || !canTryFiles(first)) first
-                else mintFromMovieFiles(acc, streamId, fallback = null, previous = first, skipCmd = plan.cmd)
+                else mintFromMovieFiles(acc, streamId, fallback = plan.fallback, previous = first, skipCmd = plan.cmd)
             }
             is StalkerVodCommandPolicy.Plan.FilesFirst -> mintFromMovieFiles(acc, streamId, plan.fallback, previous = null)
         }

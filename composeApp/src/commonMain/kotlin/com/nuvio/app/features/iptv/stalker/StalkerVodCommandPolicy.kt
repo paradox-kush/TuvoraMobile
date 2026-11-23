@@ -4,9 +4,10 @@ package com.nuvio.app.features.iptv.stalker
  * B02: which `cmd` a VOD `create_link` is sent, decided from the catalogue row and nothing else (no I/O).
  *
  * Stock Ministra (`vod.class.php`) only accepts `/media/<id>.mpg` and `/media/file_<id>.mpg` there. A row that
- * carries a custom URL (`rtsp_url`, or a file row with `protocol == custom`) holds that URL in its own `cmd`, which
- * is NOT a create_link input: the real STB (`c/player.js`) rebuilds the `/media/` form from the id, and so do we.
- * XC-emulator portals (base64 / odd cmds) keep their raw cmd untouched.
+ * PROVES it is a stock custom-URL row (`is_file`, a non-blank `rtsp_url`, `has_files > 0`) is rebuilt to the
+ * `/media/` form from its id, as the real STB (`c/player.js`) does. Anything else keeps its raw cmd as the FIRST
+ * attempt: portals emulated over Xtream carry `ffmpeg http://...` cmds that create_link accepts as-is. Only if that
+ * attempt gives no link does the client fall back (file rows -> `/media/file_<id>.mpg`, else [Plan.Direct.fallback]).
  */
 object StalkerVodCommandPolicy {
 
@@ -22,8 +23,11 @@ object StalkerVodCommandPolicy {
     )
 
     sealed interface Plan {
-        /** Send exactly this cmd to create_link. */
-        data class Direct(val cmd: String) : Plan
+        /**
+         * Send exactly this cmd to create_link. [fallback] (the `/media/<id>.mpg` form) is for an unproven raw-URL
+         * cmd only: if create_link gives no link, the movie's file rows are tried, then [fallback].
+         */
+        data class Direct(val cmd: String, val fallback: String? = null) : Plan
 
         /**
          * Ask the portal for the movie's file rows first (`get_ordered_list movie_id=<id>`) and mint
@@ -45,11 +49,9 @@ object StalkerVodCommandPolicy {
         }
         if (!row.rtspUrl.isNullOrBlank()) return Plan.Direct(movieCmd(row.id))
         if (cmd.isEmpty()) return Plan.FilesFirst(fallback = null)
-        if (isRawUrl(cmd)) {
-            // Custom URL as cmd. If the row proved it has no files the id form is right; a cold-start row
-            // (nothing but cmd) may still be a multi-file movie, so look at the files first and keep the id as fallback.
-            return if (row.hasFiles == 0) Plan.Direct(movieCmd(row.id)) else Plan.FilesFirst(fallback = movieCmd(row.id))
-        }
+        // A raw URL with no proof (no rtsp_url, has_files 0 or unknown, a cold row with only cmd) may be an
+        // XC-emulator cmd: send it unchanged, keep the id form as the last resort.
+        if (isRawUrl(cmd)) return Plan.Direct(cmd, fallback = movieCmd(row.id))
         return Plan.Direct(cmd)
     }
 

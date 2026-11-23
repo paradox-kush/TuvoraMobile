@@ -18,6 +18,8 @@ class StalkerLegacyVodTest {
     private var strictFiles = ""
     private var relativeReply = false
     private var linkError = ""
+    /** XC-emulator portal: create_link accepts a raw `ffmpeg http://...` cmd as-is. */
+    private var xcRaw = false
     private val portal: suspend (String, Map<String, String>) -> String = { url, _ ->
         val q = listOf("action","type","cmd","movie_id","series").associateWith { param(url,it) }
         requests += q
@@ -41,7 +43,8 @@ class StalkerLegacyVodTest {
             """{"js":{"total_items":1,"max_page_items":14,"data":[$strictFiles]}}"""
             else """{"js":{"total_items":1,"max_page_items":14,"data":[$strictRows]}}"""
         "create_link" -> {
-            val ok = Regex("""^/media/(file_)?\d+\.mpg$""").matches(q["cmd"].orEmpty())
+            val ok = Regex("""^/media/(file_)?\d+\.mpg$""").matches(q["cmd"].orEmpty()) ||
+                (xcRaw && q["cmd"].orEmpty().startsWith("ffmpeg http"))
             when {
                 !ok -> """{"js":{"cmd":"","error":"nothing_to_play"}}"""
                 linkError.isNotEmpty() -> """{"js":{"cmd":"","error":"$linkError"}}"""
@@ -88,14 +91,23 @@ class StalkerLegacyVodTest {
         assertEquals("http://media.test/play", StalkerClient.resolveMovieUrl(account, 10), "link resolved")
         assertEquals(listOf<String?>("/media/file_100.mpg"), createLinkCmds(), "the only create_link cmd")
     }
-    @Test fun `strict cold start with a stored custom url cmd resolves through the file row`() = runBlocking {
+    @Test fun `strict cold start with a stored custom url cmd sends it first then falls back to the file row`() = runBlocking {
         strict = true
         strictRows = """{"id":"10","name":"Movie","cmd":"http://cdn.test/f.mkv","has_files":1}"""
         strictFiles = """{"id":"100","is_file":true,"protocol":"custom","cmd":"http://cdn.test/f.mkv"}"""
         StalkerClient.vodMovies(account, "7").getOrThrow()
         StalkerClient.clearMemoryCachesForTest()   // drop the hot row: only the write-through cmd is left
         assertEquals("http://media.test/play", StalkerClient.resolveMovieUrl(account, 10), "link resolved")
-        assertEquals(listOf<String?>("/media/file_100.mpg"), createLinkCmds(), "file id, never the raw url")
+        assertEquals(listOf<String?>("http://cdn.test/f.mkv", "/media/file_100.mpg"), createLinkCmds(), "raw cmd first, then the file id")
+    }
+    @Test fun `XC emulator raw cmd is sent unchanged`() = runBlocking {
+        strict = true
+        xcRaw = true
+        strictRows = """{"id":"10","name":"Movie","cmd":"ffmpeg http://localhost/ch/3","has_files":0}"""
+        StalkerClient.vodMovies(account, "7").getOrThrow()
+        assertEquals("http://media.test/play", StalkerClient.resolveMovieUrl(account, 10), "link resolved")
+        assertEquals(listOf<String?>("ffmpeg http://localhost/ch/3"), createLinkCmds(), "the raw cmd, once")
+        assertEquals(0, requests.count { it["action"] == "get_ordered_list" && it["movie_id"] == "10" }, "no file lookup")
     }
     @Test fun `strict D - a relative reply is resolved against the portal`() = runBlocking {
         strict = true; relativeReply = true

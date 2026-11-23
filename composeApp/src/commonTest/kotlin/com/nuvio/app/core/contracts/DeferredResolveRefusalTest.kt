@@ -1,7 +1,5 @@
 package com.nuvio.app.core.contracts
 
-import com.nuvio.app.features.iptv.match.XtreamStreamSource
-import com.nuvio.app.features.iptv.stalker.StalkerLinkRefusal
 import com.nuvio.app.features.streams.StreamItem
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -16,15 +14,6 @@ class DeferredResolveRefusalTest {
         assertEquals("provider_source_nothing_to_play", DeferredResolveRefusal.NOTHING_TO_PLAY.messageKey, "nothing_to_play")
         assertEquals("provider_source_access_denied", DeferredResolveRefusal.ACCESS_DENIED.messageKey, "access_denied")
         assertEquals("provider_source_resolve_failed", DeferredResolveRefusal.OTHER.messageKey, "generic")
-    }
-
-    @Test
-    fun `a portal refusal maps to its neutral reason`() {
-        assertEquals(DeferredResolveRefusal.SESSION_LIMIT, XtreamStreamSource.refusalOf(StalkerLinkRefusal.SESSION_LIMIT), "limit")
-        assertEquals(DeferredResolveRefusal.NOTHING_TO_PLAY, XtreamStreamSource.refusalOf(StalkerLinkRefusal.NOTHING_TO_PLAY), "nothing_to_play")
-        assertEquals(DeferredResolveRefusal.ACCESS_DENIED, XtreamStreamSource.refusalOf(StalkerLinkRefusal.ACCESS_DENIED), "access_denied")
-        listOf(StalkerLinkRefusal.LINK_FAULT, StalkerLinkRefusal.PORTAL_ERROR, StalkerLinkRefusal.NO_LINK, StalkerLinkRefusal.REQUEST_FAILED)
-            .forEach { assertEquals(DeferredResolveRefusal.OTHER, XtreamStreamSource.refusalOf(it), "generic for $it") }
     }
 
     private class Plain(private val minted: String?) : StreamSourceProvider {

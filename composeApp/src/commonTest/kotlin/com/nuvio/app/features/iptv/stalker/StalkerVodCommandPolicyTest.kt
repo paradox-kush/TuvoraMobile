@@ -47,16 +47,13 @@ class StalkerVodCommandPolicyTest {
     }
 
     @Test
-    fun `a raw custom url with no row facts looks at the files first and falls back to the id cmd`() {
-        assertEquals(Plan.FilesFirst(fallback = "/media/10.mpg"),
+    fun `XC emulator raw cmd is sent unchanged`() {
+        assertEquals(Plan.Direct("ffmpeg http://localhost/ch/3", fallback = "/media/10.mpg"),
+            StalkerVodCommandPolicy.plan(Row(10, "ffmpeg http://localhost/ch/3", hasFiles = 0)), "proven no files")
+        assertEquals(Plan.Direct("http://cdn.test/a.mkv", fallback = "/media/10.mpg"),
             StalkerVodCommandPolicy.plan(Row(10, "http://cdn.test/a.mkv")), "cold start row")
-        assertEquals(Plan.FilesFirst(fallback = "/media/10.mpg"),
+        assertEquals(Plan.Direct("ffmpeg rtsp://cdn.test/a", fallback = "/media/10.mpg"),
             StalkerVodCommandPolicy.plan(Row(10, "ffmpeg rtsp://cdn.test/a")), "launcher plus rtsp")
-    }
-
-    @Test
-    fun `a raw custom url on a row proven to have no files mints the id cmd`() {
-        assertEquals(Plan.Direct("/media/10.mpg"), StalkerVodCommandPolicy.plan(Row(10, "http://cdn.test/a.mkv", hasFiles = 0)), "no files")
     }
 
     @Test
@@ -66,14 +63,16 @@ class StalkerVodCommandPolicyTest {
     }
 
     @Test
-    fun `a raw url is never a direct create_link cmd`() {
-        val rows = listOf(
-            Row(1, "http://a/b"), Row(1, "http://a/b", hasFiles = 0), Row(1, "https://a/b", rtspUrl = "https://a/b"),
-            Row(1, "rtsp://a/b", hasFiles = 3), Row(1, "http://a/b", isFile = true),
+    fun `a raw url is rewritten only on proof of a stock custom row`() {
+        val proven = listOf(
+            Row(1, "http://a/b", rtspUrl = "https://a/b"), Row(1, "rtsp://a/b", hasFiles = 3), Row(1, "http://a/b", isFile = true),
         )
-        rows.forEach { r ->
+        proven.forEach { r ->
             val p = StalkerVodCommandPolicy.plan(r)
             assertFalse(p is Plan.Direct && StalkerVodCommandPolicy.isRawUrl(p.cmd), "raw url sent as cmd for $r")
+        }
+        listOf(Row(1, "http://a/b"), Row(1, "http://a/b", hasFiles = 0)).forEach { r ->
+            assertEquals(Plan.Direct("http://a/b", "/media/1.mpg"), StalkerVodCommandPolicy.plan(r), "unproven $r")
         }
     }
 
