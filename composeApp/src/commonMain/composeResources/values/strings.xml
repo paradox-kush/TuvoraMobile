@@ -2845,6 +2845,9 @@
     <string name="media_server_search_movies">Movies · %1$s</string>
     <string name="media_server_search_series">TV Shows · %1$s</string>
     <string name="provider_source_resolve_failed">Could not open this source. Try again or choose another source.</string>
+    <string name="provider_source_session_limit">Your provider says too many screens are in use</string>
+    <string name="provider_source_nothing_to_play">The portal has nothing to play for this title</string>
+    <string name="provider_source_access_denied">The portal refused this title for your account</string>
     <!-- Recordings (wave 3) -->
     <string name="recordings_title">Recordings</string>
     <string name="recordings_section_scheduled">Scheduled</string>

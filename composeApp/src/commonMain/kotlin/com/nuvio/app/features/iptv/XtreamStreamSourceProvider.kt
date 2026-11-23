@@ -72,6 +72,16 @@ internal object XtreamStreamSourceProvider : StreamSourceProvider {
     override suspend fun resolveDeferredUrl(url: String, forceMint: Boolean): String? =
         XtreamStreamSource.resolveDeferredUrl(url, forceMint = forceMint).also { IptvPanelHosts.note(it) }
 
+    override suspend fun resolveDeferred(url: String, forceMint: Boolean): com.nuvio.app.core.contracts.DeferredResolveResult =
+        when (val r = XtreamStreamSource.resolveDeferredLink(url, forceMint = forceMint)) {
+            is com.nuvio.app.features.iptv.stalker.StalkerLinkResult.Link -> {
+                IptvPanelHosts.note(r.url)
+                com.nuvio.app.core.contracts.DeferredResolveResult.Minted(r.url)
+            }
+            is com.nuvio.app.features.iptv.stalker.StalkerLinkResult.Refused ->
+                com.nuvio.app.core.contracts.DeferredResolveResult.Refused(XtreamStreamSource.refusalOf(r.reason))
+        }
+
     // A minted Stalker VOD link keeps the stream's own headers (the playlist UA override), as before 1.20.3: the
     // interface default re-points the url and nothing else (StalkerStreamIdentityPolicy).
 }

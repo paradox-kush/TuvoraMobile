@@ -2,6 +2,24 @@ package com.nuvio.app.core.contracts
 
 import com.nuvio.app.features.streams.StreamItem
 
+/**
+ * Why a deferred (play-time) source gave no link, in neutral terms: the shared UI names the reason, never a host or
+ * a portal command. [messageKey] is the base-strings resource name of the short, plain-words toast (B02).
+ */
+enum class DeferredResolveRefusal(val messageKey: String) {
+    SESSION_LIMIT("provider_source_session_limit"),
+    NOTHING_TO_PLAY("provider_source_nothing_to_play"),
+    ACCESS_DENIED("provider_source_access_denied"),
+    /** Anything else (transport failure, no link, an unnamed refusal): the generic "could not open this source". */
+    OTHER("provider_source_resolve_failed"),
+}
+
+/** One play-time mint: the playable url, or the named reason there is none. Never a silent null. */
+sealed interface DeferredResolveResult {
+    data class Minted(val url: String) : DeferredResolveResult
+    data class Refused(val reason: DeferredResolveRefusal) : DeferredResolveResult
+}
+
 /** One match source (an enabled IPTV account, a signed-in media server), identified by an opaque id its owner maps back. */
 data class StreamSourceGroup(val sourceId: String, val addonName: String)
 
@@ -50,6 +68,11 @@ interface StreamSourceProvider {
 
     /** Mint the real play URL for a deferred [url], or null. [forceMint] bypasses static-cmd reuse. */
     suspend fun resolveDeferredUrl(url: String, forceMint: Boolean): String?
+
+    /** [resolveDeferredUrl] that says WHY when it cannot mint. Providers that know a reason override it. */
+    suspend fun resolveDeferred(url: String, forceMint: Boolean): DeferredResolveResult =
+        resolveDeferredUrl(url, forceMint)?.takeIf { it.isNotBlank() }?.let { DeferredResolveResult.Minted(it) }
+            ?: DeferredResolveResult.Refused(DeferredResolveRefusal.OTHER)
 
     /**
      * [stream] (still carrying its deferred url) re-pointed at [mintedUrl] from [resolveDeferredUrl], with any
@@ -122,6 +145,10 @@ class CompositeStreamSourceProvider(
 
     override suspend fun resolveDeferredUrl(url: String, forceMint: Boolean): String? =
         providers().firstOrNull { it.isDeferredUrl(url) }?.resolveDeferredUrl(url, forceMint)
+
+    override suspend fun resolveDeferred(url: String, forceMint: Boolean): DeferredResolveResult =
+        providers().firstOrNull { it.isDeferredUrl(url) }?.resolveDeferred(url, forceMint)
+            ?: DeferredResolveResult.Refused(DeferredResolveRefusal.OTHER)
 
     override fun withMintedUrl(stream: StreamItem, mintedUrl: String): StreamItem =
         providers().firstOrNull { it.isDeferredUrl(stream.playableDirectUrl) }?.withMintedUrl(stream, mintedUrl)

@@ -1,6 +1,8 @@
 package com.nuvio.app.features.player
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.core.contracts.DeferredResolveRefusal
+import com.nuvio.app.core.contracts.DeferredResolveResult
 import com.nuvio.app.core.contracts.StreamSourceAccess
 import com.nuvio.app.core.ui.NuvioToastController
 import com.nuvio.app.features.debrid.DirectDebridPlayableResult
@@ -18,6 +20,7 @@ import com.nuvio.app.features.servers.serverPlaybackMessage
 import com.nuvio.app.features.streams.StreamBehaviorHints
 import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.streams.StreamLinkCacheRepository
+import com.nuvio.app.features.streams.messageRes
 import com.nuvio.app.features.streams.runCatchingUnlessCancelled
 import com.nuvio.app.features.streams.YouTubeStreamResolver
 import com.nuvio.app.features.watchprogress.WatchProgressEntry
@@ -27,7 +30,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
 import nuvio.composeapp.generated.resources.Res
-import nuvio.composeapp.generated.resources.provider_source_resolve_failed
 import nuvio.composeapp.generated.resources.youtube_resolution_failed
 import org.jetbrains.compose.resources.getString
 
@@ -334,12 +336,14 @@ internal fun PlayerScreenRuntime.mintDeferredStreamThen(
     // The latest pick wins: a second tap while a mint is in flight replaces it instead of minting twice.
     deferredSourceMintJob?.cancel()
     deferredSourceMintJob = scope.launch {
-        val minted = runCatchingUnlessCancelled { sources.resolveDeferredUrl(deferredUrl, forceMint = false) }
+        val result = runCatchingUnlessCancelled { sources.resolveDeferred(deferredUrl, forceMint = false) }
             .getOrNull()
         coroutineContext.ensureActive()
+        val minted = (result as? DeferredResolveResult.Minted)?.url
         if (minted.isNullOrBlank()) {
             deferredSourceLog.w { "deferred source mint failed - keeping the current source" }
-            NuvioToastController.show(resolveText(Res.string.provider_source_resolve_failed))
+            val reason = (result as? DeferredResolveResult.Refused)?.reason ?: DeferredResolveRefusal.OTHER
+            NuvioToastController.show(resolveText(reason.messageRes()))
             return@launch
         }
         onMinted(sources.withMintedUrl(stream, minted))
