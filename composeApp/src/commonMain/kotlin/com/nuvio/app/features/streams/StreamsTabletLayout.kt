@@ -233,6 +233,7 @@ internal fun TabletStreamsLayout(
                                 onStreamLongPress = onStreamLongPress,
                                 resumePositionMs = resumePositionMs,
                                 resumeProgressFraction = resumeProgressFraction,
+                                onRetry = onRefresh,
                                 modifier = Modifier.weight(1f),
                             )
                         }

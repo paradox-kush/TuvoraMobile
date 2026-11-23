@@ -467,6 +467,9 @@ struct StreamPickerScreen: View {
     @State private var streams: StreamsUiState?
     @State private var opening = false
     @State private var smokePicked = false
+    /// B246: why Tuvora Connect gave no sources (shared policy, decided in Kotlin); nil = the generic empty state is honest.
+    @State private var managed: TvManagedBridgeExplanation?
+    @State private var managedShown = false
 
     var body: some View {
         ZStack {
@@ -509,6 +512,7 @@ struct StreamPickerScreen: View {
                                        season: video?.season?.int32Value ?? -1, episode: video?.episode?.int32Value ?? -1)
             for await next in TvTitle.shared.streams {
                 streams = next
+                await updateManaged(for: next)
                 // Auto Stream Selection (phone parity): play the nominated source without the list.
                 // Simulator smoke hook: `-smokePickFirstSource` opens the first listed source.
                 if AppArguments.list.contains("-smokePickFirstSource"), !opening, !smokePicked,
@@ -541,6 +545,9 @@ struct StreamPickerScreen: View {
                 // Every source that could serve this title failed to load: a failure is never "no sources" (B162/B186).
                 NuvioStateMessage(title: "Couldn't load sources",
                                   message: "Your sources didn't answer. Go back and open this title again in a moment.")
+            } else if let managed {
+                // B246: a Connect user is told why (and can retry) instead of a bare "No sources found".
+                NuvioStateMessage(title: managed.title, message: managed.message) { retryManaged() }
             } else {
                 NuvioStateMessage(title: "No sources found", message: StoreCopy.noSourcesMessage)
             }
@@ -557,6 +564,31 @@ struct StreamPickerScreen: View {
             }
             .scrollClipDisabled()
             .focusSection()
+        }
+    }
+
+    /// Re-decides the Connect explanation for the current list; the first empty list also re-asks the bridge once.
+    private func updateManaged(for next: StreamsUiState) async {
+        let empty = !next.isAnyLoading && next.groups.allSatisfy { $0.streams.isEmpty }
+        guard empty else { managed = nil; return }
+        managed = try? await TvManagedBridge.shared.explanation(reason: next.emptyStateReason)
+        if !managedShown {
+            managedShown = true
+            Task {
+                try? await TvManagedBridge.shared.onShown()
+                if let latest = streams { managed = try? await TvManagedBridge.shared.explanation(reason: latest.emptyStateReason) }
+            }
+        }
+    }
+
+    /// Retry is the viewer's own press: re-ask the bridge, then the sources. Never a timer.
+    private func retryManaged() {
+        Task {
+            try? await TvManagedBridge.shared.retry()
+            managed = nil
+            streams = nil
+            TvTitle.shared.loadStreams(type: meta.type, videoId: video?.id ?? meta.id, parentMetaId: meta.id,
+                                       season: video?.season?.int32Value ?? -1, episode: video?.episode?.int32Value ?? -1)
         }
     }
 

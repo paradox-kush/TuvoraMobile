@@ -68,6 +68,7 @@ import com.nuvio.app.features.home.HomeNoAddonsCardPolicy
 import com.nuvio.app.core.ui.ArtworkBackdrop
 import com.nuvio.app.core.ui.LocalOnBackdrop
 import com.nuvio.app.core.ui.NuvioBackButton
+import com.nuvio.app.core.ui.NuvioPrimaryButton
 import com.nuvio.app.core.ui.NuvioBottomSheetActionRow
 import com.nuvio.app.core.ui.NuvioBottomSheetDivider
 import com.nuvio.app.core.ui.NuvioModalBottomSheet
@@ -501,6 +502,7 @@ private fun MobileStreamsLayout(
                     onStreamLongPress = onStreamLongPress,
                     resumePositionMs = resumePositionMs,
                     resumeProgressFraction = resumeProgressFraction,
+                    onRetry = onRefresh,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -739,6 +741,7 @@ internal fun StreamList(
     onStreamLongPress: (StreamItem) -> Unit,
     resumePositionMs: Long?,
     resumeProgressFraction: Float?,
+    onRetry: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val filteredGroups = uiState.filteredGroups
@@ -817,7 +820,7 @@ internal fun StreamList(
 
             StreamsBody.Empty -> {
                 item {
-                    EmptyStateBlock(reason = uiState.emptyStateReason)
+                    EmptyStateBlock(reason = uiState.emptyStateReason, onRetry = onRetry)
                 }
                 if (failedLanes.isNotEmpty()) {
                     item(key = "failed_sources") { FailedSourcesNote(failedLanes) }
@@ -1170,6 +1173,7 @@ private fun LoadingStateBlock(
 @Composable
 private fun EmptyStateBlock(
     reason: StreamsEmptyStateReason?,
+    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val hasAnyIptvPlaylist by remember {
@@ -1182,27 +1186,17 @@ private fun EmptyStateBlock(
     )
     val managedNotice by com.nuvio.app.features.servers.ManagedAddonBridge.notice.collectAsStateWithLifecycle()
     val managedExplanation = com.nuvio.app.features.servers.ManagedBridgeEmptyStatePolicy
-        .explanation(AppFeaturePolicy.addonStreamSourcesEnabled, managedNotice)
-    // Opening an empty list is a user event: ask the bridge once whether it is ready now (never a timer).
-    LaunchedEffect(Unit) {
-        if (com.nuvio.app.features.servers.ManagedBridgeEmptyStatePolicy
-                .shouldRefreshOnEmpty(AppFeaturePolicy.addonStreamSourcesEnabled, managedNotice)
-        ) {
-            com.nuvio.app.features.servers.ManagedAddonBridge.refresh(
-                com.nuvio.app.features.profiles.ProfileRepository.activeProfileId,
-            )
-        }
-        // Once per opening (and once per state+reason per session, see the policy): which bridge state users hit.
-        com.nuvio.app.features.servers.ManagedBridgeTelemetryPolicy.session
-            .nextReport(AppFeaturePolicy.addonStreamSourcesEnabled, com.nuvio.app.features.servers.ManagedAddonBridge.notice.value)
-            ?.let { runCatching { com.nuvio.app.core.telemetry.api.TelemetryAccess.current().emit(com.nuvio.app.features.servers.ManagedBridgeTelemetryPolicy.EVENT, it) } }
-    }
+        .explanation(AppFeaturePolicy.addonStreamSourcesEnabled, managedNotice, reason)
+    // Opening an empty list is a user event (never a timer): ask the bridge once, report which state the user met.
+    LaunchedEffect(Unit) { com.nuvio.app.features.servers.ManagedBridgeEmptyStateEffects.onShown() }
+    val scope = rememberCoroutineScope()
+    var retrying by remember { mutableStateOf(false) }
     val title: String
     val message: String
 
-    if (managedExplanation != null && (reason == StreamsEmptyStateReason.NoAddonsInstalled || reason == StreamsEmptyStateReason.NoStreamsFound || reason == null)) {
-        title = stringResource(Res.string.compose_player_no_streams_found)
-        message = stringResource(com.nuvio.app.features.settings.managedNoticeText(managedExplanation))
+    if (managedExplanation != null) {
+        title = stringResource(Res.string.servers_managed_empty_title)
+        message = stringResource(com.nuvio.app.features.servers.managedNoticeText(managedExplanation))
     } else when (reason) {
         // Store builds hide the addon system, so point at IPTV setup — unless a playlist is already
         // there and simply has no match for this title (M3U playlists have no TMDB match lane) (UX38).
@@ -1275,6 +1269,26 @@ private fun EmptyStateBlock(
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,
         )
+        if (managedExplanation != null) {
+            // B246: Retry is the user's own event: re-ask the bridge, then re-ask the sources. Never a loop.
+            Spacer(modifier = Modifier.height(8.dp))
+            NuvioPrimaryButton(
+                text = stringResource(Res.string.action_retry),
+                modifier = Modifier.padding(horizontal = 24.dp),
+                enabled = !retrying,
+                onClick = {
+                    retrying = true
+                    scope.launch {
+                        try {
+                            com.nuvio.app.features.servers.ManagedBridgeEmptyStateEffects.retry()
+                            onRetry()
+                        } finally {
+                            retrying = false
+                        }
+                    }
+                },
+            )
+        }
     }
 }
 

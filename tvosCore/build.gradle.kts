@@ -280,6 +280,8 @@ kotlin {
             // Watch party: the shared rules Apple TV's party screen and player sync run on.
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/party"))
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/calendar"))
+            // Tuvora Connect (B246): the empty-state, play-gate and skip-notice rules Apple TV's sources screen runs on.
+            kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/servers/managed"))
             // Decode-health telemetry: the pure policy Apple TV's player feeds (kept in its own folder so the rest of core/analytics tests stay out).
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/core/analytics/decodehealth"))
             // Game screen core (sections, moments, refresh, assembler, strips): the shared rules Apple TV's game screen runs on.
