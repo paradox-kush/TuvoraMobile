@@ -183,8 +183,11 @@ object TvSportsHubPolicy {
     fun awayScore(state: RadarUiState, fixture: RadarFixture, nowMs: Long): String? =
         state.scoreSlots(fixture, nowMs).away
 
-    /** The score to show for one side: the livescore feed's, else the fixture's own result. */
-    fun score(feed: String?, fixture: String?): String? = (feed ?: fixture)?.takeIf { it.isNotBlank() }
+    /**
+     * The raw score for one side (feed's, else the fixture's) BEFORE Hide scores / delay: internal so Swift can never
+     * bypass the policy — screens use [homeScore] / [awayScore] / scoreSlots.
+     */
+    internal fun score(feed: String?, fixture: String?): String? = (feed ?: fixture)?.takeIf { it.isNotBlank() }
 
     /** True when both scores are numbers and this side is behind — the trailing score dims. */
     fun scoreTrails(own: String?, other: String?): Boolean {

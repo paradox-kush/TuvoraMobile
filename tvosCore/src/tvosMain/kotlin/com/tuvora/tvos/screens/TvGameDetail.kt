@@ -113,32 +113,32 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
      * Fetches, then refreshes on [GameDetailRefreshPolicy] until the game is idle (final / far future).
      * Cancelling the caller's task (screen gone, app backgrounded) ends it: no free-running poll.
      */
-    suspend fun runWhileVisible(): Unit = coroutineScope {
-        // The spoiler redraw lives as long as the poll; it ends with it (a FINAL game still returns at once).
-        val spoilerJob = launch { runScoreSpoilerWhileVisible() }
+    suspend fun runWhileVisible() {
+        // The spoiler redraw is NOT run here: Swift runs [runScoreSpoilerWhileVisible] for the whole screen, and a second
+        // copy tied to the poll only competed with it. poll() republishes each snapshot itself.
         poll()
-        spoilerJob.cancel()
     }
 
     /**
      * Keeps [state] in step with Hide scores / score delay: re-renders on a settings change, a new snapshot, or ONCE when
-     * the next delayed snapshot falls due. Local only (no request). [runWhileVisible] runs it while polling; Swift runs it
-     * in its own task tied to the screen's visibility so the reveal chip and a due final score still apply after the
-     * poll went idle. Cancel to stop.
+     * the next delayed snapshot falls due. Local only (no request). Swift runs it in its own task tied to the screen's
+     * visibility (beside [runWhileVisible]) so the reveal chip and a due final score still apply after the poll went
+     * idle. Its wake is a broadcast ([TvRedrawSignal]): any number of these loops each see every wake. Cancel to stop.
      */
     suspend fun runScoreSpoilerWhileVisible(): Unit = coroutineScope {
         var settings = RadarRepository.uiState.value.scoreSpoiler
         launch { RadarRepository.uiState.map { it.scoreSpoiler }.distinctUntilChanged().collect { settings = it; republish(it) } }
         launch { _state.collect { republish(settings) } }
         while (true) {
+            val mark = redraw.mark()
             val due = gate.nextChangeAtMs(settings, RadarTime.nowMs())
-            if (due == null) { redraw.receive(); continue }
-            withTimeoutOrNull((due - RadarTime.nowMs()).coerceAtLeast(0L) + 50L) { redraw.receive() }
+            if (due == null) { redraw.awaitAfter(mark); continue }
+            withTimeoutOrNull((due - RadarTime.nowMs()).coerceAtLeast(0L) + 50L) { redraw.awaitAfter(mark) }
             republish(settings, wake = false)
         }
     }
 
-    private val redraw = Channel<Unit>(Channel.CONFLATED)
+    private val redraw = TvRedrawSignal()
 
     /** [wake]: tell the due-time loop to re-plan (not from the loop itself, or it would spin). */
     private fun republish(settings: ScoreSpoilerSettings, wake: Boolean = true) {
@@ -147,7 +147,7 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
         val view = gate.view(s.detail, settings, RadarTime.nowMs())
         _shown.value = s.copy(detail = view.detail)
         _spoiler.value = TvGameSpoiler(hidden = view.showsRevealChip, pending = view.pending)
-        if (wake) redraw.trySend(Unit)
+        if (wake) redraw.wake()
     }
 
     private suspend fun poll() {

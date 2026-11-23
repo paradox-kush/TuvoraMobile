@@ -1,11 +1,10 @@
 package com.tuvora.tvos.screens
 
-import com.nuvio.app.features.calendar.api.CalendarGameItem
-import com.nuvio.app.features.calendar.api.CalendarGameState
 import com.nuvio.app.features.calendar.internal.CalendarSettings
 import com.nuvio.app.features.calendar.internal.CalendarState
-import com.nuvio.app.features.calendar.internal.parseCalendarInstantMs
+import com.nuvio.app.features.radar.RadarCalendarGames
 import com.nuvio.app.features.radar.RadarFixture
+import com.nuvio.app.features.radar.RadarFollow
 import com.nuvio.app.features.radar.RadarLiveScore
 import com.nuvio.app.features.radar.RadarPrefs
 import com.nuvio.app.features.radar.RadarUiState
@@ -57,16 +56,31 @@ class TvScoreSpoilerTest {
         assertEquals(now + 30_000L, s.nextScoreChangeAtMs(now + 1_000L), "one redraw when due")
     }
 
+    /** The calendar row Swift gets for [live], built the real way: RadarCalendarGames under [prefs], then the TV presentation. */
+    private fun calendarRow(prefs: RadarPrefs, recordAt: Long?, at: Long): TvCalendarGame {
+        val s = state(prefs).copy(follows = listOf(RadarFollow(leagueId = "4328", sport = "Soccer")))
+        recordAt?.let { s.recordObservedScores(it) }
+        val games = RadarCalendarGames.games(s, at)
+        val screen = TvCalendarPresentation.screen(
+            CalendarState(games = games, zone = TimeZone.of("Australia/Sydney"), settings = CalendarSettings()), at, null,
+        )
+        return screen.sections.flatMap { it.rows }.mapNotNull { it.game }.single()
+    }
+
     @Test
     fun `a pending calendar game reaches Swift as pending`() {
-        val calNow = parseCalendarInstantMs("2026-10-05T23:00:00Z")!!
-        val game = CalendarGameItem(
-            id = "g1", home = "Arsenal", away = "Chelsea", kickoffMs = parseCalendarInstantMs("2026-10-06T01:00:00Z")!!,
-            state = CalendarGameState.LIVE, homeScore = "–", awayScore = "–", scorePending = true,
-        )
-        val screen = TvCalendarPresentation.screen(
-            CalendarState(games = listOf(game), zone = TimeZone.of("Australia/Sydney"), settings = CalendarSettings()), calNow, null,
-        )
-        assertTrue(screen.sections.single().rows.single().game!!.scorePending, "pending flag carried")
+        val row = calendarRow(RadarPrefs(scoreDelaySeconds = 30), recordAt = now, at = now + 1_000L)
+        assertTrue(row.scorePending, "pending flag carried")
+        assertEquals("–" to "–", row.homeScore to row.awayScore, "dashes, never the live 2-0")
+        val due = calendarRow(RadarPrefs(scoreDelaySeconds = 30), recordAt = now, at = now + 31_000L)
+        assertFalse(due.scorePending, "due after 30 s")
+        assertEquals("2" to "0", due.homeScore to due.awayScore, "the delayed score once due")
+    }
+
+    @Test
+    fun `a hidden calendar game reaches Swift with no score`() {
+        val row = calendarRow(RadarPrefs(scoresShown = false), recordAt = now, at = now)
+        assertEquals(null to null, row.homeScore to row.awayScore, "no numbers")
+        assertFalse(row.scorePending, "hidden is not pending")
     }
 }
