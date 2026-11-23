@@ -2597,4 +2597,7 @@
     <string name="subtitle_shadow_size">Árnyék mérete</string>
     <string name="subtitle_outline_width">Körvonal vastagsága</string>
     <string name="subtitle_reset_appearance">Megjelenés visszaállítása</string>
+    <string name="settings_account_sync_backend">Szinkronizációs háttérrendszer</string>
+    <string name="debug_backend_switch_confirm_title">Háttérrendszer váltása?</string>
+    <string name="debug_backend_switch_confirm_message">Átváltasz a következőre: %1$s, és kijelentkezel? A kiválasztott háttérrendszeren újra bejelentkezhetsz.</string>
 </resources>
