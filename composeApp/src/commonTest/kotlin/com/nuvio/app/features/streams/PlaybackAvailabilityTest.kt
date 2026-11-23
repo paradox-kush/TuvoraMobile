@@ -7,6 +7,7 @@ import com.nuvio.app.features.addons.AddonResource
 import com.nuvio.app.features.addons.ManagedAddon
 import com.nuvio.app.features.plugins.PluginScraper
 import com.nuvio.app.features.plugins.PluginsUiState
+import com.nuvio.app.features.servers.ManagedBridgeNotice
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -49,6 +50,30 @@ class PlaybackAvailabilityTest {
         assertFalse(
             PlaybackAvailability(addons = listOf(loading.copy(enabled = false)), plugins = PluginsUiState(pluginsEnabled = false)).canStream("movie", "tt123"),
             "a switched-off add-on proves nothing",
+        )
+    }
+
+    @Test
+    fun `B246 a store build with synced addons can open the sources list while Connect is not ready`() {
+        val incompatible = addon(resource = "catalog")
+        fun store(addons: List<ManagedAddon>, notice: ManagedBridgeNotice?) =
+            PlaybackAvailability(
+                addons = addons,
+                plugins = PluginsUiState(pluginsEnabled = false),
+                addonSourcesEnabled = false,
+                managedBridgeNotice = notice,
+            ).canStream("movie", "tt123")
+        assertTrue(store(listOf(incompatible), ManagedBridgeNotice.Preparing), "synced add-ons + preparing bridge")
+        assertTrue(store(emptyList(), ManagedBridgeNotice.Failed("no_supported_addons")), "a failed bridge is worth explaining")
+        assertFalse(store(emptyList(), null), "nothing synced and no bridge: unchanged")
+        assertFalse(
+            PlaybackAvailability(
+                addons = listOf(incompatible),
+                plugins = PluginsUiState(pluginsEnabled = false),
+                addonSourcesEnabled = true,
+                managedBridgeNotice = ManagedBridgeNotice.Preparing,
+            ).canStream("movie", "tt123"),
+            "a full build never uses the bridge",
         )
     }
 

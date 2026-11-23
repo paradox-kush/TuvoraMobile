@@ -16,6 +16,9 @@ import com.nuvio.app.features.details.MetaDetailsRepository
 import com.nuvio.app.features.downloads.DownloadsRepository
 import com.nuvio.app.features.plugins.PluginRepository
 import com.nuvio.app.features.plugins.PluginsUiState
+import com.nuvio.app.features.servers.ManagedAddonBridge
+import com.nuvio.app.features.servers.ManagedBridgeNotice
+import com.nuvio.app.features.servers.ManagedBridgePlayGatePolicy
 import com.nuvio.app.features.servers.ServerRepository
 import com.nuvio.app.features.servers.ServerStreams
 
@@ -40,6 +43,8 @@ internal class PlaybackAvailability(
     private val iptvSourceTypes: Set<String> = emptySet(),
     /** Store builds never use add-ons as sources, so a pending or failed add-on proves nothing there. */
     private val addonSourcesEnabled: Boolean = true,
+    /** Why Tuvora Connect (the store builds' add-on route) is not usable right now, if the bridge said (B246). */
+    private val managedBridgeNotice: ManagedBridgeNotice? = null,
 ) {
     /**
      * B162: an add-on whose manifest is still loading (or failed to load) is not proof that nothing can
@@ -58,7 +63,13 @@ internal class PlaybackAvailability(
             type in iptvSourceTypes ||
             hasCompatiblePlaybackSource(addons, plugins, type, videoId) ||
             MetaDetailsRepository.findEmbeddedStreams(videoId).isNotEmpty() ||
-            ServerStreams.canServe(type, videoId)
+            ServerStreams.canServe(type, videoId) ||
+            // B246: no ready Connect connection must not make Play a dead end; the sources list explains and retries.
+            ManagedBridgePlayGatePolicy.allowsOpeningSources(
+                streamSourcesEnabled = addonSourcesEnabled,
+                hasSyncedAddons = addons.any { it.availableOnDevice },
+                notice = managedBridgeNotice,
+            )
 
     fun canPlay(
         type: String,
@@ -90,6 +101,7 @@ internal class PlaybackAvailability(
             },
             iptvSourceTypes = IptvCatalogAccess.catalogOrNull?.servedStreamTypes?.value.orEmpty(),
             addonSourcesEnabled = AppFeaturePolicy.addonStreamSourcesEnabled,
+            managedBridgeNotice = ManagedAddonBridge.notice.value,
         )
     }
 }
@@ -120,7 +132,8 @@ internal fun rememberPlaybackAvailability(): PlaybackAvailability {
         ServerRepository.ensureLoaded()
         ServerRepository.uiState
     }.collectAsStateWithLifecycle()
-    return remember(addons, plugins, downloads, iptvSourceTypes, servers.revision) {
-        PlaybackAvailability(addons.addons, plugins, iptvSourceTypes, AppFeaturePolicy.addonStreamSourcesEnabled)
+    val managedNotice by ManagedAddonBridge.notice.collectAsStateWithLifecycle()
+    return remember(addons, plugins, downloads, iptvSourceTypes, servers.revision, managedNotice) {
+        PlaybackAvailability(addons.addons, plugins, iptvSourceTypes, AppFeaturePolicy.addonStreamSourcesEnabled, managedNotice)
     }
 }

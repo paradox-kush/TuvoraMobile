@@ -7,12 +7,14 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.Painter
@@ -20,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.nuvio
+import kotlinx.coroutines.launch
 import com.nuvio.app.features.servers.ServerConnection
 import com.nuvio.app.features.servers.ServerFailure
 import com.nuvio.app.features.servers.ServerProvider
@@ -34,6 +37,7 @@ import nuvio.composeapp.generated.resources.plex_add_description
 import nuvio.composeapp.generated.resources.plex_logo
 import nuvio.composeapp.generated.resources.servers_add_description
 import nuvio.composeapp.generated.resources.servers_empty
+import nuvio.composeapp.generated.resources.servers_managed_reconnect
 import nuvio.composeapp.generated.resources.servers_section_add
 import nuvio.composeapp.generated.resources.servers_section_connected
 import nuvio.composeapp.generated.resources.silo_add_description
@@ -50,6 +54,8 @@ internal fun LazyListScope.mediaServersSettingsContent(
             ServerRepository.ensureLoaded()
             ServerRepository.uiState
         }.collectAsStateWithLifecycle()
+        val managedNotice by com.nuvio.app.features.servers.ManagedAddonBridge.notice.collectAsStateWithLifecycle()
+        val scope = rememberCoroutineScope()
         var signIn by remember { mutableStateOf<ServerSignInRequest?>(null) }
         fun open(connection: ServerConnection) {
             MediaServerSelection.connectionId = connection.id
@@ -68,6 +74,22 @@ internal fun LazyListScope.mediaServersSettingsContent(
                         color = MaterialTheme.nuvio.colors.textMuted,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                     )
+                    // B246: a Tuvora Connect that never produced a connection has no row to hang its reason on.
+                    val notice = managedNotice
+                    if (notice != null) {
+                        SettingsGroupDivider(isTablet = isTablet)
+                        SettingsNavigationRow(
+                            title = stringResource(Res.string.servers_managed_reconnect),
+                            description = stringResource(com.nuvio.app.features.servers.managedNoticeText(notice)),
+                            icon = Icons.Rounded.Sync,
+                            isTablet = isTablet,
+                            onClick = {
+                                scope.launch {
+                                    com.nuvio.app.features.servers.ManagedBridgeEmptyStateEffects.retry()
+                                }
+                            },
+                        )
+                    }
                 }
                 uiState.connections.forEachIndexed { index, connection ->
                     if (index > 0) SettingsGroupDivider(isTablet = isTablet)

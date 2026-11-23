@@ -240,7 +240,7 @@ private fun MediaServerSettingsBody(
             SettingsGroupDivider(isTablet = isTablet)
             SettingsNavigationRow(
                 title = stringResource(if (connection.managedBridgeId == null) Res.string.servers_sign_in_again else Res.string.servers_managed_reconnect),
-                description = managedNotice?.takeIf { connection.managedBridgeId != null }?.let { stringResource(managedNoticeText(it)) },
+                description = managedNotice?.takeIf { connection.managedBridgeId != null }?.let { stringResource(com.nuvio.app.features.servers.managedNoticeText(it)) },
                 icon = Icons.Rounded.Lock,
                 isTablet = isTablet,
                 onClick = {
@@ -314,14 +314,5 @@ internal fun ServerConnection.status(failure: ServerFailure?): Pair<String, Colo
             stringResource(Res.string.servers_status_cert_changed) to colors.danger
         failure == ServerFailure.UNREACHABLE -> stringResource(Res.string.servers_status_unreachable) to colors.warning
         else -> null
-    }
-}
-
-internal fun managedNoticeText(notice: com.nuvio.app.features.servers.ManagedBridgeNotice) = when (notice) {
-    com.nuvio.app.features.servers.ManagedBridgeNotice.Preparing -> Res.string.servers_managed_preparing
-    is com.nuvio.app.features.servers.ManagedBridgeNotice.Failed -> when (notice.code) {
-        "provisioning_timeout" -> Res.string.servers_managed_failed_slow
-        "no_supported_addons", "no_playback_addons" -> Res.string.servers_managed_failed_none
-        else -> Res.string.servers_managed_failed_generic
     }
 }
