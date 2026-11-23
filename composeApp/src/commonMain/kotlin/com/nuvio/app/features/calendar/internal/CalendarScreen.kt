@@ -73,6 +73,10 @@ import org.jetbrains.compose.resources.stringResource
 
 private const val GAMES_TICK_MS = 60_000L
 
+/** The games re-read wait: the minute tick, or sooner when a delayed score falls due (never a busy loop). */
+internal fun calendarGamesWaitMs(nextScoreChangeAtMs: Long?, nowMs: Long): Long =
+    nextScoreChangeAtMs?.let { (it - nowMs + 50L).coerceIn(250L, GAMES_TICK_MS) } ?: GAMES_TICK_MS
+
 @OptIn(ExperimentalTime::class)
 internal fun calendarNowMs(): Long = Clock.System.now().toEpochMilliseconds()
 
@@ -166,7 +170,8 @@ internal fun CalendarScreen(
             while (true) {
                 repository.reloadGames()
                 nowMs = calendarNowMs()
-                delay(GAMES_TICK_MS)
+                // A delayed score that falls due sooner than the minute tick re-reads once at that instant.
+                delay(calendarGamesWaitMs(repository.nextScoreChangeAtMs(nowMs), nowMs))
             }
         }
     }

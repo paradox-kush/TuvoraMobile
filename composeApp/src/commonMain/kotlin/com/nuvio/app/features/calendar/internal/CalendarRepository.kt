@@ -115,6 +115,9 @@ class CalendarRepository(
     }
 
     /** Re-reads the games from the sports source (no network). Cheap; callers may tick it while visible. */
+    /** When a delayed sports score becomes due (the visible page re-reads once then; local, no request). */
+    fun nextScoreChangeAtMs(nowMs: Long): Long? = sports?.nextScoreChangeAtMs(nowMs)
+
     suspend fun reloadGames() {
         val source = sports ?: return
         val read = runCatching { source.games(clock()) }.getOrElse {

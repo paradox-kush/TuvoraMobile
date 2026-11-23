@@ -52,7 +52,8 @@ fun RadarHomeSection(
     onPlayReplay: (SportsReplay) -> Unit = {},
 ) {
     val state by RadarRepository.uiState.collectAsStateWithLifecycle()
-    val nowMs = RadarTime.nowMs()
+    // Current time, plus one local re-render when a delayed score falls due (no network, only while RESUMED).
+    val nowMs = rememberScoreNowMs(state)
     val featured = state.activeFeatured(nowMs).firstOrNull()
     var sheetFixture by remember { mutableStateOf<RadarFixture?>(null) }
     // Outside-tap/back is NOT an answer: hide for this session only, ask again next launch.
@@ -100,6 +101,7 @@ fun RadarHomeSection(
                             live = state.isLive(fx, nowMs),
                             onClick = { sheetFixture = fx },
                             liveScore = fx.id?.let { state.liveScores[it] },
+                            scores = state.scoreSlots(fx, nowMs),
                         )
                     }
                 }

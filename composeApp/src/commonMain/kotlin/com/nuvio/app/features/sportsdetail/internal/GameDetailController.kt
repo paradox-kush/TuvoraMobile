@@ -1,5 +1,6 @@
 package com.nuvio.app.features.sportsdetail.internal
 
+import com.nuvio.app.features.radar.ScoreSpoilerSettings
 import com.nuvio.app.features.sportsdetail.api.DetailLoad
 import com.nuvio.app.features.sportsdetail.api.GameDetail
 import com.nuvio.app.features.sportsdetail.api.GameDetailRefreshPolicy
@@ -50,6 +51,7 @@ internal class GameDetailController(
     private val _state = MutableStateFlow<GameDetailUiState>(GameDetailUiState.Loading(nowMs(), nowMs() + loadDeadlineMs))
     val state: StateFlow<GameDetailUiState> = _state.asStateFlow()
 
+    private val spoiler = GameSpoilerGate()
     private var lastEventMs: Long? = null
     private var lastSummaryMs: Long? = null
     private var failures = 0
@@ -158,8 +160,16 @@ internal class GameDetailController(
     }
 
     private fun publish(detail: GameDetail) {
+        // Where the fetch result lands: time-stamp it for the score delay (Hide scores spec), never in the UI.
+        spoiler.record(detail, nowMs())
         _state.value = GameDetailUiState.Loaded(detail, watchUi(detail), chip(detail))
     }
+
+    /** The game as the user's Hide scores / delay settings allow it right now (delayed snapshot, redacted when hidden/pending). */
+    fun spoilerView(newest: GameDetail, settings: ScoreSpoilerSettings, atMs: Long): GameSpoilerView = spoiler.view(newest, settings, atMs)
+
+    /** When a delayed snapshot becomes due: the screen re-renders once then (local, no request). */
+    fun nextScoreChangeAtMs(settings: ScoreSpoilerSettings, atMs: Long): Long? = spoiler.nextChangeAtMs(settings, atMs)
 
     /** Finished and postponed games show no Watch block, so they never pay for a channel lookup. */
     private fun needsLookup(): Boolean {
