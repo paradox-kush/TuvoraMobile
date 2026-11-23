@@ -8,6 +8,7 @@ import com.nuvio.app.features.servers.ServerDeviceId
 import com.nuvio.app.features.servers.ServerException
 import com.nuvio.app.features.servers.ServerFailure
 import com.nuvio.app.features.servers.ServerHttp
+import com.nuvio.app.features.servers.ServerRepository
 import com.nuvio.app.getPlatform
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareRequest
@@ -35,7 +36,9 @@ internal class MediaBrowserClient(
     }
 
     val deviceId: String
-        get() = ServerDeviceId.current()
+        // Fork: the stored, stable server device id (keeps existing tokens valid), scoped per profile as upstream
+        // does so a sign-in on one profile no longer revokes another profile's Jellyfin/Emby token.
+        get() = ServerRepository.profileDeviceId(ServerDeviceId.current())
 
     suspend fun <T> get(
         baseUrl: String,
