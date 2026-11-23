@@ -63,6 +63,12 @@ enum class LoadSurface(val key: String, val stallMs: Long, val reportsEveryOutco
      * titles still being fetched land in the background. Only failures are reported.
      */
     CALENDAR("calendar", 30_000L, reportsEveryOutcome = false),
+    /**
+     * One Xtream `get_series_info` call behind a series' sources or episode list (B134). Failures only: a TMDB title
+     * fans out to one call per matched edition, so reporting successes would be noise. The report carries `path` and
+     * `source_type`; `error_type` is `http_<status>` or the exception type, never a host or message.
+     */
+    SERIES_INFO("series_info", 20_000L, reportsEveryOutcome = false),
 }
 
 sealed interface LoadStatus {
