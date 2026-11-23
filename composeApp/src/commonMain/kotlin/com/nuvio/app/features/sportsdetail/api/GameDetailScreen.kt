@@ -178,7 +178,7 @@ fun GameDetailScreen(
                 LoadedContent(
                     s.copy(detail = view.detail), tracker, onPlayChannel, onAddPlaylist, onFindChannels,
                     onRetryWatch = { scope.launch { controller.retryWatch() } },
-                    scoresHidden = view.hidden, onRevealScores = onRevealScores,
+                    scoresHidden = view.showsRevealChip, onRevealScores = onRevealScores,
                 )
             }
         }

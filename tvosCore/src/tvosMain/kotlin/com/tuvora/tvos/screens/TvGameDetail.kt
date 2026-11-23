@@ -74,7 +74,10 @@ object TvGameDetail {
     fun open(fixture: RadarFixture): TvGameDetailModel? = ref(fixture)?.let { TvGameDetailModel(it, service) }
 }
 
-/** The game screen's spoiler state: [hidden] shows the "Scores hidden" chip; [pending] = delayed, nothing due yet ("–"). */
+/**
+ * The game screen's spoiler state: [hidden] shows the "Scores hidden" chip (scores hidden on a live or final game —
+ * GameSpoilerView.showsRevealChip, the same rule as the phone); [pending] = delayed, nothing due yet ("–").
+ */
 data class TvGameSpoiler(val hidden: Boolean, val pending: Boolean)
 
 /** One open game screen. Create when the screen appears; run [runWhileVisible] from a task tied to its visibility. */
@@ -143,7 +146,7 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
         if (s !is TvGameDetailState.Loaded) { _shown.value = s; _spoiler.value = TvGameSpoiler(false, false); return }
         val view = gate.view(s.detail, settings, RadarTime.nowMs())
         _shown.value = s.copy(detail = view.detail)
-        _spoiler.value = TvGameSpoiler(hidden = view.hidden, pending = view.pending)
+        _spoiler.value = TvGameSpoiler(hidden = view.showsRevealChip, pending = view.pending)
         if (wake) redraw.trySend(Unit)
     }
 

@@ -26,7 +26,8 @@ import com.nuvio.app.features.sportsdetail.api.WatchBlock
 
 /** What the game page draws under the score settings. [hidden] shows the "Scores hidden" chip; [pending] = delayed, nothing due yet. */
 data class GameSpoilerView(val detail: GameDetail, val hidden: Boolean, val pending: Boolean) {
-    val showsRevealChip: Boolean get() = hidden
+    /** The "Scores hidden" reveal chip: only for a live or final game (an upcoming one has no score to reveal), every platform. */
+    val showsRevealChip: Boolean get() = hidden && (detail.state == GameState.LIVE || detail.state == GameState.FINAL)
 }
 
 /**
