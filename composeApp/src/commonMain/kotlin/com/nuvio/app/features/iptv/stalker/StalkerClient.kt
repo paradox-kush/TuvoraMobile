@@ -826,18 +826,60 @@ object StalkerClient : IptvClient {
     /** [nameHint] lets a cold-start play (Library/Continue Watching) find the row via the portal's own
      *  search instead of scanning a 63k-item catalog — pass the registered title when you have it. */
     suspend fun resolveMovieUrl(acc: XtreamAccount, streamId: Int, nameHint: String? = null, forceMint: Boolean = false): String? =
-        mintMovieUrl(acc, streamId, nameHint, forceMint)?.also { rememberStreamIdentity(acc) }
+        (resolveMovieLink(acc, streamId, nameHint, forceMint) as? StalkerLinkResult.Link)?.url
 
-    private suspend fun mintMovieUrl(acc: XtreamAccount, streamId: Int, nameHint: String?, forceMint: Boolean): String? {
-        val cmd = vodCmd(acc, streamId, nameHint)
-        if (!forceMint && cmd != null) {
-            staticUrlOrNull(acc, "vod", streamId, cmd, false)?.let { return it }
-            createLink(acc, "vod", cmd)?.let { return it }
+    /** Typed twin of [resolveMovieUrl]: the link, or why there is none (never a silent null). */
+    suspend fun resolveMovieLink(acc: XtreamAccount, streamId: Int, nameHint: String? = null, forceMint: Boolean = false): StalkerLinkResult =
+        mintMovieLink(acc, streamId, nameHint, forceMint).also { if (it is StalkerLinkResult.Link) rememberStreamIdentity(acc) }
+
+    /**
+     * B02: the create_link cmd comes from [StalkerVodCommandPolicy] (ids, never a custom URL). A direct cmd that the
+     * portal refuses falls back to the movie's file rows once, unless the refusal is a session cap or access denial
+     * (a second ask cannot change those).
+     */
+    private suspend fun mintMovieLink(acc: XtreamAccount, streamId: Int, nameHint: String?, forceMint: Boolean): StalkerLinkResult {
+        val facts = vodRowFacts(acc, streamId, nameHint)
+            ?: return mintFromMovieFiles(acc, streamId, fallback = null, previous = null)
+        facts.cmd?.takeIf { it.isNotBlank() }?.let { cmd ->
+            staticUrlOrNull(acc, "vod", streamId, cmd, forceMint)?.let { return StalkerLinkResult.Link(it) }
         }
-        val fileCmd = movieFileCmd(acc, streamId)
-        return if (fileCmd != null) createLink(acc, "vod", fileCmd)
-        else if (forceMint) cmd?.let { createLink(acc, "vod", it) } else null
+        return when (val plan = StalkerVodCommandPolicy.plan(facts)) {
+            is StalkerVodCommandPolicy.Plan.Direct -> {
+                val first = createLinkResult(acc, "vod", plan.cmd)
+                if (first is StalkerLinkResult.Link || !canTryFiles(first)) first
+                else mintFromMovieFiles(acc, streamId, fallback = null, previous = first, skipCmd = plan.cmd)
+            }
+            is StalkerVodCommandPolicy.Plan.FilesFirst -> mintFromMovieFiles(acc, streamId, plan.fallback, previous = null)
+        }
     }
+
+    private fun canTryFiles(r: StalkerLinkResult): Boolean =
+        r !is StalkerLinkResult.Refused ||
+            (r.reason != StalkerLinkRefusal.SESSION_LIMIT && r.reason != StalkerLinkRefusal.ACCESS_DENIED)
+
+    private suspend fun mintFromMovieFiles(
+        acc: XtreamAccount, streamId: Int, fallback: String?, previous: StalkerLinkResult?, skipCmd: String? = null,
+    ): StalkerLinkResult {
+        val fileCmd = movieFileCmd(acc, streamId)?.takeIf { it != skipCmd }
+        val cmd = fileCmd ?: fallback
+        return if (cmd != null) createLinkResult(acc, "vod", cmd) else previous ?: StalkerLinkResult.Refused(StalkerLinkRefusal.NO_LINK)
+    }
+
+    /** What the catalogue says about one movie row: the hot browse row, else the stored cmd, else the portal's search. */
+    private suspend fun vodRowFacts(acc: XtreamAccount, streamId: Int, nameHint: String?): StalkerVodCommandPolicy.Row? =
+        rowCache[rowKey(acc.id, "vod", streamId)]?.let { vodFactsOf(streamId, it) }
+            // Cold start keeps only the cmd (no schema change): the policy reads a bare custom-URL cmd as
+            // "look at the file rows first, the id cmd last", so a multi-file movie still resolves.
+            ?: IptvContentDb.vodRow(acc.id, streamId)?.let { StalkerVodCommandPolicy.Row(streamId, it.cmd) }
+            ?: row(acc, "vod", streamId, nameHint)?.let { vodFactsOf(streamId, it) }
+
+    private fun vodFactsOf(streamId: Int, row: JsonObject) = StalkerVodCommandPolicy.Row(
+        id = streamId,
+        cmd = row.str("cmd"),
+        rtspUrl = row.str("rtsp_url"),
+        hasFiles = row.int("has_files"),
+        isFile = row.flag("is_file") == true,
+    )
 
     /**
      * The static play URL when [StalkerPlaybackLinkPolicy] rules create_link unnecessary for this
@@ -879,9 +921,13 @@ object StalkerClient : IptvClient {
      * is a container reference, not a playable address, so the static-cmd policy never applies.
      */
     suspend fun resolveEpisodeUrl(acc: XtreamAccount, seriesId: Int, season: Int?, episodeNum: Int): String? =
-        mintEpisodeUrl(acc, seriesId, season, episodeNum)?.also { rememberStreamIdentity(acc) }
+        (resolveEpisodeLink(acc, seriesId, season, episodeNum) as? StalkerLinkResult.Link)?.url
 
-    private suspend fun mintEpisodeUrl(acc: XtreamAccount, seriesId: Int, season: Int?, episodeNum: Int): String? {
+    /** Typed twin of [resolveEpisodeUrl]: the link, or why there is none (never a silent null). */
+    suspend fun resolveEpisodeLink(acc: XtreamAccount, seriesId: Int, season: Int?, episodeNum: Int): StalkerLinkResult =
+        mintEpisodeLink(acc, seriesId, season, episodeNum).also { if (it is StalkerLinkResult.Link) rememberStreamIdentity(acc) }
+
+    private suspend fun mintEpisodeLink(acc: XtreamAccount, seriesId: Int, season: Int?, episodeNum: Int): StalkerLinkResult {
         // Season cmd resolution, cheapest first: this session's cache -> the write-through rows
         // (cold-start Continue Watching plays with ZERO portal requests before create_link) ->
         // the portal's season fetch.
@@ -891,13 +937,13 @@ object StalkerClient : IptvClient {
             ?: IptvContentDb.episodesFor(acc.id, seriesId)
                 .let { rows -> (season?.let { n -> rows.firstOrNull { it.season == n } } ?: rows.firstOrNull())?.cmd }
         if (cached == null && seriesDialect(acc) == StalkerSeriesDialect.Dialect.MINISTRA) {
-            return ministraEpisodeUrl(acc, seriesId, season, episodeNum)
+            return ministraEpisodeLink(acc, seriesId, season, episodeNum)
         }
         val cmd = cached
             ?: seasonsOf(acc, seriesId)
                 .let { s -> (season?.let { n -> s.firstOrNull { it.number == n } } ?: s.firstOrNull())?.cmd }
-            ?: return null
-        return createLink(acc, "vod", cmd, extraParams = mapOf("series" to episodeNum.toString()))
+            ?: return StalkerLinkResult.Refused(StalkerLinkRefusal.NO_LINK)
+        return createLinkResult(acc, "vod", cmd, extraParams = mapOf("series" to episodeNum.toString()))
     }
 
     // --- genuine Ministra series (B02) ------------------------------------------------------
@@ -956,26 +1002,28 @@ object StalkerClient : IptvClient {
     }
 
     /**
-     * Ministra episode play: season by number -> episode by number -> its file rows; the first FILE
-     * cmd (`/media/file_<id>.mpg`, or a custom URL) is create_link's input. No `series=` argument —
-     * that is the XC season-container convention. Always mints, like XC episodes.
+     * Ministra episode play: season by number -> episode by number -> its file rows; the first FILE row mints
+     * `/media/file_<id>.mpg` ([StalkerVodCommandPolicy.fileRowCmd]) - a file row whose own `cmd` is a custom URL is
+     * NOT create_link's input (B02). No `series=` argument: that is the XC season-container convention. Always
+     * mints, like XC episodes.
      */
-    private suspend fun ministraEpisodeUrl(acc: XtreamAccount, seriesId: Int, season: Int?, episodeNum: Int): String? {
+    private suspend fun ministraEpisodeLink(acc: XtreamAccount, seriesId: Int, season: Int?, episodeNum: Int): StalkerLinkResult {
+        val none = StalkerLinkResult.Refused(StalkerLinkRefusal.NO_LINK)
         val parent = rowCache[rowKey(acc.id, "vod", seriesId)] ?: row(acc, "vod", seriesId)
         val legacy = parent?.let(StalkerSeriesDialect::legacyEpisodeNumbers).orEmpty()
         if (episodeNum in legacy && (season == null || season == 1)) {
-            val cmd = parent?.str("cmd") ?: return null
-            return createLink(acc, "vod", cmd, extraParams = mapOf("series" to episodeNum.toString()))
+            val cmd = parent?.str("cmd") ?: return none
+            return createLinkResult(acc, "vod", cmd, extraParams = mapOf("series" to episodeNum.toString()))
         }
         val seasons = ministraSeasonsOf(acc, seriesId)
-        val s = (season?.let { n -> seasons.firstOrNull { it.number == n } } ?: seasons.firstOrNull()) ?: return null
-        val ep = ministraEpisodesOf(acc, seriesId, s.id).firstOrNull { it.node.number == episodeNum } ?: return null
+        val s = (season?.let { n -> seasons.firstOrNull { it.number == n } } ?: seasons.firstOrNull()) ?: return none
+        val ep = ministraEpisodesOf(acc, seriesId, s.id).firstOrNull { it.node.number == episodeNum } ?: return none
         val files = runCatching { browse(acc, StalkerSeriesDialect.filesParams(seriesId, s.id, ep.node.id)) }.getOrNull()
         val cmd = ((files as? JsonObject)?.get("data") as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
-            ?.firstNotNullOfOrNull { f -> f.str("cmd")?.takeIf { it.isNotBlank() } }
-            ?: return null
-        return createLink(acc, "vod", cmd)
+            ?.firstNotNullOfOrNull { f -> StalkerVodCommandPolicy.fileRowCmd(f.int("id"), f.str("cmd")) }
+            ?: return none
+        return createLinkResult(acc, "vod", cmd)
     }
 
     private suspend fun ministraSeasonsOf(acc: XtreamAccount, seriesId: Int): List<StalkerSeriesDialect.Node> {
@@ -1070,17 +1118,18 @@ object StalkerClient : IptvClient {
             seasons
         }
 
+    /** The first file row of a movie, as the create_link cmd built from its FILE id (B02). */
     private suspend fun movieFileCmd(acc: XtreamAccount, movieId: Int): String? {
         val reply = try { browse(acc, StalkerSeriesDialect.movieFilesParams(movieId)) }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { return null }
         val rows = (reply as? JsonObject)?.get("data") as? JsonArray ?: return null
-        return rows.mapNotNull { it as? JsonObject }.firstNotNullOfOrNull { file ->
-            val flag = file.str("is_file")?.trim()
-            file.str("cmd")?.takeIf { cmd ->
-                cmd.isNotBlank() && (flag == "1" || flag.equals("true", true) || cmd.contains("/media/file_"))
+        return rows.mapNotNull { it as? JsonObject }
+            .filter { file ->
+                val cmd = file.str("cmd").orEmpty()
+                file.flag("is_file") == true || cmd.contains("/media/file_") || file["protocol"] != null || file["video_id"] != null
             }
-        }
+            .firstNotNullOfOrNull { file -> StalkerVodCommandPolicy.fileRowCmd(file.int("id"), file.str("cmd")) }
     }
 
     private suspend fun createLink(
@@ -1088,7 +1137,20 @@ object StalkerClient : IptvClient {
         type: String,
         cmd: String,
         extraParams: Map<String, String> = emptyMap()
-    ): String? {
+    ): String? = (createLinkResult(acc, type, cmd, extraParams) as? StalkerLinkResult.Link)?.url
+
+    /**
+     * One create_link, answered as a link or as a named refusal ([StalkerCreateLinkReply]): relative replies are
+     * resolved against the portal, launcher prefixes stripped, and `js.error` (nothing_to_play / limit /
+     * access_denied) is kept - a failure is never an unexplained null. A transport failure is
+     * [StalkerLinkRefusal.REQUEST_FAILED]. Cancellation propagates.
+     */
+    private suspend fun createLinkResult(
+        acc: XtreamAccount,
+        type: String,
+        cmd: String,
+        extraParams: Map<String, String> = emptyMap()
+    ): StalkerLinkResult {
         val params = StalkerArchiveLink.createLinkParams(type, cmd, extraParams)
         // Playback: the ACTIVE portal only — a create_link failure never walks to a backup (Step 0.3).
         val js = try { playbackSession(acc).request(params) as? JsonObject }
@@ -1097,15 +1159,16 @@ object StalkerClient : IptvClient {
                 // Never log the exception message: portal errors can echo credentials or play tokens.
                 val status = (error as? com.nuvio.app.features.addons.HttpStatusException)?.status
                 playbackLog.w { "create_link failed: ${error::class.simpleName}, HTTP=$status" }
-                return null
+                return StalkerLinkResult.Refused(StalkerLinkRefusal.REQUEST_FAILED)
             }
         if (js == null) {
             playbackLog.w { "create_link failed: invalid response shape" }
-            return null
+            return StalkerLinkResult.Refused(StalkerLinkRefusal.NO_LINK)
         }
-        return StalkerProtocol.extractStreamUrl(js.str("cmd")).also {
-            if (it == null) playbackLog.w { "create_link failed: no playable command" }
-        }
+        val result = StalkerCreateLinkReply.parse(js.str("cmd"), js.str("error"), StalkerProtocol.normalizePortalBase(acc.baseUrl))
+        // Reason only: the raw answer can echo play tokens.
+        if (result is StalkerLinkResult.Refused) playbackLog.w { "create_link refused: ${result.reason}" }
+        return result
     }
 
     /**
