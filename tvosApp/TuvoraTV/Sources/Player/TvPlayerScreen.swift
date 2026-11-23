@@ -940,7 +940,8 @@ private struct TrackPanel: View {
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, dp(8))
                             }
                             ForEach(addonSubtitles, id: \.id) { sub in
-                                PanelRow(title: sub.display.isEmpty ? sub.language : sub.display,
+                                // The add-on's own label (Stremio `label`) wins, as on phone and Desktop.
+                                PanelRow(title: sub.title.flatMap { $0.isEmpty ? nil : $0 } ?? (sub.display.isEmpty ? sub.language : sub.display),
                                          detail: [sub.language, sub.addonName].compactMap { $0 }.joined(separator: " · "),
                                          checked: sub.id == addonId) {
                                     session.selectAddonSubtitle(subtitle: sub); reload()
