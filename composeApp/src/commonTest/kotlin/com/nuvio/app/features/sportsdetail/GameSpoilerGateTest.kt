@@ -88,6 +88,15 @@ class GameSpoilerGateTest {
     }
 
     @Test
+    fun `hidden keeps the pre-game win chance because a prediction spoils nothing`() {
+        val gate = GameSpoilerGate()
+        val upcoming = game(null, null, state = GameState.UPCOMING)
+        gate.record(upcoming, 0L)
+        val view = gate.view(upcoming, ScoreSpoilerSettings(shown = false), 0L)
+        assertTrue(view.detail.blocks.any { it is WinProbabilityBlock }, "pre-game win chance kept (TV twin keeps it too)")
+    }
+
+    @Test
     fun `hidden hides a final result too`() {
         val gate = GameSpoilerGate()
         val final = game("2", "1", state = GameState.FINAL)

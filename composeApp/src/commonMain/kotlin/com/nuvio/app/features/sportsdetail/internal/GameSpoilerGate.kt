@@ -58,7 +58,7 @@ class GameSpoilerGate {
 
 /**
  * Strips what would spoil a result. Keeps teams, kick-off, the LIVE clock / "Final" status, standings, line-ups, form,
- * broadcast and Watch; drops the scoreboard numbers and win chance always, and for a live or final game also the box
+ * broadcast and Watch; drops the scoreboard numbers always, and for a live or final game also the win chance, box
  * score, team stats, leaders, plays / scoring summary (and so the last play), results, highlights, scorers, the last
  * soccer event and the basketball scoring run.
  */
@@ -81,9 +81,8 @@ object GameSpoilerRedaction {
     }
 
     private fun block(b: GameBlock, started: Boolean): GameBlock? = when {
-        b is WinProbabilityBlock -> null
         !started -> b
-        b is LinescoreBlock || b is StatsBlock || b is LeadersBlock || b is PlaysBlock || b is TimelineBlock ||
+        b is WinProbabilityBlock || b is LinescoreBlock || b is StatsBlock || b is LeadersBlock || b is PlaysBlock || b is TimelineBlock ||
             b is ResultsBlock || b is HighlightsBlock -> null
         b is SoccerStripBlock -> b.copy(lastEvent = null, homeScorers = emptyList(), awayScorers = emptyList())
         b is BasketballStripBlock -> b.copy(run = null)
