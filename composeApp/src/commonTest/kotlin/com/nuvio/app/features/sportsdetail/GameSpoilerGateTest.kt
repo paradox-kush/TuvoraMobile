@@ -1,7 +1,19 @@
 package com.nuvio.app.features.sportsdetail
 
 import com.nuvio.app.features.radar.ScoreSpoilerSettings
+import com.nuvio.app.features.sportsdetail.api.BasketballStripBlock
+import com.nuvio.app.features.sportsdetail.api.BroadcastBlock
+import com.nuvio.app.features.sportsdetail.api.FootballFieldBlock
 import com.nuvio.app.features.sportsdetail.api.FormBlock
+import com.nuvio.app.features.sportsdetail.api.GameBlock
+import com.nuvio.app.features.sportsdetail.api.HockeyStripBlock
+import com.nuvio.app.features.sportsdetail.api.NextBlock
+import com.nuvio.app.features.sportsdetail.api.NextItem
+import com.nuvio.app.features.sportsdetail.api.SituationBlock
+import com.nuvio.app.features.sportsdetail.api.StandingsBlock
+import com.nuvio.app.features.sportsdetail.api.UnknownBlock
+import com.nuvio.app.features.sportsdetail.api.VersusHeader
+import com.nuvio.app.features.sportsdetail.api.WatchBlock
 import com.nuvio.app.features.sportsdetail.api.GameDetail
 import com.nuvio.app.features.sportsdetail.api.GameState
 import com.nuvio.app.features.sportsdetail.api.LeadersBlock
@@ -78,9 +90,7 @@ class GameSpoilerGateTest {
         assertEquals(null to null, scores(view.detail), "no scoreboard numbers")
         val kinds = view.detail.blocks.map { it::class.simpleName }
         assertFalse(view.detail.blocks.any { it is LinescoreBlock || it is StatsBlock || it is LeadersBlock || it is PlaysBlock || it is WinProbabilityBlock }, "box score, stats, plays and win chance gone: $kinds")
-        val strip = view.detail.blocks.filterIsInstance<SoccerStripBlock>().single()
-        assertNull(strip.lastEvent, "no last play")
-        assertTrue(strip.homeScorers.isEmpty() && strip.awayScorers.isEmpty(), "no scorers")
+        assertFalse(view.detail.blocks.any { it is SoccerStripBlock }, "the soccer strip (last play, scorers, cards, corners, possession) is gone: $kinds")
         assertTrue(view.detail.blocks.any { it is StandingsTableBlock } && view.detail.blocks.any { it is LineupBlock } && view.detail.blocks.any { it is FormBlock }, "standings, line-ups and form kept: $kinds")
         assertEquals("Arsenal", (view.detail.header as TeamsHeader).home.name, "teams kept")
         assertEquals("67'", view.detail.live?.clock, "the live clock is kept")
@@ -136,5 +146,87 @@ class GameSpoilerGateTest {
         gate.record(final, 100_000L)
         val view = gate.view(final, ScoreSpoilerSettings(delaySeconds = 60), 100_000L)
         assertEquals(final, view.detail, "old news shows at once")
+    }
+
+    // --- started games: an ALLOW-list, never a deny-list -----------------------------------------------------------
+
+    private fun liveWith(vararg blocks: GameBlock, state: GameState = GameState.LIVE) =
+        game("1", "0", state = state).copy(blocks = blocks.toList())
+
+    private fun hiddenView(detail: GameDetail) = GameSpoilerGate().let { gate ->
+        gate.record(detail, 0L)
+        gate.view(detail, ScoreSpoilerSettings(shown = false), 0L)
+    }
+
+    @Test
+    fun `hidden drops the situation line of a live game`() {
+        val view = hiddenView(liveWith(SituationBlock("2nd & 5 at LSU 33 - LSU leads by 7")))
+        assertFalse(view.detail.blocks.any { it is SituationBlock }, "situation can name the leader: ${view.detail.blocks}")
+    }
+
+    @Test
+    fun `hidden drops the football field strip`() {
+        val view = hiddenView(liveWith(FootballFieldBlock(yardLine = 95, possession = "home", line = "1st & Goal", redZone = true)))
+        assertFalse(view.detail.blocks.any { it is FootballFieldBlock }, "field and drive give the game away: ${view.detail.blocks}")
+    }
+
+    @Test
+    fun `hidden drops the hockey strip`() {
+        val view = hiddenView(liveWith(HockeyStripBlock(powerPlaySide = "home", homePowerPlay = "2/3", homeShots = 31)))
+        assertFalse(view.detail.blocks.any { it is HockeyStripBlock }, "power-play goals are goals: ${view.detail.blocks}")
+    }
+
+    @Test
+    fun `hidden drops the basketball strip and unknown blocks`() {
+        val view = hiddenView(liveWith(BasketballStripBlock(homeFouls = 4, homeTimeouts = 2), UnknownBlock()))
+        assertTrue(view.detail.blocks.isEmpty(), "fouls, timeouts and anything unrecognised are dropped: ${view.detail.blocks}")
+    }
+
+    @Test
+    fun `hidden keeps only watch broadcast standings lineup form and next for a started game`() {
+        val kept = listOf(
+            WatchBlock(entry = "browsing"), BroadcastBlock(mapOf("UK" to listOf("Sky"))), StandingsBlock(emptyList()),
+            StandingsTableBlock(emptyList()), LineupBlock(emptyList()), FormBlock(listOf("W"), listOf("L")),
+            NextBlock(listOf(NextItem("Sat", "vs Spurs"))),
+        )
+        val view = hiddenView(liveWith(*kept.toTypedArray(), state = GameState.FINAL))
+        assertEquals(kept, view.detail.blocks, "the allow-list passes through untouched")
+    }
+
+    @Test
+    fun `hidden redacts the versus header scores and records`() {
+        val tennis = game(null, null).copy(
+            sport = "tennis",
+            header = VersusHeader(Side("Sinner", score = "6 3", record = "41-4"), Side("Alcaraz", score = "4 6", record = "38-6")),
+        )
+        val view = hiddenView(tennis)
+        val h = view.detail.header as VersusHeader
+        assertEquals(null to null, h.a.score to h.b.score, "set scores hidden")
+        assertEquals(null to null, h.a.record to h.b.record, "a record that moved with this result is hidden")
+        assertEquals("Sinner", h.a.name, "players kept")
+    }
+
+    @Test
+    fun `hidden redacts the teams header records of a started game`() {
+        val final = game("2", "1", state = GameState.FINAL).let {
+            it.copy(header = TeamsHeader(Side("Arsenal", score = "2", record = "10-2-1"), Side("Chelsea", score = "1", record = "7-4-2")))
+        }
+        val h = hiddenView(final).detail.header as TeamsHeader
+        assertEquals(null to null, h.home.record to h.away.record, "W-D-L moves with the result")
+    }
+
+    @Test
+    fun `upcoming games keep every block while hidden`() {
+        val upcoming = liveWith(SituationBlock("Preview"), HockeyStripBlock(), state = GameState.UPCOMING)
+        assertEquals(upcoming.blocks, hiddenView(upcoming).detail.blocks, "nothing to spoil before the start")
+    }
+
+    @Test
+    fun `the reveal chip shows only for a started game`() {
+        assertTrue(hiddenView(game("1", "0")).showsRevealChip, "live")
+        assertTrue(hiddenView(game("1", "0", state = GameState.FINAL)).showsRevealChip, "final")
+        assertFalse(hiddenView(game(null, null, state = GameState.UPCOMING)).showsRevealChip, "upcoming has no score to reveal")
+        val shown = GameSpoilerGate().let { g -> val d = game("1", "0"); g.record(d, 0L); g.view(d, ScoreSpoilerSettings(), 0L) }
+        assertFalse(shown.showsRevealChip, "nothing hidden, no chip")
     }
 }

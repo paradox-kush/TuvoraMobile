@@ -7,26 +7,26 @@ import com.nuvio.app.features.radar.ScoreShown
 import com.nuvio.app.features.radar.ScoreSlots
 import com.nuvio.app.features.radar.ScoreSpoilerPolicy
 import com.nuvio.app.features.radar.ScoreSpoilerSettings
-import com.nuvio.app.features.sportsdetail.api.BasketballStripBlock
+import com.nuvio.app.features.sportsdetail.api.BroadcastBlock
 import com.nuvio.app.features.sportsdetail.api.EventHeader
+import com.nuvio.app.features.sportsdetail.api.FormBlock
 import com.nuvio.app.features.sportsdetail.api.GameBlock
 import com.nuvio.app.features.sportsdetail.api.GameDetail
 import com.nuvio.app.features.sportsdetail.api.GameState
 import com.nuvio.app.features.sportsdetail.api.Header
-import com.nuvio.app.features.sportsdetail.api.HighlightsBlock
-import com.nuvio.app.features.sportsdetail.api.LeadersBlock
-import com.nuvio.app.features.sportsdetail.api.LinescoreBlock
-import com.nuvio.app.features.sportsdetail.api.PlaysBlock
-import com.nuvio.app.features.sportsdetail.api.ResultsBlock
-import com.nuvio.app.features.sportsdetail.api.SoccerStripBlock
-import com.nuvio.app.features.sportsdetail.api.StatsBlock
+import com.nuvio.app.features.sportsdetail.api.LineupBlock
+import com.nuvio.app.features.sportsdetail.api.NextBlock
+import com.nuvio.app.features.sportsdetail.api.Side
+import com.nuvio.app.features.sportsdetail.api.StandingsBlock
+import com.nuvio.app.features.sportsdetail.api.StandingsTableBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
-import com.nuvio.app.features.sportsdetail.api.TimelineBlock
 import com.nuvio.app.features.sportsdetail.api.VersusHeader
-import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
+import com.nuvio.app.features.sportsdetail.api.WatchBlock
 
 /** What the game page draws under the score settings. [hidden] shows the "Scores hidden" chip; [pending] = delayed, nothing due yet. */
-data class GameSpoilerView(val detail: GameDetail, val hidden: Boolean, val pending: Boolean)
+data class GameSpoilerView(val detail: GameDetail, val hidden: Boolean, val pending: Boolean) {
+    val showsRevealChip: Boolean get() = hidden
+}
 
 /**
  * The game page's side of Hide scores + score delay (one per open game; phone/iPad controller and Apple TV model).
@@ -57,35 +57,32 @@ class GameSpoilerGate {
 }
 
 /**
- * Strips what would spoil a result. Keeps teams, kick-off, the LIVE clock / "Final" status, standings, line-ups, form,
- * broadcast and Watch; drops the scoreboard numbers always, and for a live or final game also the win chance, box
- * score, team stats, leaders, plays / scoring summary (and so the last play), results, highlights, scorers, the last
- * soccer event and the basketball scoring run.
+ * Strips what would spoil a result. The scoreboard numbers go always. For a live or final game the blocks are an
+ * ALLOW-list ([keepsWhenStarted]: Watch, broadcast, standings, line-ups, form, next games) — anything else, including a
+ * block type added later, is dropped — and the sides' records (they move with the result) go too. Upcoming games keep
+ * every block: there is nothing to spoil before the start.
  */
 object GameSpoilerRedaction {
     fun redact(detail: GameDetail, scorePlaceholder: String?): GameDetail {
         val started = detail.state == GameState.LIVE || detail.state == GameState.FINAL
         return detail.copy(
-            header = header(detail.header, scorePlaceholder),
-            blocks = detail.blocks.mapNotNull { block(it, started) },
+            header = header(detail.header, scorePlaceholder, started),
+            blocks = if (started) detail.blocks.filter(::keepsWhenStarted) else detail.blocks,
         )
     }
 
-    private fun header(h: Header, placeholder: String?): Header = when (h) {
-        is TeamsHeader -> h.copy(
-            home = h.home.copy(score = h.home.score?.let { placeholder }),
-            away = h.away.copy(score = h.away.score?.let { placeholder }),
-        )
-        is VersusHeader -> h.copy(a = h.a.copy(score = h.a.score?.let { placeholder }), b = h.b.copy(score = h.b.score?.let { placeholder }))
+    /** The only blocks a started game shows while redacted: none of them carries the score or how the game is going. */
+    fun keepsWhenStarted(b: GameBlock): Boolean =
+        b is WatchBlock || b is BroadcastBlock || b is StandingsBlock || b is StandingsTableBlock || b is LineupBlock ||
+            b is FormBlock || b is NextBlock
+
+    private fun side(s: Side, placeholder: String?, started: Boolean): Side =
+        s.copy(score = s.score?.let { placeholder }, record = s.record.takeUnless { started })
+
+    // EventHeader (motorsport weekend, fight card) carries name, session and venue only: no result to strip.
+    private fun header(h: Header, placeholder: String?, started: Boolean): Header = when (h) {
+        is TeamsHeader -> h.copy(home = side(h.home, placeholder, started), away = side(h.away, placeholder, started))
+        is VersusHeader -> h.copy(a = side(h.a, placeholder, started), b = side(h.b, placeholder, started))
         is EventHeader -> h
-    }
-
-    private fun block(b: GameBlock, started: Boolean): GameBlock? = when {
-        !started -> b
-        b is WinProbabilityBlock || b is LinescoreBlock || b is StatsBlock || b is LeadersBlock || b is PlaysBlock || b is TimelineBlock ||
-            b is ResultsBlock || b is HighlightsBlock -> null
-        b is SoccerStripBlock -> b.copy(lastEvent = null, homeScorers = emptyList(), awayScorers = emptyList())
-        b is BasketballStripBlock -> b.copy(run = null)
-        else -> b
     }
 }
