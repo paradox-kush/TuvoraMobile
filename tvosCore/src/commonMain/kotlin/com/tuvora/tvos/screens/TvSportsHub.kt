@@ -176,6 +176,13 @@ object TvSportsHubPolicy {
 
     fun liveText(progress: String?): String = if (progress.isNullOrBlank()) "LIVE" else "LIVE ${progress.trim()}"
 
+    /** One side's score through the user's Hide scores / delay settings ([com.nuvio.app.features.radar.ScoreSpoilerPolicy]). */
+    fun homeScore(state: RadarUiState, fixture: RadarFixture, nowMs: Long): String? =
+        state.scoreSlots(fixture, nowMs).home
+
+    fun awayScore(state: RadarUiState, fixture: RadarFixture, nowMs: Long): String? =
+        state.scoreSlots(fixture, nowMs).away
+
     /** The score to show for one side: the livescore feed's, else the fixture's own result. */
     fun score(feed: String?, fixture: String?): String? = (feed ?: fixture)?.takeIf { it.isNotBlank() }
 

@@ -40,6 +40,8 @@ data class TvCalendarGame(
     val state: String,
     val homeScore: String?,
     val awayScore: String?,
+    /** Score delay on and nothing due yet: Swift shows "–" (homeScore/awayScore are "–" too). Hidden scores are null. */
+    val scorePending: Boolean = false,
     val progress: String?,
     /** "Watch now" is offered: live, or within 15 minutes of kick-off. */
     val canWatchNow: Boolean,
@@ -156,7 +158,7 @@ object TvCalendarPresentation {
     private fun gameOf(game: CalendarGameItem) = TvCalendarGame(
         gameId = game.id, home = game.home, away = game.away, homeBadge = game.homeBadge, awayBadge = game.awayBadge,
         league = game.league, state = game.state.name, homeScore = game.homeScore, awayScore = game.awayScore,
-        progress = game.progress, canWatchNow = false,
+        scorePending = game.scorePending, progress = game.progress, canWatchNow = false,
     )
 
     fun comingUp(items: List<CalendarComingUpItem>): List<TvCalendarComingUp> = items.map { item ->
