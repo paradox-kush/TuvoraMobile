@@ -42,7 +42,48 @@ data class RadarUiState(
     val fixturesByTeam: Map<String, List<RadarFixture>> = emptyMap(),
     /** eventId -> the freshest known live state, reported by the game screen while it is open (beats the lagging feed). */
     val freshStates: Map<String, FreshFixtureState> = emptyMap(),
+    /** Every observed score with its time (recorded where fetches land): the score delay reads it. One per profile. */
+    val scoreLedger: LiveScoreLedger = LiveScoreLedger(),
 ) {
+    val scoreSpoiler: ScoreSpoilerSettings get() = prefs.scoreSpoiler
+
+    /** The score as observed now: the livescore feed's numbers, else the fixture's own result. Null when there is none. */
+    fun observedScore(fixture: RadarFixture): RadarLiveScore? {
+        val raw = fixture.id?.let { liveScores[it] }
+        val home = raw?.homeScore?.takeIf { it.isNotBlank() } ?: fixture.homeScore?.takeIf { it.isNotBlank() }
+        val away = raw?.awayScore?.takeIf { it.isNotBlank() } ?: fixture.awayScore?.takeIf { it.isNotBlank() }
+        if (home == null || away == null) return null
+        return RadarLiveScore(eventId = fixture.id, homeScore = home, awayScore = away)
+    }
+
+    /** Over (finished, or past its plausible live window) and not live: a result, not a game in progress. */
+    internal fun isOver(fixture: RadarFixture, nowMs: Long): Boolean {
+        if (isLive(fixture, nowMs)) return false
+        val start = fixture.startEpochMs ?: return fixture.isFinishedOrOff
+        return fixture.isFinishedOrOff || nowMs >= start + fixture.maxLiveWindowMs()
+    }
+
+    /** What a score slot may show for [fixture] under the user's Hide scores / delay settings ([ScoreSpoilerPolicy]). */
+    fun scoreFor(fixture: RadarFixture, nowMs: Long): ScoreVisibility<RadarLiveScore> {
+        val key = radarFixtureKey(fixture)
+        return ScoreSpoilerPolicy.scoreFor(
+            scoreSpoiler, key, observedScore(fixture), scoreLedger.finishedAtFirstSight(key), scoreLedger.buffer, nowMs,
+        )
+    }
+
+    fun scoreSlots(fixture: RadarFixture, nowMs: Long): ScoreSlots = scoreFor(fixture, nowMs).slots()
+
+    /** When a delayed score becomes due (one local re-render, no network); null when nothing is pending. */
+    fun nextScoreChangeAtMs(nowMs: Long): Long? =
+        scoreSpoiler.takeIf { it.shown }?.let { scoreLedger.buffer.nextChangeAtMs(nowMs, it.delayMs) }
+
+    /** Records every held fixture's observed score into [scoreLedger]. Called by the repository where a fetch lands. */
+    internal fun recordObservedScores(nowMs: Long) {
+        (fixturesByLeague.values.asSequence() + fixturesByTeam.values.asSequence()).flatten().forEach { fx ->
+            scoreLedger.observe(radarFixtureKey(fx), observedScore(fx), isOver(fx, nowMs), nowMs)
+        }
+    }
+
     val followedLeagueIds: Set<String> get() = follows.map { it.leagueId }.toSet()
     val followedTeamIds: Set<String> get() = teamFollows.map { it.teamId }.toSet()
 
@@ -213,6 +254,7 @@ object RadarRepository {
                 liveScores = cachedFixtures?.let { r -> scoresById(r) } ?: emptyMap(),
             )
         }
+        recordScores()
         refreshFixtures()
     }
 
@@ -294,6 +336,7 @@ object RadarRepository {
                     loadingFixtures = false,
                 )
             }
+            recordScores()
             // Persist the MERGED map — persisting only the raw response would drop leagues
             // this (possibly partial) response omitted from the offline cache.
             XtreamAccountStorage.saveRadarFixturesJson(
@@ -344,6 +387,7 @@ object RadarRepository {
                     livescoreSports = it.livescoreSports + coveredLivescoreSports(response),
                 )
             }
+            recordScores()
             XtreamAccountStorage.saveRadarFixturesJson(
                 profileAtStart,
                 json.encodeToString(
@@ -376,6 +420,7 @@ object RadarRepository {
                     livescoreSports = it.livescoreSports + coveredLivescoreSports(response),
                 )
             }
+            recordScores()
         }
     }
 
@@ -448,6 +493,27 @@ object RadarRepository {
         }
         persist()
         refreshFixtures(force = true)
+    }
+
+    // --- Hide scores + score delay (per profile, synced) -----------------------
+
+    fun setScoresShown(shown: Boolean) {
+        _uiState.update { it.copy(prefs = it.prefs.copy(scoresShown = shown)) }
+        persist()
+    }
+
+    /** The hub's "Scores shown" / "Scores hidden" chip, and the game page's reveal chip (one global setting). */
+    fun toggleScoresShown() = setScoresShown(!_uiState.value.prefs.scoresShown)
+
+    /** The hub's delay chip: Off → 15 s → 30 s → 60 s → Off. */
+    fun cycleScoreDelay() {
+        _uiState.update { it.copy(prefs = it.prefs.copy(scoreDelaySeconds = ScoreSpoilerSettings.nextDelay(it.prefs.scoreDelaySeconds))) }
+        persist()
+    }
+
+    /** Where a fetch result lands: time-stamp every observed score so the delay can show the one from N s ago. */
+    private fun recordScores() {
+        _uiState.value.recordObservedScores(clock.nowMs())
     }
 
     // --- featured-event prefs --------------------------------------------------

@@ -325,7 +325,14 @@ data class RadarPrefs(
     @SerialName("featured_event_id") val featuredEventId: String = "",
     @SerialName("opt_in_state") val optInState: String = RadarOptIn.UNSET,
     @SerialName("promo_dismissed") val promoDismissed: Boolean = false,
-)
+    /** Hide scores: false hides every score, result and spoiler-bearing game detail. Default = today's behaviour. */
+    @SerialName("scores_shown") val scoresShown: Boolean = true,
+    /** Score delay in seconds (0 / 15 / 30 / 60; anything else reads as 0). */
+    @SerialName("score_delay_s") val scoreDelaySeconds: Int = 0,
+) {
+    val scoreSpoiler: ScoreSpoilerSettings
+        get() = ScoreSpoilerSettings(shown = scoresShown, delaySeconds = ScoreSpoilerSettings.sanitizeDelay(scoreDelaySeconds))
+}
 
 /**
  * A followed club.
