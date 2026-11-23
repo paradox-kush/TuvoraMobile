@@ -1185,8 +1185,15 @@ private fun EmptyStateBlock(
         hasAnyIptvPlaylist = hasAnyIptvPlaylist,
     )
     val managedNotice by com.nuvio.app.features.servers.ManagedAddonBridge.notice.collectAsStateWithLifecycle()
-    val managedExplanation = com.nuvio.app.features.servers.ManagedBridgeEmptyStatePolicy
-        .explanation(AppFeaturePolicy.addonStreamSourcesEnabled, managedNotice, reason)
+    val addonsState by com.nuvio.app.features.addons.AddonRepository.uiState.collectAsStateWithLifecycle()
+    val serversState by com.nuvio.app.features.servers.ServerRepository.uiState.collectAsStateWithLifecycle()
+    val managedExplanation = com.nuvio.app.features.servers.ManagedBridgeEmptyStatePolicy.explanation(
+        streamSourcesEnabled = AppFeaturePolicy.addonStreamSourcesEnabled,
+        notice = managedNotice,
+        reason = reason,
+        hasSyncedAddons = addonsState.addons.any { it.availableOnDevice },
+        hasManagedConnection = serversState.connections.any { it.managedBridgeId != null },
+    )
     // Opening an empty list is a user event (never a timer): ask the bridge once, report which state the user met.
     LaunchedEffect(Unit) { com.nuvio.app.features.servers.ManagedBridgeEmptyStateEffects.onShown() }
     val scope = rememberCoroutineScope()
@@ -1269,7 +1276,7 @@ private fun EmptyStateBlock(
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,
         )
-        if (managedExplanation != null) {
+        if (com.nuvio.app.features.servers.ManagedBridgeEmptyStatePolicy.canRetry(managedExplanation)) {
             // B246: Retry is the user's own event: re-ask the bridge, then re-ask the sources. Never a loop.
             Spacer(modifier = Modifier.height(8.dp))
             NuvioPrimaryButton(

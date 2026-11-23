@@ -547,7 +547,8 @@ struct StreamPickerScreen: View {
                                   message: "Your sources didn't answer. Go back and open this title again in a moment.")
             } else if let managed {
                 // B246: a Connect user is told why (and can retry) instead of a bare "No sources found".
-                NuvioStateMessage(title: managed.title, message: managed.message) { retryManaged() }
+                NuvioStateMessage(title: managed.title, message: managed.message,
+                                  retry: managed.canRetry ? { retryManaged() } : nil)
             } else {
                 NuvioStateMessage(title: "No sources found", message: StoreCopy.noSourcesMessage)
             }

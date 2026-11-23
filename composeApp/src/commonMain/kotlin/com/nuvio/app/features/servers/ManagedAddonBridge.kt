@@ -98,6 +98,11 @@ internal sealed interface ManagedBridgeDecision {
 
 internal sealed interface ManagedBridgeNotice {
     data object Preparing : ManagedBridgeNotice
+    /**
+     * Never produced by the bridge: derived by [ManagedBridgeEmptyStatePolicy] for a store user who has synced add-ons
+     * but never set up Tuvora Connect (no connection, no bridge notice). Nothing to retry; the user sets it up.
+     */
+    data object NotConnected : ManagedBridgeNotice
     data class Failed(val code: String?) : ManagedBridgeNotice
 }
 
@@ -158,8 +163,22 @@ internal object ManagedBridgePolicy {
 /** What the empty Streams screen says about the managed (Tuvora Connect) bridge on store builds. */
 internal object ManagedBridgeEmptyStatePolicy {
     /** The bridge problem to explain, or null when the generic empty state is the honest one. */
-    fun explanation(streamSourcesEnabled: Boolean, notice: ManagedBridgeNotice?, reason: StreamsEmptyStateReason?): ManagedBridgeNotice? =
-        notice.takeUnless { streamSourcesEnabled || reason !in explainedReasons }
+    fun explanation(
+        streamSourcesEnabled: Boolean,
+        notice: ManagedBridgeNotice?,
+        reason: StreamsEmptyStateReason?,
+        hasSyncedAddons: Boolean,
+        hasManagedConnection: Boolean,
+    ): ManagedBridgeNotice? {
+        if (streamSourcesEnabled || reason !in explainedReasons) return null
+        // No bridge notice: a user with synced add-ons and no connection simply has not set up Connect (the play gate
+        // lets them in, so the list must say so). A ready connection with no notice keeps the generic text.
+        return notice ?: ManagedBridgeNotice.NotConnected.takeIf { hasSyncedAddons && !hasManagedConnection }
+    }
+
+    /** Retry re-asks the bridge: only meaningful when the bridge had something to say. */
+    fun canRetry(explanation: ManagedBridgeNotice?): Boolean =
+        explanation != null && explanation != ManagedBridgeNotice.NotConnected
 
     /**
      * Why the list is empty, in the reasons a Connect user can meet: no add-ons, none that serve this title
@@ -175,7 +194,7 @@ internal object ManagedBridgeEmptyStatePolicy {
 
     /** Opening an empty list is a user event: re-ask once if the bridge was last seen not ready. Never a timer. */
     fun shouldRefreshOnEmpty(streamSourcesEnabled: Boolean, notice: ManagedBridgeNotice?): Boolean =
-        notice != null && !streamSourcesEnabled
+        notice != null && notice != ManagedBridgeNotice.NotConnected && !streamSourcesEnabled
 }
 
 /**
@@ -241,6 +260,8 @@ internal class ManagedBridgeTelemetryPolicy {
         fun stateOf(notice: ManagedBridgeNotice?): String = when (notice) {
             null -> "none"
             ManagedBridgeNotice.Preparing -> "preparing"
+            // Derived, never reported (telemetry reads the bridge's own notice, which is null here): keep the vocabulary closed.
+            ManagedBridgeNotice.NotConnected -> "none"
             is ManagedBridgeNotice.Failed -> when (notice.code) {
                 "unreachable" -> "unreachable"
                 "disconnected" -> "disconnected"
