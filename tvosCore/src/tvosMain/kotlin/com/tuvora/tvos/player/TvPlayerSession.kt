@@ -89,6 +89,11 @@ data class TvPlayerState(
     /** A decoded frame or advancing position was seen. [isPlaying] alone is the engine's "not paused", true while idle. */
     val hasStarted: Boolean = false,
     val isEnded: Boolean = false,
+    /**
+     * The viewer wants to watch: false only after a deliberate pause (remote or live pause). Unlike [isPlaying] it stays
+     * true through a stall, a buffer and a reconnect, so Swift keeps the screen awake by it (B279, [PlaybackKeepAwakePolicy]).
+     */
+    val playIntent: Boolean = true,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val bufferedMs: Long = 0L,
@@ -320,6 +325,10 @@ class TvPlayerSession(
         }
     }
     private var wantsToPlay = true
+        set(value) {
+            field = value
+            _state.value = _state.value.copy(playIntent = value)
+        }
 
     /**
      * Watch party (shared PartyRepository / PartySync): while a party is running, remote presses go through
@@ -1041,6 +1050,7 @@ class TvPlayerSession(
             isPlaying = snapshot.isPlaying,
             hasStarted = playbackStarted || com.nuvio.app.features.player.LivePlaybackStartupPolicy.hasStarted(snapshot),
             isEnded = snapshot.isEnded,
+            playIntent = wantsToPlay,
             positionMs = snapshot.positionMs,
             durationMs = snapshot.durationMs,
             bufferedMs = snapshot.bufferedPositionMs,

@@ -108,6 +108,7 @@ import androidx.compose.ui.unit.IntSize
 import com.nuvio.app.features.player.EnterImmersivePlayerMode
 import com.nuvio.app.features.player.HidePlayerSystemBars
 import com.nuvio.app.features.player.ManagePlayerPictureInPicture
+import com.nuvio.app.features.player.keepawake.PlaybackKeepAwakePolicy
 import com.nuvio.app.features.player.LIVE_FREEZE_SURFACE_DOCKED
 import com.nuvio.app.features.player.LivePlaybackStartupPolicy
 import com.nuvio.app.features.player.LiveReconnectStatusLine
@@ -234,6 +235,7 @@ fun LiveTvScreen(
     // from playbackError so the one-shot automatic re-resolve below does not re-open the ladder.
     var reconnectGaveUp by remember { mutableStateOf(false) }
     var snapshot by remember { mutableStateOf(PlayerPlaybackSnapshot()) }
+    var userPausedPlain by remember { mutableStateOf(false) }
     var controller by remember { mutableStateOf<PlayerEngineController?>(null) }
     // Live TV hosts its own player surface rather than going through PlayerScreen, so the
     // stream readout has to be wired up here too — this is the surface users actually ask
@@ -1002,7 +1004,16 @@ fun LiveTvScreen(
     val shiftedPause = pauseState as? LivePauseState.Shifted
     val onPlayPause: () -> Unit = {
         if (pause.handlesPlayPause) pause.togglePlayPause(snapshot.isPlaying)
-        else if (snapshot.isPlaying) controller?.pause() else controller?.play()
+        else {
+            userPausedPlain = snapshot.isPlaying
+            if (snapshot.isPlaying) controller?.pause() else controller?.play()
+        }
+    }
+    LaunchedEffect(snapshot.isPlaying, source) { if (snapshot.isPlaying) userPausedPlain = false }
+    // The viewer paused on purpose: held until the engine plays again (any resume, zap or retry clears it).
+    val liveUserPaused = when (pauseState) {
+        is LivePauseState.Shifted -> (pauseState as LivePauseState.Shifted).paused
+        else -> userPausedPlain
     }
     val pausePlaying = when (pauseState) {
         is LivePauseState.Shifted -> !(pauseState as LivePauseState.Shifted).paused
@@ -1131,8 +1142,19 @@ fun LiveTvScreen(
         // Immersive mode hides the system bars, so on a phone it belongs to fullscreen alone. On
         // desktop it is only a display-sleep inhibitor and docked is the normal way to watch, so
         // it stays on there whenever the screen is up — otherwise the monitor sleeps mid-channel.
+        // B279: hold by watch intent. A live stall or reconnect reports isPlaying=false with no
+        // spinner, and the old isPlaying||isLoading let the screen sleep mid-channel.
+        val keepAwake = PlaybackKeepAwakePolicy.shouldHold(
+            playIntent = true, // opening, resolving, stalled and reconnecting are all still watching
+            userPaused = liveUserPaused,
+            ended = false,
+            error = playbackError != null || resolveError || reconnectGaveUp,
+            inBackground = false,
+        )
+        // Android's engine holds the screen on its own view (also while docked); it ANDs this decision in.
+        LaunchedEffect(controller, keepAwake) { controller?.setKeepAwakeAllowed(keepAwake) }
         if (fullscreen || !LiveTvFullscreenFollowsWindowAspect) {
-            EnterImmersivePlayerMode(keepScreenAwake = snapshot.isPlaying || snapshot.isLoading)
+            EnterImmersivePlayerMode(keepScreenAwake = keepAwake)
         }
         // Upstream split system-bar hiding out of EnterImmersivePlayerMode (a no-op on Android now);
         // fullscreen live still has to hide the bars itself.
