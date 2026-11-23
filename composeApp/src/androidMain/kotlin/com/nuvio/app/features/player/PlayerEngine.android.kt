@@ -1,5 +1,6 @@
 package com.nuvio.app.features.player
 
+import com.nuvio.app.features.player.keepawake.PlaybackKeepAwakePolicy
 import com.nuvio.app.core.analytics.DecodeHealthPolicy
 import com.nuvio.app.core.diag.MpvLogLevelPolicy
 import com.nuvio.app.core.diag.LogRedaction
@@ -967,8 +968,10 @@ private fun ExoPlayerSurface(
         mayProbeSource = autoSyncMayProbeSource,
     )
 
+    // B279: the Compose screen's hold decision, ANDed in (see PlayerEngineController.setKeepAwakeAllowed).
+    var keepAwakeAllowed by remember { mutableStateOf(true) }
     fun syncPlayerViewKeepScreenOn() {
-        playerViewRef?.keepScreenOn = exoPlayer.shouldKeepPlayerScreenOn()
+        playerViewRef?.keepScreenOn = exoPlayer.shouldKeepPlayerScreenOn(keepAwakeAllowed)
     }
 
     fun preserveAudioSelectionForReload(reason: String) {
@@ -1346,6 +1349,11 @@ private fun ExoPlayerSurface(
                     exoPlayer.pause()
                 }
 
+                override fun setKeepAwakeAllowed(allowed: Boolean) {
+                    keepAwakeAllowed = allowed
+                    syncPlayerViewKeepScreenOn()
+                }
+
                 override fun seekTo(positionMs: Long) {
                     exoPlayer.seekTo(positionMs.coerceAtLeast(0L))
                 }
@@ -1617,7 +1625,7 @@ private fun ExoPlayerSurface(
                     useController = useNativeController
                     layoutParams = android.view.ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)
                     player = exoPlayer
-                    keepScreenOn = exoPlayer.shouldKeepPlayerScreenOn()
+                    keepScreenOn = exoPlayer.shouldKeepPlayerScreenOn(keepAwakeAllowed)
                     this.resizeMode = resizeMode.toExoResizeMode()
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
                     playerViewRef = this
@@ -2903,10 +2911,22 @@ private class NuvioLibmpvView(
         )
     }
 
-    fun shouldKeepScreenOn(): Boolean {
-        val snapshot = snapshot()
-        return snapshot.isPlaying || snapshot.isLoading
-    }
+    /** B279: the Compose screen's hold decision (PlaybackKeepAwakePolicy); this view's own intent is ANDed with it. */
+    @Volatile private var keepAwakeAllowed = true
+
+    /**
+     * B279: hold by watch INTENT (NuvioTV ece70e57d), not isPlaying || isLoading: a live stall or reconnect reports
+     * neither with no spinner, and Android then dims or enters Ambient Mode mid-channel. Released on the viewer's
+     * pause (mpv `pause` is the user's pause; a cache stall is paused-for-cache, not pause) and on end.
+     */
+    fun shouldKeepScreenOn(): Boolean =
+        keepAwakeAllowed && PlaybackKeepAwakePolicy.shouldHold(
+            playIntent = true,
+            userPaused = obsPaused,
+            ended = obsEofReached,
+            error = false,
+            inBackground = false,
+        )
 
     @Volatile private var appliedVideoZoom: VideoZoom? = null
 
@@ -3003,6 +3023,11 @@ private class NuvioLibmpvView(
             override fun play() = setPaused(false)
 
             override fun pause() = setPaused(true)
+
+            override fun setKeepAwakeAllowed(allowed: Boolean) {
+                keepAwakeAllowed = allowed
+                post { keepScreenOn = shouldKeepScreenOn() }
+            }
 
             override fun seekTo(positionMs: Long) = this@NuvioLibmpvView.seekToMs(positionMs)
 
@@ -3490,10 +3515,15 @@ private fun ExoPlayer.videoDimensions(): Pair<Int, Int> {
     return if (ratio != 1f) (baseWidth * ratio).roundToInt() to baseHeight else baseWidth to baseHeight
 }
 
-private fun ExoPlayer.shouldKeepPlayerScreenOn(): Boolean =
-    playerError == null &&
-        playWhenReady &&
-        playbackState in setOf(Player.STATE_BUFFERING, Player.STATE_READY)
+/** B279: watch intent (PlaybackKeepAwakePolicy), so an IDLE re-prepare between reconnect attempts keeps the hold. */
+private fun ExoPlayer.shouldKeepPlayerScreenOn(allowed: Boolean = true): Boolean =
+    allowed && PlaybackKeepAwakePolicy.shouldHold(
+        playIntent = true,
+        userPaused = !playWhenReady,
+        ended = playbackState == Player.STATE_ENDED,
+        error = playerError != null,
+        inBackground = false,
+    )
 
 private data class TrackSelectionSnapshot(
     val trackType: Int,

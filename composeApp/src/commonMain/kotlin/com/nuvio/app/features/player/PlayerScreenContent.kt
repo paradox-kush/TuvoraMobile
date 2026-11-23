@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -103,6 +104,11 @@ internal fun PlayerScreenContent(args: PlayerScreenArgs) {
                 inBackground = false, // the iOS idle timer is inert in the background and the effect disposes on teardown
             )
         }
+    }
+
+    // B279: Android engines AND this decision into their own View.keepScreenOn hold (a no-op elsewhere).
+    LaunchedEffect(runtime.playerController, keepScreenAwake) {
+        runtime.playerController?.setKeepAwakeAllowed(keepScreenAwake)
     }
 
     BoxWithConstraints(

@@ -31,6 +31,12 @@ interface PlayerEngineController {
     fun resetVideoPipeline(): Boolean = false
     fun setPlaybackSpeed(speed: Float)
     fun setMuted(muted: Boolean) {}
+    /**
+     * B279: the screen-hold decision the Compose screen already made ([PlaybackKeepAwakePolicy], covering what only the
+     * screen knows: a resolve error, a reconnect give-up, the viewer's pause). Android engines AND it with their own
+     * intent-based hold on `View.keepScreenOn`; engines without a view-level hold ignore it.
+     */
+    fun setKeepAwakeAllowed(allowed: Boolean) {}
     fun getAudioTracks(): List<AudioTrack>
     fun getSubtitleTracks(): List<SubtitleTrack>
 

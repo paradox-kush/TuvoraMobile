@@ -1142,18 +1142,19 @@ fun LiveTvScreen(
         // Immersive mode hides the system bars, so on a phone it belongs to fullscreen alone. On
         // desktop it is only a display-sleep inhibitor and docked is the normal way to watch, so
         // it stays on there whenever the screen is up — otherwise the monitor sleeps mid-channel.
+        // B279: hold by watch intent. A live stall or reconnect reports isPlaying=false with no
+        // spinner, and the old isPlaying||isLoading let the screen sleep mid-channel.
+        val keepAwake = PlaybackKeepAwakePolicy.shouldHold(
+            playIntent = true, // opening, resolving, stalled and reconnecting are all still watching
+            userPaused = liveUserPaused,
+            ended = false,
+            error = playbackError != null || resolveError || reconnectGaveUp,
+            inBackground = false,
+        )
+        // Android's engine holds the screen on its own view (also while docked); it ANDs this decision in.
+        LaunchedEffect(controller, keepAwake) { controller?.setKeepAwakeAllowed(keepAwake) }
         if (fullscreen || !LiveTvFullscreenFollowsWindowAspect) {
-            // B279: hold by watch intent. A live stall or reconnect reports isPlaying=false with no
-            // spinner, and the old isPlaying||isLoading let the screen sleep mid-channel.
-            EnterImmersivePlayerMode(
-                keepScreenAwake = PlaybackKeepAwakePolicy.shouldHold(
-                    playIntent = true, // opening, resolving, stalled and reconnecting are all still watching
-                    userPaused = liveUserPaused,
-                    ended = false,
-                    error = playbackError != null || resolveError || reconnectGaveUp,
-                    inBackground = false,
-                ),
-            )
+            EnterImmersivePlayerMode(keepScreenAwake = keepAwake)
         }
         // Upstream split system-bar hiding out of EnterImmersivePlayerMode (a no-op on Android now);
         // fullscreen live still has to hide the bars itself.
