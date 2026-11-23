@@ -1,7 +1,9 @@
 package com.nuvio.app.features.iptv.match
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.features.iptv.BoundedLoad
 import com.nuvio.app.features.iptv.CONTENT_TYPE_MOVIES
+import com.nuvio.app.features.iptv.LoadSurface
 import com.nuvio.app.features.iptv.CONTENT_TYPE_SERIES
 import com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER
 import com.nuvio.app.features.iptv.XtreamAccount
@@ -19,7 +21,9 @@ import com.nuvio.app.core.contracts.IptvCatalogPendingException
 /**
  * Turns a TMDB movie/episode into playable Xtream [StreamItem]s for one account —
  * the bridge that lets IPTV VOD show up next to addon/debrid streams on TMDB-driven
- * detail screens. Returns empty (never throws) when the account doesn't carry the title.
+ * detail screens. Returns empty when the account doesn't carry the title. A lookup that FAILED is not
+ * "doesn't carry": a series' failed get_series_info throws [XtreamSeriesInfoException] (B134), which the source lane
+ * shows as a failed source with Retry.
  */
 internal object XtreamStreamSource {
     private val log = Logger.withTag("XtreamStreamSource")
@@ -228,9 +232,18 @@ internal object XtreamStreamSource {
             entries.addAll(XtreamMatchIndex.probe(acc.id, MatchKind.SERIES, key))
         }
         val editions = seriesEditions(acc, entries.toList(), s)
-        return editions.flatMap { ed ->
-            val detail = XtreamClient.seriesInfo(acc, ed.sid).getOrNull() ?: return@flatMap emptyList<StreamItem>()
-            XtreamSeriesEpisodePolicy.pickEpisodes(ed, detail.episodes, s, e).map { ep ->
+        // B134: a failed get_series_info is its own outcome, never an empty list. The lane shows it as a failed
+        // source with Retry (StreamSourcePresentationPolicy.FailedLane); only the other three read as "nothing".
+        val outcome = SeriesSourcePolicy.resolve(editions, s, e) { ed ->
+            BoundedLoad.run(
+                surface = LoadSurface.SERIES_INFO,
+                report = mapOf("path" to "streams", "source_type" to acc.sourceType),
+            ) { XtreamClient.seriesInfo(acc, ed.sid).getOrThrow() }.toResult()
+        }
+        return when (outcome) {
+            is SeriesSourceOutcome.InfoFailed -> throw XtreamSeriesInfoException(outcome.kind)
+            SeriesSourceOutcome.NoMatch, SeriesSourceOutcome.NoEpisodeForSE -> emptyList()
+            is SeriesSourceOutcome.Found -> outcome.picks.map { (ed, ep) ->
                 StreamItem(
                     name = "S${s}E${e} · ${ep.title}",
                     // the edition's catalog name so language/season variants are tellable apart
@@ -238,7 +251,7 @@ internal object XtreamStreamSource {
                     url = XtreamClient.episodeStreamUrl(acc, ep.episodeId, ep.containerExtension ?: "mp4"),
                     addonName = acc.name,
                     addonId = groupId(acc),
-                        deviceSourceKind = "iptv", deviceSourceRef = acc.id,
+                    deviceSourceKind = "iptv", deviceSourceRef = acc.id,
                 )
             }
         }

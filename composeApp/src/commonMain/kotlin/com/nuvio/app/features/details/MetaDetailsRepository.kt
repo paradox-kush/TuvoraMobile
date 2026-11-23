@@ -634,14 +634,32 @@ object MetaDetailsRepository {
         peek(type, id)?.let { return it }
         if (!MetaSourceAccess.current().handlesId(id)) return fetch(type, id)
         val requestKey = "$type:$id"
-        return withContext(Dispatchers.Default) { MetaSourceAccess.current().buildNativeMeta(id) }
-            ?.also { cachedMetaByRequestKey[requestKey] = CachedMetaEntry(baseMeta = it) }
+        // B134: a native build can now throw a failed series lookup; null here means "could not be loaded".
+        val built = try {
+            withContext(Dispatchers.Default) { MetaSourceAccess.current().buildNativeMeta(id) }
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            null
+        }
+        return built?.also { cachedMetaByRequestKey[requestKey] = CachedMetaEntry(baseMeta = it) }
     }
 
     // --- Xtream IPTV short-circuit (bypasses addons; native detail for VOD/series) ---
 
     private suspend fun loadXtreamMeta(requestKey: String, id: String) {
-        val meta = withContext(Dispatchers.Default) { MetaSourceAccess.current().buildNativeMeta(id) }
+        // B134: a failed native lookup (a series' get_series_info) is Failed with its reason, shown with Retry.
+        val meta = try {
+            withContext(Dispatchers.Default) { MetaSourceAccess.current().buildNativeMeta(id) }
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            _uiState.value = MetaDetailsUiState(
+                errorMessage = error.message?.takeIf { it.isNotBlank() } ?: getString(Res.string.details_no_addon_meta),
+            )
+            activeRequestKey = null
+            return
+        }
         if (meta == null) {
             _uiState.value = MetaDetailsUiState(errorMessage = getString(Res.string.details_no_addon_meta))
             activeRequestKey = null

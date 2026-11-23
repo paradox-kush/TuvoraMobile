@@ -374,7 +374,10 @@ object XtreamClient : IptvClient {
      */
     override suspend fun seriesInfo(acc: XtreamAccount, seriesId: Int): Result<XtreamSeriesDetail?> = call {
         val text = panelText(acc) { a -> playerApi(a, "get_series_info") + "&series_id=$seriesId" }
-        val root = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return@call null
+        // B134: an unparseable body is a typed failure (XtreamParseException), never a silent null that the
+        // callers then rendered as "no episodes" / "No streams found". Only a panel that says "no such series"
+        // (blank or empty JSON array) is a genuine null.
+        val root = parseSeriesInfoRoot(text) ?: return@call null
         val info = root["info"] as? JsonObject
         val episodes = XtreamEpisodeRows.parse(root["episodes"]).map { e ->
             XtreamEpisode(e.id, e.season, e.number, e.title, e.plot, e.still, e.extension)
@@ -389,6 +392,24 @@ object XtreamClient : IptvClient {
             releaseDate = (info?.get("releaseDate") ?: info?.get("release_date") ?: info?.get("releasedate")).asStringOrNull(),
             episodes = episodes
         )
+    }
+
+    /**
+     * The `get_series_info` body as an object. null = the panel answered "no such series" (a blank body or an empty
+     * array). Anything else that is not a JSON object (HTML from a WAF, truncated JSON, a bare string) throws
+     * [XtreamParseException]. Never carries the body or the host. internal for tests.
+     */
+    internal fun parseSeriesInfoRoot(text: String): JsonObject? {
+        if (text.isBlank()) return null
+        val element = try {
+            json.parseToJsonElement(text)
+        } catch (e: kotlinx.serialization.SerializationException) {
+            throw XtreamParseException()
+        } catch (e: IllegalArgumentException) {
+            throw XtreamParseException()
+        }
+        if (element is JsonArray && element.isEmpty()) return null
+        return element as? JsonObject ?: throw XtreamParseException()
     }
 
     // --- public stream-url builders (used by the registry / short-circuits) --
@@ -588,6 +609,9 @@ object XtreamClient : IptvClient {
         return p.intOrNull ?: p.contentOrNull?.trim()?.toIntOrNull()
     }
 }
+
+/** The panel answered 200 but the body was not the JSON shape the call expects (B134). No body, host or message kept. */
+internal class XtreamParseException : IllegalStateException("Unparseable panel response")
 
 /** The panel answered and refused these credentials (`auth != 1`). Message kept for logs only. */
 internal class XtreamAuthRejectedException : IllegalStateException("Authentication failed")

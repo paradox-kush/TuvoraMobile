@@ -51,4 +51,18 @@ class XtreamSeriesEpisodePolicyTest {
         assertEquals(listOf("e3-7"), XtreamSeriesEpisodePolicy.pickEpisodes(show, eps, season = 3, episode = 7).map { it.episodeId })
         assertEquals(emptyList(), XtreamSeriesEpisodePolicy.pickEpisodes(show, eps, season = 2, episode = 7))
     }
+
+    @Test
+    fun aSeasonRangeNamesNoSingleSeason() {
+        // B134 secondary: "S01-S05" used to read as season 5 (last marker wins), hiding the pack from seasons 1-4.
+        assertEquals(null, XtreamSeriesEpisodePolicy.seasonInName("Show S01-S05"), "S01-S05")
+        assertEquals(null, XtreamSeriesEpisodePolicy.seasonInName("Show Season 1-5"), "Season 1-5")
+        assertEquals(null, XtreamSeriesEpisodePolicy.seasonInName("Show S1 to S4"), "S1 to S4")
+        // single markers are untouched
+        assertEquals(5, XtreamSeriesEpisodePolicy.seasonInName("Show S5 En"), "single season")
+        val entries = listOf(item(1, "Show S01-S05"), item(2, "Show S3 En"))
+        assertEquals(listOf(1, 2), XtreamSeriesEpisodePolicy.editionsForSeason(entries, 3).map { it.sid }, "pack kept for season 3")
+        val pack = item(1, "Show S01-S05")
+        assertEquals(listOf("e3-7"), XtreamSeriesEpisodePolicy.pickEpisodes(pack, listOf(ep(1, 7), ep(3, 7)), 3, 7).map { it.episodeId }, "real internal season")
+    }
 }
