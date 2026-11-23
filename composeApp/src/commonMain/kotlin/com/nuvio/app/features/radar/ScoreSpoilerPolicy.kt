@@ -105,12 +105,12 @@ fun ScoreVisibility<RadarLiveScore>.slots(): ScoreSlots = when (this) {
 
 /**
  * Time-stamped snapshots per key, so a screen can show the value from N seconds ago. [record] stores a snapshot only
- * when it differs from the key's latest; snapshots are pruned to the newest one old enough for [retainMs] (the longest
- * delay) plus everything newer, capped at [maxPerKey]. Thread-safe: fetches record on a background dispatcher while
- * the UI reads.
+ * when it differs from the key's latest; snapshots are pruned by TIME only, to the newest one old enough for [retainMs]
+ * (the longest delay: the anchor) plus everything newer. No count cap: a cap dropped the snapshots between the anchor
+ * and the newest ones once a window held more than it allowed, freezing a 60 s delay on the anchor forever. Size stays
+ * bounded by the poll rate (dedupe + one window). Thread-safe: fetches record on a background dispatcher while the UI reads.
  */
 class DelayedValueBuffer<K : Any, V : Any>(
-    private val maxPerKey: Int = 8,
     private val retainMs: Long = MAX_DELAY_MS,
 ) {
     private data class Snapshot<V>(val atMs: Long, val value: V)
@@ -148,8 +148,7 @@ class DelayedValueBuffer<K : Any, V : Any>(
 
     private fun prune(list: List<Snapshot<V>>, nowMs: Long): List<Snapshot<V>> {
         val anchor = list.indexOfLast { it.atMs <= nowMs - retainMs }
-        val kept = if (anchor > 0) list.subList(anchor, list.size).toList() else list
-        return if (kept.size <= maxPerKey) kept else listOf(kept.first()) + kept.takeLast(maxPerKey - 1)
+        return if (anchor > 0) list.subList(anchor, list.size).toList() else list
     }
 
     companion object {

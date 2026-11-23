@@ -132,18 +132,30 @@ class ScoreSpoilerPolicyTest {
     }
 
     @Test
-    fun `buffer stays bounded`() {
-        val buffer = DelayedValueBuffer<String, RadarLiveScore>(maxPerKey = 8)
+    fun `buffer stays bounded by time`() {
+        val buffer = DelayedValueBuffer<String, RadarLiveScore>()
         repeat(50) { i -> buffer.record("e1", score("$i", "0"), i * 15_000L) }
-        assertTrue(buffer.snapshotCount("e1") <= 8, "at most maxPerKey snapshots per key, got ${buffer.snapshotCount("e1")}")
+        // At 735 s: the 60 s anchor (675 s) plus the four newer ones.
+        assertEquals(5, buffer.snapshotCount("e1"), "only one delay window is kept")
         val now = 49 * 15_000L
         // 60 s ago = snapshot 45; it must still be answerable after the pruning.
         assertEquals(score("45", "0"), buffer.valueAt("e1", now, 60_000L), "the 60 s-old snapshot survives pruning")
     }
 
     @Test
+    fun `a snapshot every 5 s for 3 minutes still answers 60 s ago`() {
+        val buffer = DelayedValueBuffer<String, RadarLiveScore>()
+        // 37 distinct snapshots at 0..180 s: far more than fit in one 60 s window at 5 s spacing.
+        for (i in 0..36) buffer.record("e1", score("$i", "0"), i * 5_000L)
+        val now = 180_000L
+        assertEquals(score("24", "0"), buffer.valueAt("e1", now, 60_000L), "the snapshot from 120 s (60 s ago) is on screen, not a frozen anchor")
+        assertEquals(score("30", "0"), buffer.valueAt("e1", now, 30_000L), "30 s ago is the 150 s snapshot")
+        assertEquals(score("36", "0"), buffer.valueAt("e1", now, 0L), "no delay is the newest")
+    }
+
+    @Test
     fun `buffer prunes snapshots older than the 60 s anchor`() {
-        val buffer = DelayedValueBuffer<String, RadarLiveScore>(maxPerKey = 8)
+        val buffer = DelayedValueBuffer<String, RadarLiveScore>()
         buffer.record("e1", score("0", "0"), 0L)
         buffer.record("e1", score("1", "0"), 10_000L)
         buffer.record("e1", score("2", "0"), 200_000L)
