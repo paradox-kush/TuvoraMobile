@@ -46,6 +46,8 @@ struct GameDetailScreen: View {
     @State private var freshPlayKey: String?
     /// The ball slides only for a plain field move; a change of possession must not slide it across the field (spec 03 B1).
     @State private var fieldSlides = false
+    /// Hide scores is on: the scoreboard numbers and spoiler sections are withheld by the model; the chip reveals.
+    @State private var scoresHidden = false
     @State private var matches: [RadarChannelMatcher.ChannelMatch] = []
     @State private var matching = true
     @State private var opening = false
@@ -111,6 +113,16 @@ struct GameDetailScreen: View {
             for await next in model.state {
                 state = next
                 if case .loaded(let l) = onEnum(of: next) { apply(l.detail, stale: l.stale) }
+            }
+        }
+        .task(id: model.map { ObjectIdentifier($0) }) {
+            // Hide scores / score delay: local redraw (settings change, due snapshot); lives with this screen.
+            guard let model else { return }
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { try? await model.runScoreSpoilerWhileVisible() }
+                group.addTask { @MainActor in
+                    for await next in model.spoiler { scoresHidden = next.hidden }
+                }
             }
         }
         .task {
@@ -250,6 +262,7 @@ struct GameDetailScreen: View {
     private func leftColumn(_ screen: TvGameScreenModel) -> some View {
         VStack(alignment: .leading, spacing: dp(7)) {
             ScoreboardCard(board: screen.scoreboard, pulseSides: pulseSides, reduceMotion: reduceMotion, upcomingLabel: upcomingLabel, field: screen.field, possession: screen.basketball?.possession)
+            if scoresHidden { revealScoresChip }
             if let field = screen.field { FieldStripCard(strip: field, flashes: flashes, slides: fieldSlides) }
             if let soccer = screen.soccer { SoccerStripCard(strip: soccer, board: screen.scoreboard, animated: !reduceMotion) }
             if let basketball = screen.basketball { BasketballStripCard(strip: basketball, board: screen.scoreboard, flashes: flashes, animated: !reduceMotion) }
@@ -266,6 +279,9 @@ struct GameDetailScreen: View {
                 }
         }
     }
+
+    /// "Scores hidden": flips the same global setting as the hub chip, so the user can reveal without leaving.
+    private var revealScoresChip: some View { RevealScoresChip() }
 
     private var screenChips: [TvChip] { screen?.chips ?? [] }
     private var selectedIndex: Int { Int(TvSectionSelection.shared.indexOf(chips: screenChips, selected: selectedSection)) }
@@ -366,6 +382,24 @@ struct GameDetailScreen: View {
 private func teamColor(_ hex: String?, fallback: Color) -> Color {
     guard let hex, hex.count == 6, let v = UInt32(hex, radix: 16) else { return fallback }
     return Color(argb: 0xFF00_0000 | v)
+}
+
+private struct RevealScoresChip: View {
+    @Environment(\.nuvio) private var colors
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Button { TvSports.shared.toggleScoresShown() } label: {
+            Label("Scores hidden", systemImage: "eye.slash").font(NuvioType.labelMedium)
+                .foregroundStyle(focused ? colors.primary : colors.textSecondary)
+                .padding(.horizontal, dp(14)).padding(.vertical, dp(6))
+                .background(Capsule().fill(focused ? colors.focusBackground : colors.backgroundCard))
+                .overlay(Capsule().stroke(focused ? colors.focusRing : Color.clear, lineWidth: dp(2)))
+        }
+        .buttonStyle(PlainNoChromeButtonStyle())
+        .focused($focused)
+        .reportsFocus(focused)
+    }
 }
 
 private struct ScoreboardCard: View {

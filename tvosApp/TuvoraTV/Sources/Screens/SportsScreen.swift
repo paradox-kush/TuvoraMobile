@@ -78,6 +78,13 @@ struct SportsScreen: View {
                 now = TvSports.shared.nowMs()
             }
         }
+        .task(id: radar.flatMap { TvSports.shared.nextScoreChangeAtMs(state: $0, nowMs: now)?.int64Value }) {
+            // Score delay: ONE local redraw when the next delayed score falls due (no polling, no request).
+            guard let radar, let due = TvSports.shared.nextScoreChangeAtMs(state: radar, nowMs: TvSports.shared.nowMs())?.int64Value else { return }
+            let wait = max(due - TvSports.shared.nowMs(), 0) + 50
+            try? await Task.sleep(nanoseconds: UInt64(wait) * 1_000_000)
+            if !Task.isCancelled { now = TvSports.shared.nowMs() }
+        }
         .task(id: scenePhase) {
             // Egress rule: the refresh loop lives only while Sports is on screen and the app is
             // active; leaving the tab or backgrounding cancels this task and with it the loop.
@@ -133,9 +140,20 @@ struct SportsScreen: View {
     private func hub(_ radar: RadarUiState, _ hub: TvSportsHub) -> some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(alignment: .leading, spacing: dp(24)) {
-                Text("Sports").font(NuvioType.headlineSmall).foregroundStyle(colors.textPrimary)
-                    .padding(.leading, SportsMetrics.gutter)
-                    .padding(.bottom, dp(12) - dp(24))
+                let spoiler = TvSports.shared.scoreSettings(state: radar)
+                HStack(spacing: dp(12)) {
+                    Text("Sports").font(NuvioType.headlineSmall).foregroundStyle(colors.textPrimary)
+                    Spacer()
+                    ScoreChip(label: spoiler.toggleLabel, systemImage: spoiler.shown ? "eye" : "eye.slash") {
+                        TvSports.shared.toggleScoresShown()
+                    }
+                    if spoiler.shown {
+                        ScoreChip(label: spoiler.delayLabel, systemImage: "timer") { TvSports.shared.cycleScoreDelay() }
+                    }
+                }
+                .focusSection()
+                .padding(.horizontal, SportsMetrics.gutter)
+                .padding(.bottom, dp(12) - dp(24))
 
                 if !hub.featured.isEmpty {
                     VStack(alignment: .leading, spacing: 0) {
@@ -233,6 +251,32 @@ struct SportsScreen: View {
     }
 }
 
+/// Hide scores / Score delay chip: a focusable pill in the hub header (same look as See all, a touch larger).
+private struct ScoreChip: View {
+    let label: String
+    let systemImage: String
+    let action: () -> Void
+    @Environment(\.nuvio) private var colors
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: dp(6)) {
+                Image(systemName: systemImage)
+                Text(label)
+            }
+            .font(NuvioType.labelMedium)
+            .foregroundStyle(focused ? colors.primary : colors.textSecondary)
+            .padding(.horizontal, dp(14)).padding(.vertical, dp(6))
+            .background(RoundedRectangle(cornerRadius: dp(8)).fill(focused ? colors.focusBackground : colors.backgroundCard))
+            .overlay(RoundedRectangle(cornerRadius: dp(8)).stroke(focused ? colors.focusRing : Color.clear, lineWidth: dp(2)))
+        }
+        .buttonStyle(PlainNoChromeButtonStyle())
+        .focused($focused)
+        .reportsFocus(focused)
+    }
+}
+
 private struct IdentifiedItem<ID: Hashable, Item>: Identifiable {
     let id: ID
     let item: Item
@@ -309,12 +353,13 @@ private struct MatchCard: View {
                 }
                 VStack(alignment: .leading, spacing: 0) {
                     if let home = fixture.home, !home.isEmpty, let away = fixture.away, !away.isEmpty {
-                        let homeScore = sports.homeScore(state: radar, fixture: fixture)
-                        let awayScore = sports.awayScore(state: radar, fixture: fixture)
+                        let slots = sports.scoreSlots(state: radar, fixture: fixture, nowMs: sports.nowMs())
+                        let homeScore = slots.home
+                        let awayScore = slots.away
                         TeamRow(name: home, badge: fixture.homeBadge, score: homeScore,
-                                dim: TvSportsHubPolicy.shared.scoreTrails(own: homeScore, other: awayScore))
+                                dim: slots.comparable && TvSportsHubPolicy.shared.scoreTrails(own: homeScore, other: awayScore))
                         TeamRow(name: away, badge: fixture.awayBadge, score: awayScore,
-                                dim: TvSportsHubPolicy.shared.scoreTrails(own: awayScore, other: homeScore))
+                                dim: slots.comparable && TvSportsHubPolicy.shared.scoreTrails(own: awayScore, other: homeScore))
                     } else {
                         Text(fixture.displayTitle).font(NuvioType.inter(14, .semibold)).foregroundStyle(colors.textPrimary).lineLimit(2)
                     }
