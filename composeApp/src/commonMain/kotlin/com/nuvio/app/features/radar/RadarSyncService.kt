@@ -38,6 +38,17 @@ object RadarSyncService {
     var isSyncingFromRemote: Boolean = false
     private var pushJob: Job? = null
 
+    // Local Hide scores / delay changes made vs carried by a successful push ([RadarPrefsPull]).
+    @Volatile
+    private var spoilerChangeSeq = 0L
+    @Volatile
+    private var spoilerPushedSeq = 0L
+
+    /** Called by RadarRepository BEFORE it publishes a local Hide scores / delay change. */
+    fun noteLocalSpoilerChange() {
+        spoilerChangeSeq++
+    }
+
     @Serializable
     private data class FollowRow(
         @SerialName("league_id") val leagueId: String,
@@ -64,16 +75,6 @@ object RadarSyncService {
         @SerialName("sort_order") val sortOrder: Int = 0,
     )
 
-    @Serializable
-    private data class PrefsRow(
-        @SerialName("featured_event_id") val featuredEventId: String = "",
-        @SerialName("opt_in_state") val optInState: String = RadarOptIn.UNSET,
-        @SerialName("promo_dismissed") val promoDismissed: Boolean = false,
-        // Columns added 2026-11-23; a row from before the migration (or an older backend) keeps the defaults.
-        @SerialName("scores_shown") val scoresShown: Boolean = true,
-        @SerialName("score_delay_s") val scoreDelaySeconds: Int = 0,
-    )
-
     private fun authed(): Boolean {
         val s = AuthRepository.state.value
         return s is AuthState.Authenticated && !s.isAnonymous
@@ -87,15 +88,21 @@ object RadarSyncService {
         // state under the old profile id would wipe that profile's remote follows.
         val profileId = ProfileRepository.activeProfileId
         val snapshot = RadarRepository.uiState.value
+        val spoilerSeq = spoilerChangeSeq
         pushJob = scope.launch {
             delay(PUSH_DEBOUNCE_MS)
             if (ProfileRepository.activeProfileId != profileId) return@launch
+            // Dropped during a pull: pullFromServer re-triggers it on the merged state (RadarPrefsPull.pushAfterPull).
             if (isSyncingFromRemote || !authed()) return@launch
-            pushToRemote(profileId, snapshot)
+            pushToRemote(profileId, snapshot, spoilerSeq)
         }
     }
 
-    private suspend fun pushToRemote(profileId: Int, state: RadarUiState = RadarRepository.uiState.value) {
+    private suspend fun pushToRemote(
+        profileId: Int,
+        state: RadarUiState = RadarRepository.uiState.value,
+        spoilerSeq: Long = spoilerChangeSeq,
+    ) {
         runCatching {
             if (ProfileRepository.activeProfileId != profileId) return@runCatching
             val params = buildJsonObject {
@@ -140,6 +147,7 @@ object RadarSyncService {
                 })
             }
             SupabaseProvider.client.postgrest.rpc("sync_push_radar", params)
+            if (spoilerSeq > spoilerPushedSeq) spoilerPushedSeq = spoilerSeq
             log.d { "pushToRemote — ${state.follows.size} follows, ${state.teamFollows.size} teams" }
         }.onFailure { e -> log.e(e) { "pushToRemote — FAILED" } }
     }
@@ -147,6 +155,7 @@ object RadarSyncService {
     /** Pull this profile's follows+prefs on login. Empty remote + non-empty local => migrate up. */
     suspend fun pullFromServer(profileId: Int) {
         if (!authed() || ProfileRepository.activeProfileId != profileId) return
+        val spoilerSeqAtStart = spoilerChangeSeq
         runCatching {
             val followRows = SupabaseProvider.client.postgrest
                 .from("radar_follows")
@@ -165,7 +174,7 @@ object RadarSyncService {
             val prefsRow = SupabaseProvider.client.postgrest
                 .from("radar_prefs")
                 .select { filter { eq("profile_id", profileId) } }
-                .decodeList<PrefsRow>()
+                .decodeList<RadarPrefsRow>()
                 .firstOrNull()
             if (ProfileRepository.activeProfileId != profileId) return@runCatching
             if (followRows.isEmpty() && teamRows.isEmpty() && prefsRow == null) {
@@ -191,15 +200,9 @@ object RadarSyncService {
                         custom = it.custom,
                     )
                 },
-                prefs = prefsRow?.let {
-                    RadarPrefs(
-                        featuredEventId = it.featuredEventId,
-                        optInState = it.optInState,
-                        promoDismissed = it.promoDismissed,
-                        scoresShown = it.scoresShown,
-                        scoreDelaySeconds = ScoreSpoilerSettings.sanitizeDelay(it.scoreDelaySeconds),
-                    )
-                },
+                prefs = prefsRow,
+                // Read at apply time: a toggle made while the selects were in flight must survive them.
+                localSpoilerWins = { RadarPrefsPull.localSpoilerWins(spoilerChangeSeq, spoilerPushedSeq, spoilerSeqAtStart) },
                 teams = teamRows.map {
                     RadarTeamFollow(
                         teamId = it.teamId,
@@ -214,6 +217,7 @@ object RadarSyncService {
                 },
             )
             isSyncingFromRemote = false
+            if (RadarPrefsPull.pushAfterPull(spoilerChangeSeq, spoilerPushedSeq)) triggerPush()
             log.i { "pullFromServer — applied ${followRows.size} follows, ${teamRows.size} teams" }
         }.onFailure { e ->
             isSyncingFromRemote = false
@@ -229,4 +233,43 @@ internal fun radarPrefsPayload(prefs: RadarPrefs): JsonObject = buildJsonObject 
     put("promo_dismissed", prefs.promoDismissed)
     put("scores_shown", prefs.scoresShown)
     put("score_delay_s", ScoreSpoilerSettings.sanitizeDelay(prefs.scoreDelaySeconds))
+}
+
+/** One radar_prefs row as pulled. */
+@Serializable
+internal data class RadarPrefsRow(
+    @SerialName("featured_event_id") val featuredEventId: String = "",
+    @SerialName("opt_in_state") val optInState: String = RadarOptIn.UNSET,
+    @SerialName("promo_dismissed") val promoDismissed: Boolean = false,
+    // Columns added 2026-11-23. Null = the row predates them (or an older backend omits them): the LOCAL value stays —
+    // a default here would silently reset a device's Hide scores / delay on every pull.
+    @SerialName("scores_shown") val scoresShown: Boolean? = null,
+    @SerialName("score_delay_s") val scoreDelaySeconds: Int? = null,
+)
+
+/**
+ * Pure decisions for applying a pulled radar_prefs row on this device. Local Hide scores / delay changes are counted
+ * ([RadarSyncService] keeps the sequence numbers): changeSeq = local changes made, pushedSeq = the newest change a push
+ * has carried to the server.
+ */
+internal object RadarPrefsPull {
+    /** The row's columns win, except spoiler columns the row lacks, or all spoiler columns when [localSpoilerWins]. */
+    fun merge(local: RadarPrefs, remote: RadarPrefsRow, localSpoilerWins: Boolean): RadarPrefs = RadarPrefs(
+        featuredEventId = remote.featuredEventId,
+        optInState = remote.optInState,
+        promoDismissed = remote.promoDismissed,
+        scoresShown = if (localSpoilerWins) local.scoresShown else remote.scoresShown ?: local.scoresShown,
+        scoreDelaySeconds = if (localSpoilerWins) local.scoreDelaySeconds
+        else remote.scoreDelaySeconds?.let(ScoreSpoilerSettings::sanitizeDelay) ?: local.scoreDelaySeconds,
+    )
+
+    /**
+     * Keep the local spoiler values when a change is not pushed yet, or was made after the pull started (its select may
+     * have read the row before that push landed).
+     */
+    fun localSpoilerWins(changeSeq: Long, pushedSeq: Long, changeSeqAtPullStart: Long): Boolean =
+        changeSeq > pushedSeq || changeSeq > changeSeqAtPullStart
+
+    /** A debounced push dropped while the pull ran (or not yet sent) goes out after it, on the merged state. */
+    fun pushAfterPull(changeSeq: Long, pushedSeq: Long): Boolean = changeSeq > pushedSeq
 }

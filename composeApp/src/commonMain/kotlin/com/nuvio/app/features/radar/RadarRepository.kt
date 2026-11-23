@@ -498,6 +498,7 @@ object RadarRepository {
     // --- Hide scores + score delay (per profile, synced) -----------------------
 
     fun setScoresShown(shown: Boolean) {
+        RadarSyncService.noteLocalSpoilerChange()
         _uiState.update { it.copy(prefs = it.prefs.copy(scoresShown = shown)) }
         persist()
     }
@@ -507,6 +508,7 @@ object RadarRepository {
 
     /** The hub's delay chip: Off → 15 s → 30 s → 60 s → Off. */
     fun cycleScoreDelay() {
+        RadarSyncService.noteLocalSpoilerChange()
         _uiState.update { it.copy(prefs = it.prefs.copy(scoreDelaySeconds = ScoreSpoilerSettings.nextDelay(it.prefs.scoreDelaySeconds))) }
         persist()
     }
@@ -539,11 +541,13 @@ object RadarRepository {
     // --- sync ----------------------------------------------------------------
 
     /** Replace this profile's follows+prefs from a remote pull WITHOUT echoing a push back. */
-    fun applyFromRemote(
+    internal fun applyFromRemote(
         profileId: Int,
         follows: List<RadarFollow>,
-        prefs: RadarPrefs?,
+        prefs: RadarPrefsRow?,
         teams: List<RadarTeamFollow>? = null,
+        /** True keeps the local Hide scores / delay (a newer local change: [RadarPrefsPull.localSpoilerWins]). */
+        localSpoilerWins: () -> Boolean = { false },
     ) {
         loaded = true
         currentProfileId = profileId
@@ -552,7 +556,7 @@ object RadarRepository {
                 catalog = state.catalog.takeIf { it.categories.isNotEmpty() }
                     ?: runCatching { json.decodeFromString<RadarCatalog>(RadarCatalogData.JSON) }.getOrDefault(RadarCatalog()),
                 follows = follows,
-                prefs = prefs ?: state.prefs,
+                prefs = prefs?.let { RadarPrefsPull.merge(state.prefs, it, localSpoilerWins()) } ?: state.prefs,
                 // Null means the pull said nothing about teams (older backend); keep local.
                 teamFollows = teams ?: state.teamFollows,
             )
