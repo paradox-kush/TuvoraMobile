@@ -1,5 +1,6 @@
 package com.nuvio.app.features.sportsdetail.internal
 
+import com.nuvio.app.features.radar.ScoreSlots
 import com.nuvio.app.features.sportsdetail.api.BasketballStripBlock
 import com.nuvio.app.features.sportsdetail.api.FootballFieldBlock
 import com.nuvio.app.features.sportsdetail.api.HockeyStripBlock
@@ -35,9 +36,14 @@ internal sealed interface Moment {
 }
 
 internal object GameMomentPolicy {
-    /** prev == null, a different game, or a state change into LIVE -> emptyList(): nothing animates when the screen opens. */
+    /**
+     * prev == null, a different game, or a state change into LIVE -> emptyList(): nothing animates when the screen opens.
+     * Same for a change of Hide scores / delay mode (shown, hidden, pending): what is SHOWN changed, not the game — a
+     * reveal, or the delay's "–" falling due, must never pulse a goal, speak a score or replay a play.
+     */
     fun diff(prev: GameDetail?, next: GameDetail): List<Moment> {
         if (prev == null || prev.gameId != next.gameId) return emptyList()
+        if (prev.spoilerRedaction != next.spoilerRedaction) return emptyList()
         if (prev.state != GameState.LIVE && next.state == GameState.LIVE) return emptyList()
         return buildList {
             addAll(scoreChanges(prev, next))
@@ -62,6 +68,8 @@ internal object GameMomentPolicy {
     private fun scoreChanges(prev: GameDetail, next: GameDetail): List<Moment> {
         val (ph, pa) = scores(prev)
         val (nh, na) = scores(next)
+        // The delay's "–" on either side is not a score: nothing to compare against.
+        if (listOf(ph, pa, nh, na).any { it == ScoreSlots.PLACEHOLDER }) return emptyList()
         return buildList {
             if (ph != null && nh != null && ph != nh) add(Moment.ScoreChange("home", nh))
             if (pa != null && na != null && pa != na) add(Moment.ScoreChange("away", na))

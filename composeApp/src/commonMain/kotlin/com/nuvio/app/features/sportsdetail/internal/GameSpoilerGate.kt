@@ -17,6 +17,7 @@ import com.nuvio.app.features.sportsdetail.api.Header
 import com.nuvio.app.features.sportsdetail.api.LineupBlock
 import com.nuvio.app.features.sportsdetail.api.NextBlock
 import com.nuvio.app.features.sportsdetail.api.Side
+import com.nuvio.app.features.sportsdetail.api.SpoilerRedaction
 import com.nuvio.app.features.sportsdetail.api.StandingsBlock
 import com.nuvio.app.features.sportsdetail.api.StandingsTableBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
@@ -68,6 +69,7 @@ object GameSpoilerRedaction {
         return detail.copy(
             header = header(detail.header, scorePlaceholder, started),
             blocks = if (started) detail.blocks.filter(::keepsWhenStarted) else detail.blocks,
+            spoilerRedaction = if (scorePlaceholder == null) SpoilerRedaction.HIDDEN else SpoilerRedaction.PENDING,
         )
     }
 

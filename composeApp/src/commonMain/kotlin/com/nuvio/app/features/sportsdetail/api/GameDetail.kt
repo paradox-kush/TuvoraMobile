@@ -2,6 +2,7 @@ package com.nuvio.app.features.sportsdetail.api
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * What the game-detail screen consumes (research/sports-mapping/BLOCK_CONTRACT.md, v1). Providers and the
@@ -81,7 +82,15 @@ data class GameDetail(
     val asOf: Map<String, Long> = emptyMap(),
     /** The remote UI switches that are ON for this snapshot (mapping `uiSwitches`); e.g. "chartMarkers". A switch not listed is OFF. */
     val uiSwitches: Set<String> = emptySet(),
+    /**
+     * Set only on the copy Hide scores / score delay put on screen (GameSpoilerRedaction): never fetched, never stored.
+     * Moments are diffed only between snapshots of the same mode, so a reveal or a delay falling due is not a goal.
+     */
+    @Transient val spoilerRedaction: SpoilerRedaction? = null,
 )
+
+/** Why a game snapshot on screen was redacted: [HIDDEN] = Hide scores, [PENDING] = score delay with nothing due yet. */
+enum class SpoilerRedaction { HIDDEN, PENDING }
 
 /** One block of the screen. Every block says which source produced it. */
 @Serializable
