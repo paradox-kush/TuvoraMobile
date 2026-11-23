@@ -242,7 +242,7 @@ object RadarRepository {
         scope.launch { refreshCatalog(cachedCatalog?.fetchedAtMs) }
         val local = parseLocal(XtreamAccountStorage.loadRadarJson(currentProfileId))
         val cachedFixtures = parseFixtures(XtreamAccountStorage.loadRadarFixturesJson(currentProfileId))
-        _uiState.update {
+        _uiState.updateRecorded(clock.nowMs()) {
             it.copy(
                 catalog = catalog,
                 follows = local.follows,
@@ -254,7 +254,6 @@ object RadarRepository {
                 liveScores = cachedFixtures?.let { r -> scoresById(r) } ?: emptyMap(),
             )
         }
-        recordScores()
         refreshFixtures()
     }
 
@@ -322,7 +321,7 @@ object RadarRepository {
                 lastFetchMark = null
                 return@launch
             }
-            _uiState.update {
+            _uiState.updateRecorded(clock.nowMs()) {
                 it.copy(
                     // Merge so leagues the server skipped (budget/partial) keep their cache.
                     fixturesByLeague = it.fixturesByLeague + response.fixtures,
@@ -336,7 +335,6 @@ object RadarRepository {
                     loadingFixtures = false,
                 )
             }
-            recordScores()
             // Persist the MERGED map — persisting only the raw response would drop leagues
             // this (possibly partial) response omitted from the offline cache.
             XtreamAccountStorage.saveRadarFixturesJson(
@@ -378,7 +376,7 @@ object RadarRepository {
         scope.launch {
             val response = RadarFixturesClient.fetch(targets.leagueIds, sports, targets.teamIds) ?: return@launch
             if (profileAtStart != currentProfileId) return@launch
-            _uiState.update {
+            _uiState.updateRecorded(clock.nowMs()) {
                 it.copy(
                     fixturesByLeague = it.fixturesByLeague + response.fixtures,
                     fixturesByTeam = it.fixturesByTeam + response.teamFixtures,
@@ -387,7 +385,6 @@ object RadarRepository {
                     livescoreSports = it.livescoreSports + coveredLivescoreSports(response),
                 )
             }
-            recordScores()
             XtreamAccountStorage.saveRadarFixturesJson(
                 profileAtStart,
                 json.encodeToString(
@@ -412,7 +409,7 @@ object RadarRepository {
         scope.launch {
             val response = RadarFixturesClient.fetch(listOf(leagueId), sports) ?: return@launch
             if (profileAtStart != currentProfileId) return@launch
-            _uiState.update {
+            _uiState.updateRecorded(clock.nowMs()) {
                 it.copy(
                     fixturesByLeague = it.fixturesByLeague + response.fixtures,
                     liveEventIds = it.liveEventIds + liveIds(response),
@@ -420,7 +417,6 @@ object RadarRepository {
                     livescoreSports = it.livescoreSports + coveredLivescoreSports(response),
                 )
             }
-            recordScores()
         }
     }
 
@@ -513,11 +509,6 @@ object RadarRepository {
         persist()
     }
 
-    /** Where a fetch result lands: time-stamp every observed score so the delay can show the one from N s ago. */
-    private fun recordScores() {
-        _uiState.value.recordObservedScores(clock.nowMs())
-    }
-
     // --- featured-event prefs --------------------------------------------------
 
     fun setOptIn(featuredEventId: String, accepted: Boolean) {
@@ -599,4 +590,11 @@ object RadarRepository {
         if (fetched.isNotEmpty()) tvCacheLock.withLock { tvCache[eventId] = fetched }
         return fetched
     }
+}
+
+/** Where a fetch result lands: publishes [transform]'s state with every observed score time-stamped for the delay. */
+internal inline fun MutableStateFlow<RadarUiState>.updateRecorded(nowMs: Long, transform: (RadarUiState) -> RadarUiState) {
+    // Record BEFORE the state is published: the first composition that sees it must already find its score buffered
+    // (or it arms no re-render timer). A CAS retry re-records the same values at the same time: deduped, harmless.
+    update { transform(it).also { next -> next.recordObservedScores(nowMs) } }
 }
