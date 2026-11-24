@@ -577,7 +577,7 @@ struct PersonDetailScreen: View {
             if let detail {
                 content(detail)
             } else if failed {
-                NuvioStateMessage(title: "Something went wrong", message: person.name) { Task { await load() } }
+                NuvioStateMessage(title: "Something went wrong", message: person.name, retry: { Task { await load() } })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)

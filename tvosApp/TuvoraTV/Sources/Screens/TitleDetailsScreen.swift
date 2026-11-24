@@ -59,7 +59,7 @@ struct TitleDetailsScreen: View {
                     .task(id: meta.id) { await smokeScroll(proxy) }
                 }
             } else if let error = state?.errorMessage {
-                NuvioStateMessage(title: "Couldn't load this title", message: error) { TvTitle.shared.load(type: preview.type, id: preview.id) }
+                NuvioStateMessage(title: "Couldn't load this title", message: error, retry: { TvTitle.shared.load(type: preview.type, id: preview.id) }, retryTakesFocus: true)
             } else {
                 ProgressView()
             }

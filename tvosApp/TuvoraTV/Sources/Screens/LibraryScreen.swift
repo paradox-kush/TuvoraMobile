@@ -151,7 +151,7 @@ struct LibraryScreen: View {
         if view.items.isEmpty && (view.isLoading || !view.isLoaded) {
             loading
         } else if view.items.isEmpty, let error = view.errorMessage {
-            NuvioStateMessage(title: "Failed to refresh library", message: error) { TvLibrary.shared.refresh() }
+            NuvioStateMessage(title: "Failed to refresh library", message: error, retry: { TvLibrary.shared.refresh() })
                 .frame(height: dp(300))
         } else if view.items.isEmpty {
             let kind = view.selectedType.map { Self.typeLabel($0).lowercased() } ?? "items"
