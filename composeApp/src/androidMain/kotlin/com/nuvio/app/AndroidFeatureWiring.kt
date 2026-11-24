@@ -23,6 +23,13 @@ fun initializeAndroidProcessStorage(context: Context) {
     com.nuvio.app.features.calendar.api.CalendarAndroid.initialize(context)
     // Game screen: the last good remote sports mapping (persisted so a bad network day keeps the newest good one).
     com.nuvio.app.features.sportsdetail.api.SportsDetailAndroid.initialize(context)
+    // First-run funnel: NuvioApplication decides new-vs-existing install right after this, by reading these four
+    // stores. Uninitialised they read as empty, and every updating user would be counted as a new install.
+    // Each initialize() only caches the SharedPreferences handle, so MainActivity's later call is a harmless repeat.
+    XtreamAccountStorage.initialize(context)
+    com.nuvio.app.features.addons.AddonStorage.initialize(context)
+    com.nuvio.app.features.watched.WatchedStorage.initialize(context)
+    com.nuvio.app.features.watchprogress.WatchProgressStorage.initialize(context)
 }
 
 /**

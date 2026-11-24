@@ -1,5 +1,6 @@
 package com.nuvio.app.core.telemetry.internal
 
+import com.nuvio.app.core.telemetry.api.FirstRunNote
 import com.nuvio.app.core.telemetry.api.FirstRunStep
 import com.nuvio.app.core.telemetry.api.FirstRunVocab
 import kotlinx.serialization.Serializable
@@ -15,6 +16,10 @@ internal data class FirstRunState(
     val firstLaunchAtMs: Long = 0L,
     val launchIndex: Int = 0,
     val done: Set<String> = emptySet(),
+    /** First-visit facts for `first_leave`; persisted because the form may be opened in one launch and left in another. */
+    val openedSourceForm: Boolean = false,
+    val triedSave: Boolean = false,
+    val saveError: String? = null,
 )
 
 /** [state] to persist (null = nothing to persist) and the event props to emit (null = send nothing). */
@@ -51,8 +56,27 @@ internal object FirstRunFunnel {
     /** A step happened. Emits it the first time on a new install, never otherwise (also before [start]: dropped). */
     fun record(state: FirstRunState?, step: FirstRunStep, nowMs: Long, extra: Map<String, Any>): FirstRunTransition {
         if (state == null || state.existing || step.wire in state.done) return FirstRunTransition(null, null)
+        // Someone who already played is not a drop-off: no leave summary (and nothing to mark done).
+        if (step == FirstRunStep.FIRST_LEAVE && FirstRunStep.FIRST_PLAYBACK.wire in state.done) return FirstRunTransition(null, null)
         val next = state.copy(done = state.done + step.wire)
         return FirstRunTransition(next, props(next, step, nowMs, extra))
+    }
+
+    /**
+     * A first-visit fact. Returns the state to persist, or null when nothing changes: no state yet, an existing install,
+     * the leave gate already closed (it fired, or playback happened), an unchanged flag, or a note that is not persisted
+     * (a screen lives in the per-process visit).
+     */
+    fun note(state: FirstRunState?, note: FirstRunNote): FirstRunState? {
+        if (state == null || state.existing) return null
+        if (FirstRunStep.FIRST_LEAVE.wire in state.done || FirstRunStep.FIRST_PLAYBACK.wire in state.done) return null
+        val next = when (note) {
+            is FirstRunNote.Screen -> return null
+            FirstRunNote.SourceFormOpened -> state.copy(openedSourceForm = true)
+            FirstRunNote.SaveTried -> state.copy(triedSave = true)
+            is FirstRunNote.SaveFailed -> state.copy(saveError = note.kind.lowercase().takeIf { it in FirstRunVocab.saveErrors } ?: FirstRunVocab.SAVE_ERROR_OTHER)
+        }
+        return next.takeIf { it != state }
     }
 
     private fun props(state: FirstRunState, step: FirstRunStep, nowMs: Long, extra: Map<String, Any>): Map<String, Any> =
@@ -72,6 +96,14 @@ internal object FirstRunFunnel {
                     token(extra["engine"])?.let { put("engine", it) }
                 }
                 FirstRunStep.FIRST_LAUNCH -> Unit
+                FirstRunStep.FIRST_LEAVE -> {
+                    put("last_screen", FirstLeavePolicy.sanitizeScreen(extra["last_screen"] as? String))
+                    put("secs_in_app", (extra["secs_in_app"] as? Int ?: 0).coerceAtLeast(0))
+                    put("screens_seen", (extra["screens_seen"] as? Int ?: 0).coerceAtLeast(0))
+                    put("opened_source_form", state.openedSourceForm)
+                    put("tried_save", state.triedSave)
+                    put("save_error", state.saveError ?: FirstRunVocab.SAVE_ERROR_NONE)
+                }
             }
         }
 

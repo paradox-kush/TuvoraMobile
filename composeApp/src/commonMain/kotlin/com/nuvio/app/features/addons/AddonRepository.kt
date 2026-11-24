@@ -2,6 +2,8 @@ package com.nuvio.app.features.addons
 
 import com.nuvio.app.core.telemetry.api.FirstRunVocab
 import com.nuvio.app.core.telemetry.api.firstSourceAdded
+import com.nuvio.app.core.telemetry.api.funnelSaveFailed
+import com.nuvio.app.core.telemetry.api.funnelSaveTried
 import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.core.build.AppFeaturePolicy
 import co.touchlab.kermit.Logger
@@ -308,6 +310,11 @@ object AddonRepository {
     }
 
     suspend fun addAddon(rawUrl: String): AddAddonResult {
+        TelemetryAccess.current().funnelSaveTried()
+        return addAddonUntracked(rawUrl).also { if (it is AddAddonResult.Error) TelemetryAccess.current().funnelSaveFailed("other") }
+    }
+
+    private suspend fun addAddonUntracked(rawUrl: String): AddAddonResult {
         if (isUsingPrimaryAddonsFromSecondaryProfile()) {
             return AddAddonResult.Error(getString(Res.string.profile_primary_addons_required))
         }

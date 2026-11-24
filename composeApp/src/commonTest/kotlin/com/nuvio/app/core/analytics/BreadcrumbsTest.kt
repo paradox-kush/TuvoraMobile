@@ -85,4 +85,27 @@ class BreadcrumbsTest {
         Breadcrumbs.playbackStarted("live", "mpv", "player", "later", nowMs = 62 * 60_000L)
         assertEquals(Breadcrumbs.MAX_PLAYBACK_EVENTS_PER_HOUR + 1, captured.size)
     }
+
+    @Test
+    fun screenChangedFeedsTheFirstLeaveSummary() {
+        arm()
+        val notes = mutableListOf<com.nuvio.app.core.telemetry.api.FirstRunNote>()
+        val port = com.nuvio.app.core.telemetry.RecordingTelemetryPort { _, _ -> }
+        com.nuvio.app.core.telemetry.api.TelemetryAccess.register(port)
+        try {
+            Breadcrumbs.screenChanged("Tabs.Home")
+            Breadcrumbs.screenChanged("Tabs.Home")
+            Breadcrumbs.screenChanged("settings_page")
+            notes += port.notes
+        } finally {
+            com.nuvio.app.core.telemetry.api.TelemetryAccess.resetForTest()
+        }
+        assertEquals(
+            listOf<com.nuvio.app.core.telemetry.api.FirstRunNote>(
+                com.nuvio.app.core.telemetry.api.FirstRunNote.Screen("Tabs.Home"),
+                com.nuvio.app.core.telemetry.api.FirstRunNote.Screen("settings_page"),
+            ),
+            notes,
+        )
+    }
 }
