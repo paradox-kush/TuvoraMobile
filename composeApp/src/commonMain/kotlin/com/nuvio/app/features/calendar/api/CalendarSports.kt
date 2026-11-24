@@ -27,12 +27,14 @@ data class CalendarGameItem(
     val state: CalendarGameState = CalendarGameState.SCHEDULED,
     val homeScore: String? = null,
     val awayScore: String? = null,
+    /** A score delay is on and nothing is due yet: show "–" instead of the numbers. */
+    val scorePending: Boolean = false,
     /** The live minute / period ("67'", "Q3"), when the feed gives one. */
     val progress: String? = null,
     /** Opaque hint for the host's channel matching; the Calendar only hands [id] back. */
     val channelHintId: String? = null,
 ) {
-    val hasScore: Boolean get() = !homeScore.isNullOrBlank() && !awayScore.isNullOrBlank()
+    val hasScore: Boolean get() = !scorePending && !homeScore.isNullOrBlank() && !awayScore.isNullOrBlank()
 
     /** "Home v Away", else the event name, else the league. */
     val title: String
@@ -49,4 +51,7 @@ interface CalendarSportsSource {
 
     /** Emits when the underlying fixtures or scores changed. */
     val changes: Flow<Unit>
+
+    /** When a delayed score becomes due, so a visible page can re-read once then (local, no request); null = nothing pending. */
+    fun nextScoreChangeAtMs(nowMs: Long): Long? = null
 }

@@ -42,7 +42,55 @@ data class RadarUiState(
     val fixturesByTeam: Map<String, List<RadarFixture>> = emptyMap(),
     /** eventId -> the freshest known live state, reported by the game screen while it is open (beats the lagging feed). */
     val freshStates: Map<String, FreshFixtureState> = emptyMap(),
+    /** Every observed score with its time (recorded where fetches land): the score delay reads it. One per profile. */
+    val scoreLedger: LiveScoreLedger = LiveScoreLedger(),
+    /** Games the user revealed one at a time while scores are hidden: this session and profile only (never stored or synced). */
+    val revealedGames: RevealedGames = RevealedGames(),
 ) {
+    val scoreSpoiler: ScoreSpoilerSettings get() = prefs.scoreSpoiler
+
+    /** The settings for one game ([radarFixtureKey]): a game revealed on its own reads as shown, under the same delay. */
+    fun scoreSpoilerFor(key: String?): ScoreSpoilerSettings =
+        if (!scoreSpoiler.shown && key in revealedGames) scoreSpoiler.copy(shown = true) else scoreSpoiler
+
+    /** The score as observed now: the livescore feed's numbers, else the fixture's own result. Null when there is none. */
+    fun observedScore(fixture: RadarFixture): RadarLiveScore? {
+        val raw = fixture.id?.let { liveScores[it] }
+        val home = raw?.homeScore?.takeIf { it.isNotBlank() } ?: fixture.homeScore?.takeIf { it.isNotBlank() }
+        val away = raw?.awayScore?.takeIf { it.isNotBlank() } ?: fixture.awayScore?.takeIf { it.isNotBlank() }
+        if (home == null || away == null) return null
+        return RadarLiveScore(eventId = fixture.id, homeScore = home, awayScore = away)
+    }
+
+    /** Over (finished, or past its plausible live window) and not live: a result, not a game in progress. */
+    internal fun isOver(fixture: RadarFixture, nowMs: Long): Boolean {
+        if (isLive(fixture, nowMs)) return false
+        val start = fixture.startEpochMs ?: return fixture.isFinishedOrOff
+        return fixture.isFinishedOrOff || nowMs >= start + fixture.maxLiveWindowMs()
+    }
+
+    /** What a score slot may show for [fixture] under the user's Hide scores / delay settings ([ScoreSpoilerPolicy]). */
+    fun scoreFor(fixture: RadarFixture, nowMs: Long): ScoreVisibility<RadarLiveScore> {
+        val key = radarFixtureKey(fixture)
+        return ScoreSpoilerPolicy.scoreFor(
+            scoreSpoilerFor(key), key, observedScore(fixture), scoreLedger.finishedAtFirstSight(key), scoreLedger.buffer, nowMs,
+        )
+    }
+
+    fun scoreSlots(fixture: RadarFixture, nowMs: Long): ScoreSlots = scoreFor(fixture, nowMs).slots()
+
+    /** When a delayed score becomes due (one local re-render, no network); null when nothing is pending. */
+    fun nextScoreChangeAtMs(nowMs: Long): Long? =
+        // A game revealed on its own is shown (and delayed) even while every other score is hidden.
+        scoreSpoiler.takeIf { it.shown || revealedGames.ids.isNotEmpty() }?.let { scoreLedger.buffer.nextChangeAtMs(nowMs, it.delayMs) }
+
+    /** Records every held fixture's observed score into [scoreLedger]. Called by the repository where a fetch lands. */
+    internal fun recordObservedScores(nowMs: Long) {
+        (fixturesByLeague.values.asSequence() + fixturesByTeam.values.asSequence()).flatten().forEach { fx ->
+            scoreLedger.observe(radarFixtureKey(fx), observedScore(fx), isOver(fx, nowMs), nowMs)
+        }
+    }
+
     val followedLeagueIds: Set<String> get() = follows.map { it.leagueId }.toSet()
     val followedTeamIds: Set<String> get() = teamFollows.map { it.teamId }.toSet()
 
@@ -201,7 +249,7 @@ object RadarRepository {
         scope.launch { refreshCatalog(cachedCatalog?.fetchedAtMs) }
         val local = parseLocal(XtreamAccountStorage.loadRadarJson(currentProfileId))
         val cachedFixtures = parseFixtures(XtreamAccountStorage.loadRadarFixturesJson(currentProfileId))
-        _uiState.update {
+        _uiState.updateRecorded(clock.nowMs()) {
             it.copy(
                 catalog = catalog,
                 follows = local.follows,
@@ -280,7 +328,7 @@ object RadarRepository {
                 lastFetchMark = null
                 return@launch
             }
-            _uiState.update {
+            _uiState.updateRecorded(clock.nowMs()) {
                 it.copy(
                     // Merge so leagues the server skipped (budget/partial) keep their cache.
                     fixturesByLeague = it.fixturesByLeague + response.fixtures,
@@ -335,7 +383,7 @@ object RadarRepository {
         scope.launch {
             val response = RadarFixturesClient.fetch(targets.leagueIds, sports, targets.teamIds) ?: return@launch
             if (profileAtStart != currentProfileId) return@launch
-            _uiState.update {
+            _uiState.updateRecorded(clock.nowMs()) {
                 it.copy(
                     fixturesByLeague = it.fixturesByLeague + response.fixtures,
                     fixturesByTeam = it.fixturesByTeam + response.teamFixtures,
@@ -368,7 +416,7 @@ object RadarRepository {
         scope.launch {
             val response = RadarFixturesClient.fetch(listOf(leagueId), sports) ?: return@launch
             if (profileAtStart != currentProfileId) return@launch
-            _uiState.update {
+            _uiState.updateRecorded(clock.nowMs()) {
                 it.copy(
                     fixturesByLeague = it.fixturesByLeague + response.fixtures,
                     liveEventIds = it.liveEventIds + liveIds(response),
@@ -450,6 +498,36 @@ object RadarRepository {
         refreshFixtures(force = true)
     }
 
+    // --- Hide scores + score delay (per profile, synced) -----------------------
+
+    // Every spoiler change sets spoilerDirty in the same state (and so the same persist()): see RadarPrefsPull.
+
+    fun setScoresShown(shown: Boolean) {
+        _uiState.update { it.copy(prefs = it.prefs.copy(scoresShown = shown, spoilerDirty = true)) }
+        persist()
+    }
+
+    /** The hub's "Scores shown" / "Scores hidden" chip, and the game page's reveal chip (one global setting). */
+    fun toggleScoresShown() = setScoresShown(!_uiState.value.prefs.scoresShown)
+
+    /** "Show this game's score": reveals ONE game ([radarFixtureKey]) for this session and profile; the global setting stays. */
+    fun revealGame(key: String) {
+        _uiState.update { it.copy(revealedGames = it.revealedGames.reveal(key)) }
+    }
+
+    /** "Hide again": that one game goes back under the global Hide scores. */
+    fun hideGame(key: String) {
+        _uiState.update { it.copy(revealedGames = it.revealedGames.hide(key)) }
+    }
+
+    /** The hub's delay chip: Off → 15 s → 30 s → 60 s → Off. */
+    fun cycleScoreDelay() {
+        _uiState.update {
+            it.copy(prefs = it.prefs.copy(scoreDelaySeconds = ScoreSpoilerSettings.nextDelay(it.prefs.scoreDelaySeconds), spoilerDirty = true))
+        }
+        persist()
+    }
+
     // --- featured-event prefs --------------------------------------------------
 
     fun setOptIn(featuredEventId: String, accepted: Boolean) {
@@ -473,26 +551,41 @@ object RadarRepository {
     // --- sync ----------------------------------------------------------------
 
     /** Replace this profile's follows+prefs from a remote pull WITHOUT echoing a push back. */
-    fun applyFromRemote(
+    internal fun applyFromRemote(
         profileId: Int,
         follows: List<RadarFollow>,
-        prefs: RadarPrefs?,
+        prefs: RadarPrefsRow?,
         teams: List<RadarTeamFollow>? = null,
     ) {
         loaded = true
+        val shownProfileId = currentProfileId
         currentProfileId = profileId
+        // The merge reads the local prefs inside the same update that writes them: a toggle cannot slip in between.
         _uiState.update { state ->
+            val local = RadarPrefsPull.localFor(profileId, shownProfileId, state.prefs) {
+                parseLocal(XtreamAccountStorage.loadRadarJson(profileId)).prefs
+            }
             state.copy(
                 catalog = state.catalog.takeIf { it.categories.isNotEmpty() }
                     ?: runCatching { json.decodeFromString<RadarCatalog>(RadarCatalogData.JSON) }.getOrDefault(RadarCatalog()),
                 follows = follows,
-                prefs = prefs ?: state.prefs,
+                prefs = prefs?.let { RadarPrefsPull.merge(local, it) } ?: local,
                 // Null means the pull said nothing about teams (older backend); keep local.
                 teamFollows = teams ?: state.teamFollows,
             )
         }
         XtreamAccountStorage.saveRadarJson(profileId, json.encodeToString(localState()))
         refreshFixtures(force = true)
+    }
+
+    /** A push of [pushed] landed for [profileId]: clear spoilerDirty if the local values still match it (one read-modify-write). */
+    internal fun onPrefsPushed(profileId: Int, pushed: RadarPrefs) {
+        if (profileId != currentProfileId) return // that profile's blob stays dirty: its next pull pushes again (harmless)
+        val before = _uiState.value.prefs.spoilerDirty
+        _uiState.update { it.copy(prefs = RadarPrefsPull.afterPush(it.prefs, pushed)) }
+        if (before && !_uiState.value.prefs.spoilerDirty) {
+            XtreamAccountStorage.saveRadarJson(profileId, json.encodeToString(localState()))
+        }
     }
 
     private fun localState() = RadarLocalState(
@@ -529,4 +622,11 @@ object RadarRepository {
         if (fetched.isNotEmpty()) tvCacheLock.withLock { tvCache[eventId] = fetched }
         return fetched
     }
+}
+
+/** Where a fetch result lands: publishes [transform]'s state with every observed score time-stamped for the delay. */
+internal inline fun MutableStateFlow<RadarUiState>.updateRecorded(nowMs: Long, transform: (RadarUiState) -> RadarUiState) {
+    // Record BEFORE the state is published: the first composition that sees it must already find its score buffered
+    // (or it arms no re-render timer). A CAS retry re-records the same values at the same time: deduped, harmless.
+    update { transform(it).also { next -> next.recordObservedScores(nowMs) } }
 }

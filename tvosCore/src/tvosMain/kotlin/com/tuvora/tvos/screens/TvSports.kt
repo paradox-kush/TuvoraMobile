@@ -7,6 +7,8 @@ import com.nuvio.app.features.radar.RadarLeague
 import com.nuvio.app.features.radar.RadarRepository
 import com.nuvio.app.features.radar.RadarTime
 import com.nuvio.app.features.radar.RadarUiState
+import com.nuvio.app.features.radar.ScoreSlots
+import com.nuvio.app.features.radar.ScoreSpoilerSettings
 import com.tuvora.tvos.player.TvPlayerSession
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -46,11 +48,38 @@ object TvSports {
         platform.Foundation.NSCalendar.currentCalendar.timeZone
             .secondsFromGMTForDate(platform.Foundation.NSDate(timeIntervalSinceReferenceDate = atMs / 1000.0 - 978_307_200.0)) * 1000L
 
-    fun homeScore(state: RadarUiState, fixture: RadarFixture): String? =
-        TvSportsHubPolicy.score(fixture.id?.let { state.liveScores[it] }?.homeScore, fixture.homeScore)
+    /** One side's score after the Hide scores / delay policy: null while hidden, "–" while a delay has nothing due yet. */
+    fun homeScore(state: RadarUiState, fixture: RadarFixture): String? = TvSportsHubPolicy.homeScore(state, fixture, nowMs())
 
-    fun awayScore(state: RadarUiState, fixture: RadarFixture): String? =
-        TvSportsHubPolicy.score(fixture.id?.let { state.liveScores[it] }?.awayScore, fixture.awayScore)
+    fun awayScore(state: RadarUiState, fixture: RadarFixture): String? = TvSportsHubPolicy.awayScore(state, fixture, nowMs())
+
+    // --- Hide scores + score delay (per profile, synced; the same setting as the phone and Android TV) ---------------
+
+    /** The settings the hub chips show ([ScoreSpoilerSettings.toggleLabel], [ScoreSpoilerSettings.delayLabel], shown). */
+    fun scoreSettings(state: RadarUiState): ScoreSpoilerSettings = state.scoreSpoiler
+
+    /** The hub's "Scores shown" / "Scores hidden" chip: one press toggles the profile's global setting. */
+    fun toggleScoresShown() = RadarRepository.toggleScoresShown()
+
+    /**
+     * The game screen's "Show this game's score": reveals ONE game ([id] = [TvSportsHubPolicy.fixtureKey]) on its page and
+     * its hub / calendar cards, for this session and profile. The global setting is untouched.
+     */
+    fun revealGame(id: String) = RadarRepository.revealGame(id)
+
+    /** "Hide again": that game goes back under the global Hide scores. */
+    fun hideGame(id: String) = RadarRepository.hideGame(id)
+
+    fun isRevealed(state: RadarUiState, id: String): Boolean = id in state.revealedGames
+
+    /** "Delay: Off / 15 s / 30 s / 60 s" chip (only while shown): one press cycles. */
+    fun cycleScoreDelay() = RadarRepository.cycleScoreDelay()
+
+    /** The slot pair for a card (hidden -> both null; pending -> "–" with pending = true; dim only when comparable). */
+    fun scoreSlots(state: RadarUiState, fixture: RadarFixture, nowMs: Long): ScoreSlots = state.scoreSlots(fixture, nowMs)
+
+    /** When the next delayed score falls due: schedule ONE local redraw then (no request); null = nothing pending. */
+    fun nextScoreChangeAtMs(state: RadarUiState, nowMs: Long): Long? = state.nextScoreChangeAtMs(nowMs)
 
     /** Whether the card shows a when-line (not while live); the UI formats it from [day] + kick-off. */
     fun showsWhen(state: RadarUiState, fixture: RadarFixture, nowMs: Long): Boolean = !state.isLive(fixture, nowMs)

@@ -199,9 +199,13 @@ private object CalendarSportsAdapter : com.nuvio.app.features.calendar.api.Calen
         com.nuvio.app.features.radar.RadarRepository.uiState
             .distinctUntilChanged { a, b ->
                 a.fixturesByLeague === b.fixturesByLeague && a.fixturesByTeam === b.fixturesByTeam &&
-                    a.liveScores === b.liveScores && a.follows == b.follows && a.teamFollows == b.teamFollows
+                    a.liveScores === b.liveScores && a.follows == b.follows && a.teamFollows == b.teamFollows &&
+                    a.prefs.scoreSpoiler == b.prefs.scoreSpoiler
             }
             .map { }
+
+    override fun nextScoreChangeAtMs(nowMs: Long): Long? =
+        com.nuvio.app.features.radar.RadarRepository.uiState.value.nextScoreChangeAtMs(nowMs)
 }
 
 private object CalendarAccountsAdapter : CalendarAccounts {

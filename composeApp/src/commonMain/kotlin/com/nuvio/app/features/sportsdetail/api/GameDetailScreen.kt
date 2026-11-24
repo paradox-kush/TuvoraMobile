@@ -34,7 +34,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.nuvio.app.core.ui.Chip
 import com.nuvio.app.core.ui.NuvioPrimaryButton
+import com.nuvio.app.features.radar.ScoreSpoilerSettings
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.nuvio
@@ -52,6 +54,10 @@ import com.nuvio.app.features.sportsdetail.internal.GameMomentPolicy
 import com.nuvio.app.features.sportsdetail.internal.GameMomentTracker
 import com.nuvio.app.features.sportsdetail.internal.GameSection
 import com.nuvio.app.features.sportsdetail.internal.GameSectionsPolicy
+import com.nuvio.app.features.sportsdetail.internal.GameRevealChip
+import com.nuvio.app.features.sportsdetail.internal.revealChip
+import com.nuvio.app.features.sportsdetail.internal.showsHiddenCard
+import com.nuvio.app.core.ui.NuvioSurfaceCard
 import com.nuvio.app.features.sportsdetail.internal.ui.BlockContent
 import com.nuvio.app.features.sportsdetail.internal.ui.GameScoreboard
 import com.nuvio.app.features.sportsdetail.internal.ui.GameTabRow
@@ -94,6 +100,16 @@ fun GameDetailScreen(
     modifier: Modifier = Modifier,
     /** Reports the freshest state of THIS game (ESPN-backed) so lists can stop saying LIVE: (isLive, period like "3rd"). Final -> (false, null). */
     onFreshState: (live: Boolean, periodLabel: String?) -> Unit = { _, _ -> },
+    /** The user's Hide scores / score delay (per profile; the hub owns it). Required so no caller can skip the policy. */
+    scoreSettings: ScoreSpoilerSettings,
+    /** This game is revealed on its own ("Show this game's score", session only); [scoreSettings] already reads as shown. */
+    revealedHere: Boolean,
+    /** The profile's global Hide scores is off (the per-game chips have nothing to do then). */
+    globalScoresShown: Boolean,
+    /** "Show this game's score": reveals ONLY this game (page and its cards); the global setting is untouched. */
+    onRevealGame: () -> Unit,
+    /** "Hide again": puts this game back under the global Hide scores. */
+    onHideGame: () -> Unit,
 ) {
     val service = LocalSportsDetail.current
     val watch = LocalGameWatch.current
@@ -155,7 +171,27 @@ fun GameDetailScreen(
                 Spacer(Modifier.height(NuvioTokens.Space.s12))
                 NuvioPrimaryButton("Retry", onClick = controller::retry)
             }
-            is GameDetailUiState.Loaded -> LoadedContent(s, tracker, onPlayChannel, onAddPlaylist, onFindChannels, onRetryWatch = { scope.launch { controller.retryWatch() } })
+            is GameDetailUiState.Loaded -> {
+                // Hide scores / delay: the controller recorded every snapshot where it landed; render the one the setting
+                // allows, and re-render ONCE when the next delayed snapshot falls due (local, only while RESUMED).
+                var scoreTick by remember { mutableLongStateOf(0L) }
+                val scoreNow = maxOf(Clock.System.now().toEpochMilliseconds(), scoreTick)
+                val nextDue = controller.nextScoreChangeAtMs(scoreSettings, scoreNow)
+                LaunchedEffect(nextDue, lifecycleOwner) {
+                    val due = nextDue ?: return@LaunchedEffect
+                    lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                        delay((due - Clock.System.now().toEpochMilliseconds()).coerceAtLeast(0L) + 50L)
+                        scoreTick = Clock.System.now().toEpochMilliseconds()
+                    }
+                }
+                val view = controller.spoilerView(s.detail, scoreSettings, scoreNow)
+                LoadedContent(
+                    s.copy(detail = view.detail), tracker, onPlayChannel, onAddPlaylist, onFindChannels,
+                    onRetryWatch = { scope.launch { controller.retryWatch() } },
+                    revealChip = view.revealChip(revealedHere, globalScoresShown), hiddenCard = view.showsHiddenCard,
+                    onRevealGame = onRevealGame, onHideGame = onHideGame,
+                )
+            }
         }
     }
 }
@@ -168,8 +204,19 @@ private fun LoadedContent(
     onAddPlaylist: () -> Unit,
     onFindChannels: () -> Unit,
     onRetryWatch: () -> Unit,
+    revealChip: GameRevealChip,
+    hiddenCard: Boolean,
+    onRevealGame: () -> Unit,
+    onHideGame: () -> Unit,
 ) {
     val detail = s.detail
+    val onChip = if (revealChip == GameRevealChip.HIDE_AGAIN) onHideGame else onRevealGame
+    // The card already carries the reveal action, so the chip steps aside for it.
+    val showChip = revealChip != GameRevealChip.NONE && !hiddenCard
+    val spoilerItem: @Composable () -> Unit = {
+        if (hiddenCard) ScoresHiddenCard(onRevealGame)
+        else Chip(label = revealChip.label.orEmpty(), selected = revealChip == GameRevealChip.SHOW_THIS_GAME, onClick = onChip)
+    }
     val batch = remember(detail) { tracker.accept(detail) }
     val played = remember { PlayedLedger() }
     val sections = remember(detail) { GameSectionsPolicy.sections(detail) }
@@ -198,6 +245,7 @@ private fun LoadedContent(
                 Row(Modifier.fillMaxSize().padding(pad), horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12)) {
                     LazyColumn(Modifier.weight(0.44f), verticalArrangement = gap) {
                         item(key = "score") { GameScoreboard(detail) }
+                        if (showChip || hiddenCard) item(key = "spoiler") { spoilerItem() }
                         s.staleLabel?.let { item(key = "stale") { StaleChip(it) } }
                         stripItems(detail)
                         item(key = "watch") { watchCard() }
@@ -213,6 +261,7 @@ private fun LoadedContent(
                 val slim by remember { derivedStateOf { listState.layoutInfo.visibleItemsInfo.none { it.key == "score" || it.key == "watch" } } }
                 LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = pad, verticalArrangement = gap) {
                     item(key = "score") { GameScoreboard(detail) }
+                        if (showChip || hiddenCard) item(key = "spoiler") { spoilerItem() }
                     s.staleLabel?.let { item(key = "stale") { StaleChip(it) } }
                     stripItems(detail)
                     item(key = "watch") { watchCard() }
@@ -271,5 +320,21 @@ private fun LazyListScope.sectionItems(section: GameSection, detail: GameDetail,
             SwitchFade(fadeKey, reduce) { if (b is LineupBlock && PitchLayout.canDraw(b)) PitchLineup(b, detail) else BlockContent(b, detail) }
         }
         else -> items(blocks) { SwitchFade(fadeKey, reduce) { BlockContent(it, detail) } }
+    }
+}
+
+/** A started game whose Overview Hide scores emptied: say why it is blank, and offer this game's score. */
+@Composable
+private fun ScoresHiddenCard(onReveal: () -> Unit) {
+    NuvioSurfaceCard {
+        Text("Scores are hidden", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.nuvio.colors.textPrimary)
+        Spacer(Modifier.height(NuvioTokens.Space.s4))
+        Text(
+            "Results, stats and plays for this game stay hidden until you choose to see them.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.nuvio.colors.textSecondary,
+        )
+        Spacer(Modifier.height(NuvioTokens.Space.s12))
+        NuvioPrimaryButton(GameRevealChip.SHOW_THIS_GAME.label.orEmpty(), onClick = onReveal)
     }
 }

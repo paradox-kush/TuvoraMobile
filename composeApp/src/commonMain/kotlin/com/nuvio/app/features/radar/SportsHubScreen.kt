@@ -73,6 +73,7 @@ import androidx.compose.foundation.border
 import androidx.compose.ui.unit.Dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
+import com.nuvio.app.core.ui.Chip
 import com.nuvio.app.core.ui.NuvioInputField
 import com.nuvio.app.core.ui.NuvioModalBottomSheet
 import com.nuvio.app.core.ui.NuvioPrimaryButton
@@ -244,6 +245,12 @@ fun SportsHubScreen(
                     onAddPlaylist = onAddPlaylist,
                     onFindChannels = { sheetFixture = fx },
                     onFreshState = { live, period -> fx.id?.let { id -> RadarRepository.setFreshState(id, live, period) } },
+                    // Per game: a game revealed on its own reads as shown here and on its cards (session only).
+                    scoreSettings = state.scoreSpoilerFor(radarFixtureKey(fx)),
+                    revealedHere = radarFixtureKey(fx) in state.revealedGames,
+                    globalScoresShown = state.scoreSpoiler.shown,
+                    onRevealGame = { RadarRepository.revealGame(radarFixtureKey(fx)) },
+                    onHideGame = { RadarRepository.hideGame(radarFixtureKey(fx)) },
                 )
             }
         }
@@ -276,7 +283,8 @@ private fun SportsOverview(
     /** The hero's primary action: the channel-matching sheet, not the game screen. */
     onFindChannels: (RadarFixture) -> Unit = onFixtureClick,
 ) {
-    val nowMs = RadarTime.nowMs()
+    // Current time, plus one local re-render when a delayed score falls due (no network, only while RESUMED).
+    val nowMs = rememberScoreNowMs(state)
     val featured = state.activeFeatured(nowMs)
     // Followed clubs feed the same Live & Upcoming row as followed leagues — someone who
     // follows only Arsenal still expects their match at the top, not buried under Browse.
@@ -353,6 +361,7 @@ private fun SportsOverview(
                 null
             },
         )
+        ScoreSpoilerChips(state.scoreSpoiler, Modifier.padding(start = NuvioTokens.Space.s16, end = NuvioTokens.Space.s16, bottom = NuvioTokens.Space.s4))
         Box(Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -366,6 +375,7 @@ private fun SportsOverview(
                 item(key = "spotlight") {
                     val heroLive = state.isLive(hero, nowMs)
                     val heroScore = state.liveScoreFor(hero)
+                    val heroSlots = state.scoreSlots(hero, nowMs)
                     val findChannels = { onFindChannels(hero) }
                     // Details opens the GAME when it can (live score, stats, Watch); the league page only for a fixture the game screen cannot describe.
                     val details = { if (hero.opensGameScreen()) onFixtureClick(hero) else hero.leagueId?.let { state.leagueById(it) }?.let(onOpenLeague) ?: onFixtureClick(hero) }
@@ -375,7 +385,7 @@ private fun SportsOverview(
                             horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s12),
                         ) {
                             SportsSpotlightHero(
-                                fixture = hero, live = heroLive, liveScore = heroScore,
+                                fixture = hero, live = heroLive, liveScore = heroScore, scores = heroSlots,
                                 onFindChannels = findChannels, onDetails = details,
                                 modifier = Modifier.weight(1.8f).fillMaxHeight(),
                             )
@@ -391,7 +401,7 @@ private fun SportsOverview(
                     } else {
                         Box(Modifier.padding(horizontal = sectionPadding, vertical = NuvioTokens.Space.s4)) {
                             SportsSpotlightHero(
-                                fixture = hero, live = heroLive, liveScore = heroScore,
+                                fixture = hero, live = heroLive, liveScore = heroScore, scores = heroSlots,
                                 onFindChannels = findChannels, onDetails = details,
                                 modifier = Modifier.height(SpotlightHeroHeight),
                             )
@@ -445,6 +455,7 @@ private fun SportsOverview(
                             live = state.isLive(fx, nowMs),
                             onClick = { onFixtureClick(fx) },
                             liveScore = state.liveScoreFor(fx),
+                            scores = state.scoreSlots(fx, nowMs),
                         )
                     }
                 }
@@ -473,6 +484,7 @@ private fun SportsOverview(
                         live = state.isLive(fx, nowMs),
                         onClick = { onFixtureClick(fx) },
                         liveScore = state.liveScoreFor(fx),
+                        scores = state.scoreSlots(fx, nowMs),
                     )
                 }
             }
@@ -497,6 +509,7 @@ private fun SportsOverview(
                             live = state.isLive(fx, nowMs),
                             onClick = { onFixtureClick(fx) },
                             liveScore = state.liveScoreFor(fx),
+                            scores = state.scoreSlots(fx, nowMs),
                         )
                     }
                 }
@@ -556,7 +569,8 @@ private fun SportsFixturesPage(
     onFixtureClick: (RadarFixture) -> Unit,
 ) {
     PlatformBackHandler(enabled = true, onBack = onBack)
-    val nowMs = RadarTime.nowMs()
+    // Current time, plus one local re-render when a delayed score falls due (no network, only while RESUMED).
+    val nowMs = rememberScoreNowMs(state)
     Column(Modifier.fillMaxSize()) {
         BrowseHeader(page.title, onBack)
         LazyColumn(
@@ -577,6 +591,7 @@ private fun SportsFixturesPage(
                     onClick = { onFixtureClick(fixture) },
                     modifier = Modifier.fillMaxWidth(),
                     liveScore = state.liveScoreFor(fixture),
+                    scores = state.scoreSlots(fixture, nowMs),
                 )
             }
         }
@@ -790,7 +805,8 @@ private fun LeagueFixturesPage(
 ) {
     // Browsing must not require following — fetch this league on demand.
     LaunchedEffect(league.id) { RadarRepository.ensureLeagueLoaded(league.id) }
-    val nowMs = RadarTime.nowMs()
+    // Current time, plus one local re-render when a delayed score falls due (no network, only while RESUMED).
+    val nowMs = rememberScoreNowMs(state)
     val upcoming = state.upcoming(listOf(league.id), nowMs, cap = 40)
     val recent = state.recent(league.id, nowMs)
     val loaded = state.fixturesByLeague.containsKey(league.id)
@@ -853,6 +869,7 @@ private fun LeagueFixturesPage(
                             .fillMaxWidth()
                             .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s4),
                         liveScore = state.liveScoreFor(fx),
+                        scores = state.scoreSlots(fx, nowMs),
                     )
                 }
             }
@@ -866,6 +883,7 @@ private fun LeagueFixturesPage(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s4),
+                        scores = state.scoreSlots(fx, nowMs),
                     )
                 }
             }
@@ -941,6 +959,7 @@ internal fun SportsSpotlightHero(
     fixture: RadarFixture,
     live: Boolean,
     liveScore: RadarLiveScore?,
+    scores: ScoreSlots,
     onFindChannels: () -> Unit,
     onDetails: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1010,7 +1029,7 @@ internal fun SportsSpotlightHero(
                 )
             }
             Column {
-                HeroMatchup(fixture, liveScore)
+                HeroMatchup(fixture, scores)
                 Spacer(Modifier.height(NuvioTokens.Space.s12))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     NuvioPrimaryButton(text = "Find channels", onClick = onFindChannels, modifier = Modifier.weight(1f))
@@ -1023,19 +1042,20 @@ internal fun SportsSpotlightHero(
 }
 
 @Composable
-private fun HeroMatchup(fixture: RadarFixture, liveScore: RadarLiveScore?) {
+private fun HeroMatchup(fixture: RadarFixture, scores: ScoreSlots) {
     val tokens = MaterialTheme.nuvio
     val home = fixture.home?.takeIf { it.isNotBlank() }
     val away = fixture.away?.takeIf { it.isNotBlank() }
     if (home != null && away != null) {
-        val hs = (liveScore?.homeScore ?: fixture.homeScore)?.takeIf { it.isNotBlank() }
-        val as2 = (liveScore?.awayScore ?: fixture.awayScore)?.takeIf { it.isNotBlank() }
+        // Already through the Hide scores / delay policy: hidden -> "vs", pending -> "–".
+        val hs = scores.home?.takeIf { it.isNotBlank() && !scores.pending }
+        val as2 = scores.away?.takeIf { it.isNotBlank() && !scores.pending }
         // Crest-above-name, centered, so long team names ("Tennessee Titans") wrap instead of truncating —
         // robust at every width; the score sits between the two columns.
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             HeroTeam(home, fixture.homeBadge)
             Text(
-                if (hs != null && as2 != null) "$hs – $as2" else "vs",
+                if (hs != null && as2 != null) "$hs – $as2" else if (scores.pending) ScoreSlots.PLACEHOLDER else "vs",
                 style = if (hs != null && as2 != null) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = if (hs != null && as2 != null) tokens.colors.textPrimary else tokens.colors.textMuted,
@@ -1191,6 +1211,20 @@ private fun SportsLiveRail(
  * one row per team with its crest and (live/final) score, kickoff + venue below. Works
  * both as a fixed-width rail tile and stretched fillMaxWidth in the league page list.
  */
+/**
+ * The hub header's spoiler controls: "Scores shown" / "Scores hidden" (one press toggles) and, while shown,
+ * "Delay: Off / 15 s / 30 s / 60 s" (one press cycles). Both flip the per-profile, synced setting.
+ */
+@Composable
+private fun ScoreSpoilerChips(settings: ScoreSpoilerSettings, modifier: Modifier = Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s8), verticalAlignment = Alignment.CenterVertically) {
+        Chip(label = settings.toggleLabel, selected = !settings.shown, onClick = { RadarRepository.toggleScoresShown() })
+        if (settings.shown) {
+            Chip(label = settings.delayLabel, selected = settings.delayMs > 0, onClick = { RadarRepository.cycleScoreDelay() })
+        }
+    }
+}
+
 @Composable
 internal fun MatchCard(
     fixture: RadarFixture,
@@ -1198,6 +1232,8 @@ internal fun MatchCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier.width(MatchCardWidth),
     liveScore: RadarLiveScore? = null,
+    /** The score slots after the Hide scores / delay policy ([RadarUiState.scoreSlots]); required so no card can skip it. */
+    scores: ScoreSlots,
 ) {
     val tokens = MaterialTheme.nuvio
     val cardShape = RoundedCornerShape(NuvioTokens.Radius.xl)
@@ -1236,10 +1272,11 @@ internal fun MatchCard(
         val away = fixture.away?.takeIf { it.isNotBlank() }
         Column(Modifier.heightIn(min = MatchCardTeamsMinHeight)) {
             if (home != null && away != null) {
-                val homeScore = (liveScore?.homeScore ?: fixture.homeScore)?.takeIf { it.isNotBlank() }
-                val awayScore = (liveScore?.awayScore ?: fixture.awayScore)?.takeIf { it.isNotBlank() }
-                TeamRow(home, fixture.homeBadge, homeScore, dimScore = scoreTrails(homeScore, awayScore))
-                TeamRow(away, fixture.awayBadge, awayScore, dimScore = scoreTrails(awayScore, homeScore))
+                val homeScore = scores.home
+                val awayScore = scores.away
+                // Winner emphasis only for a real, shown pair: never while hidden or pending.
+                TeamRow(home, fixture.homeBadge, homeScore, dimScore = scores.comparable && scoreTrails(homeScore, awayScore))
+                TeamRow(away, fixture.awayBadge, awayScore, dimScore = scores.comparable && scoreTrails(awayScore, homeScore))
             } else {
                 // Motorsport/golf-style events have no team pair — the event name carries the card.
                 Text(

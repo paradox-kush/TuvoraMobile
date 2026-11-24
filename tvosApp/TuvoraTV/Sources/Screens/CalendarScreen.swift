@@ -441,7 +441,8 @@ struct CalendarGameRow: View {
     }
 
     private func status(_ game: TvCalendarGame) -> String? {
-        let score = [game.homeScore, game.awayScore].compactMap { $0 }.joined(separator: " – ")
+        // Score delay with nothing due yet: one dash, not "– – –". Hidden scores arrive as nil and show nothing.
+        let score = game.scorePending ? "–" : [game.homeScore, game.awayScore].compactMap { $0 }.joined(separator: " – ")
         switch game.state {
         case "LIVE": return [L("LIVE"), game.progress, score.isEmpty ? nil : score].compactMap { $0 }.joined(separator: " · ")
         case "FINAL": return [score.isEmpty ? nil : score, L("FT")].compactMap { $0 }.joined(separator: " · ")

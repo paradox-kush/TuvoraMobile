@@ -25,8 +25,10 @@ object RadarCalendarGames {
         val score = fixture.id?.let { state.liveScores[it] }
         val gameState = stateOf(fixture, state, nowMs)
         // The feed's score is fresher than the fixture row while a game is on; a fixture's own score is the final one.
-        val homeScore = score?.homeScore?.takeIf { it.isNotBlank() } ?: fixture.homeScore
-        val awayScore = score?.awayScore?.takeIf { it.isNotBlank() } ?: fixture.awayScore
+        // Both go through the user's Hide scores / delay settings (ScoreSpoilerPolicy): hidden -> none, pending -> "–".
+        val slots = state.scoreSlots(fixture, nowMs)
+        val homeScore = slots.home
+        val awayScore = slots.away
         val league = fixture.league?.takeIf { it.isNotBlank() }
             ?: fixture.leagueId?.let { state.leagueById(it)?.name }
         return CalendarGameItem(
@@ -43,6 +45,7 @@ object RadarCalendarGames {
             state = gameState,
             homeScore = homeScore.takeIf { gameState == CalendarGameState.LIVE || gameState == CalendarGameState.FINAL },
             awayScore = awayScore.takeIf { gameState == CalendarGameState.LIVE || gameState == CalendarGameState.FINAL },
+            scorePending = slots.pending && (gameState == CalendarGameState.LIVE || gameState == CalendarGameState.FINAL),
             progress = score?.progress.takeIf { gameState == CalendarGameState.LIVE },
             channelHintId = fixture.id,
         ).takeIf { it.title.isNotBlank() }

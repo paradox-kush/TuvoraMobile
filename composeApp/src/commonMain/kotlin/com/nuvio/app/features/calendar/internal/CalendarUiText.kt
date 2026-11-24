@@ -103,10 +103,10 @@ internal fun calendarGameStatusText(game: CalendarGameItem): String? = when (gam
     CalendarGameState.LIVE -> listOfNotNull(
         stringResource(Res.string.calendar_game_live),
         game.progress?.takeIf { it.isNotBlank() },
-        if (game.hasScore) "${game.homeScore} – ${game.awayScore}" else null,
+        if (game.hasScore) "${game.homeScore} – ${game.awayScore}" else if (game.scorePending) "–" else null,
     ).joinToString(" · ")
     CalendarGameState.FINAL ->
-        listOfNotNull(if (game.hasScore) "${game.homeScore} – ${game.awayScore}" else null, stringResource(Res.string.calendar_game_final))
+        listOfNotNull(if (game.hasScore) "${game.homeScore} – ${game.awayScore}" else if (game.scorePending) "–" else null, stringResource(Res.string.calendar_game_final))
             .joinToString(" · ")
     CalendarGameState.POSTPONED -> stringResource(Res.string.calendar_game_postponed)
     CalendarGameState.SCHEDULED -> null
