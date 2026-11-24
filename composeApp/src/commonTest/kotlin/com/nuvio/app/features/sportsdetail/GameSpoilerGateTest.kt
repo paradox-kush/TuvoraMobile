@@ -32,7 +32,12 @@ import com.nuvio.app.features.sportsdetail.api.StatsBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.TimelineItem
 import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
+import com.nuvio.app.features.sportsdetail.api.StandingRow
+import com.nuvio.app.features.sportsdetail.api.StandingsGroup
+import com.nuvio.app.features.sportsdetail.api.StandingsTableRow
 import com.nuvio.app.features.sportsdetail.internal.GameRevealChip
+import com.nuvio.app.features.sportsdetail.internal.GameSection
+import com.nuvio.app.features.sportsdetail.internal.GameSectionsPolicy
 import com.nuvio.app.features.sportsdetail.internal.GameSpoilerGate
 import com.nuvio.app.features.sportsdetail.internal.revealChip
 import com.nuvio.app.features.sportsdetail.internal.showsHiddenCard
@@ -94,7 +99,8 @@ class GameSpoilerGateTest {
         val kinds = view.detail.blocks.map { it::class.simpleName }
         assertFalse(view.detail.blocks.any { it is LinescoreBlock || it is StatsBlock || it is LeadersBlock || it is PlaysBlock || it is WinProbabilityBlock }, "box score, stats, plays and win chance gone: $kinds")
         assertFalse(view.detail.blocks.any { it is SoccerStripBlock }, "the soccer strip (last play, scorers, cards, corners, possession) is gone: $kinds")
-        assertTrue(view.detail.blocks.any { it is StandingsTableBlock } && view.detail.blocks.any { it is LineupBlock } && view.detail.blocks.any { it is FormBlock }, "standings, line-ups and form kept: $kinds")
+        assertTrue(view.detail.blocks.any { it is LineupBlock }, "line-ups kept: $kinds")
+        assertFalse(view.detail.blocks.any { it is StandingsTableBlock || it is FormBlock }, "standings and form give the result away: $kinds")
         assertEquals("Arsenal", (view.detail.header as TeamsHeader).home.name, "teams kept")
         assertEquals("67'", view.detail.live?.clock, "the live clock is kept")
         assertEquals(GameState.LIVE, view.detail.state, "LIVE kept")
@@ -186,10 +192,9 @@ class GameSpoilerGateTest {
     }
 
     @Test
-    fun `hidden keeps only watch broadcast standings lineup form and next for a started game`() {
+    fun `hidden keeps only watch broadcast lineup and next for a started game`() {
         val kept = listOf(
-            WatchBlock(entry = "browsing"), BroadcastBlock(mapOf("UK" to listOf("Sky"))), StandingsBlock(emptyList()),
-            StandingsTableBlock(emptyList()), LineupBlock(emptyList()), FormBlock(listOf("W"), listOf("L")),
+            WatchBlock(entry = "browsing"), BroadcastBlock(mapOf("UK" to listOf("Sky"))), LineupBlock(emptyList()),
             NextBlock(listOf(NextItem("Sat", "vs Spurs"))),
         )
         val view = hiddenView(liveWith(*kept.toTypedArray(), state = GameState.FINAL))
@@ -267,10 +272,55 @@ class GameSpoilerGateTest {
 
     @Test
     fun `no hidden card while the overview still has content or scores are shown`() {
-        val withForm = liveWith(FormBlock(listOf("W"), listOf("L")), state = GameState.FINAL)
-        assertFalse(hiddenView(withForm).showsHiddenCard, "form still fills the Overview")
+        val withNext = liveWith(NextBlock(listOf(NextItem("Sat", "vs Spurs"))), state = GameState.FINAL)
+        assertFalse(hiddenView(withNext).showsHiddenCard, "next games still fill the Overview")
         val gate = GameSpoilerGate()
         val shownEmpty = liveWith(state = GameState.FINAL).also { gate.record(it, 0L) }
         assertFalse(gate.view(shownEmpty, ScoreSpoilerSettings(), 0L).showsHiddenCard, "not hidden: no card")
+    }
+
+    // --- standings and form give the result away (W4 / L4 streaks, W-L moving) -----------------------------------
+
+    private val tableAndForm = listOf(
+        StandingsTableBlock(listOf(StandingsGroup("West", listOf("W", "L", "STRK"), listOf(StandingsTableRow("1", "Suns", listOf("40", "12", "W4"), isGameTeam = true))))),
+        StandingsBlock(listOf(StandingRow("1", "Suns", "52", "80", form = "WWWW"))),
+        FormBlock(listOf("W", "W"), listOf("L", "L")),
+    )
+
+    private fun withHeaderForm(d: GameDetail) = d.copy(
+        header = TeamsHeader(Side("Suns", score = "112", form = listOf("W", "W")), Side("Pelicans", score = "99", form = listOf("L", "L"))),
+    )
+
+    @Test
+    fun `hidden final drops standings standings table form and header form`() {
+        val final = withHeaderForm(liveWith(*(tableAndForm + LineupBlock(emptyList())).toTypedArray(), state = GameState.FINAL))
+        val view = hiddenView(final)
+        assertFalse(view.detail.blocks.any { it is StandingsTableBlock || it is StandingsBlock || it is FormBlock }, "a streak names the winner: ${view.detail.blocks}")
+        assertTrue(view.detail.blocks.any { it is LineupBlock }, "line-ups stay")
+        val h = view.detail.header as TeamsHeader
+        assertEquals(null to null, h.home.form to h.away.form, "header form hidden too")
+    }
+
+    @Test
+    fun `a game revealed on its own keeps standings and form`() {
+        val gate = GameSpoilerGate()
+        val final = withHeaderForm(liveWith(*tableAndForm.toTypedArray(), state = GameState.FINAL)).also { gate.record(it, 0L) }
+        val view = gate.view(final, ScoreSpoilerSettings(), 0L)  // revealed -> the page gets shown settings
+        assertEquals(final, view.detail, "everything back")
+    }
+
+    @Test
+    fun `upcoming keeps standings and form while hidden`() {
+        val upcoming = withHeaderForm(liveWith(*tableAndForm.toTypedArray(), state = GameState.UPCOMING))
+        val view = hiddenView(upcoming)
+        assertEquals(upcoming.blocks, view.detail.blocks, "pre-game form spoils nothing")
+        assertEquals(listOf("W", "W"), (view.detail.header as TeamsHeader).home.form, "header form kept")
+    }
+
+    @Test
+    fun `no standings tab while hidden`() {
+        val view = hiddenView(liveWith(*tableAndForm.toTypedArray(), state = GameState.FINAL))
+        assertFalse(GameSectionsPolicy.sections(view.detail).contains(GameSection.STANDINGS), "the Standings tab disappears")
+        assertTrue(view.showsHiddenCard, "and the empty Overview says why")
     }
 }

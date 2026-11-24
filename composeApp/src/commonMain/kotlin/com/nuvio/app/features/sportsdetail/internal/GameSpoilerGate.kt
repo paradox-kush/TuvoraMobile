@@ -9,7 +9,6 @@ import com.nuvio.app.features.radar.ScoreSpoilerPolicy
 import com.nuvio.app.features.radar.ScoreSpoilerSettings
 import com.nuvio.app.features.sportsdetail.api.BroadcastBlock
 import com.nuvio.app.features.sportsdetail.api.EventHeader
-import com.nuvio.app.features.sportsdetail.api.FormBlock
 import com.nuvio.app.features.sportsdetail.api.GameBlock
 import com.nuvio.app.features.sportsdetail.api.GameDetail
 import com.nuvio.app.features.sportsdetail.api.GameState
@@ -18,8 +17,6 @@ import com.nuvio.app.features.sportsdetail.api.LineupBlock
 import com.nuvio.app.features.sportsdetail.api.NextBlock
 import com.nuvio.app.features.sportsdetail.api.Side
 import com.nuvio.app.features.sportsdetail.api.SpoilerRedaction
-import com.nuvio.app.features.sportsdetail.api.StandingsBlock
-import com.nuvio.app.features.sportsdetail.api.StandingsTableBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.VersusHeader
 import com.nuvio.app.features.sportsdetail.api.WatchBlock
@@ -88,9 +85,9 @@ class GameSpoilerGate {
 
 /**
  * Strips what would spoil a result. The scoreboard numbers go always. For a live or final game the blocks are an
- * ALLOW-list ([keepsWhenStarted]: Watch, broadcast, standings, line-ups, form, next games) — anything else, including a
- * block type added later, is dropped — and the sides' records (they move with the result) go too. Upcoming games keep
- * every block: there is nothing to spoil before the start.
+ * ALLOW-list ([keepsWhenStarted]: Watch, broadcast, line-ups, next games) — anything else, including a block type
+ * added later, is dropped. Standings and form are NOT kept: a streak ("W4" / "L4") or a W-L that just moved names the
+ * winner. The sides' records and form go for the same reason. Upcoming games keep every block: nothing to spoil yet.
  */
 object GameSpoilerRedaction {
     fun redact(detail: GameDetail, scorePlaceholder: String?): GameDetail {
@@ -104,11 +101,14 @@ object GameSpoilerRedaction {
 
     /** The only blocks a started game shows while redacted: none of them carries the score or how the game is going. */
     fun keepsWhenStarted(b: GameBlock): Boolean =
-        b is WatchBlock || b is BroadcastBlock || b is StandingsBlock || b is StandingsTableBlock || b is LineupBlock ||
-            b is FormBlock || b is NextBlock
+        b is WatchBlock || b is BroadcastBlock || b is LineupBlock || b is NextBlock
 
     private fun side(s: Side, placeholder: String?, started: Boolean): Side =
-        s.copy(score = s.score?.let { placeholder }, record = s.record.takeUnless { started })
+        s.copy(
+            score = s.score?.let { placeholder },
+            record = s.record.takeUnless { started },
+            form = s.form.takeUnless { started },
+        )
 
     // EventHeader (motorsport weekend, fight card) carries name, session and venue only: no result to strip.
     private fun header(h: Header, placeholder: String?, started: Boolean): Header = when (h) {
