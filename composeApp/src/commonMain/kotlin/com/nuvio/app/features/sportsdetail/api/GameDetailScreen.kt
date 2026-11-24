@@ -37,7 +37,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.nuvio.app.core.ui.Chip
 import com.nuvio.app.core.ui.NuvioPrimaryButton
 import com.nuvio.app.features.radar.ScoreSpoilerSettings
-import com.nuvio.app.features.radar.alerts.AlertChip
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.nuvio
@@ -112,7 +111,7 @@ fun GameDetailScreen(
     /** "Hide again": puts this game back under the global Hide scores. */
     onHideGame: () -> Unit,
     /** Sports alerts for this game ("Alerts: Default / All / Off"); null = not a followed game, no chip. */
-    alertsChip: AlertChip? = null,
+    alertsChip: GameAlertsChip? = null,
     onAlertsChip: () -> Unit = {},
 ) {
     val service = LocalSportsDetail.current
@@ -213,7 +212,7 @@ private fun LoadedContent(
     hiddenCard: Boolean,
     onRevealGame: () -> Unit,
     onHideGame: () -> Unit,
-    alertsChip: AlertChip?,
+    alertsChip: GameAlertsChip?,
     onAlertsChip: () -> Unit,
 ) {
     val detail = s.detail

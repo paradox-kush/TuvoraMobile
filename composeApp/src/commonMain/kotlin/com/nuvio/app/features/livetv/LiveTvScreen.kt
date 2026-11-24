@@ -219,9 +219,14 @@ fun LiveTvScreen(
     var currentLogo by remember { mutableStateOf(initialLogo) }
 
     // Publish the channel in the player to the game screen's Watch block ("watching" vs "browsing").
+    // And to the playing-channels holder sports alerts read (set / clear exactly this id: never another player's).
     DisposableEffect(currentContentId, currentTitle) {
         LiveNowWatching.set(currentContentId, currentTitle)
-        onDispose { LiveNowWatching.clear(currentContentId) }
+        com.nuvio.app.core.contracts.PlayingChannelsAccess.current().set(currentContentId)
+        onDispose {
+            LiveNowWatching.clear(currentContentId)
+            com.nuvio.app.core.contracts.PlayingChannelsAccess.current().clear(currentContentId)
+        }
     }
 
     var source by remember { mutableStateOf<LiveChannelSource?>(null) }

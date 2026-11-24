@@ -93,8 +93,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 
 private val sportsMatchLog = Logger.withTag("SportsChannelMatch")
+
+/** How long a sports alert's "Open game" waits for the hub's own fixture load before it is dropped. */
+private const val GAME_REQUEST_DEADLINE_MS = 15_000L
 
 /** Fast score tick: only leagues/teams with a live-or-imminent fixture, so it transfers a live
  *  subset (often nothing) rather than the whole followed set. */
@@ -162,12 +166,15 @@ fun SportsHubScreen(
     }
     // A sports alert's "Open game": open that game's page once its fixture is held (else today's match sheet).
     val requestedGamePage by com.nuvio.app.core.contracts.SportsGameRequest.gameId.collectAsStateWithLifecycle()
-    LaunchedEffect(requestedGamePage, state.fixturesByLeague, state.fixturesByTeam) {
+    // Waits only for the hub's own load: a fixture still not held once loading has settled (or after the deadline)
+    // drops the request, so the game never opens late and unprompted.
+    LaunchedEffect(requestedGamePage) {
         val id = requestedGamePage ?: return@LaunchedEffect
-        state.fixtureByKey(id)?.let { fx ->
-            openFixture(fx)
-            com.nuvio.app.core.contracts.SportsGameRequest.consume()
+        val fx = withTimeoutOrNull(GAME_REQUEST_DEADLINE_MS) {
+            RadarRepository.uiState.first { s -> s.fixtureByKey(id) != null || !s.loadingFixtures }.fixtureByKey(id)
         }
+        com.nuvio.app.core.contracts.SportsGameRequest.consume()
+        fx?.let(openFixture)
     }
     // Sports alerts never interrupt the game whose page is open (gate 3).
     val openGameKey = detailFixture?.let(::radarFixtureKey)
@@ -293,10 +300,11 @@ fun SportsHubScreen(
 
 /** The game page's alerts chip for [fx], or null when the game is neither in a followed league nor has a followed team. */
 @Composable
-private fun gameAlertsChip(state: RadarUiState, fx: RadarFixture): com.nuvio.app.features.radar.alerts.AlertChip? {
+private fun gameAlertsChip(state: RadarUiState, fx: RadarFixture): com.nuvio.app.features.sportsdetail.api.GameAlertsChip? {
     val signedIn by com.nuvio.app.features.radar.alerts.SportsAlerts.signedIn.collectAsStateWithLifecycle()
     if (fx.startEpochMs == null) return null
     return com.nuvio.app.features.radar.alerts.SportsAlerts.gameChip(state, radarFixtureKey(fx), fx.leagueId, fx.homeId, fx.awayId, signedIn)
+        ?.let { com.nuvio.app.features.sportsdetail.api.GameAlertsChip(it.label, it.selected, it.enabled) }
 }
 
 // --- overview (the tab's main scroll) -----------------------------------------

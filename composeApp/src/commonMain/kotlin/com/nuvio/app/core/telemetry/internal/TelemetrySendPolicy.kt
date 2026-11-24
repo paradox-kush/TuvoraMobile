@@ -10,6 +10,7 @@ internal enum class SendDecision { SEND, RECORD_ONLY, COUNT }
  */
 internal object TelemetrySendPolicy {
     const val SCREEN_EVENT = "\$screen"
+    private const val SPORTS_ALERT = "sports_alert"
 
     private val countedAlways = setOf("playback_started", "iptv_index_build")
     private val countedUnlessFailed = setOf("iptv_load", "epg_ingest", "epg_resolve", "epg_mapping")
@@ -35,6 +36,8 @@ internal object TelemetrySendPolicy {
         // Healthy/none states are a count in session_health; a not-ready bridge is sent (once per state+reason per session).
         event == "addon_bridge_state" -> if (props["state"] in setOf("none", "ready")) SendDecision.COUNT else SendDecision.SEND
         event == "app_exit" -> decideExit(props)
+        // In-app sports alerts (review round 1): a banner shown and a banner action are sent; holds and drops are counts.
+        event == SPORTS_ALERT -> if (props["outcome"] in setOf("shown", "action")) SendDecision.SEND else SendDecision.COUNT
         else -> SendDecision.SEND
     }
 

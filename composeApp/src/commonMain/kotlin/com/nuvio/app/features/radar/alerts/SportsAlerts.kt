@@ -7,6 +7,7 @@ import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
 import com.nuvio.app.core.contracts.PlaybackContext
 import com.nuvio.app.core.contracts.PlaybackContextAccess
+import com.nuvio.app.core.contracts.PlayingChannelsAccess
 import com.nuvio.app.core.network.SupabaseProvider
 import com.nuvio.app.core.sync.AppForegroundMonitor
 import com.nuvio.app.core.sync.AppVisibility
@@ -229,6 +230,6 @@ object SportsAlerts {
         override fun followedTeamIds(): Set<String> = radar().followedTeamIds
         override fun spoiler(): ScoreSpoilerSettings = radar().scoreSpoiler
         override fun revealed(): RevealedGames = radar().revealedGames
-        override fun playingChannelId(): String? = watch.nowWatching.value?.channelId
+        override fun playingChannelIds(): Set<String> = PlayingChannelsAccess.current().ids.value
     }
 }

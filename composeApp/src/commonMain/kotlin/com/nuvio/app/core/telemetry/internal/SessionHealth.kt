@@ -40,6 +40,7 @@ internal class SessionHealth(private var windowStartMs: Long, private val maxKey
                 "epg_mapping" -> (props["outcome"] as? String)?.let(::add)
                 "playback_started" -> { (props["engine"] as? String)?.let(::add); (props["kind"] as? String)?.let(::add) }
                 "app_exit" -> (props["reason"] as? String)?.let(::add)
+                "sports_alert" -> { (props["outcome"] as? String)?.let(::add); (props["reason"] as? String)?.let(::add) }
             }
         }
         count(parts.joinToString("_"))

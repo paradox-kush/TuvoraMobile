@@ -50,11 +50,11 @@ data class SportsAlertSettings(
     fun gameOverride(eventId: String, nowMs: Long): AlertLevel? =
         games.firstOrNull { it.id == eventId && it.expMs > nowMs }?.level
 
-    /** Sets (or with [level] null clears) one game's override; expired overrides are pruned on the way. */
+    /** Sets (or with [level] null clears) one game's override; expired ones are pruned and the newest 50 kept. */
     fun withGame(eventId: String, level: AlertLevel?, expMs: Long, nowMs: Long): SportsAlertSettings {
         val others = games.filter { it.id != eventId }
         val next = if (level == null) others else others + GameAlertOverride(eventId, level, expMs)
-        return copy(games = next).pruned(nowMs)
+        return copy(games = next.takeLast(MAX_GAME_OVERRIDES)).pruned(nowMs)
     }
 
     fun pruned(nowMs: Long): SportsAlertSettings =
@@ -73,9 +73,12 @@ data class SportsAlertSettings(
         const val DEFAULT_BATCH_S = 60
         val ALLOWED_PER_HOUR: List<Int> = listOf(3, 6, 12, 0)
         val ALLOWED_BATCH_S: List<Int> = listOf(0, 60, 300)
-        /** Kept small: the backend stores the object only under 8 KB. */
+        /** Kept small: the backend stores the object only under 8 KB ([MAX_JSON_BYTES] is our margin under it). */
         const val MAX_GAME_OVERRIDES = 50
-        const val MAX_MUTED = 200
+        const val MAX_MUTED = 100
+        /** Longer ids are dropped (TheSportsDB ids are short; a fallback fixture key could be long). */
+        const val MAX_ID_LENGTH = 64
+        const val MAX_JSON_BYTES = 7_900
 
         fun nextPerHour(current: Int): Int = ALLOWED_PER_HOUR.next(current, DEFAULT_PER_HOUR)
         fun nextBatch(current: Int): Int = ALLOWED_BATCH_S.next(current, DEFAULT_BATCH_S)
@@ -107,17 +110,45 @@ data class SportsAlertSettings(
                 mutedTeams = o.ids("muted_teams"),
                 games = (o["games"] as? JsonArray).orEmpty().mapNotNull { entry ->
                     val g = entry as? JsonObject ?: return@mapNotNull null
-                    val id = g.str("id") ?: return@mapNotNull null
+                    val id = g.str("id")?.takeIf { it.length <= MAX_ID_LENGTH } ?: return@mapNotNull null
                     // A game override is only ever All or Off; anything else is dropped, never guessed.
                     val level = AlertLevel.fromWire(g.str("level"))?.takeIf { it == AlertLevel.All || it == AlertLevel.Off }
                         ?: return@mapNotNull null
                     val exp = g.long("exp") ?: return@mapNotNull null
                     GameAlertOverride(id, level, exp)
-                }.distinctBy { it.id }.take(MAX_GAME_OVERRIDES),
+                }.asReversed().distinctBy { it.id }.asReversed().takeLast(MAX_GAME_OVERRIDES),
             )
         }
 
-        fun toJson(s: SportsAlertSettings): JsonObject = buildJsonObject {
+        /**
+         * Always under [MAX_JSON_BYTES]: past it, the oldest game overrides go first (down to 10), then muted ids from the
+         * longer list, then the remaining overrides. The caps keep this to the rare hand-built extreme.
+         */
+        fun toJson(s: SportsAlertSettings): JsonObject {
+            var games = s.games.filter { it.id.length <= MAX_ID_LENGTH }.takeLast(MAX_GAME_OVERRIDES)
+            var leagues = s.mutedLeagues.filter { it.length <= MAX_ID_LENGTH }.sorted().take(MAX_MUTED)
+            var teams = s.mutedTeams.filter { it.length <= MAX_ID_LENGTH }.sorted().take(MAX_MUTED)
+            while (true) {
+                val o = encode(s, games, leagues, teams)
+                if (o.toString().encodeToByteArray().size <= MAX_JSON_BYTES) return o
+                when {
+                    games.size > MIN_KEPT_GAMES -> games = games.drop(1)
+                    leagues.isNotEmpty() || teams.isNotEmpty() ->
+                        if (leagues.size >= teams.size) leagues = leagues.dropLast(1) else teams = teams.dropLast(1)
+                    games.isNotEmpty() -> games = games.drop(1)
+                    else -> return o
+                }
+            }
+        }
+
+        private const val MIN_KEPT_GAMES = 10
+
+        private fun encode(
+            s: SportsAlertSettings,
+            games: List<GameAlertOverride>,
+            leagues: List<String>,
+            teams: List<String>,
+        ): JsonObject = buildJsonObject {
             put("enabled", s.enabled)
             put("team_level", s.teamLevel.wire)
             put("league_level", s.leagueLevel.wire)
@@ -127,10 +158,10 @@ data class SportsAlertSettings(
             put("max_per_hour", s.maxPerHour)
             put("batch_s", s.batchSeconds)
             put("during_playback", s.duringPlayback.wire)
-            putJsonArray("muted_leagues") { s.mutedLeagues.sorted().take(MAX_MUTED).forEach { add(it) } }
-            putJsonArray("muted_teams") { s.mutedTeams.sorted().take(MAX_MUTED).forEach { add(it) } }
+            putJsonArray("muted_leagues") { leagues.forEach { add(it) } }
+            putJsonArray("muted_teams") { teams.forEach { add(it) } }
             putJsonArray("games") {
-                s.games.take(MAX_GAME_OVERRIDES).forEach { g ->
+                games.forEach { g ->
                     addJsonObject {
                         put("id", g.id)
                         put("level", g.level.wire)
@@ -172,6 +203,6 @@ private fun JsonObject.long(name: String): Long? = prim(name)?.takeIf { !it.isSt
 /** Ids as strings; numbers are accepted (TheSportsDB ids are numeric strings, a hand-edited row might hold numbers). */
 private fun JsonObject.ids(name: String): Set<String> =
     (this[name] as? JsonArray).orEmpty()
-        .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotEmpty) }
+        .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { id -> id.isNotEmpty() && id.length <= SportsAlertSettings.MAX_ID_LENGTH } }
         .take(SportsAlertSettings.MAX_MUTED)
         .toSet()

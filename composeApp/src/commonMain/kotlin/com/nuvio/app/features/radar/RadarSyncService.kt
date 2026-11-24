@@ -216,8 +216,8 @@ object RadarSyncService {
 
 /**
  * sync_push_radar's `p_prefs`. The delay is sanitized: the backend's check accepts only 0 / 15 / 30 / 60. `alerts` is
- * always sent as an object; the backend keeps its stored value when the key is absent (an older client), so an old
- * client can never reset it.
+ * sent only while [RadarPrefs.alertsDirty] (review round 1): the backend keeps its stored value when the key is absent,
+ * so a device that merely pushes follows can never overwrite another device's newer alert settings.
  */
 internal fun radarPrefsPayload(prefs: RadarPrefs): JsonObject = buildJsonObject {
     put("featured_event_id", prefs.featuredEventId)
@@ -225,7 +225,7 @@ internal fun radarPrefsPayload(prefs: RadarPrefs): JsonObject = buildJsonObject 
     put("promo_dismissed", prefs.promoDismissed)
     put("scores_shown", prefs.scoresShown)
     put("score_delay_s", ScoreSpoilerSettings.sanitizeDelay(prefs.scoreDelaySeconds))
-    put("alerts", SportsAlertSettings.toJson(prefs.alerts))
+    if (prefs.alertsDirty) put("alerts", SportsAlertSettings.toJson(prefs.alerts))
 }
 
 /** One radar_prefs row as pulled. */

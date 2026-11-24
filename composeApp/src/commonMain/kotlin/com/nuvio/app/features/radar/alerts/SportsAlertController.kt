@@ -1,5 +1,6 @@
 package com.nuvio.app.features.radar.alerts
 
+import co.touchlab.kermit.Logger
 import com.nuvio.app.core.contracts.PlaybackContext
 import com.nuvio.app.features.radar.RevealedGames
 import com.nuvio.app.features.radar.ScoreSpoilerSettings
@@ -25,15 +26,16 @@ internal interface SportsAlertInputs {
     fun followedTeamIds(): Set<String>
     fun spoiler(): ScoreSpoilerSettings
     fun revealed(): RevealedGames
-    /** The live channel playing now, if any (the player's own state; no lookup). */
-    fun playingChannelId(): String?
+    /** Every live channel playing now (the players' own state; no lookup). */
+    fun playingChannelIds(): Set<String>
 }
 
 /**
  * The alerts state holder: received payloads in, one [banner] out. Runs [SportsAlertPolicy], keeps the in-memory
  * [AlertLedger] (cap and batch counters are per device), arms ONE local timer at [SportsAlertPolicy.nextTimerAtMs] for
- * held alerts, and auto-dismisses after [dismissAfterMs]. No network: the only request it can start is the banner's
- * Watch lookup, which the game screen shares ([SportsAlertActions]).
+ * held alerts, starts the watch lookup a watch-check hold waits on (and re-runs the policy when it answers), and
+ * auto-dismisses after [dismissAfterMs]. Confined to [scope]'s dispatcher (Main in production). No polling; the only
+ * requests it can start are the game screen's own Watch lookups ([SportsAlertActions]).
  */
 internal class SportsAlertController(
     private val inputs: SportsAlertInputs,
@@ -42,6 +44,7 @@ internal class SportsAlertController(
     private val dismissAfterMs: Long = PHONE_DISMISS_MS,
     private val report: (Map<String, Any>) -> Unit = SportsAlertTelemetry::send,
 ) {
+    private val log = Logger.withTag("SportsAlerts")
     private val lock = SynchronizedObject()
     private var ledger = AlertLedger()
     private var timerJob: Job? = null
@@ -70,7 +73,7 @@ internal class SportsAlertController(
 
     fun onAlert(alert: SportsAlert) {
         val settings = inputs.settings()
-        val ctx = context()
+        val ctx = context(setOf(alert.eventId))
         val decision = synchronized(lock) {
             val (decision, next) = SportsAlertPolicy.onAlert(alert, settings, ctx, ledger)
             ledger = next
@@ -79,10 +82,15 @@ internal class SportsAlertController(
         when (decision) {
             is AlertDecision.ShowNow -> show(decision.banner)
             is AlertDecision.HoldUntil -> {
-                report(SportsAlertTelemetry.decision(decision, alert))
+                report(SportsAlertTelemetry.held(alert, decision.reason))
+                if (decision.reason == HoldReason.WatchCheck) checkWatch(alert.eventId)
                 armTimer()
             }
-            is AlertDecision.Drop -> report(SportsAlertTelemetry.decision(decision, alert))
+            is AlertDecision.Drop -> {
+                // Never silent in the log, even where telemetry stays quiet (a fast device clock shows up here).
+                if (decision.reason == DropReason.Stale) log.w { "stale alert dropped: ${ctx.nowMs - alert.atMs} ms old" }
+                SportsAlertTelemetry.dropped(alert, decision.reason)?.let(report)
+            }
         }
     }
 
@@ -91,7 +99,7 @@ internal class SportsAlertController(
         val current = _banner.value ?: return null
         val action = current.action
         report(
-            SportsAlertTelemetry.acted(
+            SportsAlertTelemetry.action(
                 current,
                 when (action) {
                     is BannerAction.OpenGame -> "open_game"
@@ -107,7 +115,7 @@ internal class SportsAlertController(
     /** Swipe up / x / auto-dismiss. */
     fun dismiss(byUser: Boolean = true) {
         val current = _banner.value ?: return
-        if (byUser) report(SportsAlertTelemetry.acted(current, "dismissed"))
+        if (byUser) report(SportsAlertTelemetry.action(current, "dismissed"))
         clear()
     }
 
@@ -120,14 +128,15 @@ internal class SportsAlertController(
         clear()
     }
 
-    private fun context(): AlertContext {
+    private fun context(eventIds: Set<String>): AlertContext {
         val now = inputs.nowMs()
         return AlertContext(
             nowMs = now,
             localMinuteOfDay = inputs.localMinuteOfDay(now),
             playback = inputs.playback(),
             openGameEventId = openGame.value,
-            watchingEventId = actions.eventForChannel(inputs.playingChannelId()),
+            playingChannelIds = inputs.playingChannelIds(),
+            watch = actions.watchStates(eventIds, now),
             followedLeagueIds = inputs.followedLeagueIds(),
             followedTeamIds = inputs.followedTeamIds(),
             spoiler = inputs.spoiler(),
@@ -135,12 +144,22 @@ internal class SportsAlertController(
         )
     }
 
+    /** A watch-check hold: ask once (single-flight, cached); the answer releases the hold early. */
+    private fun checkWatch(eventId: String) {
+        actions.ensureKnown(eventId, inputs::nowMs) { _, _ ->
+            scope.launch {
+                synchronized(lock) { ledger = SportsAlertPolicy.onWatchResolved(eventId, ledger, inputs.nowMs()) }
+                flush()
+            }
+        }
+    }
+
     private fun show(banner: AlertBanner) {
         report(SportsAlertTelemetry.shown(banner))
         lookupJob?.cancel()
         _banner.value = banner
-        lookupJob = actions.resolve(banner) { watch ->
-            // Only upgrade the banner that started the lookup, and only while it is still up.
+        lookupJob = actions.resolve(banner, inputs::nowMs) { watch ->
+            // Only upgrade the banner that asked, and only while it is still up.
             _banner.update { current -> if (current != null && current.id == banner.id) current.copy(action = watch) else current }
         }
         dismissJob?.cancel()
@@ -171,11 +190,13 @@ internal class SportsAlertController(
 
     private fun flush() {
         val settings = inputs.settings()
-        val ctx = context()
+        val pendingGames = synchronized(lock) { ledger.pending.map { it.alert.eventId }.toSet() }
+        val ctx = context(pendingGames)
         val result = synchronized(lock) {
             SportsAlertPolicy.onTimer(settings, ctx, ledger).also { ledger = it.ledger }
         }
-        result.dropped.forEach { (alert, reason) -> report(SportsAlertTelemetry.dropped(alert, reason)) }
+        result.dropped.forEach { (alert, reason) -> SportsAlertTelemetry.dropped(alert, reason)?.let(report) }
+        result.held.forEach { (alert, reason) -> report(SportsAlertTelemetry.held(alert, reason)) }
         result.banner?.let(::show)
         armTimer()
     }
