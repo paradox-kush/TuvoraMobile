@@ -7,6 +7,7 @@ import com.nuvio.app.core.telemetry.api.ReportContext
 import com.nuvio.app.core.telemetry.api.ReportResult
 import com.nuvio.app.core.telemetry.api.ReportSurface
 import com.nuvio.app.core.telemetry.api.TelemetryPort
+import com.nuvio.app.core.telemetry.api.FirstRunNote
 import com.nuvio.app.core.telemetry.api.FirstRunStep
 import kotlinx.atomicfu.atomic
 import kotlinx.atomicfu.locks.SynchronizedObject
@@ -52,6 +53,7 @@ internal class TelemetryService(
     private val funnelLock = SynchronizedObject()
     private var funnelState: FirstRunState? = null
     private var funnelStarted = false
+    private val visit = FirstLeaveVisit(host.nowMs())
     private val sdkReady = atomic(false)
     private val heldFunnelEvents = atomic<List<Map<String, Any>>>(emptyList())
 
@@ -116,6 +118,16 @@ internal class TelemetryService(
             commitFunnel(funnelState, t)
         }
         emit?.let(::deliverFunnelEvent)
+    }
+
+    /** First-visit facts for `first_leave`. Persisted ones go through the same lock and store as the steps; nothing is sent here. */
+    override fun firstRunNote(note: FirstRunNote) {
+        synchronized(funnelLock) {
+            if (note is FirstRunNote.Screen) { visit.screen(note.name); return }
+            val before = funnelState
+            val next = FirstRunFunnel.note(before, note) ?: return
+            commitFunnel(before, FirstRunTransition(next, null))
+        }
     }
 
     /** Caller holds [funnelLock]. Persists a changed state (best effort: a failed write keeps the in-memory gate). */
@@ -251,13 +263,24 @@ internal class TelemetryService(
      * config changes reach this without a background in between, and a reset would silently drop the counts.
      */
     override fun onForeground() {
-        recorder.record(DiagEntry(host.nowMs(), DiagArea.LIFECYCLE, "foreground"))
+        val now = host.nowMs()
+        recorder.record(DiagEntry(now, DiagArea.LIFECYCLE, "foreground"))
+        synchronized(funnelLock) { visit.foreground(now) }
     }
 
     override fun onBackground() {
-        recorder.record(DiagEntry(host.nowMs(), DiagArea.LIFECYCLE, "background"))
+        val now = host.nowMs()
+        recorder.record(DiagEntry(now, DiagArea.LIFECYCLE, "background"))
+        // first_leave: the first time the app leaves the foreground before anything played. Captured here, synchronously,
+        // so the flush below carries it; once-gate, consent and the existing-install rule are the funnel's.
+        val leave = synchronized(funnelLock) {
+            commitFunnel(funnelState, FirstRunFunnel.record(funnelState, FirstRunStep.FIRST_LEAVE, now, visit.props(now)))
+        }
+        leave?.let(::deliverFunnelEvent)
         // Memory probe, summary, disk and flush all happen off the caller's thread (it is usually Main).
         scope.launch {
+            // The process may be suspended any moment now: get the leave event out before the slower work.
+            if (leave != null) runCatching { host.flush() }
             sampleMemoryOnce()
             sendHealth()
             persistRingIfDue(force = true)

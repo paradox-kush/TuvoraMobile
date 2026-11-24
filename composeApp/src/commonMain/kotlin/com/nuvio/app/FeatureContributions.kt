@@ -112,7 +112,7 @@ fun registerLogicFeatureContributions() {
  * history in ANY profile slot, straight from storage (no repository load, no network). The support-code signal is
  * read by the telemetry service itself, before it generates one.
  */
-private object FirstRunExistingInstallProbe {
+internal object FirstRunExistingInstallProbe {
     fun hasUserState(): Boolean = (1..MAX_PROFILES).any { profile ->
         FirstRunInstallSignals.playlistsPresent(XtreamAccountStorage.loadAccountsJson(profile)) ||
             AddonStorage.loadInstalledAddonUrls(profile).isNotEmpty() ||

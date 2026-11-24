@@ -23,6 +23,8 @@ import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
+import com.nuvio.app.core.telemetry.api.funnelSourceFormOpened
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -119,6 +121,7 @@ internal fun ServerSignInSheet(
     onConnected: (ServerConnection) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    LaunchedEffect(Unit) { TelemetryAccess.current().funnelSourceFormOpened() }
     when (val provider = request.provider) {
         is PlexProvider -> {
             PlexSignInSheet(provider = provider, onConnected = onConnected, onDismiss = onDismiss)
