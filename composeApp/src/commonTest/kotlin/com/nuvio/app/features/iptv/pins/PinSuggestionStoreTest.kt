@@ -1,5 +1,13 @@
 package com.nuvio.app.features.iptv
 
+import kotlinx.atomicfu.atomic
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -202,5 +210,37 @@ class PinSuggestionStoreTest {
         assertNull(h.storage.saved[1], "no saved copy yet")
         store.recordPlay("a", "Alpha", null)
         assertNotNull(h.storage.saved[1], "saved after the first play")
+    }
+
+    /**
+     * Apple TV Live TV deadlock: the write to storage ran inside the store's lock, storage hopped to the main thread
+     * (UserDefaults' change notification), and the main thread was waiting for that lock in ensureLoaded(). A read of
+     * the store must never wait for a write in flight.
+     */
+    @Test
+    fun `reading the store never waits for a write that is still in flight`() = runTest {
+        val entered = atomic(false)
+        val release = atomic(false)
+        val storage = object : PinSuggestionStorage {
+            override fun load(profileId: Int): String? = null
+            override fun save(profileId: Int, json: String) {
+                entered.value = true
+                while (!release.value) { /* a slow write: the main thread is not free to finish it */ }
+            }
+        }
+        val store = PinSuggestionStore(storage, nowMs = { 1_000L }, activeProfileId = { 1 })
+        withContext(Dispatchers.Default) {
+            val writer = async { store.recordPlay("a", "Alpha", null) }
+            try {
+                var waited = 0
+                while (!entered.value && waited < 500) { delay(10); waited++ }
+                assertTrue(entered.value, "the write never started")
+                val reader = withTimeoutOrNull(2_000) { CoroutineScope(Dispatchers.Default).async { store.ensureLoaded(); store.state.value.channels.size }.await() }
+                assertEquals(1, reader, "ensureLoaded waited for the write, or the new state was not visible")
+            } finally {
+                release.value = true
+            }
+            writer.await()
+        }
     }
 }

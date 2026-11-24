@@ -39,6 +39,8 @@ internal class PinSuggestionStore(
 
     private var loaded = false
     private var profileId = 1
+    /** Bumped on every accepted change; guarded by [lock]. */
+    private var version = 0L
 
     fun ensureLoaded() = synchronized(lock) {
         if (loaded) return@synchronized
@@ -110,15 +112,27 @@ internal class PinSuggestionStore(
         return moved
     }
 
+    /**
+     * The state moves under [lock]; the write to storage happens AFTER it is released. Storage can hop to another
+     * thread (Apple's UserDefaults posts a change notification whose main-queue observer the writer waits for),
+     * and the main thread reads this store under the same lock (`ensureLoaded`): holding the lock across the write
+     * deadlocked Live TV's guide on Apple TV (main waiting on the lock, the writer waiting on main). A write that
+     * is already superseded by a newer change is skipped; the newer change writes the newer state.
+     */
     private fun change(transform: (PinSuggestionState) -> PinSuggestionState) {
         ensureLoaded()
+        var write: Triple<Int, String, Long>? = null
         synchronized(lock) {
             val before = _state.value
             val after = transform(before)
             if (after == before) return@synchronized
             _state.value = after
-            storage.save(profileId, json.encodeToString(after))
+            version += 1
+            write = Triple(profileId, json.encodeToString(after), version)
         }
+        val (profile, payload, mine) = write ?: return
+        if (synchronized(lock) { version != mine }) return
+        storage.save(profile, payload)
     }
 
     private fun parse(stored: String?): PinSuggestionState {
