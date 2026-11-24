@@ -122,8 +122,12 @@ struct RootView: View {
 
     /// Simulator smoke hook: `-smokeClearPlaylists` removes every playlist of the (local guest) profile, so a test that
     /// needs an empty IPTV hub gets one whatever earlier tests added. Local guest only: a signed-in account would sync it.
+    /// Once per launch: the gate task re-runs (and re-delivers `.main`) whenever the gate view reappears, e.g. after
+    /// a full-screen player closes, and a second sweep would delete the playlist the test added.
+    private static var smokeClearDone = false
     private static func smokeClearPlaylists() {
-        guard AppArguments.list.contains("-smokeClearPlaylists"), AppArguments.list.contains("-smokeLocalGuest") else { return }
+        guard !smokeClearDone, AppArguments.list.contains("-smokeClearPlaylists"), AppArguments.list.contains("-smokeLocalGuest") else { return }
+        smokeClearDone = true
         TvPlaylists.shared.ensureLoaded()
         Task {
             for account in TvPlaylists.shared.state.value.accounts { TvPlaylists.shared.remove(accountId: account.id) }
@@ -133,9 +137,11 @@ struct RootView: View {
 
     /// Simulator smoke hook: `-smokeSeedProfiles <n>` tops a LOCAL profile set up to n profiles (a guest starts with
     /// one, and the sidebar's profile switch only exists with 2+). Local-only: createProfile on a guest never syncs.
+    private static var smokeSeedDone = false
     private static func smokeSeedProfiles() {
         let args = AppArguments.list
-        guard let i = args.firstIndex(of: "-smokeSeedProfiles"), i + 1 < args.count, let wanted = Int(args[i + 1]) else { return }
+        guard !smokeSeedDone, let i = args.firstIndex(of: "-smokeSeedProfiles"), i + 1 < args.count, let wanted = Int(args[i + 1]) else { return }
+        smokeSeedDone = true
         Task {
             while ProfileRepository.shared.state.value.profiles.count < wanted {
                 let number = ProfileRepository.shared.state.value.profiles.count + 1
