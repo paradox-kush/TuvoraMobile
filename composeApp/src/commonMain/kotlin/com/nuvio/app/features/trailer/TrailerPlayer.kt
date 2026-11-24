@@ -1,5 +1,6 @@
 package com.nuvio.app.features.trailer
 
+import com.nuvio.app.features.player.keepawake.PlaybackKeepAwakePolicy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,7 +45,15 @@ internal fun TrailerPlayer(
     onExitFullscreen: (() -> Unit)? = null,
 ) {
     val error = errorMessage ?: state.error
-    EnterImmersivePlayerMode(keepScreenAwake = error == null && state.playWhenReady && !state.snapshot.isEnded)
+    EnterImmersivePlayerMode(
+        keepScreenAwake = PlaybackKeepAwakePolicy.shouldHold(
+            playIntent = true,
+            userPaused = !state.playWhenReady,
+            ended = state.snapshot.isEnded,
+            error = error != null,
+            inBackground = false,
+        ),
+    )
     Box(modifier = modifier.background(Color.Black), contentAlignment = Alignment.Center) {
         if (source != null && !isLoading && error == null) {
             TrailerPlaybackSurface(

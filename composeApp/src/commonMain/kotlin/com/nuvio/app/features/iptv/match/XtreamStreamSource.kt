@@ -1,7 +1,9 @@
 package com.nuvio.app.features.iptv.match
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.features.iptv.BoundedLoad
 import com.nuvio.app.features.iptv.CONTENT_TYPE_MOVIES
+import com.nuvio.app.features.iptv.LoadSurface
 import com.nuvio.app.features.iptv.CONTENT_TYPE_SERIES
 import com.nuvio.app.features.iptv.SOURCE_TYPE_STALKER
 import com.nuvio.app.features.iptv.XtreamAccount
@@ -9,6 +11,8 @@ import com.nuvio.app.features.iptv.XtreamClient
 import com.nuvio.app.features.iptv.XtreamMovie
 import com.nuvio.app.features.iptv.XtreamSeriesItem
 import com.nuvio.app.features.iptv.stalker.StalkerClient
+import com.nuvio.app.features.iptv.stalker.StalkerLinkRefusal
+import com.nuvio.app.features.iptv.stalker.StalkerLinkResult
 import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.tmdb.TmdbService
 import com.nuvio.app.features.tmdb.TmdbTitleBundle
@@ -17,7 +21,9 @@ import com.nuvio.app.core.contracts.IptvCatalogPendingException
 /**
  * Turns a TMDB movie/episode into playable Xtream [StreamItem]s for one account —
  * the bridge that lets IPTV VOD show up next to addon/debrid streams on TMDB-driven
- * detail screens. Returns empty (never throws) when the account doesn't carry the title.
+ * detail screens. Returns empty when the account doesn't carry the title. A lookup that FAILED is not
+ * "doesn't carry": a series' failed get_series_info throws [XtreamSeriesInfoException] (B134), which the source lane
+ * shows as a failed source with Retry.
  */
 internal object XtreamStreamSource {
     private val log = Logger.withTag("XtreamStreamSource")
@@ -55,17 +61,31 @@ internal object XtreamStreamSource {
      * [forceMint] — the 401-refresh path only: bypass a static-cmd verdict (the static URL just
      * died); the normal pick-time resolve keeps the policy's static shortcut.
      */
-    suspend fun resolveDeferredUrl(url: String, forceMint: Boolean = false): String? {
-        if (!isDeferred(url)) return url
-        val d = parseDeferred(url) ?: return null
+    suspend fun resolveDeferredUrl(url: String, forceMint: Boolean = false): String? =
+        (resolveDeferredLink(url, forceMint) as? StalkerLinkResult.Link)?.url
+
+    /** [resolveDeferredUrl] that keeps the portal's named refusal (B02): a failure is never an unexplained null. */
+    suspend fun resolveDeferredLink(url: String, forceMint: Boolean = false): StalkerLinkResult {
+        if (!isDeferred(url)) return StalkerLinkResult.Link(url)
+        val none = StalkerLinkResult.Refused(StalkerLinkRefusal.NO_LINK)
+        val d = parseDeferred(url) ?: return none
         com.nuvio.app.features.iptv.XtreamRepository.ensureLoaded()
         val acc = com.nuvio.app.features.iptv.XtreamRepository.uiState.value.accounts
-            .firstOrNull { it.id == d.accountId } ?: return null
+            .firstOrNull { it.id == d.accountId } ?: return none
         return if (d.isMovie) {
-            StalkerClient.resolveMovieUrl(acc, d.a, d.name, forceMint)
+            StalkerClient.resolveMovieLink(acc, d.a, d.name, forceMint)
         } else {
-            StalkerClient.resolveEpisodeUrl(acc, d.a, d.b, d.c)
+            StalkerClient.resolveEpisodeLink(acc, d.a, d.b, d.c)
         }
+    }
+
+    /** Pure: the neutral reason the shared UI names for a portal refusal. */
+    fun refusalOf(reason: StalkerLinkRefusal): com.nuvio.app.core.contracts.DeferredResolveRefusal = when (reason) {
+        StalkerLinkRefusal.SESSION_LIMIT -> com.nuvio.app.core.contracts.DeferredResolveRefusal.SESSION_LIMIT
+        StalkerLinkRefusal.NOTHING_TO_PLAY -> com.nuvio.app.core.contracts.DeferredResolveRefusal.NOTHING_TO_PLAY
+        StalkerLinkRefusal.ACCESS_DENIED -> com.nuvio.app.core.contracts.DeferredResolveRefusal.ACCESS_DENIED
+        StalkerLinkRefusal.LINK_FAULT, StalkerLinkRefusal.PORTAL_ERROR, StalkerLinkRefusal.NO_LINK,
+        StalkerLinkRefusal.REQUEST_FAILED -> com.nuvio.app.core.contracts.DeferredResolveRefusal.OTHER
     }
 
     internal data class Deferred(
@@ -212,9 +232,18 @@ internal object XtreamStreamSource {
             entries.addAll(XtreamMatchIndex.probe(acc.id, MatchKind.SERIES, key))
         }
         val editions = seriesEditions(acc, entries.toList(), s)
-        return editions.flatMap { ed ->
-            val detail = XtreamClient.seriesInfo(acc, ed.sid).getOrNull() ?: return@flatMap emptyList<StreamItem>()
-            XtreamSeriesEpisodePolicy.pickEpisodes(ed, detail.episodes, s, e).map { ep ->
+        // B134: a failed get_series_info is its own outcome, never an empty list. The lane shows it as a failed
+        // source with Retry (StreamSourcePresentationPolicy.FailedLane); only the other three read as "nothing".
+        val outcome = SeriesSourcePolicy.resolve(editions, s, e) { ed ->
+            BoundedLoad.run(
+                surface = LoadSurface.SERIES_INFO,
+                report = mapOf("path" to "streams", "source_type" to acc.sourceType),
+            ) { XtreamClient.seriesInfo(acc, ed.sid).getOrThrow() }.toResult()
+        }
+        return when (outcome) {
+            is SeriesSourceOutcome.InfoFailed -> throw XtreamSeriesInfoException(outcome.kind)
+            SeriesSourceOutcome.NoMatch, SeriesSourceOutcome.NoEpisodeForSE -> emptyList()
+            is SeriesSourceOutcome.Found -> outcome.picks.map { (ed, ep) ->
                 StreamItem(
                     name = "S${s}E${e} · ${ep.title}",
                     // the edition's catalog name so language/season variants are tellable apart
@@ -222,7 +251,7 @@ internal object XtreamStreamSource {
                     url = XtreamClient.episodeStreamUrl(acc, ep.episodeId, ep.containerExtension ?: "mp4"),
                     addonName = acc.name,
                     addonId = groupId(acc),
-                        deviceSourceKind = "iptv", deviceSourceRef = acc.id,
+                    deviceSourceKind = "iptv", deviceSourceRef = acc.id,
                 )
             }
         }

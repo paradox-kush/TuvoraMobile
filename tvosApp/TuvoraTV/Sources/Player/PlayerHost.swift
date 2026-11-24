@@ -130,6 +130,8 @@ final class PlayerHostController: UIHostingController<AnyView>, UIGestureRecogni
         // Dismissed by any route (or taken down with the screen that presented it).
         if !reportedGone, isBeingDismissed || presentingViewController == nil {
             reportedGone = true
+            // B279: the player is gone, so nothing holds the screen on (covers a dismissal the SwiftUI screen never saw).
+            UIApplication.shared.isIdleTimerDisabled = false
             onGone?(self)
         }
     }

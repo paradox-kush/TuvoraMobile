@@ -4,6 +4,9 @@ import co.touchlab.kermit.Logger
 import com.nuvio.app.core.contracts.MetaSourceProvider
 import com.nuvio.app.features.details.MetaDetails
 import com.nuvio.app.features.details.MetaVideo
+import com.nuvio.app.features.iptv.match.SeriesSourcePolicy
+import com.nuvio.app.features.iptv.match.XtreamSeriesInfoException
+import com.nuvio.app.features.iptv.match.toResult
 import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.tmdb.TmdbMetadataService
 import com.nuvio.app.features.tmdb.TmdbSettingsRepository
@@ -155,7 +158,16 @@ internal object XtreamMetaSource : MetaSourceProvider {
         val isM3u = account.sourceType == com.nuvio.app.features.iptv.SOURCE_TYPE_M3U_URL
         val client = com.nuvio.app.features.iptv.IptvClient.forAccount(account)
         val registered = XtreamItemRegistry.getOrLoad(id)
-        val detail = client.seriesInfo(account, seriesId).getOrNull()
+        // B134: a failed get_series_info is thrown (the detail screen shows Failed + Retry), never an empty
+        // episode list. A null detail is the panel's own "no such series" and keeps the empty page.
+        val info = BoundedLoad.run(
+            surface = LoadSurface.SERIES_INFO,
+            report = mapOf("path" to "meta", "source_type" to account.sourceType),
+        ) { client.seriesInfo(account, seriesId).getOrThrow() }.toResult()
+        val detail = info.getOrElse { error ->
+            if (error is kotlinx.coroutines.CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
+            throw XtreamSeriesInfoException(SeriesSourcePolicy.classify(error), error)
+        }
         val videos = detail?.episodes.orEmpty().map { ep ->
             val episodeContentId = XtreamItemRegistry.episodeId(accountId, ep.episodeId)
             // Xtream builds the episode URL from its id; M3U reads the stored line from the DB.

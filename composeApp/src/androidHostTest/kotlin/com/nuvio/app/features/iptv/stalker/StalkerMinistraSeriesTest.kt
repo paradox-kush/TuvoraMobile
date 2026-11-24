@@ -22,6 +22,8 @@ class StalkerMinistraSeriesTest {
 
     private val requests = mutableListOf<Map<String, String>>()
     private var ministra = true
+    /** B02: file rows carry a custom URL as cmd, and create_link is stock-strict (only /media/<id>.mpg, /media/file_<id>.mpg). */
+    private var customFiles = false
     private val episodesPerSeason = 16   // > one 14-row page: episodes must be paged
 
     private fun query(url: String): Map<String, String> =
@@ -55,6 +57,10 @@ class StalkerMinistraSeriesTest {
         val type = q["type"]; val action = q["action"]
         if (action == "handshake") return """{"js":{"token":"T"}}"""
         if (action == "get_profile") return """{"js":{"id":"1","status":0}}"""
+        if (action == "create_link" && customFiles) {
+            return if (Regex("""^/media/(file_)?\d+\.mpg$""").matches(q["cmd"].orEmpty())) """{"js":{"cmd":"ffmpeg http://media.test/play?c=1"}}"""
+            else """{"js":{"cmd":"","error":"nothing_to_play"}}"""
+        }
         if (action == "create_link") return """{"js":{"cmd":"ffmpeg http://media.test/play?c=1"}}"""
         if (type == "series") {
             if (ministra) return """{"js":null}"""
@@ -73,7 +79,8 @@ class StalkerMinistraSeriesTest {
             val p = q["p"]?.toIntOrNull() ?: 1
             return when {
                 episodeId.isNotEmpty() ->
-                    page(listOf("""{"id":"$episodeId","name":"English / HD","is_file":true,"cmd":"/media/file_$episodeId.mpg"}"""), 1)
+                    if (customFiles) page(listOf("""{"id":"$episodeId","name":"English / HD","is_file":true,"protocol":"custom","cmd":"http://cdn.test/e$episodeId.mkv"}"""), 1)
+                    else page(listOf("""{"id":"$episodeId","name":"English / HD","is_file":true,"cmd":"/media/file_$episodeId.mpg"}"""), 1)
                 seasonId.isNotEmpty() -> {
                     val sid = seasonId.toInt()
                     val all = (1..episodesPerSeason).map { e ->
@@ -156,6 +163,15 @@ class StalkerMinistraSeriesTest {
         assertEquals("vod", mint["type"])
         assertEquals("/media/file_500203.mpg", mint["cmd"], "the FILE cmd, not a season container")
         assertFalse(mint.containsKey("series"), "no XC series={n} argument")
+    }
+
+    @Test
+    fun `strict C - an episode whose file row is a custom url mints the file id`() = runBlocking {
+        customFiles = true
+        val acc = account()
+        StalkerClient.seriesCategories(acc).getOrThrow()
+        assertNotNull(StalkerClient.resolveEpisodeUrl(acc, seriesId = 500, season = 2, episodeNum = 3), "must play")
+        assertEquals(listOf<String?>("/media/file_500203.mpg"), requests.filter { it["action"] == "create_link" }.map { it["cmd"] }, "id form only")
     }
 
     @Test

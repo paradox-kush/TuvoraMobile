@@ -1,5 +1,6 @@
 package com.nuvio.app.features.player
 
+import com.nuvio.app.features.player.keepawake.PlaybackKeepAwakePolicy
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -93,10 +95,20 @@ internal fun PlayerScreenContent(args: PlayerScreenArgs) {
     }
     val keepScreenAwake by remember(runtime) {
         derivedStateOf {
-            runtime.errorMessage == null &&
-                (runtime.playbackSnapshot.isPlaying ||
-                    (runtime.shouldPlay && runtime.playbackSnapshot.isLoading))
+            // B279: watch intent, not the engine's isPlaying (a stall or reconnect reports isPlaying=false).
+            PlaybackKeepAwakePolicy.shouldHold(
+                playIntent = true,
+                userPaused = !runtime.shouldPlay,
+                ended = runtime.playbackSnapshot.isEnded,
+                error = runtime.errorMessage != null,
+                inBackground = false, // the iOS idle timer is inert in the background and the effect disposes on teardown
+            )
         }
+    }
+
+    // B279: Android engines AND this decision into their own View.keepScreenOn hold (a no-op elsewhere).
+    LaunchedEffect(runtime.playerController, keepScreenAwake) {
+        runtime.playerController?.setKeepAwakeAllowed(keepScreenAwake)
     }
 
     BoxWithConstraints(
