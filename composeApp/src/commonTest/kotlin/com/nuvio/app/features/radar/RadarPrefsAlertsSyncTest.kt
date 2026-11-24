@@ -84,6 +84,13 @@ class RadarPrefsAlertsSyncTest {
     }
 
     @Test
+    fun `a push that did not carry alerts never clears alerts_dirty`() {
+        // The snapshot was read before the alerts change: clean, so the payload had no `alerts` key.
+        val pushedClean = local
+        assertTrue(RadarPrefsPull.afterPush(current = dirty, pushed = pushedClean).alertsDirty, "the change still has to go out")
+    }
+
+    @Test
     fun `an alerts change made after the push read stays dirty`() {
         val since = dirty.copy(alerts = quietAlerts.copy(enabled = false))
         assertTrue(RadarPrefsPull.afterPush(current = since, pushed = dirty).alertsDirty, "changed since the read")

@@ -19,6 +19,11 @@ class WatchBlockPolicyTest {
         assertEquals(WatchUi.Browsing(offer), decide(null, WatchLookup.Found(offer), GameState.UPCOMING))
     }
 
+    @Test fun `unconfirmed carriers offer no Play`() {
+        assertEquals(WatchUi.NoMatch, decide(null, WatchLookup.Unconfirmed(setOf("ch-2"))))
+        assertEquals(WatchUi.Watching(playing, switchTo = null), decide(playing, WatchLookup.Unconfirmed(setOf("ch-2"))))
+    }
+
     @Test fun `watching a different channel offers Switch to the matched one`() {
         assertEquals(WatchUi.Watching(playing, switchTo = offer), decide(playing, WatchLookup.Found(offer)))
     }

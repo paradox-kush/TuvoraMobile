@@ -175,4 +175,51 @@ class SportsAlertControllerTest {
         assertEquals(listOf("shown", "held", "action"), h.sent.map { it["outcome"] }, "duplicate and not_followed are never emitted")
         assertTrue(h.sent.none { p -> p.values.any { it == "e1" || it == "x" || it == "Arsenal" || it == "4328" } }, "no ids or names")
     }
+
+    @Test
+    fun `a flush that needs the watch check asks before dropping`() = runTest {
+        val watch = FakeWatch(WatchLookup.NoMatch)
+        val h = Harness(this, backgroundScope, watch)
+        h.inputs.spoiler = ScoreSpoilerSettings(shown = true, delaySeconds = 30)
+        h.controller.onAlert(alert())
+        h.inputs.playback = PlaybackContext.LiveTv
+        h.inputs.playing = setOf("live:9")
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals(1, watch.lookups, "the flush started the watch lookup")
+        assertEquals("Goal · Arsenal 1–0 Chelsea", h.controller.banner.value?.title, "no channel carries it: shown")
+    }
+
+    @Test
+    fun `going to the background clears what is held`() = runTest {
+        val h = Harness(this, backgroundScope, FakeWatch(WatchLookup.NoMatch))
+        h.inputs.spoiler = ScoreSpoilerSettings(shown = true, delaySeconds = 30)
+        h.controller.onAlert(alert())
+        h.controller.clearHeld()
+        advanceTimeBy(31_000)
+        runCurrent()
+        assertNull(h.controller.banner.value, "nothing surfaces on return")
+    }
+
+    @Test
+    fun `any channel that carries the game counts even when the watch button has another`() = runTest {
+        val found = WatchLookup.Found(WatchOffer("live:1", "Sky Sports"), carriers = setOf("live:1", "live:9"))
+        val h = Harness(this, backgroundScope, FakeWatch(found))
+        h.inputs.playback = PlaybackContext.LiveTv
+        h.inputs.playing = setOf("live:9")
+        h.controller.onAlert(alert())
+        runCurrent()
+        assertNull(h.controller.banner.value, "the viewer is on a second carrier")
+        assertEquals("watching_this_game", h.sent.last()["reason"], "reported")
+    }
+
+    @Test
+    fun `unconfirmed carriers count for gate 3`() = runTest {
+        val h = Harness(this, backgroundScope, FakeWatch(WatchLookup.Unconfirmed(setOf("live:9"))))
+        h.inputs.playback = PlaybackContext.LiveTv
+        h.inputs.playing = setOf("live:9")
+        h.controller.onAlert(alert())
+        runCurrent()
+        assertNull(h.controller.banner.value, "a channel that may carry it is on screen")
+    }
 }

@@ -120,8 +120,11 @@ class SportsAlertSettingsTest {
             mutedTeams = (1..500).map { longId("t", it) }.toSet(),
             games = (1..50).map { GameAlertOverride(longId("g", it), AlertLevel.All, Long.MAX_VALUE) },
         )
-        val bytes = SportsAlertSettings.toJson(worst).toString().encodeToByteArray().size
-        assertTrue(bytes < 8 * 1024, "the backend stores it only under 8 KB: $bytes bytes")
+        val json = SportsAlertSettings.toJson(worst)
+        val compact = json.toString().encodeToByteArray().size
+        assertTrue(compact <= 7_000, "client budget: $compact compact bytes")
+        val jsonb = jsonbTextLength(json)
+        assertTrue(jsonb < 8_192, "the backend measures jsonb text (with spaces): $jsonb bytes")
         val back = SportsAlertSettings.fromJson(SportsAlertSettings.toJson(worst))
         assertTrue(back.games.isNotEmpty() && back.mutedTeams.isNotEmpty(), "trimmed, not emptied")
     }
@@ -174,5 +177,13 @@ class SportsAlertSettingsTest {
         assertNull(SportsAlertLabels.nextGameLevel(AlertLevel.Off), "off then default")
         assertEquals("22:00", SportsAlertLabels.clock(22 * 60), "clock")
         assertEquals(23 * 60 + 30, SportsAlertLabels.stepClock(0, -1), "wraps back past midnight")
+    }
+
+    /** Postgres renders jsonb as text with a space after every `:` and `,`: the length the backend's check sees. */
+    private fun jsonbTextLength(e: kotlinx.serialization.json.JsonElement): Int = when (e) {
+        is JsonObject -> 2 + e.entries.sumOf { (k, v) -> JsonPrimitive(k).toString().encodeToByteArray().size + 2 + jsonbTextLength(v) } +
+            (e.size - 1).coerceAtLeast(0) * 2
+        is kotlinx.serialization.json.JsonArray -> 2 + e.sumOf { jsonbTextLength(it) } + (e.size - 1).coerceAtLeast(0) * 2
+        else -> e.toString().encodeToByteArray().size
     }
 }
