@@ -1256,7 +1256,7 @@ private fun SportsLiveRail(
 /**
  * The hub header's spoiler controls: "Scores shown" / "Scores hidden" (one press toggles) and, while shown,
  * "Delay: Off / 15 s / 30 s / 60 s" (one press cycles). Both flip the per-profile, synced setting. Beside them the
- * sports-alerts bell: "Alerts on" / "Alerts off" (one press toggles; disabled with "Sign in to get alerts" when signed out).
+ * sports-alerts bell: "Alerts on" / "Alerts off" (one press toggles; disabled with "Sign in for alerts" when signed out).
  */
 @Composable
 private fun ScoreSpoilerChips(state: RadarUiState, modifier: Modifier = Modifier) {

@@ -478,7 +478,7 @@ private struct RevealScoresChip: View {
 }
 
 /// `Alerts: Default / All / Off` for a followed game: OK moves to the next level. Signed out it reads
-/// `Sign in to get alerts`, dims and can't take focus; same house focus treatment as the reveal chip.
+/// `Sign in for alerts`, dims and can't take focus; same house focus treatment as the reveal chip.
 private struct GameAlertsChip: View {
     let chip: AlertChip
     /// A fixture without a kick-off time can't hold a per-game level (it expires from kick-off): shown, not settable.

@@ -122,7 +122,7 @@ object TvSportsAlerts {
         }
     }
 
-    /** The hub header's bell chip (`Alerts on` / `Alerts off`; `Sign in to get alerts`, disabled, when signed out). */
+    /** The hub header's bell chip (`Alerts on` / `Alerts off`; `Sign in for alerts`, disabled, when signed out). */
     fun hubChip(): AlertChip = SportsAlertLabels.hubChip(SportsAlerts.settings(), SportsAlerts.signedIn.value)
 
     fun toggleEnabled() = SportsAlerts.toggleEnabled()

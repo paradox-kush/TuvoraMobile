@@ -8,7 +8,7 @@ data class AlertChip(val label: String, val selected: Boolean, val enabled: Bool
  * screens' convention). Apple TV and NuvioTV read the same strings.
  */
 object SportsAlertLabels {
-    const val SIGN_IN = "Sign in to get alerts"
+    const val SIGN_IN = "Sign in for alerts"
 
     fun level(level: AlertLevel): String = when (level) {
         AlertLevel.All -> "Everything"
@@ -53,7 +53,7 @@ object SportsAlertLabels {
 
     /**
      * The game page chip `Alerts: Default / All / Off`, only for a game in a followed league or with a followed team
-     * (null otherwise). Signed out: disabled, `Sign in to get alerts`.
+     * (null otherwise). Signed out: disabled, `Sign in for alerts`.
      */
     fun gameChip(settings: SportsAlertSettings, eventId: String, followed: Boolean, signedIn: Boolean, nowMs: Long): AlertChip? {
         if (!followed) return null
