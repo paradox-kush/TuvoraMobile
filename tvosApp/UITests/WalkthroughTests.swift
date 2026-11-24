@@ -121,6 +121,7 @@ final class WalkthroughTests: XCTestCase {
         // a viewer presses RIGHT, then DOWN off the header chips, to reach the channels.
         for _ in 0..<4 where !landed {
             if focusedId().hasPrefix("sidebar.") { press(.right, settle: 1.5) } else if focusedId().hasPrefix("hubchip.") { press(.down, settle: 1.5) }
+            else if focusedId().hasPrefix("#"), app.buttons["All channels"].exists { press(.right, settle: 1.5) }   // on a category: into the channels
             landed = waitFocus(8, onChannelRow)
         }
         XCTAssertTrue(landed, "iptv: no channel row could be focused (focus \(focusedId()))")
@@ -131,6 +132,10 @@ final class WalkthroughTests: XCTestCase {
         let channel = focusedId()
         XCTAssertFalse(categories.exists, "guide: the category column should start tucked away while a channel has focus (focus \(channel))")
         press(.left, settle: 1.5)
+        // LEFT lands on the CURRENT category, which earlier launches may have left on another one: walk to All channels.
+        XCTAssertTrue(categories.exists, "guide: LEFT from a channel did not bring the category column back (focus \(focusedId()))")
+        for _ in 0..<8 where focusedId() != "#All channels" { press(.up, settle: 0.6) }
+        for _ in 0..<12 where focusedId() != "#All channels" { press(.down, settle: 0.6) }
         XCTAssertEqual(focusedId(), "#All channels", "guide: could not reach the All channels category")
         press(.select, settle: 3)
         press(.right, settle: 1.5)
