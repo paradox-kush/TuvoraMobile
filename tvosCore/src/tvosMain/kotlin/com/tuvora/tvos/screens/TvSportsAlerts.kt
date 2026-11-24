@@ -5,6 +5,7 @@ import com.nuvio.app.core.contracts.PlaybackContextAccess
 import com.nuvio.app.core.contracts.PlayingChannelsAccess
 import com.nuvio.app.features.common.lifecycle.Disposable
 import com.nuvio.app.features.livetv.LiveNowWatching
+import com.nuvio.app.features.radar.RadarFixture
 import com.nuvio.app.features.radar.RadarGameWatch
 import com.nuvio.app.features.radar.RadarRepository
 import com.nuvio.app.features.radar.alerts.AlertChip
@@ -12,6 +13,8 @@ import com.nuvio.app.features.radar.alerts.BannerAction
 import com.nuvio.app.features.radar.alerts.SportsAlertLabels
 import com.nuvio.app.features.radar.alerts.SportsAlertSettings
 import com.nuvio.app.features.radar.alerts.SportsAlerts
+import com.nuvio.app.features.radar.fixtureByKey
+import com.tuvora.tvos.player.TvPlayerSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,9 +45,9 @@ object TvSportsAlerts {
 
     /** Long press on Select while a banner is up. Swift does what the result says. */
     fun act(): TvAlertAction? = when (val action = SportsAlerts.act()) {
-        is BannerAction.OpenGame -> TvAlertAction(kind = TvAlertAction.OPEN_GAME, eventId = action.eventId, channelId = null)
-        is BannerAction.Watch -> TvAlertAction(kind = TvAlertAction.WATCH, eventId = action.eventId, channelId = action.channelId)
-        BannerAction.OpenSports -> TvAlertAction(kind = TvAlertAction.OPEN_SPORTS, eventId = null, channelId = null)
+        is BannerAction.OpenGame -> TvAlertAction(kind = TvAlertAction.OPEN_GAME, eventId = action.eventId, channelId = null, channelName = null)
+        is BannerAction.Watch -> TvAlertAction(kind = TvAlertAction.WATCH, eventId = action.eventId, channelId = action.channelId, channelName = action.channelName)
+        BannerAction.OpenSports -> TvAlertAction(kind = TvAlertAction.OPEN_SPORTS, eventId = null, channelId = null, channelName = null)
         null -> null
     }
 
@@ -64,6 +67,16 @@ object TvSportsAlerts {
         PlayingChannelsAccess.current().set(contentId)
         LiveNowWatching.set(contentId, name)
     }
+
+    /** Whether [session] reads as Live TV for [enterPlayback] ([TvSportsAlertsPolicy.isLiveLaunch]). */
+    fun isLiveLaunch(session: TvPlayerSession): Boolean = TvSportsAlertsPolicy.isLiveLaunch(session.launch.streamType)
+
+    /** The channel [session] publishes through [setPlayingChannel], or null for VOD ([TvSportsAlertsPolicy.playingChannel]). */
+    fun playingChannelOf(session: TvPlayerSession): String? =
+        TvSportsAlertsPolicy.playingChannel(session.launch.streamType, session.launch.videoId, session.launch.parentMetaId)
+
+    /** The fixture an alert's event id names, from what the hub already holds (a local read); null if not held. */
+    fun fixtureFor(eventId: String): RadarFixture? = RadarRepository.uiState.value.fixtureByKey(eventId)
 
     /** The player stopped showing [contentId]. Clears exactly that id: never another player's channel. */
     fun clearPlayingChannel(contentId: String) {
@@ -126,7 +139,7 @@ object TvSportsAlerts {
 }
 
 /** What Swift must do after a banner action: [kind] is one of the constants. */
-data class TvAlertAction(val kind: String, val eventId: String?, val channelId: String?) {
+data class TvAlertAction(val kind: String, val eventId: String?, val channelId: String?, val channelName: String?) {
     companion object {
         const val OPEN_GAME = "open_game"
         const val WATCH = "watch"

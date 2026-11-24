@@ -44,6 +44,19 @@ object TvSportsAlertsPolicy {
         isSummary = banner.isSummary,
     )
 
+    /**
+     * What the player feeds the alerts while it shows a launch: a live stream (a replay included) reads as Live TV,
+     * anything else as VOD, exactly as the phone's PlayerDestination.
+     */
+    fun isLiveLaunch(streamType: String?): Boolean = streamType?.trim().equals("live", ignoreCase = true)
+
+    /**
+     * The channel a launch publishes as playing (gate 3), the id the phone's Live TV screen publishes: its content id
+     * ([videoId], else [parentMetaId]) for a live launch, null for VOD.
+     */
+    fun playingChannel(streamType: String?, videoId: String?, parentMetaId: String): String? =
+        if (isLiveLaunch(streamType)) videoId ?: parentMetaId else null
+
     /** The settings page, in order. Ids are what Swift passes back to [com.tuvora.tvos.screens.TvSportsAlerts.press]. */
     fun rows(s: SportsAlertSettings, signedIn: Boolean): List<TvAlertSettingRow> {
         if (!signedIn) return listOf(TvAlertSettingRow(ROW_ENABLED, "Sports alerts", SportsAlertLabels.SIGN_IN, isSwitch = false, on = false))

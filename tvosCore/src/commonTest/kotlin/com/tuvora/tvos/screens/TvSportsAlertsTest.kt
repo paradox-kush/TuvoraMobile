@@ -63,4 +63,15 @@ class TvSportsAlertsTest {
         assertEquals("22:00", all.first { it.id == TvSportsAlertsPolicy.ROW_QUIET_FROM }.value, "quiet from")
         assertEquals(7, TvSportsAlertsPolicy.rows(SportsAlertSettings(quietOn = false), signedIn = true).size, "no time rows with quiet hours off")
     }
+
+    @Test
+    fun `a live launch reads as live tv and publishes its channel`() {
+        assertEquals(true, TvSportsAlertsPolicy.isLiveLaunch("live"), "live")
+        assertEquals(true, TvSportsAlertsPolicy.isLiveLaunch(" LIVE "), "case and spaces")
+        assertEquals(false, TvSportsAlertsPolicy.isLiveLaunch("movie"), "film")
+        assertEquals(false, TvSportsAlertsPolicy.isLiveLaunch(null), "unknown is VOD")
+        assertEquals("xtream:1:live:42", TvSportsAlertsPolicy.playingChannel("live", "xtream:1:live:42", "parent"), "the content id")
+        assertEquals("parent", TvSportsAlertsPolicy.playingChannel("live", null, "parent"), "falls back to the parent id")
+        assertEquals(null, TvSportsAlertsPolicy.playingChannel("movie", "tt1", "tt1"), "VOD publishes no channel")
+    }
 }
