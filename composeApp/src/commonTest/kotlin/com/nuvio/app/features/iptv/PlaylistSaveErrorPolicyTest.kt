@@ -228,3 +228,11 @@ class PlaylistSaveErrorPolicyTest {
         assertTrue("turned off" !in PlaylistSaveError.SIGNING_IN.fallbackText)
     }
 }
+
+class FirstLeaveSaveErrorVocabTest {
+    @kotlin.test.Test
+    fun `the funnel save_error vocabulary is exactly the save-error enum plus other`() {
+        val fromEnum = PlaylistSaveError.entries.map { it.name.lowercase() }.toSet() + "other"
+        kotlin.test.assertEquals(fromEnum, com.nuvio.app.core.telemetry.api.FirstRunVocab.saveErrors)
+    }
+}

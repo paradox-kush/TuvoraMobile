@@ -27,6 +27,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
+import com.nuvio.app.core.telemetry.api.funnelSourceFormOpened
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +91,7 @@ internal fun AddonsSettingsPageContent(
 ) {
     LaunchedEffect(Unit) {
         AddonRepository.initialize()
+        TelemetryAccess.current().funnelSourceFormOpened()
     }
 
     val uiState by AddonRepository.uiState.collectAsStateWithLifecycle()

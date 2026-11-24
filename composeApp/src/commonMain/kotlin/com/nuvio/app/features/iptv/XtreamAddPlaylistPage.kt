@@ -28,6 +28,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
+import com.nuvio.app.core.telemetry.api.funnelSourceFormOpened
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -162,6 +165,7 @@ internal fun LazyListScope.xtreamAddPlaylistContent(
             return@item
         }
         val startOnCode = remember { XtreamAddPage.consumeStartWithCode() }
+        if (editing == null) LaunchedEffect(Unit) { TelemetryAccess.current().funnelSourceFormOpened() }
 
         // Prefilled once per target playlist (add mode -> blank). Fields are plain remembered state.
         val editingIsM3uUrl = editing?.sourceType == SOURCE_TYPE_M3U_URL

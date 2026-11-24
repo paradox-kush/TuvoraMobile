@@ -2,6 +2,8 @@ package com.nuvio.app.features.iptv
 
 import com.nuvio.app.core.telemetry.api.FirstRunVocab
 import com.nuvio.app.core.telemetry.api.firstSourceAdded
+import com.nuvio.app.core.telemetry.api.funnelSaveFailed
+import com.nuvio.app.core.telemetry.api.funnelSaveTried
 import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import com.nuvio.app.features.iptv.content.IptvContentDb
 import com.nuvio.app.features.iptv.match.XtreamMatchIndex
@@ -245,6 +247,7 @@ object XtreamRepository : IptvCatalog {
      * [xtreamAccountFromForm] layers the option fields on before the live verify + persist.
      */
     internal fun addFromForm(input: XtreamFormInput, onResult: (Boolean) -> Unit) {
+        TelemetryAccess.current().funnelSaveTried()
         // UX21: say WHICH problem the form has (empty fields vs. an address that isn't one) before
         // any network — the builders below return a bare null for both.
         PlaylistSaveErrorPolicy.validate(input)?.let { error ->
@@ -297,6 +300,7 @@ object XtreamRepository : IptvCatalog {
                 input.pickedFile?.let { copyM3UFileToStorage(account.id, it) }
             }.isSuccess
             if (!copyOk) {
+                noteSaveFailed(PlaylistSaveMessage.Known(PlaylistSaveError.FILE_UNREADABLE))
                 val text = PlaylistSaveError.FILE_UNREADABLE.text()
                 _uiState.update { it.copy(isValidating = false, error = text) }
                 onResult(false)
@@ -304,6 +308,7 @@ object XtreamRepository : IptvCatalog {
             }
             // No pick + no existing local copy = nothing to ingest.
             if (input.pickedFile == null && !M3UFileStore.hasLocalCopy(account)) {
+                noteSaveFailed(PlaylistSaveMessage.Known(PlaylistSaveError.MISSING_M3U_FILE))
                 val text = PlaylistSaveError.MISSING_M3U_FILE.text()
                 _uiState.update { it.copy(isValidating = false, error = text) }
                 onResult(false)
@@ -319,7 +324,9 @@ object XtreamRepository : IptvCatalog {
                 }
                 .onFailure { e ->
                     // UX11: a mapped sentence, never a parser's or the platform's raw message.
-                    val text = PlaylistSaveErrorPolicy.classify(e, account.sourceType).text()
+                    val failure = PlaylistSaveErrorPolicy.classify(e, account.sourceType)
+                    noteSaveFailed(failure)
+                    val text = failure.text()
                     _uiState.update { it.copy(isValidating = false, error = text) }
                     onResult(false)
                 }
@@ -333,6 +340,7 @@ object XtreamRepository : IptvCatalog {
      * the form's own option fields (EPG/DNS/auto-refresh) always win because the form shows them.
      */
     internal fun editFromForm(oldId: String, input: XtreamFormInput, onResult: (Boolean) -> Unit) {
+        TelemetryAccess.current().funnelSaveTried()
         // A MANAGED playlist's edit is a rename only, built from the pulled account (never from form
         // fields): re-normalising its address would silently detach it from its provider.
         managedRenameCandidate(oldId, input.name)?.let { candidate ->
@@ -417,7 +425,9 @@ object XtreamRepository : IptvCatalog {
                     lastVerifyRefused = e is com.nuvio.app.core.sources.SourceDisabledOnDeviceException
                     // UX11/UX20: a plain, mapped sentence — "unreachable" is no longer reported as
                     // "Authentication failed", and the platform's raw text never reaches the form.
-                    val text = PlaylistSaveErrorPolicy.classify(e, account.sourceType).text()
+                    val failure = PlaylistSaveErrorPolicy.classify(e, account.sourceType)
+                    noteSaveFailed(failure)
+                    val text = failure.text()
                     _uiState.update { it.copy(isValidating = false, error = text) }
                     onResult(false)
                 }
@@ -764,7 +774,11 @@ object XtreamRepository : IptvCatalog {
      * Shows a form error resolved to its localized sentence. Resolution suspends (string resources),
      * so the error lands — and [onResult] fires — from [scope], like every verify failure already did.
      */
+    /** First-visit summary (`first_leave`): the last failed save's error kind. A code, never the message text. */
+    private fun noteSaveFailed(message: PlaylistSaveMessage) = TelemetryAccess.current().funnelSaveFailed(message.funnelKind())
+
     private fun reportFormError(message: PlaylistSaveMessage, onResult: (Boolean) -> Unit) {
+        noteSaveFailed(message)
         scope.launch {
             val text = message.text()
             _uiState.update { it.copy(isValidating = false, error = text) }

@@ -10,6 +10,9 @@ enum class FirstRunStep(val wire: String) {
     SOURCE_ADDED("source_added"),
     FIRST_CONTENT_LOADED("first_content_loaded"),
     FIRST_PLAYBACK("first_playback"),
+
+    /** The first visit ended (app left the foreground) before anything played. Fired by the service, never by a call site. */
+    FIRST_LEAVE("first_leave"),
 }
 
 /** Closed vocabularies for `source_kind` and `via`. Anything else is sent as `unknown`. */
@@ -27,6 +30,18 @@ object FirstRunVocab {
     const val VIA_SYNC = "sync"
     const val VIA_UNKNOWN = "unknown"
     val vias: Set<String> = setOf(VIA_MANUAL, VIA_SETUP_CODE, VIA_SYNC, VIA_UNKNOWN)
+
+    /**
+     * Closed vocabulary of `save_error`: the lower-cased names of the playlist-save error enum, `other` for a failure
+     * outside it, `none` when no save failed (a test pins this to the enum so the two cannot drift).
+     */
+    const val SAVE_ERROR_OTHER = "other"
+    const val SAVE_ERROR_NONE = "none"
+    val saveErrors: Set<String> = setOf(
+        "missing_xtream_fields", "missing_m3u_url", "missing_stalker_fields", "missing_m3u_file", "invalid_address",
+        "unreachable", "wrong_credentials", "provider_blocked", "secure_connection_failed", "source_disabled_on_device",
+        "source_disabled_for_account", "signing_in", "file_unreadable", SAVE_ERROR_OTHER,
+    )
 
     /** Maps a playlist `sourceType` (`xtream`, `m3u_url`, `m3u_file`, `stalker`) to a [sourceKinds] value. */
     fun kindOfPlaylist(sourceType: String): String = when (sourceType) {
@@ -48,3 +63,26 @@ fun TelemetryPort.firstContentLoaded(surface: String) =
 /** Playback produced output (the `playback_started` chokepoint). */
 fun TelemetryPort.firstPlayback(kind: String, engine: String) =
     firstRunStep(FirstRunStep.FIRST_PLAYBACK, mapOf("kind" to kind, "engine" to engine))
+
+/**
+ * Facts about the first visit that [FirstRunStep.FIRST_LEAVE] summarises. Closed shapes only: a screen identifier
+ * from the app's own route names, never anything the person typed.
+ */
+sealed interface FirstRunNote {
+    /** A screen was shown ([name] = the `Breadcrumbs.screenChanged` identifier; sanitised by the policy). */
+    data class Screen(val name: String) : FirstRunNote
+
+    /** An add-source form (Xtream / M3U / Stalker / add-on install / media server) was opened. */
+    data object SourceFormOpened : FirstRunNote
+
+    /** The person pressed save/add on such a form. */
+    data object SaveTried : FirstRunNote
+
+    /** A save failed; [kind] is the playlist-save error name lower-cased (anything outside the vocabulary becomes `other`). */
+    data class SaveFailed(val kind: String) : FirstRunNote
+}
+
+fun TelemetryPort.funnelScreen(name: String) = firstRunNote(FirstRunNote.Screen(name))
+fun TelemetryPort.funnelSourceFormOpened() = firstRunNote(FirstRunNote.SourceFormOpened)
+fun TelemetryPort.funnelSaveTried() = firstRunNote(FirstRunNote.SaveTried)
+fun TelemetryPort.funnelSaveFailed(kind: String) = firstRunNote(FirstRunNote.SaveFailed(kind))

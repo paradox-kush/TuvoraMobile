@@ -64,6 +64,12 @@ internal sealed interface PlaylistSaveMessage {
     data class Authored(val text: String) : PlaylistSaveMessage
 }
 
+/** The `save_error` value of the first-run summary: the enum name lower-cased, `other` for a sentence we authored ourselves. */
+internal fun PlaylistSaveMessage.funnelKind(): String = when (this) {
+    is PlaylistSaveMessage.Known -> error.name.lowercase()
+    is PlaylistSaveMessage.Authored -> "other"
+}
+
 /** The neutral transport vocabulary every platform's network stack is mapped onto. */
 internal enum class PlaylistTransportFailure { UNREACHABLE, SECURE_CONNECTION, INVALID_ADDRESS }
 
