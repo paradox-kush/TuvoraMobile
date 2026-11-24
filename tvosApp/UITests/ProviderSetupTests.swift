@@ -4,6 +4,11 @@ import XCTest
 /// screen, driven by the Siri Remote (XCUIRemote). Needs the simulator signed in to the LOCAL test backend
 /// (the app is built with SUPABASE_URL pointing at it) with a managed playlist "Starshare Live" on profile 1
 /// and an unmanaged one ("Plain List") - see the lane notes. Nothing here touches a real account.
+///
+/// Two kinds of test live here. The LANE tests (managed playlist, typed or redeemed codes) need that signed-in
+/// local backend, which a fresh simulator does not have; they skip unless the run says it is the lane:
+/// `TEST_RUNNER_ATV_PROVIDER_LANE=1 xcodebuild test ...` (plus `TEST_RUNNER_ATV_TYPED_CODE` / `_EXPIRED_CODE`
+/// for the code tests). The rest run on any simulator as a local guest.
 final class ProviderSetupTests: XCTestCase {
     private let remote = XCUIRemote.shared
     private var app: XCUIApplication!
@@ -11,6 +16,12 @@ final class ProviderSetupTests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
+    }
+
+    /// Skips a LANE test when the run is not wired to the local provider backend (see the class note).
+    private func requireLane(_ what: String = "a signed-in local backend with the managed test playlists") throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["ATV_PROVIDER_LANE"] == "1",
+                          "provider lane test: needs \(what); run with TEST_RUNNER_ATV_PROVIDER_LANE=1")
     }
 
     private func launch(_ dialog: String, account: String? = nil, extra: [String] = []) {
@@ -36,7 +47,8 @@ final class ProviderSetupTests: XCTestCase {
 
     /// A managed playlist: facts on the left (never focusable), STARSHARE / YOUR LIBRARY / REMOVE shelves on the
     /// right; focus starts on Contact; Up/Down changes shelf and returns to the card that shelf last had.
-    func testManagedDetailsShelvesAndFocusMemory() {
+    func testManagedDetailsShelvesAndFocusMemory() throws {
+        try requireLane()
         launch("playlistDetails", account: "Starshare Live")
         XCTAssertTrue(waitFocus { $0 == "details.card.contact" }, "the page did not start on the first card; focus \(focusedId())")
         XCTAssertTrue(app.staticTexts["details.expiry"].exists || app.descendants(matching: .any)["details.expiry"].exists, "no expiry line")
@@ -59,7 +71,8 @@ final class ProviderSetupTests: XCTestCase {
     }
 
     /// The contact dialog is text + a QR per contact the provider set (Apple TV cannot open WhatsApp).
-    func testContactOpensQrDialog() {
+    func testContactOpensQrDialog() throws {
+        try requireLane()
         launch("playlistDetails", account: "Starshare Live")
         XCTAssertTrue(waitFocus { $0 == "details.card.contact" }, "focus \(focusedId())")
         press(.select, settle: 1.5)
@@ -72,7 +85,8 @@ final class ProviderSetupTests: XCTestCase {
     }
 
     /// Detach: the dialog opens on Cancel; a quick press on the destructive button does nothing.
-    func testDetachNeedsAHoldAndQuickPressDoesNothing() {
+    func testDetachNeedsAHoldAndQuickPressDoesNothing() throws {
+        try requireLane()
         launch("playlistDetails", account: "Starshare Live")
         XCTAssertTrue(waitFocus { $0 == "details.card.contact" }, "focus \(focusedId())")
         press(.down); press(.down)
@@ -93,7 +107,8 @@ final class ProviderSetupTests: XCTestCase {
     }
 
     /// Remove: holding OK for 2.6 s confirms; the page goes with the playlist.
-    func testRemoveHoldConfirms() {
+    func testRemoveHoldConfirms() throws {
+        try requireLane()
         launch("playlistDetails", account: "Plain List")
         XCTAssertTrue(waitFocus { $0.hasPrefix("details.card.") }, "focus \(focusedId())")
         XCTAssertTrue(app.descendants(matching: .any)["details.card.edit"].exists, "an unmanaged playlist lost Edit URL / credentials")
@@ -114,7 +129,8 @@ final class ProviderSetupTests: XCTestCase {
     }
 
     /// Detach: holding OK for 2.8 s detaches; the page then has no provider shelf, no Detach card and no lock note.
-    func testDetachHoldConfirms() {
+    func testDetachHoldConfirms() throws {
+        try requireLane()
         launch("playlistDetails", account: "Starshare Movies")
         XCTAssertTrue(waitFocus { $0.hasPrefix("details.card.") }, "focus \(focusedId())")
         XCTAssertTrue(app.descendants(matching: .any)["details.card.detach"].exists, "the managed playlist has no Detach")
@@ -133,7 +149,8 @@ final class ProviderSetupTests: XCTestCase {
 
     // MARK: settings list
 
-    func testManagedRowSaysWhoManagesIt() {
+    func testManagedRowSaysWhoManagesIt() throws {
+        try requireLane()
         app.launchArguments = ["-smokePickProfile", "1", "-smokeTab", "settings", "-smokeSettings", "integrations", "-smokeIntegration", "iptv"]
         app.launch()
         let row = app.buttons["playlist.row.Starshare Live"]
@@ -167,6 +184,7 @@ final class ProviderSetupTests: XCTestCase {
 
     /// Type a code with the keypad, preview it, add it: lands on the new playlist's details with the banner.
     func testTypeCodeWithKeypadThenAdd() throws {
+        try requireLane("a signed-in local backend that issues the typed code")
         let code = try XCTUnwrap(ProcessInfo.processInfo.environment["ATV_TYPED_CODE"] ?? UserDefaults.standard.string(forKey: "ATV_TYPED_CODE"), "pass the code through ATV_TYPED_CODE")
         launch("setupCode")
         XCTAssertTrue(waitFocus { $0 == "setup.key.A" }, "the code screen did not start on the first key; focus \(focusedId())")
@@ -192,6 +210,7 @@ final class ProviderSetupTests: XCTestCase {
 
     /// An expired code names its cause and offers the provider's contacts.
     func testExpiredCodeShowsContacts() throws {
+        try requireLane("a signed-in local backend that holds the expired code")
         let code = try XCTUnwrap(ProcessInfo.processInfo.environment["ATV_EXPIRED_CODE"] ?? UserDefaults.standard.string(forKey: "ATV_EXPIRED_CODE"))
         launch("setupCode")
         XCTAssertTrue(waitFocus { $0 == "setup.key.A" }, "focus \(focusedId())")
@@ -206,7 +225,8 @@ final class ProviderSetupTests: XCTestCase {
     }
 
     /// The phone route: the screen sits on the code entry; a redeem from outside finishes it by itself.
-    func testFinishesByItselfWhenAPhoneRedeems() {
+    func testFinishesByItselfWhenAPhoneRedeems() throws {
+        try requireLane()
         launch("setupCode")
         XCTAssertTrue(waitFocus { $0 == "setup.key.A" }, "focus \(focusedId())")
         XCTAssertTrue(app.descendants(matching: .any)["setup.account"].exists, "the screen does not say which account it is adding to")
@@ -215,15 +235,15 @@ final class ProviderSetupTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["details.banner"].waitForExistence(timeout: 240), "the screen did not finish by itself")
     }
 
-    /// An empty IPTV hub (profile 2 has no playlists) offers "I have a setup code" and it opens the same code screen.
+    /// An empty IPTV hub (a local guest has no playlists) offers "I have a setup code" and it opens the same code screen.
     func testEmptyHubOffersSetupCode() {
-        app.launchArguments = ["-smokePickProfile", "2", "-smokeTab", "iptv"]
+        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "iptv", "-smokeClearPlaylists"]
         app.launch()
         let button = app.buttons["iptv.empty.setupCode"]
         XCTAssertTrue(button.waitForExistence(timeout: 40), "the empty IPTV hub has no setup-code button")
         XCTAssertTrue(waitFocus(10) { $0 == "iptv.empty.setupCode" }, "the button is not focused; focus \(focusedId())")
         press(.select, settle: 3)
         XCTAssertTrue(waitFocus(15) { $0 == "setup.key.A" }, "the code screen did not open; focus \(focusedId())")
-        XCTAssertTrue(app.descendants(matching: .any)["setup.account"].exists)
+        // A guest has no account to name; "which account" is checked by the lane test (testFinishesByItself...).
     }
 }

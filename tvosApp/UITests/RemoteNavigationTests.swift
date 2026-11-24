@@ -13,7 +13,7 @@ final class RemoteNavigationTests: XCTestCase {
     }
 
     private func launch(_ args: [String]) {
-        app.launchArguments = ["-smokePickProfile", "1"] + args
+        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1"] + args
         app.launch()
     }
 
@@ -149,8 +149,10 @@ final class RemoteNavigationTests: XCTestCase {
     /// "Add the in-app profile switch": the drawer's profile item opens "Who's watching?"; Menu backs
     /// out with no switch; picking the other profile switches and Home fills in (catalogs reload).
     func testSidebarProfileSwitch() {
-        launch(["-smokeTab", "home"])
+        // The drawer's profile item exists only with 2+ profiles; a guest starts with one, so top the set up to two.
+        launch(["-smokeTab", "home", "-smokeSeedProfiles", "2"])
         XCTAssertTrue(waitForFocus(where: { $0 != "<none>" && !$0.hasPrefix("sidebar.") }), "nothing focused on Home")
+        Thread.sleep(forTimeInterval: 4)   // the second profile is created just after Home opens
         press(.menu)
         XCTAssertTrue(waitForFocus(where: { $0.hasPrefix("sidebar.") }, timeout: 5), "Menu did not open the sidebar")
         for _ in 0..<8 where focusedId() != "sidebar.profile" { press(.up, settle: 0.5) }

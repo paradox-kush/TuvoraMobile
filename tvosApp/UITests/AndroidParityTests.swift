@@ -37,6 +37,17 @@ final class AndroidParityTests: XCTestCase {
         tree.lifetime = .keepAlways; add(tree)
         XCTFail("Could not focus \(target.identifier); focused=\(focused.identifier)")
     }
+    /// IPTV entry lands on the first channel with the category column tucked away (2e333ea9d, F7): LEFT from
+    /// a channel brings it back. Waits for the lineup to import, then presses LEFT once a channel row has focus.
+    private func openGuideCategories() {
+        let end = Date().addingTimeInterval(60)
+        while Date() < end {
+            if app.buttons["guide.search"].exists { return }
+            let f = focused
+            if f.exists, f.identifier.isEmpty, f.label.range(of: "^\\d+, ", options: .regularExpression) != nil { remote.press(.left) }
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+    }
     private func choose(_ target: XCUIElement) { focus(target); remote.press(.select) }
     private func waitLabel(_ target: XCUIElement, contains text: String) {
         let ready = expectation(for: NSPredicate(format: "label CONTAINS %@", text), evaluatedWith: target)
@@ -48,7 +59,7 @@ final class AndroidParityTests: XCTestCase {
     }
 
     func testSourcesChoiceSurvivesRelaunch() {
-        launch(["-smokeTab", "settings", "-smokeSettingsDialog", "deviceSources", "-smokeAddM3uLater", "1", fixture])
+        launch(["-smokeTab", "settings", "-smokeSettingsDialog", "deviceSources", "-smokeClearPlaylists", "-smokeAddM3uLater", "1", fixture])
         let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'deviceSources.source.' AND label CONTAINS 'Smoke M3U'")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 50))
         choose(row); waitLabel(row, contains: "Off")
@@ -62,8 +73,9 @@ final class AndroidParityTests: XCTestCase {
     }
 
     func testGuideSearchUsesNativeKeyboardAndBackReturnsToGuide() {
-        launch(["-smokeTab", "iptv", "-smokeAddM3uLater", "1", fixture])
+        launch(["-smokeTab", "iptv", "-smokeClearPlaylists", "-smokeAddM3uLater", "1", fixture])
         let search = app.buttons["guide.search"]
+        openGuideCategories()
         focus(search)
         XCTAssertFalse(app.textFields["guide.search.input"].exists, "Focus must not open the keyboard")
         remote.press(.select)
@@ -86,8 +98,9 @@ final class AndroidParityTests: XCTestCase {
     }
 
     func testSyncedGroupProjectionAppearsAsGuideCategory() {
-        launch(["-smokeTab", "iptv", "-smokeAddM3uLater", "1", fixture, "-smokeGuideGroup"])
+        launch(["-smokeTab", "iptv", "-smokeClearPlaylists", "-smokeAddM3uLater", "1", fixture, "-smokeGuideGroup"])
         let group = app.buttons["guide.customGroup.grp:smoke-parity"]
+        openGuideCategories()
         choose(group)
         XCTAssertTrue(group.hasFocus)
         snapshot("guide-custom-group")

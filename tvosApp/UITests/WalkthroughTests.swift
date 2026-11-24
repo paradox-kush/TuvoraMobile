@@ -4,12 +4,14 @@ import XCTest
 /// TVOS-FOCUS-CHECKLIST.md (researched HIG / WWDC / forum pitfalls); a failure is a finding.
 final class WalkthroughTests: XCTestCase {
     private let remote = XCUIRemote.shared
+    /// Disposable loopback lineup (Scripts/parity-guide-fixture.py); a guest profile has no playlists of its own.
+    private static let lineup = "http://127.0.0.1:18124/lineup.m3u"
     private var app: XCUIApplication!
 
     override func setUp() {
         continueAfterFailure = true   // a walkthrough reports every finding, not just the first
         app = XCUIApplication()
-        app.launchArguments = ["-smokePickProfile", "1", "-smokeTab", "home"]
+        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "home", "-smokeCollections"]
         app.launch()
     }
 
@@ -28,12 +30,22 @@ final class WalkthroughTests: XCTestCase {
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: "/tmp/walk-\(name).png"))
         print("WALK \(name) focus=\(focusedId())")
     }
+    /// A guest profile has no add-ons, so Home's catalog rows are the in-memory sample (-smokeCollections falls back to
+    /// two rows of well-known titles when Home has none). Walks DOWN to the first sample poster.
+    private static let sampleTitles = ["The Shawshank Redemption", "The Godfather", "The Dark Knight", "12 Angry Men", "Inception", "Interstellar", "The Matrix", "Forrest Gump", "Fight Club"]
+    private func focusFirstPoster() -> Bool {
+        for _ in 0..<14 {
+            if Self.sampleTitles.contains(where: { focused.label.hasPrefix($0) }) { return true }
+            press(.down, settle: 1.2)
+        }
+        return false
+    }
     private func inContent(_ id: String) -> Bool { id != "<none>" && !id.hasPrefix("sidebar.") }
 
     private func openTab(_ tab: String) {
         if !focusedId().hasPrefix("sidebar.") { press(.menu) }
         XCTAssertTrue(waitFocus(5) { $0.hasPrefix("sidebar.") }, "Menu did not open the sidebar (on \(focusedId()))")
-        let order = ["home", "search", "library", "iptv", "sports", "settings"]
+        let order = ["home", "search", "library", "iptv", "sports", "calendar", "settings"]
         guard let from = order.firstIndex(where: { "sidebar.\($0)" == focusedId() }), let to = order.firstIndex(of: tab) else { return }
         for _ in 0..<abs(to - from) { press(to > from ? .down : .up, settle: 0.4) }
         XCTAssertEqual(focusedId(), "sidebar.\(tab)")
@@ -44,7 +56,7 @@ final class WalkthroughTests: XCTestCase {
     /// its leftmost column gets back to the sidebar.
     func testEveryTabTakesFocusAndReachesSidebar() {
         XCTAssertTrue(waitFocus { inContent($0) }, "Home: nothing focused after launch")
-        for tab in ["search", "library", "iptv", "sports", "settings", "home"] {
+        for tab in ["search", "library", "iptv", "sports", "calendar", "settings", "home"] {
             openTab(tab)
             let ok = waitFocus(15) { inContent($0) }
             XCTAssertTrue(ok, "\(tab): after choosing it in the sidebar, focus is \(focusedId()) - nothing in the tab took focus")
@@ -69,7 +81,7 @@ final class WalkthroughTests: XCTestCase {
     /// Checklist A/E: details opens from a card, Menu closes it, and focus returns to the card.
     func testDetailsMenuReturnsFocusToOpener() {
         XCTAssertTrue(waitFocus { inContent($0) }, "Home: nothing focused")
-        press(.down, settle: 1.5)   // first catalog row (posters open details)
+        XCTAssertTrue(focusFirstPoster(), "Home: no catalog poster reachable with DOWN (focus \(focusedId()))")
         let opener = focusedId()
         press(.select, settle: 4)
         let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Watch'")).firstMatch
@@ -99,15 +111,18 @@ final class WalkthroughTests: XCTestCase {
     /// Guide: RIGHT into channels hides the categories; LEFT from a channel brings them back (never
     /// the sidebar); RIGHT from a channel enters the timeline, where LEFT travels, not the sidebar.
     func testGuideLeftAndTimeline() {
-        XCTAssertTrue(waitFocus { inContent($0) })
-        openTab("iptv")
-        XCTAssertTrue(waitFocus(20) { inContent($0) }, "iptv: nothing focused")
-        Thread.sleep(forTimeInterval: 4)   // channels load
+        app.terminate()
+        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "iptv", "-smokeClearPlaylists", "-smokeAddM3uLater", "1", Self.lineup]
+        app.launch()
+        // The lineup is added a second after launch; the first channel row ("#1, name") then claims focus.
+        XCTAssertTrue(waitFocus(60) { $0.hasPrefix("#") && $0.dropFirst().first?.isNumber == true }, "iptv: the first channel never took focus (focus \(focusedId()))")
         let categories = app.buttons["All channels"]
         shot("guide-0")
-        // Launch focus is on the hub chips: DOWN into the category column, then RIGHT into channels.
-        for _ in 0..<3 where focusedId().hasPrefix("hubchip.") || focusedId().hasPrefix("#onn") { press(.down, settle: 1) }
-        for _ in 0..<4 where focusedId() != "#All channels" { press(.down, settle: 0.7) }
+        // IPTV entry lands on the first channel (2e333ea9d, F7), with the categories tucked away: LEFT
+        // from a channel brings the column back on the current category (All channels).
+        let channel = focusedId()
+        XCTAssertFalse(categories.exists, "guide: the category column should start tucked away while a channel has focus (focus \(channel))")
+        press(.left, settle: 1.5)
         XCTAssertEqual(focusedId(), "#All channels", "guide: could not reach the All channels category")
         press(.select, settle: 3)
         press(.right, settle: 1.5)
@@ -131,7 +146,7 @@ final class WalkthroughTests: XCTestCase {
     /// Details -> Play -> sources: Menu closes the picker back to details, then details back to Home.
     func testSourcePickerMenuStepsBack() {
         XCTAssertTrue(waitFocus { inContent($0) })
-        press(.down, settle: 1.5)
+        XCTAssertTrue(focusFirstPoster(), "Home: no catalog poster reachable with DOWN (focus \(focusedId()))")
         press(.select, settle: 4)
         let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Watch'")).firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 15), "details did not open")
@@ -169,7 +184,7 @@ final class WalkthroughTests: XCTestCase {
     /// "On the info page, can not scroll down to see all the options like movie actors etc."
     func testDetailsScrollsPastTheButtons() {
         XCTAssertTrue(waitFocus { inContent($0) })
-        press(.down, settle: 1.5)
+        XCTAssertTrue(focusFirstPoster(), "Home: no catalog poster reachable with DOWN (focus \(focusedId()))")
         press(.select, settle: 5)
         let play = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Play' OR label BEGINSWITH 'Resume' OR label BEGINSWITH 'Watch'")).firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 15), "details did not open")
@@ -186,7 +201,7 @@ final class WalkthroughTests: XCTestCase {
     /// back in the guide - never on the sidebar or nowhere. The remote's arrows never reach the shell.
     func testPlayerMenuReturnsToGuide() {
         app.terminate()
-        app.launchArguments = ["-smokePickProfile", "1", "-smokeTab", "iptv", "-smokeGuidePlay"]
+        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "iptv", "-smokeClearPlaylists", "-smokeAddM3uLater", "1", Self.lineup, "-smokeGuidePlay"]
         app.launch()
         Thread.sleep(forTimeInterval: 22)   // preview, then full screen
         shot("player-0")
@@ -205,10 +220,23 @@ final class WalkthroughTests: XCTestCase {
         XCTAssertTrue(app.buttons["hubchip.Live TV"].isHittable, "Menu did not close the player; steps \(steps)")
         XCTAssertTrue(inContent(focusedId()), "after closing the player focus is \(focusedId()); steps \(steps)")
         XCTAssertEqual(app.state, .runningForeground, "Menu from the player left the app")
-        // B112: the closed player's engine must be gone too (it kept playing sound on Apple TV build 4).
+        // B112: the closed player's engine must be gone too (it kept playing sound on Apple TV build 4). Back in the
+        // guide its docked preview strip may legitimately hold ONE engine of its own (the guide previews the focused
+        // channel since 979fd07d1), so "gone" is proved in two steps: never more than that one engine while the guide
+        // is up, and none at all once the viewer has left Live TV (a leaked player engine would still be alive).
         let engines = app.descendants(matching: .any)["engines.live"]
-        let end = Date().addingTimeInterval(10)
-        while Date() < end && !(engines.exists && engines.label == "engines=0") { Thread.sleep(forTimeInterval: 1) }
-        XCTAssertEqual(engines.exists ? engines.label : "<missing>", "engines=0", "an engine outlived the player; steps \(steps)")
+        func count() -> String { engines.exists ? engines.label : "<missing>" }
+        let settle = Date().addingTimeInterval(10)
+        while Date() < settle && !(count() == "engines=0" || count() == "engines=1") { Thread.sleep(forTimeInterval: 1) }
+        XCTAssertTrue(["engines=0", "engines=1"].contains(count()), "more than the guide's own preview engine is alive after the player closed (\(count())); steps \(steps)")
+        // Leave Live TV: Menu to the sidebar, Home, and the guide's preview goes with its screen.
+        for _ in 0..<3 where !focusedId().hasPrefix("sidebar.") { press(.menu, settle: 1.5) }
+        XCTAssertTrue(focusedId().hasPrefix("sidebar."), "Menu did not open the sidebar from the guide (focus \(focusedId()))")
+        for _ in 0..<6 where focusedId() != "sidebar.home" { press(.up, settle: 0.5) }
+        XCTAssertEqual(focusedId(), "sidebar.home")
+        press(.select, settle: 2)
+        let end = Date().addingTimeInterval(15)
+        while Date() < end && count() != "engines=0" { Thread.sleep(forTimeInterval: 1) }
+        XCTAssertEqual(count(), "engines=0", "an engine outlived the player and the guide; steps \(steps)")
     }
 }

@@ -24,7 +24,7 @@ final class CollectionsTests: XCTestCase {
     private func launch(layout: String) {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["-smokePickProfile", "1", "-smokeTab", "home", "-smokeCollections", "-smokeHomeLayout", layout]
+        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "home", "-smokeCollections", "-smokeHomeLayout", layout]
         app.launch()
     }
 

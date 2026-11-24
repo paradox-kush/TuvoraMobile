@@ -37,7 +37,7 @@ final class HubSearchTests: XCTestCase {
 
     /// Opens the IPTV tab with the demo playlist and waits for the hub header.
     private func launchHub() throws {
-        app.launchArguments = ["-smokePickProfile", "1", "-smokeTab", "iptv", "-smokeAddM3uLater", "1", Self.demo]
+        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "iptv", "-smokeClearPlaylists", "-smokeAddM3uLater", "1", Self.demo]
         app.launch()
         guard app.buttons["hubchip.Movies"].waitForExistence(timeout: 90) else {
             throw XCTSkip("the demo playlist did not load (offline, or the profile already has playlists that hide it)")

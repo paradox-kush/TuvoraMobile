@@ -12,7 +12,8 @@ final class TelemetryReportTests: XCTestCase {
 
     private func launch(_ args: [String], consent: Bool = true) {
         app = XCUIApplication()
-        app.launchArguments = ["-smokeDiagnostics", consent ? "true" : "false"] + args
+        // A guest profile, so a fresh simulator gets past sign-in; the explicit consent below survives it.
+        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeDiagnostics", consent ? "true" : "false"] + args
         app.launch()
     }
 
