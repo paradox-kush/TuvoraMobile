@@ -1,6 +1,9 @@
 package com.nuvio.app.core.sync
 
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 
 internal enum class AppVisibility {
@@ -30,3 +33,24 @@ internal fun shouldTriggerForegroundWork(visibility: AppVisibility): Boolean =
 /** Foreground-only view of [AppForegroundMonitor.events], per [shouldTriggerForegroundWork]. */
 internal fun Flow<AppVisibility>.foregroundEvents(): Flow<AppVisibility> =
     filter { shouldTriggerForegroundWork(it) }
+
+/**
+ * The visibility stream for a platform that offers "is active now?" plus became-active / will-resign notifications
+ * (iOS, tvOS). The observers are registered BEFORE the current state is read: read first and an activation that
+ * lands in between (app launch: the state reads Inactive, then didBecomeActive posts) is lost, and the stream sits on
+ * Background until the next background/foreground round trip. That silently kept sports alerts (and every other
+ * foreground-gated consumer) off for a whole launch on iPhone (2026-11-24 central pass).
+ *
+ * [observe] registers the two callbacks and returns their unregister action.
+ */
+internal fun appVisibilityEvents(
+    isActive: () -> Boolean,
+    observe: (onActive: () -> Unit, onResign: () -> Unit) -> (() -> Unit),
+): Flow<AppVisibility> = callbackFlow {
+    val unregister = observe(
+        { trySend(AppVisibility.Foreground) },
+        { trySend(AppVisibility.Background) },
+    )
+    trySend(if (isActive()) AppVisibility.Foreground else AppVisibility.Background)
+    awaitClose { unregister() }
+}.distinctUntilChanged()
