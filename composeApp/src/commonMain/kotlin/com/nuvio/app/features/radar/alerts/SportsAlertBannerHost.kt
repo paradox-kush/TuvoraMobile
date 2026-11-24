@@ -71,7 +71,7 @@ internal object SportsAlertBannerHostImpl : SportsAlertsHost {
             onAction = {
                 when (val action = SportsAlerts.act()) {
                     is BannerAction.OpenGame -> {
-                        SportsGameRequest.request(action.eventId)
+                        SportsGameRequest.request(action.eventId, atMs = SportsAlerts.nowMs())
                         onOpenSports()
                     }
                     is BannerAction.Watch -> onPlayChannel(action.channelId)

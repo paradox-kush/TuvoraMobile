@@ -224,6 +224,9 @@ object TvAppLifecycle {
                 AppForegroundMonitor.events().collectLatest { visibility ->
                     when (visibility) {
                         AppVisibility.Foreground -> {
+                            // First: in-app sports alerts listen only while the app is in front (no polls, no HTTP).
+                            // Started before the pulls below so a slow or throwing step can never leave them off.
+                            SportsAlerts.startForegroundSession()
                             NetworkStatusRepository.requestForegroundRefresh()
                             MemberAccessRepository.refreshIfStale()
                             if (syncProfileId != null) {
@@ -234,8 +237,6 @@ object TvAppLifecycle {
                             }
                             runCatching { IptvCatalogAccess.catalog.refreshDuePlaylists() }
                                 .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
-                            // In-app sports alerts listen only while the app is in front (no polls, no HTTP).
-                            SportsAlerts.startForegroundSession()
                         }
                         AppVisibility.Background -> {
                             SyncManager.stopPeriodicNuvioSyncPull()

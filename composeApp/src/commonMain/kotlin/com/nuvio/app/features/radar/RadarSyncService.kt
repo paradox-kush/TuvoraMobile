@@ -278,7 +278,8 @@ internal object RadarPrefsPull {
             ScoreSpoilerSettings.sanitizeDelay(current.scoreDelaySeconds) == ScoreSpoilerSettings.sanitizeDelay(pushed.scoreDelaySeconds)
         val alertsSame = current.alerts == pushed.alerts
         val clearSpoiler = current.spoilerDirty && spoilerSame
-        val clearAlerts = current.alertsDirty && alertsSame
+        // Only a push whose snapshot carried `alerts` (it was dirty, so the key was sent) can confirm them.
+        val clearAlerts = current.alertsDirty && pushed.alertsDirty && alertsSame
         if (!clearSpoiler && !clearAlerts) return current
         return current.copy(
             spoilerDirty = current.spoilerDirty && !clearSpoiler,

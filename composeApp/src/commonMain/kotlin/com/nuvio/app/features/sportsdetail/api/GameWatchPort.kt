@@ -10,7 +10,13 @@ data class NowWatching(val channelId: String, val channelName: String)
 data class WatchOffer(val channelId: String, val channelName: String, val logo: String? = null)
 
 sealed interface WatchLookup {
-    data class Found(val offer: WatchOffer) : WatchLookup
+    /**
+     * [offer] is the best CONFIRMED match (the Watch / Play button). [carriers] is every channel the matcher thinks
+     * carries the game, any confidence (sports alerts' "already watching this game" check), the offer's included.
+     */
+    data class Found(val offer: WatchOffer, val carriers: Set<String> = setOf(offer.channelId)) : WatchLookup
+    /** Channels may carry the game but none is confirmed: no Play button; [carriers] still count as "watching it". */
+    data class Unconfirmed(val carriers: Set<String>) : WatchLookup
     /** No IPTV playlist on this device. */
     data object NoPlaylist : WatchLookup
     /** Playlists exist but no channel lists this game. */

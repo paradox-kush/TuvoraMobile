@@ -119,6 +119,13 @@ internal class SportsAlertController(
         clear()
     }
 
+    /** The app went to the background: drop everything held (it would be old news on return) and its timer. */
+    fun clearHeld() {
+        synchronized(lock) { ledger = SportsAlertPolicy.clearHeld(ledger) }
+        timerJob?.cancel()
+        timerJob = null
+    }
+
     /** A profile switch or sign-out: nothing held for the old profile may surface under the new one. */
     fun reset() {
         synchronized(lock) { ledger = AlertLedger() }
@@ -196,7 +203,11 @@ internal class SportsAlertController(
             SportsAlertPolicy.onTimer(settings, ctx, ledger).also { ledger = it.ledger }
         }
         result.dropped.forEach { (alert, reason) -> SportsAlertTelemetry.dropped(alert, reason)?.let(report) }
-        result.held.forEach { (alert, reason) -> report(SportsAlertTelemetry.held(alert, reason)) }
+        result.held.forEach { (alert, reason) ->
+            report(SportsAlertTelemetry.held(alert, reason))
+            // The flush asks too: an alert re-held for the watch check is never dropped as unknown without a lookup.
+            if (reason == HoldReason.WatchCheck) checkWatch(alert.eventId)
+        }
         result.banner?.let(::show)
         armTimer()
     }

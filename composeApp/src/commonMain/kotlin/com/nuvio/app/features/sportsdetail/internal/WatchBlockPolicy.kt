@@ -15,7 +15,7 @@ internal object WatchBlockPolicy {
             null -> WatchUi.Checking
             is WatchLookup.Found -> WatchUi.Browsing(lookup.offer)
             WatchLookup.NoPlaylist -> WatchUi.NoPlaylist
-            WatchLookup.NoMatch -> WatchUi.NoMatch
+            WatchLookup.NoMatch, is WatchLookup.Unconfirmed -> WatchUi.NoMatch
             WatchLookup.Failed -> WatchUi.LookupFailed
         }
     }

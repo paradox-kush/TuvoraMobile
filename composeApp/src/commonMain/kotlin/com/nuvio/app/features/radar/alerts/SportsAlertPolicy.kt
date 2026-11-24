@@ -10,7 +10,8 @@ import com.nuvio.app.features.radar.ScoreSpoilerSettings
  */
 sealed interface WatchState {
     data object Unknown : WatchState
-    data class Channel(val channelId: String) : WatchState
+    /** Every channel the matcher thinks carries the game, any confidence (not only the Watch button's). */
+    data class Channel(val channelIds: Set<String>) : WatchState
     /** Asked and answered: no playlist, or no channel lists this game. */
     data object NoChannel : WatchState
 }
@@ -58,7 +59,14 @@ enum class DropReason(val wire: String) {
     WatchUnknown("watch_unknown"),
 }
 
-data class Held(val alert: SportsAlert, val receivedAtMs: Long, val releaseAtMs: Long, val reason: HoldReason)
+data class Held(
+    val alert: SportsAlert,
+    val receivedAtMs: Long,
+    val releaseAtMs: Long,
+    val reason: HoldReason,
+    /** When this alert's watch check started (its 6 s run from here), or null if it never needed one. */
+    val watchCheckAtMs: Long? = null,
+)
 
 /** The device's in-memory alert state (never stored, never synced): cap counter, seen keys, held alerts. */
 data class AlertLedger(
@@ -103,6 +111,8 @@ object SportsAlertPolicy {
     /** `at` further ahead of the device clock than this is clock skew: the receive time stands in for it. */
     const val CLOCK_SKEW_ALLOWANCE_MS: Long = 60_000L
     const val WATCH_CHECK_MS: Long = 6_000L
+    /** A held alert released later than this (a suspended timer, a sleeping device) is old news: dropped as stale. */
+    const val RELEASE_GRACE_MS: Long = 60_000L
     const val SEEN_KEYS_MAX: Int = 200
     const val HOUR_MS: Long = 60 * 60_000L
     const val SUMMARY_LINES: Int = 3
@@ -117,10 +127,10 @@ object SportsAlertPolicy {
         if (alert.key in ledger.seenKeys) return AlertDecision.Drop(DropReason.Duplicate) to ledger
         val seen = ledger.copy(seenKeys = remember(ledger.seenKeys, alert.key))
         if (isStale(alert, ctx.nowMs)) return AlertDecision.Drop(DropReason.Stale) to seen
-        return when (val step = evaluate(alert, settings, ctx, receivedAtMs = ctx.nowMs)) {
+        return when (val step = evaluate(alert, settings, ctx, receivedAtMs = ctx.nowMs, watchCheckAtMs = null)) {
             is Step.Drop -> AlertDecision.Drop(step.reason) to seen
             is Step.Hold -> AlertDecision.HoldUntil(step.atMs, step.reason) to
-                seen.copy(pending = seen.pending + Held(alert, ctx.nowMs, step.atMs, step.reason))
+                seen.copy(pending = seen.pending + Held(alert, ctx.nowMs, step.atMs, step.reason, step.watchCheckAtMs))
             is Step.Ready -> {
                 if (capReached(settings, ctx.nowMs, seen)) return AlertDecision.Drop(DropReason.HourlyCap) to seen
                 batchReleaseAt(settings, ctx.nowMs, seen)?.let { at ->
@@ -144,9 +154,13 @@ object SportsAlertPolicy {
         val reheld = ArrayList<Held>()
         val ready = ArrayList<Pair<Held, Boolean>>()
         for (held in due) {
-            when (val step = evaluate(held.alert, settings, ctx, held.receivedAtMs)) {
+            if (expired(held, ctx)) {
+                dropped += held.alert to DropReason.Stale
+                continue
+            }
+            when (val step = evaluate(held.alert, settings, ctx, held.receivedAtMs, held.watchCheckAtMs)) {
                 is Step.Drop -> dropped += held.alert to step.reason
-                is Step.Hold -> reheld += held.copy(releaseAtMs = step.atMs, reason = step.reason)
+                is Step.Hold -> reheld += held.copy(releaseAtMs = step.atMs, reason = step.reason, watchCheckAtMs = step.watchCheckAtMs)
                 is Step.Ready -> ready += held to step.numbers
             }
         }
@@ -176,6 +190,9 @@ object SportsAlertPolicy {
     /** When the one local timer should fire next; null when nothing is held. No network, ever. */
     fun nextTimerAtMs(ledger: AlertLedger): Long? = ledger.pending.minOfOrNull { it.releaseAtMs }
 
+    /** Going to the background: nothing held survives (spec review round 2). Seen keys and the cap counter stay. */
+    fun clearHeld(ledger: AlertLedger): AlertLedger = ledger.copy(pending = emptyList())
+
     /** Games whose channel a watch-check hold is waiting on (the controller looks them up). */
     fun watchChecks(ledger: AlertLedger): Set<String> =
         ledger.pending.filter { it.reason == HoldReason.WatchCheck }.map { it.alert.eventId }.toSet()
@@ -184,18 +201,34 @@ object SportsAlertPolicy {
 
     private sealed interface Step {
         data class Drop(val reason: DropReason) : Step
-        data class Hold(val atMs: Long, val reason: HoldReason) : Step
+        data class Hold(val atMs: Long, val reason: HoldReason, val watchCheckAtMs: Long?) : Step
         data class Ready(val numbers: Boolean) : Step
     }
 
-    /** Gates 1 (disabled) to 6 for an alert received at [receivedAtMs]. Time-based, so a re-run after a hold is exact. */
-    private fun evaluate(alert: SportsAlert, settings: SportsAlertSettings, ctx: AlertContext, receivedAtMs: Long): Step {
+    /** Released over a minute late, or older than max age + the score delay: old news (dropped, never emitted). */
+    private fun expired(held: Held, ctx: AlertContext): Boolean =
+        ctx.nowMs - held.releaseAtMs > RELEASE_GRACE_MS ||
+            ctx.nowMs - held.receivedAtMs > MAX_ALERT_AGE_MS + ctx.spoiler.delayMs
+
+    /**
+     * Gates 1 (disabled) to 6 for an alert received at [receivedAtMs], whose watch check (if any) started at
+     * [watchCheckAtMs]. Time-based, so a re-run after any hold is exact. Parity rules (review round 2): a hold released
+     * over an unknown live channel starts its own watch check; the score delay always counts from receipt; a full time
+     * downgraded at the watch deadline still waits out the delay.
+     */
+    private fun evaluate(
+        alert: SportsAlert,
+        settings: SportsAlertSettings,
+        ctx: AlertContext,
+        receivedAtMs: Long,
+        watchCheckAtMs: Long?,
+    ): Step {
         if (!settings.enabled) return Step.Drop(DropReason.Disabled)
         followGate(alert, settings, ctx.followedLeagueIds, ctx.followedTeamIds, ctx.nowMs)?.let { return Step.Drop(it) }
         // Gate 3, the definite part.
         if (alert.eventId == ctx.openGameEventId) return Step.Drop(DropReason.WatchingThisGame)
         val watch = ctx.watchOf(alert.eventId)
-        if (watch is WatchState.Channel && watch.channelId in ctx.playingChannelIds) return Step.Drop(DropReason.WatchingThisGame)
+        if (watch is WatchState.Channel && watch.channelIds.any { it in ctx.playingChannelIds }) return Step.Drop(DropReason.WatchingThisGame)
         // Gates 4-5 before any wait: an alert they drop never costs a lookup.
         if (settings.quietOn && inQuietHours(ctx.localMinuteOfDay, settings.quietStartMin, settings.quietEndMin)) {
             return Step.Drop(DropReason.QuietHours)
@@ -206,20 +239,25 @@ object SportsAlertPolicy {
             DuringPlayback.Never -> ctx.playback != PlaybackContext.None
         }
         if (playbackBlocked) return Step.Drop(DropReason.Playback)
-        var numbers = showsNumbers(alert, ctx)
-        if (alert.kind == AlertKind.Score && !numbers) return Step.Drop(DropReason.ScoresHidden)
+        val spoilerShows = showsNumbers(alert, ctx)
+        if (alert.kind == AlertKind.Score && !spoilerShows) return Step.Drop(DropReason.ScoresHidden)
+        var numbers = spoilerShows
         // Gate 3, the uncertain part: live TV is playing a channel and we do not know whether it carries this game.
         val mayBeWatching = watch == WatchState.Unknown && ctx.playback == PlaybackContext.LiveTv &&
             ctx.playingChannelIds.isNotEmpty() && alert.kind != AlertKind.Start
         if (mayBeWatching) {
-            val deadline = receivedAtMs + WATCH_CHECK_MS
-            if (ctx.nowMs < deadline) return Step.Hold(deadline, HoldReason.WatchCheck)
+            // Never drop for "unknown" without asking: a check starts now unless this alert already has one running.
+            val started = watchCheckAtMs ?: return Step.Hold(ctx.nowMs + WATCH_CHECK_MS, HoldReason.WatchCheck, ctx.nowMs)
+            val deadline = started + WATCH_CHECK_MS
+            if (ctx.nowMs < deadline) return Step.Hold(deadline, HoldReason.WatchCheck, started)
             if (alert.kind == AlertKind.Score) return Step.Drop(DropReason.WatchUnknown)
             numbers = false
         }
+        // The delay counts from receipt and applies whenever the spoiler setting shows numbers, even to a full time
+        // shown without them at the watch deadline.
         val delayMs = ctx.spoiler.delayMs
-        if (numbers && delayMs > 0 && alert.kind != AlertKind.Start && ctx.nowMs < receivedAtMs + delayMs) {
-            return Step.Hold(receivedAtMs + delayMs, HoldReason.Delay)
+        if (spoilerShows && delayMs > 0 && alert.kind != AlertKind.Start && ctx.nowMs < receivedAtMs + delayMs) {
+            return Step.Hold(receivedAtMs + delayMs, HoldReason.Delay, watchCheckAtMs)
         }
         return Step.Ready(numbers)
     }

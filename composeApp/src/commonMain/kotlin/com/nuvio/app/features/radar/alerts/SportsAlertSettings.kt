@@ -78,7 +78,8 @@ data class SportsAlertSettings(
         const val MAX_MUTED = 100
         /** Longer ids are dropped (TheSportsDB ids are short; a fallback fixture key could be long). */
         const val MAX_ID_LENGTH = 64
-        const val MAX_JSON_BYTES = 7_900
+        /** Compact JSON. The backend measures jsonb TEXT (a space after every `:` and `,`) against < 8192. */
+        const val MAX_JSON_BYTES = 7_000
 
         fun nextPerHour(current: Int): Int = ALLOWED_PER_HOUR.next(current, DEFAULT_PER_HOUR)
         fun nextBatch(current: Int): Int = ALLOWED_BATCH_S.next(current, DEFAULT_BATCH_S)

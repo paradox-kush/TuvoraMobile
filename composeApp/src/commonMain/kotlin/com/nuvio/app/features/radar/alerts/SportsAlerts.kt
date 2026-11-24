@@ -113,6 +113,7 @@ object SportsAlerts {
     fun stopForegroundSession() {
         tvSession?.dispose()
         tvSession = null
+        uiScope.launch { controller.clearHeld() }
     }
 
     private fun startSession(foreground: Flow<Boolean>): Disposable {
@@ -126,6 +127,11 @@ object SportsAlerts {
                 .distinctUntilChanged().drop(1).collect { uiScope.launch { controller.reset() } }
         }
         effects.onRevert { identity.cancel() }
+        // Background: nothing held survives (it would surface as old news on return).
+        val background = ioScope.launch {
+            foreground.distinctUntilChanged().collect { fg -> if (!fg) uiScope.launch { controller.clearHeld() } }
+        }
+        effects.onRevert { background.cancel() }
         SportsAlertSubscription(
             client = { SupabaseProvider.client },
             desiredTopics = desiredTopics(foreground),
@@ -151,6 +157,9 @@ object SportsAlerts {
     /** The process lifecycle's foreground signal; collected on Main (ProcessLifecycleOwner requires it on Android). */
     private fun appForeground(): Flow<Boolean> =
         AppForegroundMonitor.events().map { it == AppVisibility.Foreground }.flowOn(Dispatchers.Main)
+
+    /** Wall-clock now (what the open-game request is stamped and judged with). */
+    fun nowMs(): Long = RadarTime.nowMs()
 
     // --- screens report ------------------------------------------------------------------------------------------
 

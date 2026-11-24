@@ -3,6 +3,7 @@ package com.nuvio.app.features.radar.alerts
 import com.nuvio.app.features.sportsdetail.api.GameRef
 import com.nuvio.app.features.sportsdetail.api.GameWatchPort
 import com.nuvio.app.features.sportsdetail.api.WatchLookup
+import com.nuvio.app.features.sportsdetail.api.WatchOffer
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CancellationException
@@ -24,7 +25,8 @@ internal class SportsAlertActions(
     /** The game screen's reference for an event id, from fixtures already held; null = no lookup possible. */
     private val gameRef: (eventId: String) -> GameRef?,
 ) {
-    private data class Cached(val state: WatchState, val channelName: String?, val atMs: Long)
+    /** [state] lists every carrier (gate 3); [offer] is the best confirmed match only (the Watch button), if any. */
+    private data class Cached(val state: WatchState, val offer: WatchOffer?, val atMs: Long)
 
     private val lock = SynchronizedObject()
     private val cache = HashMap<String, Cached>()
@@ -40,11 +42,11 @@ internal class SportsAlertActions(
 
     /**
      * Makes sure [eventId]'s channel is known: a fresh cached answer is returned through [onKnown] at once; otherwise
-     * one lookup starts (unless no fixture is held). [onKnown] gets the state and the channel's name. Returns the job.
+     * one lookup starts (unless no fixture is held). [onKnown] gets the state and the Watch offer. Returns the job.
      */
-    fun ensureKnown(eventId: String, nowMs: () -> Long, onKnown: (WatchState, String?) -> Unit): Job? {
+    fun ensureKnown(eventId: String, nowMs: () -> Long, onKnown: (WatchState, WatchOffer?) -> Unit): Job? {
         synchronized(lock) { cache[eventId]?.takeIf { nowMs() - it.atMs < CACHE_TTL_MS } }?.let {
-            onKnown(it.state, it.channelName)
+            onKnown(it.state, it.offer)
             return null
         }
         val ref = gameRef(eventId) ?: return null
@@ -57,12 +59,13 @@ internal class SportsAlertActions(
                 WatchLookup.Failed
             }
             val known = when (result) {
-                is WatchLookup.Found -> Cached(WatchState.Channel(result.offer.channelId), result.offer.channelName, nowMs())
+                is WatchLookup.Found -> Cached(WatchState.Channel(result.carriers + result.offer.channelId), result.offer, nowMs())
+                is WatchLookup.Unconfirmed -> Cached(WatchState.Channel(result.carriers), null, nowMs())
                 WatchLookup.NoMatch, WatchLookup.NoPlaylist -> Cached(WatchState.NoChannel, null, nowMs())
                 WatchLookup.Failed -> null
             }
             if (known != null) synchronized(lock) { cache[eventId] = known }
-            onKnown(known?.state ?: WatchState.Unknown, known?.channelName)
+            onKnown(known?.state ?: WatchState.Unknown, known?.offer)
         }
     }
 
@@ -71,8 +74,8 @@ internal class SportsAlertActions(
         val open = banner.action as? BannerAction.OpenGame ?: return null
         val kind = banner.alerts.singleOrNull()?.kind ?: return null
         if (kind == AlertKind.Final) return null
-        return ensureKnown(open.eventId, nowMs) { state, name ->
-            if (state is WatchState.Channel) onWatch(BannerAction.Watch(open.eventId, state.channelId, name.orEmpty()))
+        return ensureKnown(open.eventId, nowMs) { _, offer ->
+            if (offer != null) onWatch(BannerAction.Watch(open.eventId, offer.channelId, offer.channelName))
         }
     }
 

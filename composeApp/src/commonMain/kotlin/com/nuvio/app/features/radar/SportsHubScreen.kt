@@ -97,8 +97,6 @@ import kotlinx.coroutines.flow.first
 
 private val sportsMatchLog = Logger.withTag("SportsChannelMatch")
 
-/** How long a sports alert's "Open game" waits for the hub's own fixture load before it is dropped. */
-private const val GAME_REQUEST_DEADLINE_MS = 15_000L
 
 /** Fast score tick: only leagues/teams with a live-or-imminent fixture, so it transfers a live
  *  subset (often nothing) rather than the whole followed set. */
@@ -164,16 +162,23 @@ fun SportsHubScreen(
             com.nuvio.app.core.contracts.SportsMatchRequest.consume()
         }
     }
-    // A sports alert's "Open game": open that game's page once its fixture is held (else today's match sheet).
-    val requestedGamePage by com.nuvio.app.core.contracts.SportsGameRequest.gameId.collectAsStateWithLifecycle()
-    // Waits only for the hub's own load: a fixture still not held once loading has settled (or after the deadline)
-    // drops the request, so the game never opens late and unprompted.
+    // A sports alert's "Open game": honoured only within 15 s of the tap, and dropped once the hub's load has FINISHED
+    // without the fixture (OpenGameRequestPolicy), so the game never opens late and unprompted.
+    val requestedGamePage by com.nuvio.app.core.contracts.SportsGameRequest.request.collectAsStateWithLifecycle()
     LaunchedEffect(requestedGamePage) {
-        val id = requestedGamePage ?: return@LaunchedEffect
-        val fx = withTimeoutOrNull(GAME_REQUEST_DEADLINE_MS) {
-            RadarRepository.uiState.first { s -> s.fixtureByKey(id) != null || !s.loadingFixtures }.fixtureByKey(id)
+        val request = requestedGamePage ?: return@LaunchedEffect
+        val now = com.nuvio.app.features.radar.alerts.SportsAlerts.nowMs()
+        val fresh = com.nuvio.app.features.radar.alerts.OpenGameRequestPolicy.isFresh(request.atMs, now)
+        val deadline = com.nuvio.app.features.radar.alerts.OpenGameRequestPolicy.deadlineMs(request.atMs)
+        val fx = if (!fresh) null else withTimeoutOrNull((deadline - now).coerceAtLeast(0L)) {
+            val waiter = com.nuvio.app.features.radar.alerts.OpenGameRequestPolicy.Waiter()
+            val settled = RadarRepository.uiState.first { s ->
+                waiter.observe(s.fixtureByKey(request.gameId) != null, s.loadingFixtures) !=
+                    com.nuvio.app.features.radar.alerts.OpenGameRequestPolicy.Outcome.Wait
+            }
+            settled.fixtureByKey(request.gameId)
         }
-        com.nuvio.app.core.contracts.SportsGameRequest.consume()
+        com.nuvio.app.core.contracts.SportsGameRequest.consume(request)
         fx?.let(openFixture)
     }
     // Sports alerts never interrupt the game whose page is open (gate 3).

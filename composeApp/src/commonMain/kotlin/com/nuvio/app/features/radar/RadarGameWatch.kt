@@ -59,10 +59,12 @@ internal class RadarGameWatch(
             val fixture = ref.tsdbEventId?.let { state.fixtureByKey(it) } ?: return WatchLookup.NoMatch
             val league = fixture.leagueId?.let { state.leagueById(it) }
             val matches = RadarChannelMatcher.match(fixture, league, stationLookup = { RadarRepository.tvStations(fixture.id) })
+            // Every match, any confidence: what sports alerts treat as "already watching this game".
+            val carriers = matches.map { it.channel.contentId }.toSet()
             val best = matches.firstOrNull { it.confidence == MatchConfidence.CONFIRMED && it.via == RadarChannelMatcher.MatchVia.EPG }
                 ?: matches.firstOrNull { it.confidence == MatchConfidence.CONFIRMED }
-                ?: return WatchLookup.NoMatch
-            WatchLookup.Found(WatchOffer(best.channel.contentId, best.channel.name, best.channel.logo))
+                ?: return if (carriers.isEmpty()) WatchLookup.NoMatch else WatchLookup.Unconfirmed(carriers)
+            WatchLookup.Found(WatchOffer(best.channel.contentId, best.channel.name, best.channel.logo), carriers + best.channel.contentId)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
