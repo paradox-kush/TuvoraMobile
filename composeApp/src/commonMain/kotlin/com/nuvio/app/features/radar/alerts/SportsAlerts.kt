@@ -144,6 +144,7 @@ object SportsAlerts {
     /** The topics to hold right now: empty in the background, signed out, with Realtime off or alerts off. */
     private fun desiredTopics(foreground: Flow<Boolean>): Flow<Set<String>> =
         combine(foreground, RadarRepository.uiState, AuthRepository.state) { fg, radar, auth ->
+            log.w { "DIAG topics input fg=$fg realtime=${RealtimeSyncConfig.ENABLED} signedIn=${auth.signedIn()} enabled=${radar.prefs.alerts.enabled} follows=${radar.follows.size} teams=${radar.teamFollows.size}" }
             if (!fg || !RealtimeSyncConfig.ENABLED) emptySet()
             else SportsAlertTopicPolicy.topics(
                 settings = radar.prefs.alerts,

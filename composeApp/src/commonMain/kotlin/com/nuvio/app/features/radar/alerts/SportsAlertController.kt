@@ -68,7 +68,10 @@ internal class SportsAlertController(
 
     /** A broadcast payload from a sports-alerts topic. Malformed or other-version payloads are ignored. */
     fun onPayload(payload: JsonObject) {
-        SportsAlert.parse(payload)?.let(::onAlert)
+        val alert = SportsAlert.parse(payload)
+        // DIAG (diag/sports-alerts-trace, never main): every received payload.
+        if (alert == null) log.w { "DIAG alert payload unparsed: keys=${payload.keys}" }
+        alert?.let(::onAlert)
     }
 
     fun onAlert(alert: SportsAlert) {
@@ -79,6 +82,7 @@ internal class SportsAlertController(
             ledger = next
             decision
         }
+        log.w { "DIAG alert ${alert.key} kind=${alert.kind} -> ${decision::class.simpleName} ${(decision as? AlertDecision.Drop)?.reason ?: (decision as? AlertDecision.HoldUntil)?.reason ?: ""} playback=${ctx.playback} quietMin=${ctx.localMinuteOfDay} hidden=${!ctx.spoiler.shown}" }
         when (decision) {
             is AlertDecision.ShowNow -> show(decision.banner)
             is AlertDecision.HoldUntil -> {

@@ -52,6 +52,7 @@ internal class SportsAlertSubscription(
 
     /** Runs only in the watcher coroutine (one collector), so [handles] needs no lock. */
     private fun reconcile(desired: Set<String>, effects: EffectScope) {
+        log.w { "DIAG reconcile desired=$desired held=${handles.keys}" }
         (handles.keys - desired).toList().forEach { topic -> handles.remove(topic)?.dispose() }
         (desired - handles.keys).forEach { topic -> handles[topic] = effects.adopt(join(topic)) }
     }
