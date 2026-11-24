@@ -493,9 +493,10 @@ object RadarRepository {
 
     // --- Hide scores + score delay (per profile, synced) -----------------------
 
+    // Every spoiler change sets spoilerDirty in the same state (and so the same persist()): see RadarPrefsPull.
+
     fun setScoresShown(shown: Boolean) {
-        RadarSyncService.noteLocalSpoilerChange()
-        _uiState.update { it.copy(prefs = it.prefs.copy(scoresShown = shown)) }
+        _uiState.update { it.copy(prefs = it.prefs.copy(scoresShown = shown, spoilerDirty = true)) }
         persist()
     }
 
@@ -504,8 +505,9 @@ object RadarRepository {
 
     /** The hub's delay chip: Off → 15 s → 30 s → 60 s → Off. */
     fun cycleScoreDelay() {
-        RadarSyncService.noteLocalSpoilerChange()
-        _uiState.update { it.copy(prefs = it.prefs.copy(scoreDelaySeconds = ScoreSpoilerSettings.nextDelay(it.prefs.scoreDelaySeconds))) }
+        _uiState.update {
+            it.copy(prefs = it.prefs.copy(scoreDelaySeconds = ScoreSpoilerSettings.nextDelay(it.prefs.scoreDelaySeconds), spoilerDirty = true))
+        }
         persist()
     }
 
@@ -537,23 +539,36 @@ object RadarRepository {
         follows: List<RadarFollow>,
         prefs: RadarPrefsRow?,
         teams: List<RadarTeamFollow>? = null,
-        /** True keeps the local Hide scores / delay (a newer local change: [RadarPrefsPull.localSpoilerWins]). */
-        localSpoilerWins: () -> Boolean = { false },
     ) {
         loaded = true
+        val shownProfileId = currentProfileId
         currentProfileId = profileId
+        // The merge reads the local prefs inside the same update that writes them: a toggle cannot slip in between.
         _uiState.update { state ->
+            val local = RadarPrefsPull.localFor(profileId, shownProfileId, state.prefs) {
+                parseLocal(XtreamAccountStorage.loadRadarJson(profileId)).prefs
+            }
             state.copy(
                 catalog = state.catalog.takeIf { it.categories.isNotEmpty() }
                     ?: runCatching { json.decodeFromString<RadarCatalog>(RadarCatalogData.JSON) }.getOrDefault(RadarCatalog()),
                 follows = follows,
-                prefs = prefs?.let { RadarPrefsPull.merge(state.prefs, it, localSpoilerWins()) } ?: state.prefs,
+                prefs = prefs?.let { RadarPrefsPull.merge(local, it) } ?: local,
                 // Null means the pull said nothing about teams (older backend); keep local.
                 teamFollows = teams ?: state.teamFollows,
             )
         }
         XtreamAccountStorage.saveRadarJson(profileId, json.encodeToString(localState()))
         refreshFixtures(force = true)
+    }
+
+    /** A push of [pushed] landed for [profileId]: clear spoilerDirty if the local values still match it (one read-modify-write). */
+    internal fun onPrefsPushed(profileId: Int, pushed: RadarPrefs) {
+        if (profileId != currentProfileId) return // that profile's blob stays dirty: its next pull pushes again (harmless)
+        val before = _uiState.value.prefs.spoilerDirty
+        _uiState.update { it.copy(prefs = RadarPrefsPull.afterPush(it.prefs, pushed)) }
+        if (before && !_uiState.value.prefs.spoilerDirty) {
+            XtreamAccountStorage.saveRadarJson(profileId, json.encodeToString(localState()))
+        }
     }
 
     private fun localState() = RadarLocalState(

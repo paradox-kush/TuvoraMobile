@@ -38,17 +38,6 @@ object RadarSyncService {
     var isSyncingFromRemote: Boolean = false
     private var pushJob: Job? = null
 
-    // Local Hide scores / delay changes made vs carried by a successful push ([RadarPrefsPull]).
-    @Volatile
-    private var spoilerChangeSeq = 0L
-    @Volatile
-    private var spoilerPushedSeq = 0L
-
-    /** Called by RadarRepository BEFORE it publishes a local Hide scores / delay change. */
-    fun noteLocalSpoilerChange() {
-        spoilerChangeSeq++
-    }
-
     @Serializable
     private data class FollowRow(
         @SerialName("league_id") val leagueId: String,
@@ -88,20 +77,18 @@ object RadarSyncService {
         // state under the old profile id would wipe that profile's remote follows.
         val profileId = ProfileRepository.activeProfileId
         val snapshot = RadarRepository.uiState.value
-        val spoilerSeq = spoilerChangeSeq
         pushJob = scope.launch {
             delay(PUSH_DEBOUNCE_MS)
             if (ProfileRepository.activeProfileId != profileId) return@launch
-            // Dropped during a pull: pullFromServer re-triggers it on the merged state (RadarPrefsPull.pushAfterPull).
+            // Dropped during a pull or offline: spoilerDirty stays set and the next pull pushes it (RadarPrefsPull.pushAfterPull).
             if (isSyncingFromRemote || !authed()) return@launch
-            pushToRemote(profileId, snapshot, spoilerSeq)
+            pushToRemote(profileId, snapshot)
         }
     }
 
     private suspend fun pushToRemote(
         profileId: Int,
         state: RadarUiState = RadarRepository.uiState.value,
-        spoilerSeq: Long = spoilerChangeSeq,
     ) {
         runCatching {
             if (ProfileRepository.activeProfileId != profileId) return@runCatching
@@ -147,7 +134,8 @@ object RadarSyncService {
                 })
             }
             SupabaseProvider.client.postgrest.rpc("sync_push_radar", params)
-            if (spoilerSeq > spoilerPushedSeq) spoilerPushedSeq = spoilerSeq
+            // Clears spoilerDirty only if the local values still equal what this push carried (RadarPrefsPull.afterPush).
+            RadarRepository.onPrefsPushed(profileId, state.prefs)
             log.d { "pushToRemote — ${state.follows.size} follows, ${state.teamFollows.size} teams" }
         }.onFailure { e -> log.e(e) { "pushToRemote — FAILED" } }
     }
@@ -155,7 +143,6 @@ object RadarSyncService {
     /** Pull this profile's follows+prefs on login. Empty remote + non-empty local => migrate up. */
     suspend fun pullFromServer(profileId: Int) {
         if (!authed() || ProfileRepository.activeProfileId != profileId) return
-        val spoilerSeqAtStart = spoilerChangeSeq
         runCatching {
             val followRows = SupabaseProvider.client.postgrest
                 .from("radar_follows")
@@ -201,8 +188,6 @@ object RadarSyncService {
                     )
                 },
                 prefs = prefsRow,
-                // Read at apply time: a toggle made while the selects were in flight must survive them.
-                localSpoilerWins = { RadarPrefsPull.localSpoilerWins(spoilerChangeSeq, spoilerPushedSeq, spoilerSeqAtStart) },
                 teams = teamRows.map {
                     RadarTeamFollow(
                         teamId = it.teamId,
@@ -217,7 +202,8 @@ object RadarSyncService {
                 },
             )
             isSyncingFromRemote = false
-            if (RadarPrefsPull.pushAfterPull(spoilerChangeSeq, spoilerPushedSeq)) triggerPush()
+            // Covers a push that failed, ran offline, was dropped during this pull, or died with the app.
+            if (RadarPrefsPull.pushAfterPull(RadarRepository.uiState.value.prefs)) triggerPush()
             log.i { "pullFromServer — applied ${followRows.size} follows, ${teamRows.size} teams" }
         }.onFailure { e ->
             isSyncingFromRemote = false
@@ -248,28 +234,42 @@ internal data class RadarPrefsRow(
 )
 
 /**
- * Pure decisions for applying a pulled radar_prefs row on this device. Local Hide scores / delay changes are counted
- * ([RadarSyncService] keeps the sequence numbers): changeSeq = local changes made, pushedSeq = the newest change a push
- * has carried to the server.
+ * Pure decisions for Hide scores / delay sync. The pending flag is [RadarPrefs.spoilerDirty], persisted in each
+ * profile's local blob, so it is per profile and survives a restart; no counters, no global state.
  */
 internal object RadarPrefsPull {
-    /** The row's columns win, except spoiler columns the row lacks, or all spoiler columns when [localSpoilerWins]. */
-    fun merge(local: RadarPrefs, remote: RadarPrefsRow, localSpoilerWins: Boolean): RadarPrefs = RadarPrefs(
-        featuredEventId = remote.featuredEventId,
-        optInState = remote.optInState,
-        promoDismissed = remote.promoDismissed,
-        scoresShown = if (localSpoilerWins) local.scoresShown else remote.scoresShown ?: local.scoresShown,
-        scoreDelaySeconds = if (localSpoilerWins) local.scoreDelaySeconds
-        else remote.scoreDelaySeconds?.let(ScoreSpoilerSettings::sanitizeDelay) ?: local.scoreDelaySeconds,
-    )
+    /**
+     * A pulled row onto this profile's [local] prefs. Its featured / opt-in / promo columns always apply. While
+     * [RadarPrefs.spoilerDirty] the local Hide scores / delay stay (an unpushed change); otherwise the row's values
+     * apply, and a column the row lacks (pre-migration row, older backend) keeps the local value.
+     */
+    fun merge(local: RadarPrefs, remote: RadarPrefsRow): RadarPrefs {
+        val dirty = local.spoilerDirty
+        return RadarPrefs(
+            featuredEventId = remote.featuredEventId,
+            optInState = remote.optInState,
+            promoDismissed = remote.promoDismissed,
+            scoresShown = if (dirty) local.scoresShown else remote.scoresShown ?: local.scoresShown,
+            scoreDelaySeconds = if (dirty) local.scoreDelaySeconds
+            else remote.scoreDelaySeconds?.let(ScoreSpoilerSettings::sanitizeDelay) ?: local.scoreDelaySeconds,
+            spoilerDirty = dirty,
+        )
+    }
+
+    /** A push carrying [pushed] succeeded: clean only if [current] still holds the same values (a later toggle stays dirty). */
+    fun afterPush(current: RadarPrefs, pushed: RadarPrefs): RadarPrefs {
+        val same = current.scoresShown == pushed.scoresShown &&
+            ScoreSpoilerSettings.sanitizeDelay(current.scoreDelaySeconds) == ScoreSpoilerSettings.sanitizeDelay(pushed.scoreDelaySeconds)
+        return if (current.spoilerDirty && same) current.copy(spoilerDirty = false) else current
+    }
+
+    /** After every pull: a change still dirty (failed / offline / dropped push, or a restart) goes out now. */
+    fun pushAfterPull(prefs: RadarPrefs): Boolean = prefs.spoilerDirty
 
     /**
-     * Keep the local spoiler values when a change is not pushed yet, or was made after the pull started (its select may
-     * have read the row before that push landed).
+     * The local prefs a pull for [pullProfileId] merges onto: what is on screen when that profile is the shown one,
+     * else that profile's own stored blob — never another profile's (dirty) state.
      */
-    fun localSpoilerWins(changeSeq: Long, pushedSeq: Long, changeSeqAtPullStart: Long): Boolean =
-        changeSeq > pushedSeq || changeSeq > changeSeqAtPullStart
-
-    /** A debounced push dropped while the pull ran (or not yet sent) goes out after it, on the merged state. */
-    fun pushAfterPull(changeSeq: Long, pushedSeq: Long): Boolean = changeSeq > pushedSeq
+    fun localFor(pullProfileId: Int, currentProfileId: Int, current: RadarPrefs, stored: () -> RadarPrefs): RadarPrefs =
+        if (pullProfileId == currentProfileId) current else stored()
 }
