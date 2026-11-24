@@ -49,7 +49,16 @@ internal fun PlayerDestination(
     DisposableEffect(Unit) {
         com.nuvio.app.core.contracts.PlaybackGateAccess.current().setPlaybackActive(true)
         ImmersivePlaybackGate.setImmersive(true)
+        // What is playing, for app chrome that cares (sports alerts' "during playback"): a live launch reads as Live TV.
+        val playback = com.nuvio.app.core.contracts.PlaybackContextAccess.current().enter(
+            if (launch.streamType.equals("live", ignoreCase = true)) {
+                com.nuvio.app.core.contracts.PlaybackContext.LiveTv
+            } else {
+                com.nuvio.app.core.contracts.PlaybackContext.Vod
+            },
+        )
         onDispose {
+            playback.dispose()
             com.nuvio.app.core.contracts.PlaybackGateAccess.current().setPlaybackActive(false)
             ImmersivePlaybackGate.setImmersive(false)
         }

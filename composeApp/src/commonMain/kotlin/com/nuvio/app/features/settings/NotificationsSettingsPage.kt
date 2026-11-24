@@ -267,6 +267,11 @@ internal fun LazyListScope.notificationsSettingsContent(
         }
     }
 
+    // In-app sports alerts (fork, registered by FeatureWiring): absent when the Sports feature is.
+    com.nuvio.app.core.contracts.SportsAlertsSettingsSectionAccess.current()?.let { section ->
+        with(section) { sportsAlertsSettings(isTablet) }
+    }
+
     item {
         SettingsSection(
             title = stringResource(Res.string.settings_notifications_section_test),
@@ -471,7 +476,7 @@ private fun SendingLessOftenRow(isTablet: Boolean, onUndo: () -> Unit) {
 
 /** A time of day with minus and plus buttons in half-hour steps: no dialog, nothing to dismiss. */
 @Composable
-private fun TimeStepperRow(
+internal fun TimeStepperRow(
     label: String,
     minute: Int,
     isTablet: Boolean,

@@ -883,6 +883,18 @@ internal fun MainAppContent(
             navController.navigate(DetailRoute(type = type, id = id, title = name))
         }
     }
+
+    // A sports alert's Open game / Open Sports: back to the tabs (the banner may sit over the player or a detail
+    // page), then the Sports tab, which opens the requested game itself (SportsGameRequest). Bounded: a pop that
+    // does not move the stack (native navigation owns it) ends the walk.
+    fun openSportsFromAlert() {
+        while (true) {
+            val top = navController.currentRoute ?: break
+            if (top is TabsRoute) break
+            if (!navController.popBackStack(top) || navController.currentRoute == top) break
+        }
+        activateTab(AppScreenTab.Sports)
+    }
     val launchExternalPlayer = rememberExternalPlayerLauncher { result ->
         if (result != null) {
             val fallbackSession = lastExternalPlayerLaunch?.externalPlaybackSession()
@@ -2021,7 +2033,10 @@ internal fun MainAppContent(
                         // App-level chrome (the update banner) is a layout sibling of the whole
                         // app, so it must stand down or it shrinks the video.
                         ImmersivePlaybackGate.setImmersive(true)
+                        val playback = com.nuvio.app.core.contracts.PlaybackContextAccess.current()
+                            .enter(com.nuvio.app.core.contracts.PlaybackContext.LiveTv)
                         onDispose {
+                            playback.dispose()
                             com.nuvio.app.core.contracts.PlaybackGateAccess.current().setPlaybackActive(false)
                             ImmersivePlaybackGate.setImmersive(false)
                         }
@@ -2581,6 +2596,24 @@ internal fun MainAppContent(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .zIndex(15f),
+            )
+
+            // Fork: in-app sports alerts. A sibling of the nav host, so the banner also shows over the player.
+            com.nuvio.app.core.contracts.SportsAlertsHostAccess.current()?.Render(
+                ownsAppRuntime = ownsAppRuntime,
+                onOpenSports = ::openSportsFromAlert,
+                onPlayChannel = { contentId ->
+                    val item = com.nuvio.app.core.contracts.LivePlaybackAccess.current().channelInfoFor(contentId)
+                    playLiveXtreamChannel(
+                        contentId = contentId,
+                        name = item?.name ?: "Live TV",
+                        logo = item?.logo ?: item?.poster,
+                        url = item?.streamUrl,
+                    )
+                },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .zIndex(19f),
             )
 
             NuvioToastHost(

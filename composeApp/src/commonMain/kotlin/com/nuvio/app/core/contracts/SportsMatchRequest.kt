@@ -21,3 +21,21 @@ object SportsMatchRequest {
         _gameId.value = null
     }
 }
+
+/**
+ * "Open this game's page" — a neutral request from the shell (a sports alert banner's Open game) to the Sports hub,
+ * the same shape as [SportsMatchRequest]: the shell switches to the Sports tab, the hub opens the game screen when the
+ * fixture is held and consumes the request. The shell names no sports type, only the opaque game id.
+ */
+object SportsGameRequest {
+    private val _gameId = MutableStateFlow<String?>(null)
+    val gameId: StateFlow<String?> = _gameId.asStateFlow()
+
+    fun request(gameId: String) {
+        _gameId.value = gameId
+    }
+
+    fun consume() {
+        _gameId.value = null
+    }
+}

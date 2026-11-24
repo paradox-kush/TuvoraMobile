@@ -37,6 +37,11 @@ import com.nuvio.app.features.sportsdetail.api.LocalGameWatch
 import com.nuvio.app.features.sportsdetail.api.LocalSportsDetail
 import com.nuvio.app.features.sportsdetail.api.SportsDetailAccess
 import com.nuvio.app.features.sportsdetail.api.SportsDetail
+import com.nuvio.app.core.contracts.SportsAlertsHostAccess
+import com.nuvio.app.core.contracts.SportsAlertsSettingsSectionAccess
+import com.nuvio.app.features.radar.alerts.SportsAlertBannerHostImpl
+import com.nuvio.app.features.radar.alerts.SportsAlerts
+import com.nuvio.app.features.radar.alerts.SportsAlertsSettingsSectionImpl
 
 /**
  * THE one firewall exception (rules doc Rule 1 / R2b): the only non-fork file allowed to name fork
@@ -93,6 +98,11 @@ fun registerFeatureContributions() {
     CalendarScreenContentAccess.register(CalendarUiSlots.screen())
     // Game screen: registered at process init so iOS (which never wraps its UI in installFeatures) finds it too.
     SportsDetailAccess.register(sportsDetailService, gameWatch)
+    // In-app sports alerts: the banner over the app (and the player), its settings section, and the game screen's
+    // Watch port behind the banner's "Watch". Apple TV installs its own from TvAppGraph (no Compose slots there).
+    SportsAlerts.installWatch(gameWatch)
+    SportsAlertsHostAccess.register(SportsAlertBannerHostImpl)
+    SportsAlertsSettingsSectionAccess.register(SportsAlertsSettingsSectionImpl)
     FeatureRegistry.markInitialized()
 }
 
