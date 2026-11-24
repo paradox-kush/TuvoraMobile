@@ -33,6 +33,11 @@ struct SportsScreen: View {
     @State private var gameFallback: RadarFixture?
     @State private var pendingPlay: TvPlayerSession?
     @State private var smokeMatchOpened = false
+    /// Sports alerts: a banner's "Open game" arrives here; the hub header carries the Alerts on / off chip.
+    @ObservedObject private var alerts = SportsAlertCenter.shared
+    @State private var alertsSignedIn = TvSportsAlerts.shared.signedIn.value.boolValue
+    /// The game page on screen (fixture key): alerts never interrupt the game whose page is open (gate 3).
+    @State private var openGameKey: String?
 
     var body: some View {
         Group {
@@ -55,6 +60,7 @@ struct SportsScreen: View {
             for await next in TvSports.shared.state {
                 radar = next
                 now = TvSports.shared.nowMs()
+                consumeGameRequest(next)
                 smokeLog("SMOKE sports follows=%d fixtures=%d loading=%d", next.follows.count, next.fixturesByLeague.count, next.loadingFixtures)
                 // Simulator smoke hook: `-smokeSportsMatch` opens the first upcoming match's channel sheet.
                 // `-smokeSportsLeague <leagueId>` opens a league page.
@@ -84,6 +90,22 @@ struct SportsScreen: View {
             let wait = max(due - TvSports.shared.nowMs(), 0) + 50
             try? await Task.sleep(nanoseconds: UInt64(wait) * 1_000_000)
             if !Task.isCancelled { now = TvSports.shared.nowMs() }
+        }
+        // A banner's "Open game" while the hub is already up (the state loop above handles it on the next emission too).
+        .onChange(of: alerts.pendingGameId) { _, _ in if let radar { consumeGameRequest(radar) } }
+        .task(id: alerts.pendingGameId) {
+            // Bounded: a request the hub's load never satisfies is dropped, never opened late and unprompted.
+            guard let id = alerts.pendingGameId else { return }
+            try? await Task.sleep(nanoseconds: Self.gameRequestDeadlineNs)
+            if !Task.isCancelled, alerts.pendingGameId == id { alerts.pendingGameId = nil }
+        }
+        .task { for await value in TvSportsAlerts.shared.signedIn { alertsSignedIn = value.boolValue } }
+        .onChange(of: game?.id) { _, _ in
+            let key = game.map { TvSportsHubPolicy.shared.fixtureKey(fixture: $0.fixture) }
+            guard key != openGameKey else { return }
+            if let old = openGameKey { TvSportsAlerts.shared.closedGame(eventId: old) }
+            if let key { TvSportsAlerts.shared.openedGame(eventId: key) }
+            openGameKey = key
         }
         .task(id: scenePhase) {
             // Egress rule: the refresh loop lives only while Sports is on screen and the app is
@@ -130,6 +152,23 @@ struct SportsScreen: View {
         }
     }
 
+    /// The phone's GAME_REQUEST_DEADLINE_MS (SportsHubScreen.kt).
+    private static let gameRequestDeadlineNs: UInt64 = 15_000_000_000
+
+    /// A banner's "Open game": opens the game once the hub holds its fixture; dropped once the hub's load has
+    /// settled without it (the phone's SportsGameRequest rule), so a game never opens late and unprompted.
+    private func consumeGameRequest(_ state: RadarUiState) {
+        guard let id = alerts.pendingGameId else { return }
+        if let fixture = TvSportsAlerts.shared.fixtureFor(eventId: id) {
+            alerts.pendingGameId = nil
+            leaguePage = nil
+            page = nil
+            open(fixture)
+        } else if !state.loadingFixtures {
+            alerts.pendingGameId = nil
+        }
+    }
+
     /// OK on a match opens the live game screen; it hands over to the channel sheet when it has no data.
     private func open(_ fixture: RadarFixture) {
         // A fixture the game screen can't open (no event id / kick-off) goes straight to the channel sheet.
@@ -149,6 +188,12 @@ struct SportsScreen: View {
                     }
                     if spoiler.shown {
                         ScoreChip(label: spoiler.delayLabel, systemImage: "timer") { TvSports.shared.cycleScoreDelay() }
+                    }
+                    // `Alerts on` / `Alerts off`; signed out it reads `Sign in to get alerts` and can't take focus.
+                    let alertChip = TvSportsAlerts.shared.hubChip()
+                    ScoreChip(label: alertChip.label, systemImage: alertChip.selected ? "bell" : "bell.slash",
+                              enabled: alertChip.enabled && alertsSignedIn) {
+                        TvSportsAlerts.shared.toggleEnabled()
                     }
                 }
                 .focusSection()
@@ -255,6 +300,8 @@ struct SportsScreen: View {
 private struct ScoreChip: View {
     let label: String
     let systemImage: String
+    /// Disabled chips dim and can't take focus (the signed-out alerts chip).
+    var enabled = true
     let action: () -> Void
     @Environment(\.nuvio) private var colors
     @FocusState private var focused: Bool
@@ -270,8 +317,10 @@ private struct ScoreChip: View {
             .padding(.horizontal, dp(14)).padding(.vertical, dp(6))
             .background(RoundedRectangle(cornerRadius: dp(8)).fill(focused ? colors.focusBackground : colors.backgroundCard))
             .overlay(RoundedRectangle(cornerRadius: dp(8)).stroke(focused ? colors.focusRing : Color.clear, lineWidth: dp(2)))
+            .opacity(enabled ? 1 : 0.4)
         }
         .buttonStyle(PlainNoChromeButtonStyle())
+        .disabled(!enabled)
         .focused($focused)
         .reportsFocus(focused)
     }

@@ -236,6 +236,8 @@ final class PlaybackCoordinator: ObservableObject {
 
     private weak var playerHost: PlayerHostController?
     private weak var pickerHost: UIViewController?
+    /// Sports alerts read what is playing (gate 3, "while something plays"): fed at every start, swap and end here.
+    private let alertsFeed = SportsAlertsPlaybackFeed()
 
     func play(_ session: TvPlayerSession, zapper: ((Int) async -> TvPlayerSession?)? = nil) {
         self.zapper = zapper
@@ -248,29 +250,36 @@ final class PlaybackCoordinator: ObservableObject {
         // new channel — a live zap showed the new title over a closed player (UITest LiveZapTests).
         let screen = TvPlayerScreen(session: session, relay: relay) { [weak self] in self?.stop() }
             .id(ObjectIdentifier(session))
+            // Sports alerts over the player: text only, never focusable; hold Select acts on it (SelectHoldCatcher).
+            .overlay(alignment: .topTrailing) { SportsAlertOverlay() }
             .environment(\.nuvio, palette)
             .environmentObject(self)
         if let host = playerHost {
             host.relay = relay
             host.rootView = AnyView(screen)          // already on screen: swap the session in place
+            alertsFeed.showing(session)
             return
         }
-        guard let top = Self.topViewController() else { session.close(); self.session = nil; return }
+        guard let top = Self.topViewController() else { session.close(); self.session = nil; alertsFeed.gone(); return }
         let host = PlayerHostController(rootView: AnyView(screen), relay: relay)
         host.modalPresentationStyle = .fullScreen
         host.view.backgroundColor = .black
         host.onGone = { [weak self] in self?.playerHostGone($0) }
         top.present(host, animated: true)
         playerHost = host
+        alertsFeed.showing(session)
     }
 
     /// Leaves the player: the session is closed (engine destroyed) before the screen goes (B112).
-    func stop() {
+    /// [then] runs once the player is off screen (at once when none is up): a SwiftUI cover asked for while the
+    /// UIKit dismissal is still running would be dropped (a sports alert's Open game).
+    func stop(then: (() -> Void)? = nil) {
         session?.session.close()
         session = nil
         zapper = nil
-        playerHost?.dismiss(animated: true)
+        if let host = playerHost { host.dismiss(animated: true, completion: then) } else { then?() }
         playerHost = nil
+        alertsFeed.gone()
     }
 
     /// The player screen went away by a route that didn't come through [stop] (UIKit dismissed it):
@@ -281,6 +290,7 @@ final class PlaybackCoordinator: ObservableObject {
         session?.session.close()
         session = nil
         zapper = nil
+        alertsFeed.gone()
     }
 
     /// Plays [next] only while the player that asked for it (showing [from]) is still up; a session that
@@ -294,6 +304,7 @@ final class PlaybackCoordinator: ObservableObject {
     func openSources(meta: MetaDetails, video: MetaVideo?) {
         session?.session.close()
         session = nil
+        alertsFeed.gone()
         let picker = AnyView(StreamPickerScreen(meta: meta, video: video) { [weak self] in self?.pickerHost?.dismiss(animated: true) }
             .environment(\.nuvio, palette).environmentObject(self))
         if let host = playerHost {

@@ -75,6 +75,8 @@ struct MainShell: View {
     @FocusState private var recoveryFocused: Bool
     @State private var recoveryActive = false
     @ObservedObject private var contentFocus = ContentFocusActivity.shared
+    /// Sports alerts: the banner drawn top-right (never focusable) and what holding Select on it does.
+    @ObservedObject private var alerts = SportsAlertCenter.shared
 
     private func openRail() {
         railEngaged = true
@@ -168,6 +170,22 @@ struct MainShell: View {
         .ignoresSafeArea()
         .onChange(of: contentFocus.railRequests) { _, _ in openRail() }
         .overlay(alignment: .bottom) { toast(colors) }
+        // Sports alerts: top-right, outside the focus system (text only, no hit testing). The window-level hold
+        // recognizer is armed only while a banner exists, and acts only while one is on screen (shell or player).
+        .overlay(alignment: .topTrailing) { SportsAlertOverlay().environment(\.nuvio, colors) }
+        .background(SelectHoldCatcher(armed: alerts.banner != nil).frame(width: 0, height: 0))
+        .task { await alerts.observe() }
+        .onAppear {
+            alerts.shellMounted = true
+            alerts.playback = playback
+            alerts.openSports = {
+                railEngaged = false
+                railFocus = nil
+                contentFocus.expectContentFocus()
+                destination = .sports
+            }
+        }
+        .onDisappear { alerts.shellMounted = false }
         .onChange(of: theme.colors.secondary, initial: true) { _, _ in playback.palette = theme.colors }
         .fullScreenCover(item: $smokeDetails) { box in
             TitleDetailsScreen(preview: box.preview).environmentObject(playback).environment(\.nuvio, colors)

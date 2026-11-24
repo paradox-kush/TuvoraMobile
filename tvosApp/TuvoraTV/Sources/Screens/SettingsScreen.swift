@@ -9,7 +9,7 @@ import TuvoraCore
 /// Categories follow NuvioTV's order. Android-only debug tooling is omitted.
 struct SettingsScreen: View {
     enum Category: String, CaseIterable, Identifiable {
-        case account, profiles, appearance, layout, discovery, integrations, playback, tracking, party, advanced, diagnostics, about
+        case account, profiles, appearance, layout, discovery, integrations, playback, alerts, tracking, party, advanced, diagnostics, about
         var id: String { rawValue }
         /// The rail's categories. Content & Discovery manages add-ons and plugins, which the App Store
         /// build compiles out (the phone's store build drops the same row).
@@ -27,6 +27,7 @@ struct SettingsScreen: View {
             case .discovery: return "Content & Discovery"
             case .integrations: return "Integrations"
             case .playback: return "Playback"
+            case .alerts: return "Sports alerts"
             case .tracking: return "Tracking"
             case .party: return "Watch party"
             case .advanced: return "Advanced"
@@ -43,6 +44,7 @@ struct SettingsScreen: View {
             case .discovery: return "md_explore"
             case .integrations: return "md_link"
             case .playback: return "md_play_arrow"
+            case .alerts: return "md_notifications"
             case .tracking: return "md_sync"
             case .party: return "md_people"
             case .advanced: return "sidebar_settings"
@@ -212,6 +214,7 @@ struct SettingsScreen: View {
         case .discovery: if StoreCopy.showsContentDiscovery { AddonsSettingsDetail(model: model) }
         case .integrations: IntegrationsSettingsDetail(nav: integrationsNav, model: integrations, settings: model)
         case .playback: PlaybackSettingsDetail(model: model)
+        case .alerts: SportsAlertsSettingsDetail()
         case .tracking: TrackingSettingsDetail(model: integrations)
         case .party: WatchPartySettingsDetail(party: party)
         case .advanced: PrivacySettingsDetail()
