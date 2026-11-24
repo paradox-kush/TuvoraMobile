@@ -400,9 +400,9 @@ class SportsAlertPolicyTest {
     fun `the watch check released with a result re-runs gate 3`() {
         val (_, ledger) = decide(alert(), c = liveCtx)
         val resolved = SportsAlertPolicy.onWatchResolved("e1", ledger, t0 + 1_000)
-        val watching = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(now = t0 + 1_000, watch = mapOf("e1" to WatchState.Channel(setOf("live:42")))), resolved)
+        val watching = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(nowMs = t0 + 1_000, watch = mapOf("e1" to WatchState.Channel(setOf("live:42")))), resolved)
         assertEquals(listOf(DropReason.WatchingThisGame), watching.dropped.map { it.second }, "it was this game")
-        val elsewhere = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(now = t0 + 1_000, watch = mapOf("e1" to WatchState.NoChannel)), resolved)
+        val elsewhere = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(nowMs = t0 + 1_000, watch = mapOf("e1" to WatchState.NoChannel)), resolved)
         assertEquals("Goal · Arsenal 1–0 Chelsea", elsewhere.banner?.title, "shown as soon as the answer is in")
     }
 
@@ -410,10 +410,10 @@ class SportsAlertPolicyTest {
     fun `still unknown at the deadline drops a score and shows a full time without numbers`() {
         val deadline = t0 + SportsAlertPolicy.WATCH_CHECK_MS
         val (_, l1) = decide(alert(), c = liveCtx)
-        val score = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(now = deadline), l1)
+        val score = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(nowMs = deadline), l1)
         assertEquals(listOf(DropReason.WatchUnknown), score.dropped.map { it.second }, "a score could spoil the stream")
         val (_, l2) = decide(alert(AlertKind.Final, h = 2, a = 1), c = liveCtx)
-        val final = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(now = deadline), l2)
+        val final = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(nowMs = deadline), l2)
         assertEquals("Full time · Arsenal v Chelsea", final.banner?.title, "full time without numbers")
     }
 
@@ -447,11 +447,11 @@ class SportsAlertPolicyTest {
     @Test
     fun `a delay hold released over an unknown live channel goes to the watch check`() {
         val (_, ledger) = decide(alert(), c = ctx(spoiler = delayed))
-        val release = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(now = t0 + 30_000, spoiler = delayed), ledger)
+        val release = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(nowMs = t0 + 30_000, spoiler = delayed), ledger)
         assertNull(release.banner, "never shown with numbers without asking")
         assertEquals(listOf(HoldReason.WatchCheck), release.held.map { it.second }, "asks first")
         assertEquals(t0 + 36_000, SportsAlertPolicy.nextTimerAtMs(release.ledger), "a fresh 6 s check")
-        val deadline = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(now = t0 + 36_000, spoiler = delayed), release.ledger)
+        val deadline = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(nowMs = t0 + 36_000, spoiler = delayed), release.ledger)
         assertEquals(listOf(DropReason.WatchUnknown), deadline.dropped.map { it.second }, "still unknown: dropped")
     }
 
@@ -459,7 +459,7 @@ class SportsAlertPolicyTest {
     fun `the score delay counts from receipt not from the watch check`() {
         val (_, ledger) = decide(alert(), c = liveCtx.copy(spoiler = delayed))
         val resolved = SportsAlertPolicy.onWatchResolved("e1", ledger, t0 + 2_000)
-        val after = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(now = t0 + 2_000, spoiler = delayed, watch = mapOf("e1" to WatchState.NoChannel)), resolved)
+        val after = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(nowMs = t0 + 2_000, spoiler = delayed, watch = mapOf("e1" to WatchState.NoChannel)), resolved)
         assertEquals(listOf(HoldReason.Delay), after.held.map { it.second }, "then the delay")
         assertEquals(t0 + 30_000, SportsAlertPolicy.nextTimerAtMs(after.ledger), "received + 30 s, not resolved + 30 s")
     }
@@ -467,10 +467,10 @@ class SportsAlertPolicyTest {
     @Test
     fun `a full time downgraded at the watch deadline still honours the delay`() {
         val (_, l1) = decide(alert(AlertKind.Final, h = 2, a = 1), c = liveCtx.copy(spoiler = delayed))
-        val atDeadline = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(now = t0 + 6_000, spoiler = delayed), l1)
+        val atDeadline = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(nowMs = t0 + 6_000, spoiler = delayed), l1)
         assertNull(atDeadline.banner, "not before the delay")
         assertEquals(t0 + 30_000, SportsAlertPolicy.nextTimerAtMs(atDeadline.ledger), "held to received + delay")
-        val shown = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(now = t0 + 30_000, spoiler = delayed), atDeadline.ledger)
+        val shown = SportsAlertPolicy.onTimer(SportsAlertSettings(), liveCtx.copy(nowMs = t0 + 30_000, spoiler = delayed), atDeadline.ledger)
         assertEquals("Full time · Arsenal v Chelsea", shown.banner?.title, "without numbers")
     }
 }
