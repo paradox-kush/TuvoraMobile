@@ -189,7 +189,7 @@ struct SportsScreen: View {
                     if spoiler.shown {
                         ScoreChip(label: spoiler.delayLabel, systemImage: "timer") { TvSports.shared.cycleScoreDelay() }
                     }
-                    // `Alerts on` / `Alerts off`; signed out it reads `Sign in to get alerts` and can't take focus.
+                    // `Alerts on` / `Alerts off`; signed out it reads `Sign in for alerts` and can't take focus.
                     let alertChip = TvSportsAlerts.shared.hubChip()
                     ScoreChip(label: alertChip.label, systemImage: alertChip.selected ? "bell" : "bell.slash",
                               enabled: alertChip.enabled && alertsSignedIn) {
