@@ -48,13 +48,12 @@ class SportsAlertTopicPolicyTest {
     }
 
     @Test
-    fun `a level of off removes that kind of follow`() {
+    fun `topics ignore levels so a followed sport stays joined`() {
         assertEquals(
-            setOf("sports-alerts:v1:ice_hockey"),
-            topics(SportsAlertSettings(leagueLevel = AlertLevel.Off), listOf(soccerA), listOf(rangers)),
-            "leagues off",
+            setOf("sports-alerts:v1:soccer", "sports-alerts:v1:ice_hockey"),
+            topics(SportsAlertSettings(leagueLevel = AlertLevel.Off, teamLevel = AlertLevel.Off), listOf(soccerA), listOf(rangers)),
+            "levels decide what shows, not what is joined",
         )
-        assertEquals(emptySet(), topics(SportsAlertSettings(teamLevel = AlertLevel.Off), teams = listOf(arsenal)), "teams off")
     }
 
     @Test

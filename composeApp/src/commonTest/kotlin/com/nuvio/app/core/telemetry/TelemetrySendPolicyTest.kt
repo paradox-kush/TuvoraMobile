@@ -11,6 +11,15 @@ class TelemetrySendPolicyTest {
     private fun decide(event: String, vararg p: Pair<String, Any>) = TelemetrySendPolicy.decide(event, mapOf(*p))
 
     @Test
+    fun `sports_alert sends shown and actions and counts holds and drops`() {
+        assertEquals(SendDecision.SEND, decide("sports_alert", "outcome" to "shown"))
+        assertEquals(SendDecision.SEND, decide("sports_alert", "outcome" to "action", "action" to "watch"))
+        assertEquals(SendDecision.COUNT, decide("sports_alert", "outcome" to "held", "reason" to "batch"))
+        assertEquals(SendDecision.COUNT, decide("sports_alert", "outcome" to "dropped", "reason" to "quiet_hours"))
+        assertFalse(TelemetrySendPolicy.attachesTrail("sports_alert", mapOf("outcome" to "dropped")))
+    }
+
+    @Test
     fun `screen views stay in the recorder`() = assertEquals(SendDecision.RECORD_ONLY, decide("\$screen"))
 
     @Test

@@ -32,16 +32,17 @@ class SportsAlertControllerTest {
     private class FakeInputs(private val clock: () -> Long) : SportsAlertInputs {
         var settings = SportsAlertSettings()
         var spoiler = ScoreSpoilerSettings()
-        var playing: String? = null
+        var playing: Set<String> = emptySet()
+        var playback: PlaybackContext = PlaybackContext.None
         override fun nowMs(): Long = clock()
         override fun localMinuteOfDay(nowMs: Long): Int = 15 * 60
-        override fun playback(): PlaybackContext = PlaybackContext.None
+        override fun playback(): PlaybackContext = playback
         override fun settings(): SportsAlertSettings = settings
         override fun followedLeagueIds(): Set<String> = emptySet()
         override fun followedTeamIds(): Set<String> = setOf("133604")
         override fun spoiler(): ScoreSpoilerSettings = spoiler
         override fun revealed(): RevealedGames = RevealedGames()
-        override fun playingChannelId(): String? = playing
+        override fun playingChannelIds(): Set<String> = playing
     }
 
     private class FakeWatch(private val result: WatchLookup) : GameWatchPort {
@@ -53,8 +54,8 @@ class SportsAlertControllerTest {
         }
     }
 
-    private fun alert(eventId: String = "e1", key: String = "$eventId:score", at: Long = t0) = SportsAlert(
-        key = key, eventId = eventId, kind = AlertKind.Score, sport = "soccer", leagueId = "4328", league = "Premier League",
+    private fun alert(eventId: String = "e1", key: String = "$eventId:score", at: Long = t0, kind: AlertKind = AlertKind.Score) = SportsAlert(
+        key = key, eventId = eventId, kind = kind, sport = "soccer", leagueId = "4328", league = "Premier League",
         homeId = "133604", awayId = "133610", home = "Arsenal", away = "Chelsea", homeScore = 1, awayScore = 0,
         progress = null, corrected = false, atMs = at,
     )
@@ -113,7 +114,7 @@ class SportsAlertControllerTest {
         h.controller.onAlert(alert(key = "first"))
         runCurrent()
         h.controller.dismiss()
-        h.inputs.playing = "live:42"
+        h.inputs.playing = setOf("live:42")
         h.inputs.settings = SportsAlertSettings(batchSeconds = 0)
         h.controller.onAlert(alert(key = "second"))
         assertNull(h.controller.banner.value, "the viewer is watching this game")
@@ -121,16 +122,57 @@ class SportsAlertControllerTest {
     }
 
     @Test
-    fun `telemetry never carries an id or a name`() = runTest {
+    fun `an unknown channel over live tv waits for the lookup then shows`() = runTest {
+        val watch = FakeWatch(WatchLookup.NoMatch)
+        val h = Harness(this, backgroundScope, watch)
+        h.inputs.playback = PlaybackContext.LiveTv
+        h.inputs.playing = setOf("live:9")
+        h.controller.onAlert(alert())
+        assertNull(h.controller.banner.value, "held for the watch check")
+        runCurrent()
+        assertEquals(1, watch.lookups, "the hold started the lookup")
+        assertEquals("Goal · Arsenal 1–0 Chelsea", h.controller.banner.value?.title, "no channel carries it: shown at once")
+    }
+
+    @Test
+    fun `a full time banner starts no lookup`() = runTest {
+        val watch = FakeWatch(WatchLookup.Found(WatchOffer("live:42", "Sky Sports")))
+        val h = Harness(this, backgroundScope, watch)
+        h.controller.onAlert(alert(kind = AlertKind.Final, key = "e1:final"))
+        runCurrent()
+        assertEquals(0, watch.lookups, "Open game only")
+        assertEquals(BannerAction.OpenGame("e1"), h.controller.banner.value?.action, "no Watch")
+    }
+
+    @Test
+    fun `a game's lookup result is reused for 15 minutes`() = runTest {
+        val watch = FakeWatch(WatchLookup.NoMatch)
+        val h = Harness(this, backgroundScope, watch)
+        h.inputs.settings = SportsAlertSettings(batchSeconds = 0)
+        h.controller.onAlert(alert(key = "a"))
+        runCurrent()
+        h.controller.dismiss()
+        h.controller.onAlert(alert(key = "b"))
+        runCurrent()
+        assertEquals(1, watch.lookups, "a no-match is cached too")
+        h.controller.dismiss()
+        advanceTimeBy(15 * 60_000L + 1)
+        h.controller.onAlert(alert(key = "c", at = t0 + 15 * 60_000L + 1))
+        runCurrent()
+        assertEquals(2, watch.lookups, "asked again after 15 minutes")
+    }
+
+    @Test
+    fun `telemetry sends only the ruled outcomes and never an id or a name`() = runTest {
         val h = Harness(this, backgroundScope, FakeWatch(WatchLookup.NoMatch))
         h.controller.onAlert(alert())
-        h.controller.onAlert(alert())                      // duplicate
-        h.controller.onAlert(alert(eventId = "x"))         // held for the batch
+        h.controller.onAlert(alert())                      // duplicate: never emitted
+        h.controller.onAlert(alert(eventId = "x"))         // held for the batch: counted
+        h.controller.onAlert(alert(eventId = "y").copy(homeId = "nobody", awayId = "none")) // not followed: never emitted
         h.controller.act()
-        val allowed = setOf("outcome", "reason", "kind", "sport", "batch_size", "action")
-        assertTrue(h.sent.isNotEmpty(), "events were sent")
-        h.sent.forEach { props -> assertTrue(props.keys.all { it in allowed }, "only closed props: $props") }
-        assertEquals(listOf("shown", "dropped", "held", "acted"), h.sent.map { it["outcome"] }, "one event per decision and action")
+        val allowed = setOf("outcome", "reason", "kind", "sport", "batch", "action")
+        h.sent.forEach { props -> assertTrue(props.keys.all { it in allowed }, "only the shared schema: $props") }
+        assertEquals(listOf("shown", "held", "action"), h.sent.map { it["outcome"] }, "duplicate and not_followed are never emitted")
         assertTrue(h.sent.none { p -> p.values.any { it == "e1" || it == "x" || it == "Arsenal" || it == "4328" } }, "no ids or names")
     }
 }

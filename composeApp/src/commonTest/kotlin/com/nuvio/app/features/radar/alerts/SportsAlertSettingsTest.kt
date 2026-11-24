@@ -104,6 +104,29 @@ class SportsAlertSettingsTest {
     }
 
     @Test
+    fun `overrides keep the newest 50`() {
+        val many = (1..60).fold(SportsAlertSettings()) { acc, i -> acc.withGame("e$i", AlertLevel.Off, expMs = 1_000, nowMs = 0) }
+        assertEquals(50, many.games.size, "capped")
+        assertEquals("e11", many.games.first().id, "the oldest went first")
+        val text = """{"games":[${(1..60).joinToString(",") { "{\"id\":\"e$it\",\"level\":\"off\",\"exp\":9}" }}]}"""
+        assertEquals("e60", parse(text).games.last().id, "decode keeps the newest too")
+    }
+
+    @Test
+    fun `the serialized object stays under 8 KB at its limits`() {
+        val longId = { p: String, i: Int -> (p + i).padEnd(64, 'x') }
+        val worst = SportsAlertSettings(
+            mutedLeagues = (1..500).map { longId("l", it) }.toSet(),
+            mutedTeams = (1..500).map { longId("t", it) }.toSet(),
+            games = (1..50).map { GameAlertOverride(longId("g", it), AlertLevel.All, Long.MAX_VALUE) },
+        )
+        val bytes = SportsAlertSettings.toJson(worst).toString().encodeToByteArray().size
+        assertTrue(bytes < 8 * 1024, "the backend stores it only under 8 KB: $bytes bytes")
+        val back = SportsAlertSettings.fromJson(SportsAlertSettings.toJson(worst))
+        assertTrue(back.games.isNotEmpty() && back.mutedTeams.isNotEmpty(), "trimmed, not emptied")
+    }
+
+    @Test
     fun `setting a game override prunes expired ones`() {
         val s = SportsAlertSettings(games = listOf(GameAlertOverride("old", AlertLevel.Off, 10)))
             .withGame("e1", AlertLevel.All, expMs = 1_000, nowMs = 20)
@@ -132,6 +155,9 @@ class SportsAlertSettingsTest {
         assertEquals(AlertKind.Score, alert.kind, "kind")
         assertNull(SportsAlert.parse(JsonObject(payload + ("v" to JsonPrimitive(2)))), "another version is ignored")
         assertNull(SportsAlert.parse(JsonObject(payload - "eventId")), "no event id")
+        assertNull(SportsAlert.parse(JsonObject(payload - "at")), "at is required")
+        assertNull(SportsAlert.parse(JsonObject(payload - "v")), "v is required")
+        assertEquals("", SportsAlert.parse(JsonObject(payload - "away"))?.away, "away is optional")
     }
 
     @Test

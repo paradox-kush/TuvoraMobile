@@ -28,11 +28,12 @@ class RadarPrefsAlertsSyncTest {
     // --- push payload ----------------------------------------------------------------------------------------------
 
     @Test
-    fun `the sync payload carries alerts and never alerts_dirty`() {
+    fun `the sync payload carries alerts only while dirty and never alerts_dirty`() {
         val payload = radarPrefsPayload(dirty)
         val alerts = assertIs<JsonObject>(payload["alerts"], "alerts is an object")
         assertEquals("final", alerts["team_level"]?.jsonPrimitive?.content, "the local value goes out")
         assertFalse(payload.containsKey("alerts_dirty"), "device-local only")
+        assertFalse(radarPrefsPayload(local).containsKey("alerts"), "clean: absent, so the server keeps its stored value")
     }
 
     // --- pull ------------------------------------------------------------------------------------------------------

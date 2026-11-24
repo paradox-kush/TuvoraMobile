@@ -27,6 +27,16 @@ class SessionHealthTest {
     }
 
     @Test
+    fun `sports alert holds and drops count by outcome and reason`() {
+        val h = SessionHealth(0L)
+        h.countEvent("sports_alert", mapOf("outcome" to "dropped", "reason" to "quiet_hours", "kind" to "score", "sport" to "soccer", "batch" to 1))
+        h.countEvent("sports_alert", mapOf("outcome" to "held", "reason" to "watch_check", "kind" to "final", "sport" to "soccer", "batch" to 1))
+        val s = h.snapshot(1L)!!.payload
+        assertEquals(1, s["n_sports_alert_dropped_quiet_hours"])
+        assertEquals(1, s["n_sports_alert_held_watch_check"])
+    }
+
+    @Test
     fun `peak memory is the maximum seen`() {
         val h = SessionHealth(0L)
         h.count("x"); h.noteMemory(100L, 300L); h.noteMemory(180L, 250L); h.noteMemory(90L, null)
