@@ -186,6 +186,8 @@ struct SeeAllButton: View {
 }
 
 /// ErrorState / EmptyScreenState (shared TV components): centred title + message, optional retry.
+/// Pass Retry as `retry:` explicitly: a trailing closure binds to the LAST closure property, [action], which shows
+/// nothing without [actionTitle] (four error screens lost their Retry button that way).
 struct NuvioStateMessage: View {
     let title: String
     let message: String

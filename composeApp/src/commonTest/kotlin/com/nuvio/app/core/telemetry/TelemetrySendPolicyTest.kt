@@ -97,4 +97,15 @@ class TelemetrySendPolicyTest {
         assertFalse(TelemetrySendPolicy.attachesTrail("first_run_step", props))
         assertTrue("first_run_step" in TelemetrySendPolicy.explicitSendEvents)
     }
+
+    @Test
+    fun `first_leave is sent as first_run_step with no trail`() {
+        val props = mapOf<String, Any>(
+            "step" to "first_leave", "schema_version" to 1, "launch_index" to 1, "secs_since_first_launch" to 20,
+            "last_screen" to "tabs.home", "secs_in_app" to 20, "screens_seen" to 2,
+            "opened_source_form" to true, "tried_save" to true, "save_error" to "unreachable",
+        )
+        assertEquals(SendDecision.SEND, decide("first_run_step", *props.toList().toTypedArray()))
+        assertFalse(TelemetrySendPolicy.attachesTrail("first_run_step", props))
+    }
 }

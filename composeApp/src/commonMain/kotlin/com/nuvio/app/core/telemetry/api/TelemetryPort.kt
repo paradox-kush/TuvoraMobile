@@ -35,6 +35,13 @@ interface TelemetryPort {
      */
     fun firstRunStep(step: FirstRunStep, props: Map<String, Any> = emptyMap())
 
+    /**
+     * Facts for the `first_leave` summary (screens, source-form open, save tried/failed). Local bookkeeping only: nothing
+     * is sent here; the summary goes out when the app first leaves the foreground ([onBackground]). Use the
+     * `funnelScreen` / `funnelSourceFormOpened` / `funnelSaveTried` / `funnelSaveFailed` helpers.
+     */
+    fun firstRunNote(note: FirstRunNote)
+
     /** Mirrors an abnormal process exit as an exception so error tracking groups it (host SDK permitting). */
     fun reportException(error: Throwable, props: Map<String, Any>)
 
@@ -117,6 +124,7 @@ private object NoopTelemetryPort : TelemetryPort {
     override fun reportError(event: String, props: Map<String, Any>) {}
     override fun emit(event: String, props: Map<String, Any>) {}
     override fun firstRunStep(step: FirstRunStep, props: Map<String, Any>) {}
+    override fun firstRunNote(note: FirstRunNote) {}
     override fun reportException(error: Throwable, props: Map<String, Any>) {}
     override suspend fun sendUserReport(category: ReportCategory, surface: ReportSurface, context: ReportContext) = ReportResult.Failed
     override fun consentEnabled(): Boolean = false

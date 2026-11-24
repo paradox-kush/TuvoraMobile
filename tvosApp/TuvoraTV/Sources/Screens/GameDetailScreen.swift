@@ -15,7 +15,7 @@ import TuvoraCore
 
 /// Focus targets of the screen: the Play row (default) and the section chip row are two focus sections.
 private enum GameFocus: Hashable {
-    case play, more, chip(Int)
+    case play, more, reveal, chip(Int)
 }
 
 struct GameDetailScreen: View {
@@ -161,6 +161,8 @@ struct GameDetailScreen: View {
 
     /// Three snapshots, nine seconds apart, then stops: exercises each moment once.
     private func runDemo(_ kind: String) async {
+        // `-gameDemoHidden`: the canned game as Hide scores shows it (the reveal chip's focus walk; no spoiler model here).
+        if AppArguments.list.contains("-gameDemoHidden") { scoresHidden = true }
         for step in 0..<3 {
             TvGameScreenDemo.shared.enabled = true          // debug builds only (this whole block is #if DEBUG)
             guard let detail = TvGameScreenDemo.shared.detail(kind: kind, step: Int32(step)) else { return }
@@ -280,8 +282,10 @@ struct GameDetailScreen: View {
                 .focusSection()
                 // The chips sit top-right, out of the focus engine's geometric reach from the bottom-left Play row:
                 // Up goes to the selected chip explicitly (Right also reaches them through the right section).
+                // With scores hidden, Up reaches "Show this game's score" first (it sits above the row, left column).
                 .onMoveCommand { direction in
-                    if direction == .up, !(screenChips.isEmpty) { focus = .chip(selectedIndex) }
+                    guard direction == .up else { return }
+                    if scoresHidden || hideAgain { focus = .reveal } else if !screenChips.isEmpty { focus = .chip(selectedIndex) }
                 }
         }
     }
@@ -289,7 +293,12 @@ struct GameDetailScreen: View {
     /// "Scores hidden": flips the same global setting as the hub chip, so the user can reveal without leaving.
     /// Per game only ("Show this game's score" / "Hide again"); the hub's chip owns the global setting.
     private var revealScoresChip: some View {
-        RevealScoresChip(hideAgain: hideAgain, gameKey: TvSportsHubPolicy.shared.fixtureKey(fixture: fixture))
+        RevealScoresChip(hideAgain: hideAgain, gameKey: TvSportsHubPolicy.shared.fixtureKey(fixture: fixture), focus: $focus)
+            // Right reaches the section chips; Down returns to the Play row.
+            .onMoveCommand { direction in
+                if direction == .right, !screenChips.isEmpty { focus = .chip(selectedIndex) }
+                if direction == .down { focus = .play }
+            }
     }
 
     private var screenChips: [TvChip] { screen?.chips ?? [] }
@@ -404,8 +413,9 @@ private func teamColor(_ hex: String?, fallback: Color) -> Color {
 private struct RevealScoresChip: View {
     let hideAgain: Bool
     let gameKey: String
+    var focus: FocusState<GameFocus?>.Binding
     @Environment(\.nuvio) private var colors
-    @FocusState private var focused: Bool
+    private var focused: Bool { focus.wrappedValue == .reveal }
 
     var body: some View {
         Button {
@@ -419,8 +429,9 @@ private struct RevealScoresChip: View {
                 .overlay(Capsule().stroke(focused ? colors.focusRing : Color.clear, lineWidth: dp(2)))
         }
         .buttonStyle(PlainNoChromeButtonStyle())
-        .focused($focused)
+        .focused(focus, equals: .reveal)
         .reportsFocus(focused)
+        .accessibilityIdentifier("game.revealScore")
     }
 }
 

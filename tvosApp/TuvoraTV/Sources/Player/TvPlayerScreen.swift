@@ -54,6 +54,8 @@ struct TvPlayerScreen: View {
     /// B279: the app is not the active scene, so the screen hold is released (PlaybackKeepAwakePolicy).
     @Environment(\.scenePhase) private var scenePhase
     @State private var appInBackground = false
+    /// Mirrors the keep-awake hold for the `player.awake` UI-test marker (B279).
+    @State private var keepAwakeHeld = false
     /// Watch party: the shared party, the player's party line, and the last party message (a few seconds).
     @StateObject private var party = PartyModel()
     @State private var partyLine: String?
@@ -80,6 +82,7 @@ struct TvPlayerScreen: View {
             inBackground: appInBackground
         )
         if UIApplication.shared.isIdleTimerDisabled != hold { UIApplication.shared.isIdleTimerDisabled = hold }
+        if keepAwakeHeld != hold { keepAwakeHeld = hold }
     }
 
     /// Bare video: nothing over it that takes focus.
@@ -96,6 +99,15 @@ struct TvPlayerScreen: View {
             .opacity(0.01)
             .allowsHitTesting(false)
             .accessibilityIdentifier("player.now")
+    }
+
+    /// UI-test marker (B279): whether the screen is held awake right now ("awake=1") or may sleep ("awake=0").
+    private var awakeMarker: some View {
+        Text("awake=\(keepAwakeHeld ? 1 : 0)")
+            .font(.system(size: 1))
+            .opacity(0.01)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("player.awake")
     }
 
     /// UI-test marker: whole seconds played, and whether a scrub preview is up ("12|scrub").
@@ -126,6 +138,7 @@ struct TvPlayerScreen: View {
             .disabled(!bareVideoFocusable)
             .accessibilityIdentifier("player.video")
             nowMarker
+            awakeMarker
             positionMarker
             #if DEBUG
             RemoteTrailMarker()

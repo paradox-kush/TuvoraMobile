@@ -2,6 +2,8 @@ package com.nuvio.app.features.servers
 
 import com.nuvio.app.core.telemetry.api.FirstRunVocab
 import com.nuvio.app.core.telemetry.api.firstSourceAdded
+import com.nuvio.app.core.telemetry.api.funnelSaveFailed
+import com.nuvio.app.core.telemetry.api.funnelSaveTried
 import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import co.touchlab.kermit.Logger
 import com.nuvio.app.features.profiles.ProfileRepository
@@ -223,15 +225,28 @@ object ServerRepository {
     }
 
     suspend fun connect(provider: ServerProvider, address: String, username: String, password: String): ServerConnection =
-        connectWith(provider) { provider.signIn(address, username, password) }
+        userSave { connectWith(provider) { provider.signIn(address, username, password) } }
 
     /** Quick Connect sign-in: the token it yields is this device's own and stays on this device (never synced). */
     suspend fun connectWithQuickConnect(provider: ServerProvider, challenge: QuickConnectChallenge): ServerConnection =
-        connectWith(provider) { provider.quickConnectComplete(challenge) }
+        userSave { connectWith(provider) { provider.quickConnectComplete(challenge) } }
 
     /** Upstream's Plex sign-in shape: the provider runs its own flow and hands back the sign-in. */
     suspend fun connect(provider: ServerProvider, signIn: suspend () -> ServerSignIn): ServerConnection =
-        connectWith(provider) { signIn() }
+        userSave { connectWith(provider) { signIn() } }
+
+    /** A person pressed connect: first-visit summary bookkeeping (`first_leave`). A failure is `other`, never its message. */
+    private suspend fun <T> userSave(block: suspend () -> T): T {
+        TelemetryAccess.current().funnelSaveTried()
+        try {
+            return block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            TelemetryAccess.current().funnelSaveFailed("other")
+            throw failure
+        }
+    }
 
     internal suspend fun connectManaged(signIn: ServerSignIn, bridgeId: String, expiresAtMs: Long, revision: Long): ServerConnection =
         connectWith(checkNotNull(ServerProviders.forId("jellyfin")), bridgeId, expiresAtMs, revision) { signIn }

@@ -12,8 +12,15 @@ final class GameScreenRemoteTests: XCTestCase {
         // The demo kind file (debug switch) wins over the launch argument, so set it explicitly.
         try? "football".write(toFile: "/tmp/tuvora-game-demo.txt", atomically: true, encoding: .utf8)
         app = XCUIApplication()
-        app.launchArguments = ["-smokePickProfile", "1", "-smokeTab", "sports", "-gameDemo", "football"]
+        app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "sports", "-gameDemo", "football"]
         app.launch()
+    }
+
+    /// The demo switch file outlives the test otherwise, and every later run (or manual pass) on this Mac then shows the
+    /// canned football game instead of the real one.
+    override func tearDown() {
+        try? FileManager.default.removeItem(atPath: "/tmp/tuvora-game-demo.txt")
+        super.tearDown()
     }
 
     private var focused: XCUIElement {
@@ -38,11 +45,17 @@ final class GameScreenRemoteTests: XCTestCase {
     /// Sports hub -> American Football -> NCAA Football -> first game card -> game screen.
     private func openDemoGame() {
         XCTAssertTrue(waitFocus(30) { $0 != "<none>" }, "Sports: nothing focused after launch")
-        press(.right, settle: 0.6); press(.right, settle: 0.6)          // Football, Basketball, American Football
+        // A hub with followed leagues opens on its Live & Upcoming row; walk down to the sport cards first.
+        for _ in 0..<4 where !isSportCard(focusedLabel()) { press(.down, settle: 0.6) }
+        for _ in 0..<4 where !focusedLabel().hasPrefix("American Football") { press(.right, settle: 0.6) }
         press(.select, settle: 2)
         press(.down, settle: 0.6); press(.select, settle: 6)           // NCAA Football league page
         press(.down, settle: 1)                                         // first match card
         press(.select, settle: 3)
+    }
+
+    private func isSportCard(_ label: String) -> Bool {
+        ["Football", "Basketball", "American Football", "Baseball", "Hockey"].contains { label.hasPrefix($0 + ",") }
     }
 
     /// The Play slot reads "Play" with a matched channel, "Find channels" / "Finding channels…" without one (the sim's channel set varies).
@@ -84,5 +97,24 @@ final class GameScreenRemoteTests: XCTestCase {
         XCTAssertTrue(isPlayRow(focusedLabel()), "focus moved on a refresh: \(focusedLabel())")
         XCTAssertTrue(has("WSH ball"), "the turnover on the last snapshot flips the ball label")
         shot("4-after-updates")
+    }
+
+    /// Hide scores: "Show this game's score" sits above the Play row in the left column, but Up from Play used to jump
+    /// straight to the section chips on the right, so the remote could never reach it. (`-gameDemoHidden` shows the
+    /// canned game as Hide scores does; the reveal itself is covered by the shared TvScoreSpoiler tests.)
+    func testRevealChipIsReachableWithScoresHidden() {
+        app.terminate()
+        app.launchArguments += ["-gameDemoHidden"]
+        app.launch()
+        openDemoGame()
+        XCTAssertTrue(has("Show this game's score", timeout: 20), "the reveal control is not shown with scores hidden")
+        XCTAssertTrue(waitFocus(10) { self.isPlayRow($0) }, "Play is not focused on open: \(focusedLabel())")
+        press(.up)
+        XCTAssertEqual(focusedLabel(), "Show this game's score", "Up from Play must reach the reveal control")
+        shot("reveal-focused")
+        press(.right)
+        XCTAssertEqual(focusedLabel(), "Plays", "Right from the reveal control reaches the selected chip")
+        press(.left); press(.down)
+        XCTAssertTrue(isPlayRow(focusedLabel()), "Down from the reveal control returns to Play: \(focusedLabel())")
     }
 }
