@@ -56,6 +56,7 @@ struct IptvHubScreen: View {
                                         ? "This playlist has no categories in this section. Try again, pick another section, or add a different playlist.\n\nChecked just now, still empty."
                                         : "This playlist has no categories in this section. Try again, pick another section, or add a different playlist.",
                                       retry: { TvIptvBrowse.shared.retryEmpty() }, retryTakesFocus: true,
+                                      takesFocus: TvIptvEntryFocus.shared.messageClaimsFocus(viewerMoved: viewerMoved),
                                       actionTitle: "Add Playlist", actionId: "iptv.empty.addPlaylist") {
                         DeepLinkCenter.shared.openSetupCode = true
                     }

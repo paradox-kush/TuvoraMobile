@@ -23,4 +23,10 @@ class TvIptvEntryFocusTest {
         assertEquals(TvIptvLanding.SelectedChip, TvIptvEntryFocus.landing(XtreamHubSection.MOVIES, hasChannels = true), "movies")
         assertEquals(TvIptvLanding.SelectedChip, TvIptvEntryFocus.landing(XtreamHubSection.SERIES, hasChannels = true), "series")
     }
+
+    @Test
+    fun `an empty-hub message claims focus on entry but never from the chip the viewer just chose`() {
+        assertEquals(true, TvIptvEntryFocus.messageClaimsFocus(viewerMoved = false), "fresh entry: Retry gets the remote")
+        assertEquals(false, TvIptvEntryFocus.messageClaimsFocus(viewerMoved = true), "after a move the chip keeps focus")
+    }
 }
