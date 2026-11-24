@@ -44,8 +44,14 @@ data class RadarUiState(
     val freshStates: Map<String, FreshFixtureState> = emptyMap(),
     /** Every observed score with its time (recorded where fetches land): the score delay reads it. One per profile. */
     val scoreLedger: LiveScoreLedger = LiveScoreLedger(),
+    /** Games the user revealed one at a time while scores are hidden: this session and profile only (never stored or synced). */
+    val revealedGames: RevealedGames = RevealedGames(),
 ) {
     val scoreSpoiler: ScoreSpoilerSettings get() = prefs.scoreSpoiler
+
+    /** The settings for one game ([radarFixtureKey]): a game revealed on its own reads as shown, under the same delay. */
+    fun scoreSpoilerFor(key: String?): ScoreSpoilerSettings =
+        if (!scoreSpoiler.shown && key in revealedGames) scoreSpoiler.copy(shown = true) else scoreSpoiler
 
     /** The score as observed now: the livescore feed's numbers, else the fixture's own result. Null when there is none. */
     fun observedScore(fixture: RadarFixture): RadarLiveScore? {
@@ -67,7 +73,7 @@ data class RadarUiState(
     fun scoreFor(fixture: RadarFixture, nowMs: Long): ScoreVisibility<RadarLiveScore> {
         val key = radarFixtureKey(fixture)
         return ScoreSpoilerPolicy.scoreFor(
-            scoreSpoiler, key, observedScore(fixture), scoreLedger.finishedAtFirstSight(key), scoreLedger.buffer, nowMs,
+            scoreSpoilerFor(key), key, observedScore(fixture), scoreLedger.finishedAtFirstSight(key), scoreLedger.buffer, nowMs,
         )
     }
 
@@ -75,7 +81,8 @@ data class RadarUiState(
 
     /** When a delayed score becomes due (one local re-render, no network); null when nothing is pending. */
     fun nextScoreChangeAtMs(nowMs: Long): Long? =
-        scoreSpoiler.takeIf { it.shown }?.let { scoreLedger.buffer.nextChangeAtMs(nowMs, it.delayMs) }
+        // A game revealed on its own is shown (and delayed) even while every other score is hidden.
+        scoreSpoiler.takeIf { it.shown || revealedGames.ids.isNotEmpty() }?.let { scoreLedger.buffer.nextChangeAtMs(nowMs, it.delayMs) }
 
     /** Records every held fixture's observed score into [scoreLedger]. Called by the repository where a fetch lands. */
     internal fun recordObservedScores(nowMs: Long) {
@@ -502,6 +509,16 @@ object RadarRepository {
 
     /** The hub's "Scores shown" / "Scores hidden" chip, and the game page's reveal chip (one global setting). */
     fun toggleScoresShown() = setScoresShown(!_uiState.value.prefs.scoresShown)
+
+    /** "Show this game's score": reveals ONE game ([radarFixtureKey]) for this session and profile; the global setting stays. */
+    fun revealGame(key: String) {
+        _uiState.update { it.copy(revealedGames = it.revealedGames.reveal(key)) }
+    }
+
+    /** "Hide again": that one game goes back under the global Hide scores. */
+    fun hideGame(key: String) {
+        _uiState.update { it.copy(revealedGames = it.revealedGames.hide(key)) }
+    }
 
     /** The hub's delay chip: Off → 15 s → 30 s → 60 s → Off. */
     fun cycleScoreDelay() {

@@ -48,6 +48,8 @@ struct GameDetailScreen: View {
     @State private var fieldSlides = false
     /// Hide scores is on: the scoreboard numbers and spoiler sections are withheld by the model; the chip reveals.
     @State private var scoresHidden = false
+    @State private var hideAgain = false
+    @State private var hiddenCard = false
     @State private var matches: [RadarChannelMatcher.ChannelMatch] = []
     @State private var matching = true
     @State private var opening = false
@@ -121,7 +123,11 @@ struct GameDetailScreen: View {
             await withTaskGroup(of: Void.self) { group in
                 group.addTask { try? await model.runScoreSpoilerWhileVisible() }
                 group.addTask { @MainActor in
-                    for await next in model.spoiler { scoresHidden = next.hidden }
+                    for await next in model.spoiler {
+                        scoresHidden = next.hidden
+                        hideAgain = next.hideAgain
+                        hiddenCard = next.hiddenCard
+                    }
                 }
             }
         }
@@ -262,7 +268,7 @@ struct GameDetailScreen: View {
     private func leftColumn(_ screen: TvGameScreenModel) -> some View {
         VStack(alignment: .leading, spacing: dp(7)) {
             ScoreboardCard(board: screen.scoreboard, pulseSides: pulseSides, reduceMotion: reduceMotion, upcomingLabel: upcomingLabel, field: screen.field, possession: screen.basketball?.possession)
-            if scoresHidden { revealScoresChip }
+            if scoresHidden || hideAgain { revealScoresChip }
             if let field = screen.field { FieldStripCard(strip: field, flashes: flashes, slides: fieldSlides) }
             if let soccer = screen.soccer { SoccerStripCard(strip: soccer, board: screen.scoreboard, animated: !reduceMotion) }
             if let basketball = screen.basketball { BasketballStripCard(strip: basketball, board: screen.scoreboard, flashes: flashes, animated: !reduceMotion) }
@@ -281,7 +287,10 @@ struct GameDetailScreen: View {
     }
 
     /// "Scores hidden": flips the same global setting as the hub chip, so the user can reveal without leaving.
-    private var revealScoresChip: some View { RevealScoresChip() }
+    /// Per game only ("Show this game's score" / "Hide again"); the hub's chip owns the global setting.
+    private var revealScoresChip: some View {
+        RevealScoresChip(hideAgain: hideAgain, gameKey: TvSportsHubPolicy.shared.fixtureKey(fixture: fixture))
+    }
 
     private var screenChips: [TvChip] { screen?.chips ?? [] }
     private var selectedIndex: Int { Int(TvSectionSelection.shared.indexOf(chips: screenChips, selected: selectedSection)) }
@@ -369,6 +378,14 @@ struct GameDetailScreen: View {
     @ViewBuilder
     private func fallbackCards(_ screen: TvGameScreenModel) -> some View {
         VStack(alignment: .leading, spacing: dp(12)) {
+            if hiddenCard && screen.situationLine == nil && screen.panels.byPeriod == nil {
+                // Redaction left nothing to show: say why instead of an empty column (the reveal chip is on the left).
+                VStack(alignment: .leading, spacing: dp(4)) {
+                    Text("Scores are hidden").font(NuvioType.titleMediumSemi).foregroundStyle(colors.textPrimary)
+                    Text("Results, stats and plays for this game stay hidden until you choose to see them.")
+                        .font(NuvioType.labelMedium).foregroundStyle(colors.textSecondary)
+                }
+            }
             if let line = screen.situationLine {
                 Text(line).font(NuvioType.titleMediumSemi).foregroundStyle(colors.textPrimary).lineLimit(2)
             }
@@ -385,12 +402,17 @@ private func teamColor(_ hex: String?, fallback: Color) -> Color {
 }
 
 private struct RevealScoresChip: View {
+    let hideAgain: Bool
+    let gameKey: String
     @Environment(\.nuvio) private var colors
     @FocusState private var focused: Bool
 
     var body: some View {
-        Button { TvSports.shared.toggleScoresShown() } label: {
-            Label("Scores hidden", systemImage: "eye.slash").font(NuvioType.labelMedium)
+        Button {
+            if hideAgain { TvSports.shared.hideGame(id: gameKey) } else { TvSports.shared.revealGame(id: gameKey) }
+        } label: {
+            Label(hideAgain ? "Hide again" : "Show this game's score", systemImage: hideAgain ? "eye.slash" : "eye")
+                .font(NuvioType.labelMedium)
                 .foregroundStyle(focused ? colors.primary : colors.textSecondary)
                 .padding(.horizontal, dp(14)).padding(.vertical, dp(6))
                 .background(Capsule().fill(focused ? colors.focusBackground : colors.backgroundCard))

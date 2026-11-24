@@ -245,8 +245,12 @@ fun SportsHubScreen(
                     onAddPlaylist = onAddPlaylist,
                     onFindChannels = { sheetFixture = fx },
                     onFreshState = { live, period -> fx.id?.let { id -> RadarRepository.setFreshState(id, live, period) } },
-                    scoreSettings = state.scoreSpoiler,
-                    onRevealScores = { RadarRepository.setScoresShown(true) },
+                    // Per game: a game revealed on its own reads as shown here and on its cards (session only).
+                    scoreSettings = state.scoreSpoilerFor(radarFixtureKey(fx)),
+                    revealedHere = radarFixtureKey(fx) in state.revealedGames,
+                    globalScoresShown = state.scoreSpoiler.shown,
+                    onRevealGame = { RadarRepository.revealGame(radarFixtureKey(fx)) },
+                    onHideGame = { RadarRepository.hideGame(radarFixtureKey(fx)) },
                 )
             }
         }

@@ -30,6 +30,27 @@ data class GameSpoilerView(val detail: GameDetail, val hidden: Boolean, val pend
     val showsRevealChip: Boolean get() = hidden && (detail.state == GameState.LIVE || detail.state == GameState.FINAL)
 }
 
+/** The game page's per-game chip: "Show this game's score" / "Hide again" (never the global hub setting). */
+enum class GameRevealChip(val label: String?) {
+    NONE(null),
+    SHOW_THIS_GAME("Show this game's score"),
+    HIDE_AGAIN("Hide again"),
+}
+
+/**
+ * Which per-game chip the page shows. [revealedHere] = this game is in RevealedGames (so the page got shown settings);
+ * [globalShown] = the profile's Hide scores is off. Only for a live or final game: an upcoming one has no score.
+ */
+fun GameSpoilerView.revealChip(revealedHere: Boolean, globalShown: Boolean): GameRevealChip = when {
+    showsRevealChip -> GameRevealChip.SHOW_THIS_GAME
+    revealedHere && !globalShown && !hidden && detail.state.let { it == GameState.LIVE || it == GameState.FINAL } -> GameRevealChip.HIDE_AGAIN
+    else -> GameRevealChip.NONE
+}
+
+/** Redaction left this started game's Overview with nothing to draw: show a "Scores are hidden" card with the reveal action. */
+val GameSpoilerView.showsHiddenCard: Boolean
+    get() = showsRevealChip && GameSectionsPolicy.blocksFor(GameSection.OVERVIEW, detail).isEmpty()
+
 /**
  * The game page's side of Hide scores + score delay (one per open game; phone/iPad controller and Apple TV model).
  * [record] runs where a fetch result lands; [view] picks the snapshot the delay allows ([ScoreSpoilerPolicy]) and

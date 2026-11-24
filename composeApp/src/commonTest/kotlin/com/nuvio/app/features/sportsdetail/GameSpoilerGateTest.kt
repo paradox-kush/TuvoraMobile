@@ -32,7 +32,10 @@ import com.nuvio.app.features.sportsdetail.api.StatsBlock
 import com.nuvio.app.features.sportsdetail.api.TeamsHeader
 import com.nuvio.app.features.sportsdetail.api.TimelineItem
 import com.nuvio.app.features.sportsdetail.api.WinProbabilityBlock
+import com.nuvio.app.features.sportsdetail.internal.GameRevealChip
 import com.nuvio.app.features.sportsdetail.internal.GameSpoilerGate
+import com.nuvio.app.features.sportsdetail.internal.revealChip
+import com.nuvio.app.features.sportsdetail.internal.showsHiddenCard
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -228,5 +231,46 @@ class GameSpoilerGateTest {
         assertFalse(hiddenView(game(null, null, state = GameState.UPCOMING)).showsRevealChip, "upcoming has no score to reveal")
         val shown = GameSpoilerGate().let { g -> val d = game("1", "0"); g.record(d, 0L); g.view(d, ScoreSpoilerSettings(), 0L) }
         assertFalse(shown.showsRevealChip, "nothing hidden, no chip")
+    }
+
+    // --- one game revealed; the empty-overview card ------------------------------------------------------------------
+
+    @Test
+    fun `a hidden started game offers Show this game's score`() {
+        assertEquals(GameRevealChip.SHOW_THIS_GAME, hiddenView(game("1", "0")).revealChip(revealedHere = false, globalShown = false), "reveal one game")
+    }
+
+    @Test
+    fun `a game revealed while scores are hidden offers Hide again`() {
+        val gate = GameSpoilerGate()
+        val live = game("1", "0")
+        gate.record(live, 0L)
+        val shownHere = gate.view(live, ScoreSpoilerSettings(), 0L)    // the page gets shown settings for a revealed game
+        assertEquals(GameRevealChip.HIDE_AGAIN, shownHere.revealChip(revealedHere = true, globalShown = false), "hide it again")
+        assertEquals(GameRevealChip.NONE, shownHere.revealChip(revealedHere = true, globalShown = true), "scores shown everywhere: nothing to undo here")
+        assertEquals(GameRevealChip.NONE, shownHere.revealChip(revealedHere = false, globalShown = true), "plain shown game: no chip")
+    }
+
+    @Test
+    fun `an upcoming game offers neither chip`() {
+        val upcoming = game(null, null, state = GameState.UPCOMING)
+        assertEquals(GameRevealChip.NONE, hiddenView(upcoming).revealChip(revealedHere = false, globalShown = false), "nothing to reveal")
+        val gate = GameSpoilerGate().also { it.record(upcoming, 0L) }
+        assertEquals(GameRevealChip.NONE, gate.view(upcoming, ScoreSpoilerSettings(), 0L).revealChip(revealedHere = true, globalShown = false), "nothing to hide")
+    }
+
+    @Test
+    fun `a final game whose overview redaction emptied shows the Scores are hidden card`() {
+        val final = liveWith(StandingsTableBlock(emptyList()), WatchBlock(entry = "browsing"), state = GameState.FINAL)
+        assertTrue(hiddenView(final).showsHiddenCard, "standings and Watch are not Overview: the Overview would be blank")
+    }
+
+    @Test
+    fun `no hidden card while the overview still has content or scores are shown`() {
+        val withForm = liveWith(FormBlock(listOf("W"), listOf("L")), state = GameState.FINAL)
+        assertFalse(hiddenView(withForm).showsHiddenCard, "form still fills the Overview")
+        val gate = GameSpoilerGate()
+        val shownEmpty = liveWith(state = GameState.FINAL).also { gate.record(it, 0L) }
+        assertFalse(gate.view(shownEmpty, ScoreSpoilerSettings(), 0L).showsHiddenCard, "not hidden: no card")
     }
 }

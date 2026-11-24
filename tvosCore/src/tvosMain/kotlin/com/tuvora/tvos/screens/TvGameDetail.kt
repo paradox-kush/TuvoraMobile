@@ -12,7 +12,10 @@ import com.nuvio.app.features.sportsdetail.api.SportsDetailService
 import com.nuvio.app.features.sportsdetail.api.StoredMapping
 import com.nuvio.app.features.radar.RadarRepository
 import com.nuvio.app.features.radar.ScoreSpoilerSettings
+import com.nuvio.app.features.sportsdetail.internal.GameRevealChip
 import com.nuvio.app.features.sportsdetail.internal.GameSpoilerGate
+import com.nuvio.app.features.sportsdetail.internal.revealChip
+import com.nuvio.app.features.sportsdetail.internal.showsHiddenCard
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -75,10 +78,17 @@ object TvGameDetail {
 }
 
 /**
- * The game screen's spoiler state: [hidden] shows the "Scores hidden" chip (scores hidden on a live or final game —
- * GameSpoilerView.showsRevealChip, the same rule as the phone); [pending] = delayed, nothing due yet ("–").
+ * The game screen's spoiler state, decided by the same shared rules as the phone (GameSpoilerView.revealChip):
+ * [hidden] shows "Show this game's score" (scores hidden on a live or final game; press: [TvSports.revealGame]);
+ * [hideAgain] shows "Hide again" (this game was revealed on its own; press: [TvSports.hideGame]);
+ * [pending] = delayed, nothing due yet ("–"); [hiddenCard] = redaction left nothing to show, say "Scores are hidden".
  */
-data class TvGameSpoiler(val hidden: Boolean, val pending: Boolean)
+data class TvGameSpoiler(
+    val hidden: Boolean,
+    val pending: Boolean,
+    val hideAgain: Boolean = false,
+    val hiddenCard: Boolean = false,
+)
 
 /** One open game screen. Create when the screen appears; run [runWhileVisible] from a task tied to its visibility. */
 class TvGameDetailModel internal constructor(private val ref: GameRef, private val service: SportsDetailService) {
@@ -92,6 +102,11 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
     /** Hidden -> Swift shows the "Scores hidden" chip beside the scoreboard (press: [TvSports.toggleScoresShown]). */
     val spoiler: StateFlow<TvGameSpoiler> = _spoiler.asStateFlow()
     private val gate = GameSpoilerGate()
+    /** This game's key in RevealedGames (radarFixtureKey: the TheSportsDB event id the screen was opened with). */
+    private val revealKey: String = ref.tsdbEventId?.takeIf { it.isNotBlank() } ?: ref.gameId
+
+    /** This game's settings: a game revealed on its own reads as shown (session only, never the global setting). */
+    private fun settingsNow(): ScoreSpoilerSettings = RadarRepository.uiState.value.scoreSpoilerFor(revealKey)
     private val retrySignal = Channel<Unit>(Channel.CONFLATED)
 
     // Model fields, not locals: the Swift task restarts on every foreground, and a restart must not
@@ -105,7 +120,7 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
     /** Retry after Failed/Empty (the only way back from them: an event, never a timer). */
     fun retry() {
         if (_state.value !is TvGameDetailState.Loaded) _state.value = TvGameDetailState.Loading
-        republish(RadarRepository.uiState.value.scoreSpoiler)
+        republish(settingsNow())
         retrySignal.trySend(Unit)
     }
 
@@ -126,8 +141,12 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
      * idle. Its wake is a broadcast ([TvRedrawSignal]): any number of these loops each see every wake. Cancel to stop.
      */
     suspend fun runScoreSpoilerWhileVisible(): Unit = coroutineScope {
-        var settings = RadarRepository.uiState.value.scoreSpoiler
-        launch { RadarRepository.uiState.map { it.scoreSpoiler }.distinctUntilChanged().collect { settings = it; republish(it) } }
+        var settings = settingsNow()
+        // Keyed on the global setting and this game's reveal too: "Hide again" depends on both, not only on the settings.
+        launch {
+            RadarRepository.uiState.map { Triple(it.scoreSpoilerFor(revealKey), it.scoreSpoiler.shown, revealKey in it.revealedGames) }
+                .distinctUntilChanged().collect { (s, _, _) -> settings = s; republish(s) }
+        }
         launch { _state.collect { republish(settings) } }
         while (true) {
             val mark = redraw.mark()
@@ -146,7 +165,14 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
         if (s !is TvGameDetailState.Loaded) { _shown.value = s; _spoiler.value = TvGameSpoiler(false, false); return }
         val view = gate.view(s.detail, settings, RadarTime.nowMs())
         _shown.value = s.copy(detail = view.detail)
-        _spoiler.value = TvGameSpoiler(hidden = view.showsRevealChip, pending = view.pending)
+        val radar = RadarRepository.uiState.value
+        val chip = view.revealChip(revealedHere = revealKey in radar.revealedGames, globalShown = radar.scoreSpoiler.shown)
+        _spoiler.value = TvGameSpoiler(
+            hidden = chip == GameRevealChip.SHOW_THIS_GAME,
+            pending = view.pending,
+            hideAgain = chip == GameRevealChip.HIDE_AGAIN,
+            hiddenCard = view.showsHiddenCard,
+        )
         if (wake) redraw.wake()
     }
 
@@ -180,7 +206,7 @@ class TvGameDetailModel internal constructor(private val ref: GameRef, private v
             // Where the fetch result lands: time-stamp it for the score delay (never in Swift).
             if (load is DetailLoad.Loaded) gate.record(load.detail, at)
             _state.value = TvGameDetailReducer.reduce(_state.value, load)
-            republish(RadarRepository.uiState.value.scoreSpoiler)
+            republish(settingsNow())
             val after = _state.value
             if (after !is TvGameDetailState.Loaded) {
                 retrySignal.receive()          // Failed / Empty wait for Retry (or the screen going away)

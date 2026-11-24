@@ -58,8 +58,19 @@ object TvSports {
     /** The settings the hub chips show ([ScoreSpoilerSettings.toggleLabel], [ScoreSpoilerSettings.delayLabel], shown). */
     fun scoreSettings(state: RadarUiState): ScoreSpoilerSettings = state.scoreSpoiler
 
-    /** "Scores shown" / "Scores hidden" chip: one press toggles. Also the game screen's reveal chip. */
+    /** The hub's "Scores shown" / "Scores hidden" chip: one press toggles the profile's global setting. */
     fun toggleScoresShown() = RadarRepository.toggleScoresShown()
+
+    /**
+     * The game screen's "Show this game's score": reveals ONE game ([id] = [TvSportsHubPolicy.fixtureKey]) on its page and
+     * its hub / calendar cards, for this session and profile. The global setting is untouched.
+     */
+    fun revealGame(id: String) = RadarRepository.revealGame(id)
+
+    /** "Hide again": that game goes back under the global Hide scores. */
+    fun hideGame(id: String) = RadarRepository.hideGame(id)
+
+    fun isRevealed(state: RadarUiState, id: String): Boolean = id in state.revealedGames
 
     /** "Delay: Off / 15 s / 30 s / 60 s" chip (only while shown): one press cycles. */
     fun cycleScoreDelay() = RadarRepository.cycleScoreDelay()

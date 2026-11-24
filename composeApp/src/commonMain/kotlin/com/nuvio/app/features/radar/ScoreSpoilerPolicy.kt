@@ -32,6 +32,16 @@ data class ScoreSpoilerSettings(val shown: Boolean = true, val delaySeconds: Int
     }
 }
 
+/**
+ * "Show this game's score": games revealed one at a time while Hide scores is on, keyed by [radarFixtureKey]. Session
+ * only — it lives in RadarUiState, which is never persisted or synced and is rebuilt on a profile switch.
+ */
+data class RevealedGames(val ids: Set<String> = emptySet()) {
+    fun reveal(key: String): RevealedGames = copy(ids = ids + key)
+    fun hide(key: String): RevealedGames = copy(ids = ids - key)
+    operator fun contains(key: String?): Boolean = key != null && key in ids
+}
+
 /** What a score slot may show right now. */
 sealed interface ScoreVisibility<out V>
 
