@@ -47,6 +47,13 @@ class GameSpoilerGate {
     }
 
     fun view(newest: GameDetail, settings: ScoreSpoilerSettings, nowMs: Long): GameSpoilerView =
+        pick(newest, settings, nowMs).let { it.copy(detail = it.detail.copy(spoilerDelaySeconds = effectiveDelaySeconds(settings))) }
+
+    /** The delay that actually picks the snapshot: none while hidden, or for a game already final when first seen. */
+    private fun effectiveDelaySeconds(settings: ScoreSpoilerSettings): Int =
+        if (!settings.shown || finishedAtFirstSight == true) 0 else (settings.delayMs / 1000L).toInt()
+
+    private fun pick(newest: GameDetail, settings: ScoreSpoilerSettings, nowMs: Long): GameSpoilerView =
         when (val v = ScoreSpoilerPolicy.resolve(settings, newest.gameId, newest, finishedAtFirstSight == true, buffer, nowMs)) {
             is ScoreShown -> GameSpoilerView(v.value ?: newest, hidden = false, pending = false)
             ScoreHidden -> GameSpoilerView(GameSpoilerRedaction.redact(newest, scorePlaceholder = null), hidden = true, pending = false)

@@ -38,12 +38,13 @@ internal sealed interface Moment {
 internal object GameMomentPolicy {
     /**
      * prev == null, a different game, or a state change into LIVE -> emptyList(): nothing animates when the screen opens.
-     * Same for a change of Hide scores / delay mode (shown, hidden, pending): what is SHOWN changed, not the game — a
-     * reveal, or the delay's "–" falling due, must never pulse a goal, speak a score or replay a play.
+     * Same for a change of Hide scores / delay mode (shown, hidden, pending) or of the delay itself (Off <-> 30 s, also
+     * via sync): what is SHOWN changed, not the game — a reveal, the delay's "–" falling due, or a jump between
+     * snapshots from different times must never pulse a goal (or a backwards one), speak a score or replay a play.
      */
     fun diff(prev: GameDetail?, next: GameDetail): List<Moment> {
         if (prev == null || prev.gameId != next.gameId) return emptyList()
-        if (prev.spoilerRedaction != next.spoilerRedaction) return emptyList()
+        if (prev.spoilerRedaction != next.spoilerRedaction || prev.spoilerDelaySeconds != next.spoilerDelaySeconds) return emptyList()
         if (prev.state != GameState.LIVE && next.state == GameState.LIVE) return emptyList()
         return buildList {
             addAll(scoreChanges(prev, next))

@@ -74,4 +74,28 @@ class GameMomentSpoilerTest {
     fun `a real goal while shown still animates`() {
         assertEquals(1, GameMomentPolicy.diff(game("1", "0"), game("2", "0")).count { it is com.nuvio.app.features.sportsdetail.internal.Moment.ScoreChange }, "1-0 to 2-0 is a goal")
     }
+
+    @Test
+    fun `turning the delay off while the page is open animates nothing`() {
+        val gate = GameSpoilerGate()
+        gate.record(game("0", "0", playId = "p0"), 0L)
+        val newest = game("1", "0", playId = "p1")
+        gate.record(newest, 40_000L)
+        val tracker = GameMomentTracker()
+        tracker.accept(gate.view(newest, ScoreSpoilerSettings(delaySeconds = 30), 50_000L).detail) // 0-0 from 30 s ago
+        val off = tracker.accept(gate.view(newest, ScoreSpoilerSettings(), 51_000L).detail)        // jumps to the live 1-0
+        assertEquals(emptyList(), off.moments, "a delay change is a change of what is shown, not a goal")
+    }
+
+    @Test
+    fun `turning a delay on while the page is open never animates a backwards goal`() {
+        val gate = GameSpoilerGate()
+        gate.record(game("0", "0", playId = "p0"), 0L)
+        val newest = game("1", "0", playId = "p1")
+        gate.record(newest, 40_000L)
+        val tracker = GameMomentTracker()
+        tracker.accept(gate.view(newest, ScoreSpoilerSettings(), 50_000L).detail)                   // live 1-0
+        val on = tracker.accept(gate.view(newest, ScoreSpoilerSettings(delaySeconds = 30), 51_000L).detail) // back to 0-0
+        assertEquals(emptyList(), on.moments, "1-0 back to 0-0 is not a score change")
+    }
 }

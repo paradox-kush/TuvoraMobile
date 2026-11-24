@@ -87,6 +87,8 @@ data class GameDetail(
      * Moments are diffed only between snapshots of the same mode, so a reveal or a delay falling due is not a goal.
      */
     @Transient val spoilerRedaction: SpoilerRedaction? = null,
+    /** The score delay this on-screen copy was picked under (GameSpoilerGate); a change of it is a mode change too. */
+    @Transient val spoilerDelaySeconds: Int = 0,
 )
 
 /** Why a game snapshot on screen was redacted: [HIDDEN] = Hide scores, [PENDING] = score delay with nothing due yet. */
