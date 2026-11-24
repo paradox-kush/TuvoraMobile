@@ -120,6 +120,32 @@ struct RootView: View {
         }
     }
 
+    /// Simulator smoke hook: `-smokeClearPlaylists` removes every playlist of the (local guest) profile, so a test that
+    /// needs an empty IPTV hub gets one whatever earlier tests added. Local guest only: a signed-in account would sync it.
+    private static func smokeClearPlaylists() {
+        guard AppArguments.list.contains("-smokeClearPlaylists"), AppArguments.list.contains("-smokeLocalGuest") else { return }
+        TvPlaylists.shared.ensureLoaded()
+        Task {
+            for account in TvPlaylists.shared.state.value.accounts { TvPlaylists.shared.remove(accountId: account.id) }
+            smokeLog("SMOKE cleared playlists")
+        }
+    }
+
+    /// Simulator smoke hook: `-smokeSeedProfiles <n>` tops a LOCAL profile set up to n profiles (a guest starts with
+    /// one, and the sidebar's profile switch only exists with 2+). Local-only: createProfile on a guest never syncs.
+    private static func smokeSeedProfiles() {
+        let args = AppArguments.list
+        guard let i = args.firstIndex(of: "-smokeSeedProfiles"), i + 1 < args.count, let wanted = Int(args[i + 1]) else { return }
+        Task {
+            while ProfileRepository.shared.state.value.profiles.count < wanted {
+                let number = ProfileRepository.shared.state.value.profiles.count + 1
+                let made = (try? await ProfileRepository.shared.createProfile(name: "Profile \(number)", avatarColorHex: "#1E88E5", avatarId: nil, avatarUrl: nil, usesPrimaryAddons: false))?.boolValue ?? false
+                smokeLog("SMOKE seed profile %d ok=%d", number, made ? 1 : 0)
+                if !made { break }
+            }
+        }
+    }
+
     private var gate: some View {
         Group {
             switch screen {
@@ -137,7 +163,7 @@ struct RootView: View {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)   // let the add-ons load first
                     smokeSession = session
                 }
-                if next == .main { Self.smokeAddPlaylistLater() }
+                if next == .main { ProfilePickerLaunch.mainReached = true; Self.smokeAddPlaylistLater(); Self.smokeSeedProfiles(); Self.smokeClearPlaylists() }
                 screen = next
                 TvAppGraph.shared.screenChanged(name: "tv_gate_\(next)")
             }

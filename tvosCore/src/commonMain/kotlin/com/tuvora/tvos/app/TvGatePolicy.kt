@@ -52,6 +52,9 @@ object TvGatePolicy {
 
     fun decide(input: TvGateInput): TvGateDecision {
         if (input.current == TvGateScreen.Switching) return TvGateDecision.Stay
+        // A picker the viewer opened on purpose (Manage Profiles, the sidebar's profile item) stays up whatever the
+        // session is doing: a restoring or lapsed session on cached profiles must not auto-skip it back to the app.
+        if (input.userOpenedPicker && input.current == TvGateScreen.ProfilePicker) return TvGateDecision.Stay
 
         val authenticated = input.auth is AuthState.Authenticated
         val cachedAccess = input.profiles.isNotEmpty() && !authenticated

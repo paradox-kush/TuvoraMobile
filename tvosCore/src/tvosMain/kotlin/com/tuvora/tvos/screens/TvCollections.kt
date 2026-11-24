@@ -7,6 +7,7 @@ import com.nuvio.app.features.collection.FolderDetailRepository
 import com.nuvio.app.features.collection.FolderDetailUiState
 import com.nuvio.app.features.collection.FolderTab
 import com.nuvio.app.features.collection.FolderViewMode
+import com.nuvio.app.features.catalog.CatalogTarget
 import com.nuvio.app.features.home.HomeCatalogSection
 import com.nuvio.app.features.home.HomeCatalogSettingsRepository
 import com.nuvio.app.features.home.HomeRepository
@@ -53,11 +54,11 @@ object TvCollections {
     /** The open folder (FolderDetailRepository's state, or the in-memory smoke sample). */
     val folder: StateFlow<FolderDetailUiState> =
         combine(FolderDetailRepository.uiState, smokeTarget, smokeTab, HomeRepository.uiState) { real, target, tab, rows ->
-            target?.let { (c, f) -> smokeFolderState(c, f, rows.sections).let { it.copy(selectedTabIndex = tab.coerceIn(0, (it.tabs.size - 1).coerceAtLeast(0))) } } ?: real
+            target?.let { (c, f) -> smokeFolderState(c, f, smokeRows(rows.sections)).let { it.copy(selectedTabIndex = tab.coerceIn(0, (it.tabs.size - 1).coerceAtLeast(0))) } } ?: real
         }.stateIn(scope, SharingStarted.Eagerly, FolderDetailUiState())
 
     private val collections = smoke.flatMapLatest { sample ->
-        if (sample) HomeRepository.uiState.map { smokeCollections(it.sections) } else CollectionRepository.collections
+        if (sample) HomeRepository.uiState.map { smokeCollections(smokeRows(it.sections)) } else CollectionRepository.collections
     }
 
     fun start() {
@@ -71,7 +72,7 @@ object TvCollections {
         }
         scope.launch {
             combine(HomeRepository.uiState, HomeCatalogSettingsRepository.uiState, collections) { rows, settings, list ->
-                TvHomeCollectionsPolicy.entries(settings.items, rows.sections, list)
+                TvHomeCollectionsPolicy.entries(settings.items, if (smoke.value) smokeRows(rows.sections) else rows.sections, list)
             }.collect { _entries.value = it }
         }
     }
@@ -99,6 +100,26 @@ object TvCollections {
     // region Smoke sample (in memory only)
 
     private const val SMOKE_PREFIX = "smoke-"
+
+    /**
+     * A source-less profile (a fresh simulator guest: the App Store build has no add-ons) has no Home rows to build
+     * the sample from, which left every sample folder empty and the remote with nothing to focus. The real rows win
+     * when there are any; otherwise two sample rows of well-known titles (real IMDb ids, so their details resolve).
+     */
+    private fun smokeRows(sections: List<HomeCatalogSection>): List<HomeCatalogSection> {
+        if (sections.isNotEmpty()) return sections
+        fun row(key: String, title: String, vararg titles: Pair<String, String>) = HomeCatalogSection(
+            key = "smoke-row-$key", title = title, subtitle = "Sample", addonName = "Sample",
+            target = CatalogTarget.Addon(manifestUrl = "smoke://sample", contentType = "movie", catalogId = key),
+            items = titles.map { (id, name) -> MetaPreview(id = id, type = "movie", name = name) },
+        )
+        return listOf(
+            row("classics", "Sample classics", "tt0111161" to "The Shawshank Redemption", "tt0068646" to "The Godfather",
+                "tt0071562" to "The Godfather Part II", "tt0468569" to "The Dark Knight", "tt0050083" to "12 Angry Men"),
+            row("modern", "Sample modern", "tt1375666" to "Inception", "tt0816692" to "Interstellar",
+                "tt0133093" to "The Matrix", "tt0109830" to "Forrest Gump", "tt0137523" to "Fight Club"),
+        )
+    }
 
     private fun smokeCollections(sections: List<HomeCatalogSection>): List<Collection> {
         fun cover(i: Int, wide: Boolean): String? = sections.getOrNull(i % sections.size.coerceAtLeast(1))?.items?.firstOrNull()?.let {

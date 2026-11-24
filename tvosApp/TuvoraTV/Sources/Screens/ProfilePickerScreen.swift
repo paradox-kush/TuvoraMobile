@@ -31,6 +31,11 @@ enum PickerMetrics {
 @MainActor
 enum ProfilePickerLaunch {
     static var manageRequested = false
+    /// The app has opened its main screen this launch. The `-smoke…` picker hooks are a startup script: once Main has
+    /// been reached, a picker the viewer opens on purpose (Manage Profiles, the sidebar's profile item) must not run
+    /// them again - on a profile set that auto-skipped the startup picker (a guest) they would pick a profile the
+    /// moment the picker appeared and close it straight away.
+    static var mainReached = false
     static func consumeManage() -> Bool {
         defer { manageRequested = false }
         return manageRequested || AppArguments.list.contains("-smokeManage")
@@ -274,7 +279,7 @@ struct ProfilePickerView: View {
     /// Once per launch: a picker reopened later (Settings -> Manage Profiles) must not re-run them.
     private static var smokeRanThisLaunch = false
     private func runSmokeHooks(_ profiles: [NuvioProfile]) {
-        guard !smokeHandled, !Self.smokeRanThisLaunch, !profiles.isEmpty else { return }
+        guard !smokeHandled, !Self.smokeRanThisLaunch, !ProfilePickerLaunch.mainReached, !profiles.isEmpty else { return }
         let args = AppArguments.list
         func value(after flag: String) -> String? {
             guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }

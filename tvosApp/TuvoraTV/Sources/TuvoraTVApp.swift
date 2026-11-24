@@ -26,7 +26,8 @@ struct TuvoraTVApp: App {
             if AuthStorage.shared.loadAnonymousUserId() == nil {
                 AuthStorage.shared.saveAnonymousUserId(userId: UUID().uuidString)
             }
-            UserDefaults.standard.set(false, forKey: "sentry_enabled")
+            // An explicit `-smokeDiagnostics` (set just above) states the consent the test wants: keep it.
+            if !args.contains("-smokeDiagnostics") { UserDefaults.standard.set(false, forKey: "sentry_enabled") }
             RecEventSettings.shared.setEnabled(value: false)
         }
         #endif

@@ -24,6 +24,16 @@ class TvGatePolicyTest {
     ) = TvGateInput(auth, profiles, current, online, rememberLast, everSelected, activeProfileIndex)
 
     @Test
+    fun `a picker the viewer opened stays up on cached profiles with no session`() {
+        val opened = input(auth = AuthState.Unauthenticated, profiles = listOf(alice), current = TvGateScreen.ProfilePicker)
+            .copy(userOpenedPicker = true)
+        assertEquals(TvGateDecision.Stay, TvGatePolicy.decide(opened), "Manage Profiles must not bounce back to the app")
+        assertEquals(TvGateDecision.Stay, TvGatePolicy.decide(opened.copy(auth = AuthState.Loading)), "session still restoring")
+        // The startup picker (not opened by the viewer) still auto-skips a single unlocked profile.
+        assertEquals(TvGateDecision.SwitchTo(alice, sync = false), TvGatePolicy.decide(opened.copy(userOpenedPicker = false)))
+    }
+
+    @Test
     fun `signed in with one unlocked profile opens it and syncs`() {
         assertEquals(TvGateDecision.SwitchTo(alice, sync = true), TvGatePolicy.decide(input(profiles = listOf(alice))))
     }
