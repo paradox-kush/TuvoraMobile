@@ -376,6 +376,7 @@ private fun PlatformPlayerSurfaceInner(
                 videoZoom = videoZoom,
                 liveBufferPlan = liveBufferPlan,
                 streamLavfOptions = LiveLinkReconnectPolicy.mpvStreamLavfOptions(linkReconnectMode),
+                singleUseLink = singleUseLink,
                 // Routed through the policy: on the live path it downgrades a leaking gpu-next to
                 // gpu (the fence-fd leak fix — see LiveVideoOutputPolicy); off the live path it
                 // passes the user's renderer through unchanged.
@@ -979,6 +980,15 @@ private fun ExoPlayerSurface(
         val selection = exoPlayer.captureSelectedTrack(C.TRACK_TYPE_AUDIO) ?: return
         pendingAudioTrackSelection.add(selection)
         Log.d(TAG, "$reason: preserving audio track index=${selection.index} id=${selection.id}")
+    }
+
+    // A Wi-Fi -> mobile data switch leaves this player's socket on the old network for good. The coordinator flushes
+    // the shared playback OkHttp stack on a real switch: Media3's load retry then re-opens the read on the new network,
+    // so the player itself has nothing more to do. A single-use link (no transport retry) is never cancelled.
+    DisposableEffect(exoPlayer, allowTransportRetry) {
+        val networkSwitch = AndroidPlaybackNetworkSwitch.coordinator(context)
+            .register(singleUseLink = !allowTransportRetry) {}
+        onDispose { networkSwitch.dispose() }
     }
 
     DisposableEffect(exoPlayer) {
@@ -1693,6 +1703,8 @@ private fun LibmpvPlayerSurface(
     liveBufferPlan: LiveBufferPlan?,
     /** mpv `stream-lavf-o` for this source, from [LiveLinkReconnectPolicy]; set before each `loadfile`. */
     streamLavfOptions: String,
+    /** A spent-after-first-open link: never re-opened on a network switch ([PlaybackNetworkSwitchPolicy]). */
+    singleUseLink: Boolean,
     /** Already resolved by [LiveVideoOutputPolicy]: gpu on the live path, else the user's renderer. */
     videoOutput: String,
     hardwareDecodingEnabled: Boolean,
@@ -1966,6 +1978,15 @@ private fun LibmpvPlayerSurface(
             view.mpv.removeObserver(observer)
             view.mpv.removeLogObserver(logObserver)
         }
+    }
+
+    // A Wi-Fi -> mobile data switch leaves FFmpeg's socket on the old network for good: on a real switch the
+    // coordinator asks this view to re-open the source on the new one ([PlaybackNetworkSwitchPolicy]).
+    DisposableEffect(playerViewRef, singleUseLink) {
+        val view = playerViewRef ?: return@DisposableEffect onDispose {}
+        val networkSwitch = AndroidPlaybackNetworkSwitch.coordinator(context)
+            .register(singleUseLink = singleUseLink) { view.reconnectOnCurrentNetwork() }
+        onDispose { networkSwitch.dispose() }
     }
 
     DisposableEffect(playerViewRef) {
@@ -2844,6 +2865,24 @@ private class NuvioLibmpvView(
         // mpv's own pause event confirms (or corrects) it moments later.
         obsPaused = paused
         ctl { mpv.setPropertyBoolean("pause", paused) }
+    }
+
+    /**
+     * The default network changed ([PlaybackNetworkSwitchPolicy]): FFmpeg's socket stays on the old network (a weak
+     * Wi-Fi keeps trickling and never times out), so re-open the source on the current one. A live channel rejoins
+     * the edge; anything else reloads at the playhead, paused or playing as it was. Position and pause come from the
+     * observed shadow; the reload is queued on mpv-ctl like every other mpv write. Never called for a single-use link.
+     */
+    fun reconnectOnCurrentNetwork() {
+        val positionMs = obsPositionMs
+        val playing = !obsPaused
+        ctl {
+            if (currentSourceUrl == null) return@ctl
+            loadCurrentSource(
+                playWhenReady = playing,
+                startOption = MpvStartPosition.loadOption(positionMs, isLiveStream),
+            )
+        }
     }
 
     // Route through ctl {} (mpv-ctl queue) so seeks never touch mpv on the main thread — see the ANR fix.

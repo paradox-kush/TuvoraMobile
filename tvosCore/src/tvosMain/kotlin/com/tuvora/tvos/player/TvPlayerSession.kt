@@ -30,6 +30,7 @@ import com.nuvio.app.features.player.ResumeLoadPolicy
 import com.nuvio.app.features.player.setMpvProperties
 import com.nuvio.app.features.player.applyStreamLavfOptions
 import com.nuvio.app.features.player.LiveLinkReconnectPolicy
+import com.nuvio.app.features.player.ApplePlaybackNetworkSwitch
 import androidx.compose.ui.graphics.toArgb
 import com.nuvio.app.features.player.SubtitleRepository
 import com.nuvio.app.features.player.addonSubtitleRequests
@@ -293,6 +294,8 @@ class TvPlayerSession(
         },
     )
     private var bridge: NuvioPlayerBridge? = null
+    /** Held while attached: re-opens the stream when the default network changes ([PlaybackNetworkSwitchPolicy]). */
+    private var networkSwitch: com.nuvio.app.features.common.lifecycle.Disposable? = null
     /** Final: once closed no engine is ever opened again (a late attach / re-embed / zap would play with no screen). */
     private var closed = false
     private var escalated = false
@@ -493,6 +496,11 @@ class TvPlayerSession(
         fetchAddonSubtitles()
         if (bridge == null) open(_state.value.lane, launch.initialPositionMs)
         party.attach(scope)
+        if (networkSwitch == null) {
+            networkSwitch = ApplePlaybackNetworkSwitch.coordinator.register(singleUseLink) {
+                scope.launch { reconnectOnCurrentNetwork() }
+            }
+        }
         if (pollJob?.isActive == true) return
         pollJob = scope.launch {
             while (isActive) {
@@ -504,6 +512,8 @@ class TvPlayerSession(
 
     fun detach() {
         vodRetry.cancel()
+        networkSwitch?.dispose()
+        networkSwitch = null
         party.detach()
         pollJob?.cancel()
         pollJob = null
@@ -622,6 +632,34 @@ class TvPlayerSession(
     fun setResizeMode(mode: Int) { bridge?.setResizeMode(mode) }
 
     fun setSpeed(speed: Float) { if (!party.speed(speed)) bridge?.setPlaybackSpeed(speed) }
+
+    /**
+     * The default network changed (Wi-Fi -> Ethernet or a hotspot): libmpv's socket stays on the old network, and a weak
+     * one keeps trickling without ever failing, so playback would stay slow for good. Re-open the same source on the new
+     * network — a live channel rejoins the edge (with the live watch restarted, as for a fresh tune), anything else
+     * resumes at the playhead. Never for a single-use link (the coordinator does not call it), never on the AVPlayer
+     * lane (AVFoundation does its own networking) and never while live pause plays from its buffer.
+     */
+    private fun reconnectOnCurrentNetwork() {
+        val b = bridge ?: return
+        val pauseKind = _state.value.livePause.kind
+        if (closed || _state.value.lane != PlaybackLane.Libmpv) return
+        // Time-shifted live pause plays from what it already holds; a reload would throw that away.
+        if (pauseKind == LivePauseView.Kind.Shifted || pauseKind == LivePauseView.Kind.Preparing) return
+        log.i { "default network changed: re-opening the stream on it" }
+        if (isLive) monitor = TvLiveMonitor()
+        applyLinkReconnectPolicy(b)
+        val headers = TvPlaybackHeaders.sanitize(activeSourceHeaders)
+        b.loadFileWithAudio(
+            videoUrl = activeSourceUrl,
+            audioUrl = launch.sourceAudioUrl,
+            headersJson = headers.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
+            subtitlesJson = launch.externalSubtitles.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
+            startOption = MpvStartPosition.loadOption(snapshot.positionMs, isLive),
+        )
+        // mpv keeps its pause flag across a loadfile: say the intent explicitly either way.
+        if (wantsToPlay) b.play() else b.pause()
+    }
 
     fun retry() {
         if (closed) return

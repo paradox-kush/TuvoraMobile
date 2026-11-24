@@ -1,5 +1,7 @@
 package com.nuvio.app.features.player
 
+import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_main_queue
 import com.nuvio.app.core.diag.LogRedaction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -480,6 +482,35 @@ private fun PlatformPlayerSurfaceInner(
             bridge.play()
         } else {
             bridge.pause()
+        }
+    }
+
+    // A Wi-Fi -> mobile data switch leaves libmpv's socket on the old network for good (a weak Wi-Fi keeps trickling
+    // and never times out). On a real switch, re-open the same source on the new network: a live channel rejoins the
+    // edge, anything else resumes at the playhead ([PlaybackNetworkSwitchPolicy]). Never for a single-use link.
+    val latestNetworkSwitchPlayWhenReady = rememberUpdatedState(playWhenReady)
+    DisposableEffect(bridge, sourceUrl, sourceAudioUrl, sourceHeaders, externalSubtitles, singleUseLink) {
+        var active = true
+        val networkSwitch = ApplePlaybackNetworkSwitch.coordinator.register(singleUseLink) {
+            dispatch_async(dispatch_get_main_queue()) {
+                if (!active) return@dispatch_async
+                val isLive = LivePlaybackRejoinPolicy.rejoinsLiveEdge(streamType, isCatchUpPlayback)
+                bridge.applyStreamLavfOptions(
+                    LiveLinkReconnectPolicy.mpvStreamLavfOptions(LiveLinkReconnectPolicy.modeFor(singleUseLink)),
+                )
+                bridge.loadFileWithAudio(
+                    videoUrl = sourceUrl,
+                    audioUrl = sourceAudioUrl,
+                    headersJson = encodePlaybackHeadersForBridge(sourceHeaders),
+                    subtitlesJson = encodeExternalSubtitlesForBridge(externalSubtitles),
+                    startOption = MpvStartPosition.loadOption(bridge.getPositionMs(), isLive),
+                )
+                if (latestNetworkSwitchPlayWhenReady.value) bridge.play() else bridge.pause()
+            }
+        }
+        onDispose {
+            active = false
+            networkSwitch.dispose()
         }
     }
 

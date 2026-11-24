@@ -72,6 +72,25 @@ internal object PlayerPlaybackNetworking {
             .build()
     }
 
+    /**
+     * The device's default network changed ([PlaybackNetworkSwitchPolicy]). Every playback client is a
+     * `newBuilder()` of [strictPlaybackHttpClient], so they all share its connection pool and dispatcher: one
+     * flush covers the player, the permissive panel client and the live pause capture.
+     */
+    internal val connectionPool: PlaybackConnectionPool = object : PlaybackConnectionPool {
+        override fun releaseIdle() {
+            strictPlaybackHttpClient.connectionPool.evictAll()
+        }
+
+        // Media3 maps the aborted read to a load error and its retry re-opens at the same byte, on the new
+        // network. Loopback reads (the live pause relay) are not on any network and are left alone.
+        override fun cancelInFlight() {
+            strictPlaybackHttpClient.dispatcher.runningCalls()
+                .filterNot { isLoopbackHost(it.request().url.host.trim('[', ']')) }
+                .forEach { it.cancel() }
+        }
+    }
+
     /** The class of [host] for the live app: panel hosts of the user's IPTV providers, minus any media-server host. */
     internal fun tlsClassOf(host: String): PlaybackTlsClass = PlaybackTlsPolicy.classify(
         host = host,
