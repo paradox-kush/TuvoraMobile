@@ -36,10 +36,8 @@ struct SportsScreen: View {
     /// Sports alerts: a banner's "Open game" arrives here; the hub header carries the Alerts on / off chip.
     @ObservedObject private var alerts = SportsAlertCenter.shared
     @State private var alertsSignedIn = TvSportsAlerts.shared.signedIn.value.boolValue
-    /// The game page on screen (fixture key): alerts never interrupt the game whose page is open (gate 3).
-    @State private var openGameKey: String?
-    /** The hub's load was seen running since the current "Open game" request arrived (review round 2). */
-    @State private var gameRequestSawLoading = false
+    /// The current "Open game" request's wait (the phone's OpenGameRequestPolicy: open, wait, or drop once the load finished).
+    @State private var gameRequestWaiter = OpenGameRequestPolicy.Waiter()
 
     var body: some View {
         Group {
@@ -95,7 +93,7 @@ struct SportsScreen: View {
         }
         // A banner's "Open game" while the hub is already up (the state loop above handles it on the next emission too).
         .onChange(of: alerts.pendingGameId) { _, _ in
-            gameRequestSawLoading = false
+            gameRequestWaiter = OpenGameRequestPolicy.Waiter()
             if let radar { consumeGameRequest(radar) }
         }
         .task(id: alerts.pendingGameId) {
@@ -105,18 +103,7 @@ struct SportsScreen: View {
             if !Task.isCancelled, alerts.pendingGameId == id { alerts.pendingGameId = nil }
         }
         .task { for await value in TvSportsAlerts.shared.signedIn { alertsSignedIn = value.boolValue } }
-        .onChange(of: game?.id) { _, _ in
-            let key = game.map { TvSportsHubPolicy.shared.fixtureKey(fixture: $0.fixture) }
-            guard key != openGameKey else { return }
-            if let old = openGameKey { TvSportsAlerts.shared.closedGame(eventId: old) }
-            if let key { TvSportsAlerts.shared.openedGame(eventId: key) }
-            openGameKey = key
-        }
-        // Leaving Sports with a game page up: alerts for that game may show again (gate 3 must not stay stuck).
-        .onDisappear {
-            if let old = openGameKey { TvSportsAlerts.shared.closedGame(eventId: old) }
-            openGameKey = nil
-        }
+        // Gate 3 (the game page is up) is reported by GameDetailScreen itself, on its own appear / disappear.
         .task(id: scenePhase) {
             // Egress rule: the refresh loop lives only while Sports is on screen and the app is
             // active; leaving the tab or backgrounding cancels this task and with it the loop.
@@ -162,7 +149,7 @@ struct SportsScreen: View {
         }
     }
 
-    /// The phone's OpenGameRequestPolicy.TTL_MS (15 s from the tap).
+    /// The phone's OpenGameRequestPolicy.TTL_MS (15 s).
     private static let gameRequestDeadlineNs: UInt64 = 15_000_000_000
 
     /// A banner's "Open game": opens the game once the hub holds its fixture; dropped once the hub's load has
@@ -170,14 +157,14 @@ struct SportsScreen: View {
     /// (the phone's OpenGameRequestPolicy), so a game never opens late and unprompted.
     private func consumeGameRequest(_ state: RadarUiState) {
         guard let id = alerts.pendingGameId else { return }
-        if let fixture = TvSportsAlerts.shared.fixtureFor(eventId: id) {
+        let fixture = TvSportsAlerts.shared.fixtureFor(eventId: id)
+        let outcome = gameRequestWaiter.observe(found: fixture != nil, loading: state.loadingFixtures)
+        if outcome == .open, let fixture {
             alerts.pendingGameId = nil
             leaguePage = nil
             page = nil
             open(fixture)
-        } else if state.loadingFixtures {
-            gameRequestSawLoading = true
-        } else if gameRequestSawLoading {
+        } else if outcome == .drop {
             alerts.pendingGameId = nil
         }
     }

@@ -41,7 +41,7 @@ struct IptvHubScreen: View {
                         onClose: { TvIptvHubSearch.shared.close(); chipFocus = "search" })
                 } else if let error = hub.loadError {
                     if IptvLoadFailurePolicy.shared.offersRetry(kind: error.kind) {
-                        NuvioStateMessage(title: "Couldn't load this playlist", message: error.detail) { TvIptvBrowse.shared.retry() }
+                        NuvioStateMessage(title: "Couldn't load this playlist", message: error.detail, retry: { TvIptvBrowse.shared.retry() })
                     } else {
                         // UX164: the portal answered that it has nothing in this section. A fact, not a failure:
                         // plain words, no Retry (asking again gets the same answer), no exception name.

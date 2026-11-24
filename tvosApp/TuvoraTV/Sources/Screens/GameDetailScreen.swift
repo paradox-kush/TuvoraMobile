@@ -15,7 +15,7 @@ import TuvoraCore
 
 /// Focus targets of the screen: the Play row (default) and the section chip row are two focus sections.
 private enum GameFocus: Hashable {
-    case play, more, chip(Int)
+    case play, more, reveal, alerts, chip(Int)
 }
 
 struct GameDetailScreen: View {
@@ -55,6 +55,8 @@ struct GameDetailScreen: View {
     @State private var opening = false
     @State private var showSheet = false
     @FocusState private var focus: GameFocus?
+    /// Sports alerts for this game (`Alerts: Default / All / Off`); nil for a game nobody follows (no chip).
+    @State private var alertChip: AlertChip?
 
     var body: some View {
         Group {
@@ -135,6 +137,13 @@ struct GameDetailScreen: View {
             matches = (try? await TvSports.shared.matchChannels(fixture: fixture, onPartial: { matches = $0 })) ?? matches
             matching = false
         }
+        // The alerts chip follows the sports state (follows, per-game levels, mutes) and sign-in; a local read, no request.
+        .task { for await _ in TvSports.shared.state { refreshAlertChip() } }
+        .task { for await _ in TvSportsAlerts.shared.signedIn { refreshAlertChip() } }
+        // Gate 3: alerts never interrupt the game whose page is up. Owned by the page itself (not the cover's
+        // presenter), so a tab switch that tears the page down also closes it.
+        .onAppear { TvSportsAlerts.shared.openedGame(eventId: gameKey) }
+        .onDisappear { TvSportsAlerts.shared.closedGame(eventId: gameKey) }
         .fullScreenCover(isPresented: $showSheet) {
             MatchChannelsSheet(fixture: fixture, live: isLive) { session in
                 showSheet = false
@@ -161,6 +170,8 @@ struct GameDetailScreen: View {
 
     /// Three snapshots, nine seconds apart, then stops: exercises each moment once.
     private func runDemo(_ kind: String) async {
+        // `-gameDemoHidden`: the canned game as Hide scores shows it (the reveal chip's focus walk; no spoiler model here).
+        if AppArguments.list.contains("-gameDemoHidden") { scoresHidden = true }
         for step in 0..<3 {
             TvGameScreenDemo.shared.enabled = true          // debug builds only (this whole block is #if DEBUG)
             guard let detail = TvGameScreenDemo.shared.detail(kind: kind, step: Int32(step)) else { return }
@@ -268,7 +279,7 @@ struct GameDetailScreen: View {
     private func leftColumn(_ screen: TvGameScreenModel) -> some View {
         VStack(alignment: .leading, spacing: dp(7)) {
             ScoreboardCard(board: screen.scoreboard, pulseSides: pulseSides, reduceMotion: reduceMotion, upcomingLabel: upcomingLabel, field: screen.field, possession: screen.basketball?.possession)
-            if scoresHidden || hideAgain { revealScoresChip }
+            if scoresHidden || hideAgain || alertChip != nil { gameChips }
             if let field = screen.field { FieldStripCard(strip: field, flashes: flashes, slides: fieldSlides) }
             if let soccer = screen.soccer { SoccerStripCard(strip: soccer, board: screen.scoreboard, animated: !reduceMotion) }
             if let basketball = screen.basketball { BasketballStripCard(strip: basketball, board: screen.scoreboard, flashes: flashes, animated: !reduceMotion) }
@@ -280,16 +291,56 @@ struct GameDetailScreen: View {
                 .focusSection()
                 // The chips sit top-right, out of the focus engine's geometric reach from the bottom-left Play row:
                 // Up goes to the selected chip explicitly (Right also reaches them through the right section).
+                // With scores hidden, Up reaches "Show this game's score" first (it sits above the row, left column).
                 .onMoveCommand { direction in
-                    if direction == .up, !(screenChips.isEmpty) { focus = .chip(selectedIndex) }
+                    guard direction == .up else { return }
+                    if scoresHidden || hideAgain { focus = .reveal }
+                    else if alertChip?.enabled == true { focus = .alerts }
+                    else if !screenChips.isEmpty { focus = .chip(selectedIndex) }
                 }
         }
+    }
+
+    private var gameKey: String { TvSportsHubPolicy.shared.fixtureKey(fixture: fixture) }
+
+    /// The left column's chip row: "Show this game's score" (scores hidden), then `Alerts: …` (a followed game).
+    /// Down returns to Play; Right from the last chip reaches the section chips (the rule the reveal chip set).
+    private var gameChips: some View {
+        HStack(spacing: dp(8)) {
+            if scoresHidden || hideAgain { revealScoresChip }
+            if let chip = alertChip { alertsChip(chip) }
+        }
+        .focusSection()
+    }
+
+    private func alertsChip(_ chip: AlertChip) -> some View {
+        GameAlertsChip(chip: chip, settable: fixture.startEpochMs != nil, focus: $focus) {
+            guard let kickoff = fixture.startEpochMs?.int64Value else { return }
+            TvSportsAlerts.shared.cycleGame(eventId: gameKey, kickoffMs: kickoff)
+            refreshAlertChip()
+        }
+        .onMoveCommand { direction in
+            if direction == .left, scoresHidden || hideAgain { focus = .reveal }
+            if direction == .right, !screenChips.isEmpty { focus = .chip(selectedIndex) }
+            if direction == .down { focus = .play }
+        }
+    }
+
+    private func refreshAlertChip() {
+        alertChip = TvSportsAlerts.shared.gameChip(eventId: gameKey, leagueId: fixture.leagueId, homeId: fixture.homeId, awayId: fixture.awayId)
     }
 
     /// "Scores hidden": flips the same global setting as the hub chip, so the user can reveal without leaving.
     /// Per game only ("Show this game's score" / "Hide again"); the hub's chip owns the global setting.
     private var revealScoresChip: some View {
-        RevealScoresChip(hideAgain: hideAgain, gameKey: TvSportsHubPolicy.shared.fixtureKey(fixture: fixture))
+        RevealScoresChip(hideAgain: hideAgain, gameKey: TvSportsHubPolicy.shared.fixtureKey(fixture: fixture), focus: $focus)
+            // Right reaches the alerts chip beside it, else the section chips; Down returns to the Play row.
+            .onMoveCommand { direction in
+                if direction == .right {
+                    if alertChip?.enabled == true { focus = .alerts } else if !screenChips.isEmpty { focus = .chip(selectedIndex) }
+                }
+                if direction == .down { focus = .play }
+            }
     }
 
     private var screenChips: [TvChip] { screen?.chips ?? [] }
@@ -404,8 +455,9 @@ private func teamColor(_ hex: String?, fallback: Color) -> Color {
 private struct RevealScoresChip: View {
     let hideAgain: Bool
     let gameKey: String
+    var focus: FocusState<GameFocus?>.Binding
     @Environment(\.nuvio) private var colors
-    @FocusState private var focused: Bool
+    private var focused: Bool { focus.wrappedValue == .reveal }
 
     var body: some View {
         Button {
@@ -419,8 +471,39 @@ private struct RevealScoresChip: View {
                 .overlay(Capsule().stroke(focused ? colors.focusRing : Color.clear, lineWidth: dp(2)))
         }
         .buttonStyle(PlainNoChromeButtonStyle())
-        .focused($focused)
+        .focused(focus, equals: .reveal)
         .reportsFocus(focused)
+        .accessibilityIdentifier("game.revealScore")
+    }
+}
+
+/// `Alerts: Default / All / Off` for a followed game: OK moves to the next level. Signed out it reads
+/// `Sign in to get alerts`, dims and can't take focus; same house focus treatment as the reveal chip.
+private struct GameAlertsChip: View {
+    let chip: AlertChip
+    /// A fixture without a kick-off time can't hold a per-game level (it expires from kick-off): shown, not settable.
+    let settable: Bool
+    var focus: FocusState<GameFocus?>.Binding
+    let action: () -> Void
+    @Environment(\.nuvio) private var colors
+    private var focused: Bool { focus.wrappedValue == .alerts }
+    private var enabled: Bool { chip.enabled && settable }
+
+    var body: some View {
+        Button(action: action) {
+            Label(chip.label, systemImage: chip.selected ? "bell.fill" : "bell")
+                .font(NuvioType.labelMedium)
+                .foregroundStyle(focused ? colors.primary : (chip.selected ? colors.textPrimary : colors.textSecondary))
+                .padding(.horizontal, dp(14)).padding(.vertical, dp(6))
+                .background(Capsule().fill(focused ? colors.focusBackground : colors.backgroundCard))
+                .overlay(Capsule().stroke(focused ? colors.focusRing : Color.clear, lineWidth: dp(2)))
+                .opacity(enabled ? 1 : 0.4)
+        }
+        .buttonStyle(PlainNoChromeButtonStyle())
+        .disabled(!enabled)
+        .focused(focus, equals: .alerts)
+        .reportsFocus(focused)
+        .accessibilityIdentifier("game.alerts")
     }
 }
 
