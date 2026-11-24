@@ -2,6 +2,7 @@ package com.tuvora.tvos.screens
 
 import com.nuvio.app.core.contracts.PlaybackContext
 import com.nuvio.app.core.contracts.PlaybackContextAccess
+import com.nuvio.app.core.contracts.PlayingChannelsAccess
 import com.nuvio.app.features.common.lifecycle.Disposable
 import com.nuvio.app.features.livetv.LiveNowWatching
 import com.nuvio.app.features.radar.RadarGameWatch
@@ -55,10 +56,20 @@ object TvSportsAlerts {
     fun enterPlayback(live: Boolean): Disposable =
         PlaybackContextAccess.current().enter(if (live) PlaybackContext.LiveTv else PlaybackContext.Vod)
 
-    /** The live channel now playing (so an alert for the game it carries is not shown over it); clear with [stoppedChannel]. */
-    fun playingChannel(contentId: String, name: String) = LiveNowWatching.set(contentId, name)
+    /**
+     * The Swift player started showing live channel [contentId] (multiview: call once per tile). An alert for the game
+     * that channel carries is then not shown over it. Same holder the phone's Live TV screen feeds.
+     */
+    fun setPlayingChannel(contentId: String, name: String) {
+        PlayingChannelsAccess.current().set(contentId)
+        LiveNowWatching.set(contentId, name)
+    }
 
-    fun stoppedChannel(contentId: String) = LiveNowWatching.clear(contentId)
+    /** The player stopped showing [contentId]. Clears exactly that id: never another player's channel. */
+    fun clearPlayingChannel(contentId: String) {
+        PlayingChannelsAccess.current().clear(contentId)
+        LiveNowWatching.clear(contentId)
+    }
 
     /** The game screen is showing [eventId] ([TvSportsHubPolicy.fixtureKey]); call [closedGame] when it leaves. */
     fun openedGame(eventId: String) = SportsAlerts.openedGame(eventId)

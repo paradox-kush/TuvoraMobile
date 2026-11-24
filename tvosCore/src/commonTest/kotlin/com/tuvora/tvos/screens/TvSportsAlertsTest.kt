@@ -29,7 +29,7 @@ class TvSportsAlertsTest {
                 progress = "FT", corrected = false, atMs = t0,
             ),
             SportsAlertSettings(),
-            AlertContext(t0, 15 * 60, PlaybackContext.LiveTv, null, null, emptySet(), setOf("133604"), spoiler, RevealedGames()),
+            AlertContext(t0, 15 * 60, PlaybackContext.LiveTv, null, emptySet(), emptyMap(), emptySet(), setOf("133604"), spoiler, RevealedGames()),
             AlertLedger(),
         ).first.let { (it as AlertDecision.ShowNow).banner }
 
