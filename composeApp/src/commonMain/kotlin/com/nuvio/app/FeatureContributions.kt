@@ -15,6 +15,8 @@ import com.nuvio.app.core.contracts.LiveRecentsAccess
 import com.nuvio.app.core.contracts.LocalStateCleanerRegistry
 import com.nuvio.app.core.contracts.MemoryPortAccess
 import com.nuvio.app.core.contracts.PlaybackGateAccess
+import com.nuvio.app.core.contracts.PlaybackContextAccess
+import com.nuvio.app.core.contracts.PlaybackContextStack
 import com.nuvio.app.core.contracts.ProfileChangeParticipants
 import com.nuvio.app.core.contracts.RecTrackingAccess
 import com.nuvio.app.core.contracts.SyncParticipantRegistry
@@ -97,6 +99,8 @@ fun registerLogicFeatureContributions() {
     ProfileChangeParticipants.register(RadarProfileChange)
     LiveRecentsAccess.register(XtreamLiveRecentsProvider)
     PlaybackGateAccess.register(IptvPlaybackGateAdapter)
+    // What is playing (None / Vod / LiveTv), fed by the player and Live TV routes; read by sports alerts.
+    PlaybackContextAccess.register(PlaybackContextStack())
     LivePlaybackAccess.register(XtreamLivePlaybackProvider)
     // F17: public subtitle ids for IPTV movies/episodes (OpenSubtitles in the IPTV section).
     IptvSubtitleIdAccess.register(XtreamSubtitleIdResolver)

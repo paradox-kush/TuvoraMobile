@@ -1,5 +1,7 @@
 package com.nuvio.app.features.radar
 
+import com.nuvio.app.features.radar.alerts.SportsAlertSettings
+import com.nuvio.app.features.radar.alerts.SportsAlertSettingsSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -334,6 +336,14 @@ data class RadarPrefs(
      * sync_push_radar's p_prefs): while set, a pull keeps the local spoiler values and the next push carries them.
      */
     @SerialName("spoiler_dirty") val spoilerDirty: Boolean = false,
+    /**
+     * In-app sports alerts (research/sports-alerts-spec-2026-11-24.md): one object, synced per profile like
+     * `scores_shown`. Read tolerantly: a missing or malformed value reads as the defaults, never fails the blob.
+     */
+    @Serializable(with = SportsAlertSettingsSerializer::class)
+    @SerialName("alerts") val alerts: SportsAlertSettings = SportsAlertSettings(),
+    /** A local alerts change no push has confirmed yet. Device-local, handled exactly like [spoilerDirty]. */
+    @SerialName("alerts_dirty") val alertsDirty: Boolean = false,
 ) {
     val scoreSpoiler: ScoreSpoilerSettings
         get() = ScoreSpoilerSettings(shown = scoresShown, delaySeconds = ScoreSpoilerSettings.sanitizeDelay(scoreDelaySeconds))

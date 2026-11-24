@@ -528,6 +528,18 @@ object RadarRepository {
         persist()
     }
 
+    // --- in-app sports alerts (per profile, synced) ------------------------------
+
+    /**
+     * Every alerts change goes through here: one read-modify-write that also sets alertsDirty (so a pull keeps it
+     * until a push carries it, see RadarPrefsPull) and prunes expired per-game overrides.
+     */
+    fun updateAlertSettings(transform: (com.nuvio.app.features.radar.alerts.SportsAlertSettings) -> com.nuvio.app.features.radar.alerts.SportsAlertSettings) {
+        val nowMs = clock.nowMs()
+        _uiState.update { it.copy(prefs = it.prefs.copy(alerts = transform(it.prefs.alerts).pruned(nowMs), alertsDirty = true)) }
+        persist()
+    }
+
     // --- featured-event prefs --------------------------------------------------
 
     fun setOptIn(featuredEventId: String, accepted: Boolean) {
@@ -578,12 +590,13 @@ object RadarRepository {
         refreshFixtures(force = true)
     }
 
-    /** A push of [pushed] landed for [profileId]: clear spoilerDirty if the local values still match it (one read-modify-write). */
+    /** A push of [pushed] landed for [profileId]: clear spoilerDirty / alertsDirty if the local values still match it (one read-modify-write). */
     internal fun onPrefsPushed(profileId: Int, pushed: RadarPrefs) {
         if (profileId != currentProfileId) return // that profile's blob stays dirty: its next pull pushes again (harmless)
-        val before = _uiState.value.prefs.spoilerDirty
+        val before = _uiState.value.prefs
         _uiState.update { it.copy(prefs = RadarPrefsPull.afterPush(it.prefs, pushed)) }
-        if (before && !_uiState.value.prefs.spoilerDirty) {
+        val after = _uiState.value.prefs
+        if (before.spoilerDirty != after.spoilerDirty || before.alertsDirty != after.alertsDirty) {
             XtreamAccountStorage.saveRadarJson(profileId, json.encodeToString(localState()))
         }
     }

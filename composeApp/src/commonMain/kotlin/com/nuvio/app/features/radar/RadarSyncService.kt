@@ -22,7 +22,9 @@ import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import com.nuvio.app.features.radar.alerts.SportsAlertSettings
 
 /**
  * Syncs Sports Centre follows + featured prefs per profile to Supabase, mirroring
@@ -80,7 +82,7 @@ object RadarSyncService {
         pushJob = scope.launch {
             delay(PUSH_DEBOUNCE_MS)
             if (ProfileRepository.activeProfileId != profileId) return@launch
-            // Dropped during a pull or offline: spoilerDirty stays set and the next pull pushes it (RadarPrefsPull.pushAfterPull).
+            // Dropped during a pull or offline: spoilerDirty / alertsDirty stay set and the next pull pushes them (RadarPrefsPull.pushAfterPull).
             if (isSyncingFromRemote || !authed()) return@launch
             pushToRemote(profileId, snapshot)
         }
@@ -134,7 +136,7 @@ object RadarSyncService {
                 })
             }
             SupabaseProvider.client.postgrest.rpc("sync_push_radar", params)
-            // Clears spoilerDirty only if the local values still equal what this push carried (RadarPrefsPull.afterPush).
+            // Clears spoilerDirty / alertsDirty only if the local values still equal what this push carried (RadarPrefsPull.afterPush).
             RadarRepository.onPrefsPushed(profileId, state.prefs)
             log.d { "pushToRemote — ${state.follows.size} follows, ${state.teamFollows.size} teams" }
         }.onFailure { e -> log.e(e) { "pushToRemote — FAILED" } }
@@ -212,13 +214,18 @@ object RadarSyncService {
     }
 }
 
-/** sync_push_radar's `p_prefs`. The delay is sanitized: the backend's check accepts only 0 / 15 / 30 / 60. */
+/**
+ * sync_push_radar's `p_prefs`. The delay is sanitized: the backend's check accepts only 0 / 15 / 30 / 60. `alerts` is
+ * always sent as an object; the backend keeps its stored value when the key is absent (an older client), so an old
+ * client can never reset it.
+ */
 internal fun radarPrefsPayload(prefs: RadarPrefs): JsonObject = buildJsonObject {
     put("featured_event_id", prefs.featuredEventId)
     put("opt_in_state", prefs.optInState)
     put("promo_dismissed", prefs.promoDismissed)
     put("scores_shown", prefs.scoresShown)
     put("score_delay_s", ScoreSpoilerSettings.sanitizeDelay(prefs.scoreDelaySeconds))
+    put("alerts", SportsAlertSettings.toJson(prefs.alerts))
 }
 
 /** One radar_prefs row as pulled. */
@@ -231,11 +238,15 @@ internal data class RadarPrefsRow(
     // a default here would silently reset a device's Hide scores / delay on every pull.
     @SerialName("scores_shown") val scoresShown: Boolean? = null,
     @SerialName("score_delay_s") val scoreDelaySeconds: Int? = null,
+    // Column added for sports alerts. Null (or not an object) = the row predates it: the LOCAL alerts stay.
+    @SerialName("alerts") val alerts: JsonElement? = null,
 )
 
 /**
- * Pure decisions for Hide scores / delay sync. The pending flag is [RadarPrefs.spoilerDirty], persisted in each
- * profile's local blob, so it is per profile and survives a restart; no counters, no global state.
+ * Pure decisions for Hide scores / delay and sports-alerts sync. The pending flags are [RadarPrefs.spoilerDirty] and
+ * [RadarPrefs.alertsDirty], persisted in each profile's local blob, so they are per profile and survive a restart; no
+ * counters, no global state. The two flags are independent: an unpushed alerts change never holds back a pulled
+ * Hide scores value, and the other way round.
  */
 internal object RadarPrefsPull {
     /**
@@ -253,18 +264,30 @@ internal object RadarPrefsPull {
             scoreDelaySeconds = if (dirty) local.scoreDelaySeconds
             else remote.scoreDelaySeconds?.let(ScoreSpoilerSettings::sanitizeDelay) ?: local.scoreDelaySeconds,
             spoilerDirty = dirty,
+            // While alertsDirty the local object stays; otherwise the row's object applies (read tolerantly), and a row
+            // without one (null column, older backend, not an object) keeps the local value.
+            alerts = if (local.alertsDirty) local.alerts
+            else (remote.alerts as? JsonObject)?.let(SportsAlertSettings::fromJson) ?: local.alerts,
+            alertsDirty = local.alertsDirty,
         )
     }
 
     /** A push carrying [pushed] succeeded: clean only if [current] still holds the same values (a later toggle stays dirty). */
     fun afterPush(current: RadarPrefs, pushed: RadarPrefs): RadarPrefs {
-        val same = current.scoresShown == pushed.scoresShown &&
+        val spoilerSame = current.scoresShown == pushed.scoresShown &&
             ScoreSpoilerSettings.sanitizeDelay(current.scoreDelaySeconds) == ScoreSpoilerSettings.sanitizeDelay(pushed.scoreDelaySeconds)
-        return if (current.spoilerDirty && same) current.copy(spoilerDirty = false) else current
+        val alertsSame = current.alerts == pushed.alerts
+        val clearSpoiler = current.spoilerDirty && spoilerSame
+        val clearAlerts = current.alertsDirty && alertsSame
+        if (!clearSpoiler && !clearAlerts) return current
+        return current.copy(
+            spoilerDirty = current.spoilerDirty && !clearSpoiler,
+            alertsDirty = current.alertsDirty && !clearAlerts,
+        )
     }
 
     /** After every pull: a change still dirty (failed / offline / dropped push, or a restart) goes out now. */
-    fun pushAfterPull(prefs: RadarPrefs): Boolean = prefs.spoilerDirty
+    fun pushAfterPull(prefs: RadarPrefs): Boolean = prefs.spoilerDirty || prefs.alertsDirty
 
     /**
      * The local prefs a pull for [pullProfileId] merges onto: what is on screen when that profile is the shown one,
