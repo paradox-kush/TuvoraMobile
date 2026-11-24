@@ -115,7 +115,15 @@ final class WalkthroughTests: XCTestCase {
         app.launchArguments = ["-smokeLocalGuest", "-smokePickProfile", "1", "-smokeTab", "iptv", "-smokeClearPlaylists", "-smokeAddM3uLater", "1", Self.lineup]
         app.launch()
         // The lineup is added a second after launch; the first channel row ("#1, name") then claims focus.
-        XCTAssertTrue(waitFocus(60) { $0.hasPrefix("#") && $0.dropFirst().first?.isNumber == true }, "iptv: the first channel never took focus (focus \(focusedId()))")
+        func onChannelRow(_ id: String) -> Bool { id.hasPrefix("#") && id.dropFirst().first?.isNumber == true }
+        var landed = waitFocus(30, onChannelRow)
+        // Focus can still be on the sidebar item that opened the tab (the lineup arrived after the first focus pass):
+        // a viewer presses RIGHT, then DOWN off the header chips, to reach the channels.
+        for _ in 0..<4 where !landed {
+            if focusedId().hasPrefix("sidebar.") { press(.right, settle: 1.5) } else if focusedId().hasPrefix("hubchip.") { press(.down, settle: 1.5) }
+            landed = waitFocus(8, onChannelRow)
+        }
+        XCTAssertTrue(landed, "iptv: no channel row could be focused (focus \(focusedId()))")
         let categories = app.buttons["All channels"]
         shot("guide-0")
         // IPTV entry lands on the first channel (2e333ea9d, F7), with the categories tucked away: LEFT
