@@ -18,6 +18,7 @@ final class RemoteDriverTests: XCTestCase {
     private let app = XCUIApplication()
 
     func testDrive() throws {
+        continueAfterFailure = true
         try XCTSkipUnless(FileManager.default.fileExists(atPath: "\(dir)/enabled"), "remote driver not enabled")
         let cmdPath = "\(dir)/cmd", outPath = "\(dir)/out"
         try? "ready".write(toFile: "\(dir)/state", atomically: true, encoding: .utf8)
@@ -62,13 +63,14 @@ final class RemoteDriverTests: XCTestCase {
         case "focus":
             return focusLine()
         case "texts":
-            guard app.state == .runningForeground else { return "app not in foreground (state \(app.state.rawValue))" }
+            guard app.state == .runningForeground, let root = try? app.snapshot() else { return "app not in foreground (state \(app.state.rawValue))" }
             var seen = Set<String>(), lines: [String] = []
-            for e in app.descendants(matching: .any).allElementsBoundByIndex.prefix(600) {
-                let l = e.label.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !l.isEmpty, e.frame.width > 0, seen.insert(l).inserted else { continue }
-                lines.append((e.hasFocus ? "* " : "  ") + l)
+            func walk(_ n: XCUIElementSnapshot) {
+                let l = n.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !l.isEmpty, n.frame.width > 0, seen.insert(l).inserted { lines.append((n.hasFocus ? "* " : "  ") + l) }
+                n.children.forEach(walk)
             }
+            walk(root)
             return lines.joined(separator: "\n")
         case "shot":
             let path = parts.count > 1 ? parts[1] : "\(dir)/shot.png"
@@ -83,10 +85,15 @@ final class RemoteDriverTests: XCTestCase {
         }
     }
 
+    /// One accessibility snapshot, walked in memory: never fails if the UI changes mid-read (per-element queries do).
     private func focusLine() -> String {
-        guard app.state == .runningForeground else { return "<app not in foreground>" }
-        let f = app.descendants(matching: .any).element(matching: NSPredicate(format: "hasFocus == true"))
-        guard f.exists else { return "<none>" }
+        guard app.state == .runningForeground, let root = try? app.snapshot() else { return "<app not in foreground>" }
+        func find(_ n: XCUIElementSnapshot) -> XCUIElementSnapshot? {
+            if n.hasFocus { return n }
+            for c in n.children { if let f = find(c) { return f } }
+            return nil
+        }
+        guard let f = find(root) else { return "<none>" }
         return f.identifier.isEmpty ? f.label : "\(f.label) [\(f.identifier)]"
     }
 }
