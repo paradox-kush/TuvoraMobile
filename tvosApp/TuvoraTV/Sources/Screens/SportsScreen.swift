@@ -38,6 +38,8 @@ struct SportsScreen: View {
     @State private var alertsSignedIn = TvSportsAlerts.shared.signedIn.value.boolValue
     /// The game page on screen (fixture key): alerts never interrupt the game whose page is open (gate 3).
     @State private var openGameKey: String?
+    /** The hub's load was seen running since the current "Open game" request arrived (review round 2). */
+    @State private var gameRequestSawLoading = false
 
     var body: some View {
         Group {
@@ -92,7 +94,10 @@ struct SportsScreen: View {
             if !Task.isCancelled { now = TvSports.shared.nowMs() }
         }
         // A banner's "Open game" while the hub is already up (the state loop above handles it on the next emission too).
-        .onChange(of: alerts.pendingGameId) { _, _ in if let radar { consumeGameRequest(radar) } }
+        .onChange(of: alerts.pendingGameId) { _, _ in
+            gameRequestSawLoading = false
+            if let radar { consumeGameRequest(radar) }
+        }
         .task(id: alerts.pendingGameId) {
             // Bounded: a request the hub's load never satisfies is dropped, never opened late and unprompted.
             guard let id = alerts.pendingGameId else { return }
@@ -106,6 +111,11 @@ struct SportsScreen: View {
             if let old = openGameKey { TvSportsAlerts.shared.closedGame(eventId: old) }
             if let key { TvSportsAlerts.shared.openedGame(eventId: key) }
             openGameKey = key
+        }
+        // Leaving Sports with a game page up: alerts for that game may show again (gate 3 must not stay stuck).
+        .onDisappear {
+            if let old = openGameKey { TvSportsAlerts.shared.closedGame(eventId: old) }
+            openGameKey = nil
         }
         .task(id: scenePhase) {
             // Egress rule: the refresh loop lives only while Sports is on screen and the app is
@@ -152,11 +162,12 @@ struct SportsScreen: View {
         }
     }
 
-    /// The phone's GAME_REQUEST_DEADLINE_MS (SportsHubScreen.kt).
+    /// The phone's OpenGameRequestPolicy.TTL_MS (15 s from the tap).
     private static let gameRequestDeadlineNs: UInt64 = 15_000_000_000
 
     /// A banner's "Open game": opens the game once the hub holds its fixture; dropped once the hub's load has
-    /// settled without it (the phone's SportsGameRequest rule), so a game never opens late and unprompted.
+    /// FINISHED without it (seen loading, then not), never merely because nothing is loading at this instant
+    /// (the phone's OpenGameRequestPolicy), so a game never opens late and unprompted.
     private func consumeGameRequest(_ state: RadarUiState) {
         guard let id = alerts.pendingGameId else { return }
         if let fixture = TvSportsAlerts.shared.fixtureFor(eventId: id) {
@@ -164,7 +175,9 @@ struct SportsScreen: View {
             leaguePage = nil
             page = nil
             open(fixture)
-        } else if !state.loadingFixtures {
+        } else if state.loadingFixtures {
+            gameRequestSawLoading = true
+        } else if gameRequestSawLoading {
             alerts.pendingGameId = nil
         }
     }
