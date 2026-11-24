@@ -288,6 +288,8 @@ kotlin {
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/core/analytics/decodehealth"))
             // Game screen core (sections, moments, refresh, assembler, strips): the shared rules Apple TV's game screen runs on.
             kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/sportsdetail"))
+            // In-app sports alerts: the show / hold / drop policy, topics and settings Apple TV's banner runs on.
+            kotlin.srcDir(composeAppSrc.resolve("commonTest/kotlin/com/nuvio/app/features/radar/alerts"))
             // Tests SportsDetailLocals (Compose CompositionLocal wiring), which tvosCore excludes.
             kotlin.exclude("**/SportsDetailAccessTest.kt")
             // Tests a Compose-side helper (CalendarHomeSection.kt) that tvosCore excludes: Apple TV draws the Calendar in SwiftUI.

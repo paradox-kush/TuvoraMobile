@@ -32,6 +32,8 @@ object TvAppGraph {
             MemoryTierPolicy.iosTier(NSProcessInfo.processInfo.physicalMemory.toLong()),
         )
         StartupJournal.markUiLaunchStarted()
+        // In-app sports alerts: the Watch lookup behind the banner and the TV dismiss time, before the session starts.
+        com.tuvora.tvos.screens.TvSportsAlerts.install()
         TvAppLifecycle.start()
         com.tuvora.tvos.screens.TvDeviceSources.start()
     }
