@@ -201,6 +201,11 @@ import com.nuvio.app.features.watching.application.canMarkWatched
 import com.nuvio.app.features.watchprogress.ContinueWatchingItem
 import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesRepository
 import com.nuvio.app.features.watchprogress.ResumePromptRepository
+import com.nuvio.app.features.home.ContinueWatchingRowSnapshot
+import com.nuvio.app.features.home.ResumePromptPicker
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.withTimeoutOrNull
+import com.nuvio.app.features.watchprogress.WatchProgressClock
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
 import com.nuvio.app.features.watchprogress.WatchProgressSourceCoordinator
 import com.nuvio.app.features.watchprogress.continueWatchingItemKey
@@ -219,6 +224,9 @@ import kotlinx.coroutines.launch
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
+
+/** How long the launch prompt waits for Home to publish the Continue Watching row before giving up quietly. */
+private const val RESUME_PROMPT_ROW_WAIT_MS = 8_000L
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -922,8 +930,14 @@ internal fun MainAppContent(
         if (!initialHomeReady || profileSwitchLoading) return@LaunchedEffect
         if (resumePromptItem != null) return@LaunchedEffect
         if (currentRoute is StreamRoute || currentRoute is PlayerRoute || currentRoute is PartyRoute) return@LaunchedEffect
-        if (showResumePromptOnLaunch) {
-            resumePromptItem = ResumePromptRepository.consumeResumePrompt()
+        if (showResumePromptOnLaunch && ResumePromptRepository.hasPendingPrompt()) {
+            // Wait (bounded) for Home to publish the Continue Watching row, then offer its first eligible item.
+            val row = withTimeoutOrNull(RESUME_PROMPT_ROW_WAIT_MS) {
+                ContinueWatchingRowSnapshot.items.filterNotNull().first { it.isNotEmpty() }
+            }
+            if (ResumePromptRepository.consumeWasInPlayer()) {
+                resumePromptItem = row?.let { ResumePromptPicker.pick(it, WatchProgressClock.nowEpochMs()) }
+            }
         }
     }
 
