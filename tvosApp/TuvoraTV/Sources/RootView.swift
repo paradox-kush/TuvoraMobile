@@ -35,6 +35,8 @@ struct RootView: View {
             }
             #endif
         }
+        // The Top Shelf follows the gate from launch: empty while signed out, on the picker or switching profiles.
+        .task { TopShelfPublisher.watchGate() }
         .task { await startSmokeZap() }
         .task { await startSmokePresent() }
         #if DEBUG
@@ -45,6 +47,7 @@ struct RootView: View {
         .onOpenURL { url in
             if let code = TvParty.shared.codeFromLink(url: url.absoluteString) { DeepLinkCenter.shared.partyCode = code }
             else if let link = DeepLink(url: url) { DeepLinkCenter.shared.pending = link }
+            else if let live = LiveDeepLink(url: url) { DeepLinkCenter.shared.pendingLive = live }
         }
     }
 

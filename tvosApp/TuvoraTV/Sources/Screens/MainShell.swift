@@ -206,6 +206,11 @@ struct MainShell: View {
         .onReceive(DeepLinkCenter.shared.$partyCode) { code in if code != nil { destination = .settings } }
         // Watch party news (joins, leaves, the party ending, what someone did to playback) as the shell's toast.
         .task { for await text in TvParty.shared.messages { playback.notify(text) } }
+        .onReceive(DeepLinkCenter.shared.$pendingLive) { link in
+            guard let link else { return }
+            DeepLinkCenter.shared.pendingLive = nil
+            openLive(link)
+        }
         .onReceive(DeepLinkCenter.shared.$pending) { link in
             guard let link else { return }
             DeepLinkCenter.shared.pending = nil
@@ -215,6 +220,17 @@ struct MainShell: View {
         // the edge catcher must not be armed - it would take the launch focus and open the drawer.
         .onAppear { contentFocus.expectContentFocus() }
         .task { for await state in ProfileRepository.shared.state { profile = state.activeProfile; profileCount = state.profiles.count } }
+    }
+
+    /// A Top Shelf recent channel: tunes it. A channel that no longer resolves says so instead of doing nothing.
+    private func openLive(_ link: LiveDeepLink) {
+        Task {
+            if let session = try? await TvIptvBrowse.shared.playChannel(contentId: link.id, name: link.name, logo: link.logo) {
+                playback.play(session)
+            } else {
+                playback.notify(LK("topshelf_channel_unavailable", "That channel isn't available right now."))
+            }
+        }
     }
 
     /// A Top Shelf item: Play resumes that title's sources, Select opens its details.
