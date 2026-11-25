@@ -1,11 +1,15 @@
+import ComposeApp
 import Foundation
 import MetricKit
-import PostHog
 
-/// Reports Apple's delayed reliability diagnostics without exporting diagnostic payloads.
+/// Apple's delayed reliability reports (iPhone and iPad only: MetricKit's manager, payloads and diagnostics are
+/// `API_UNAVAILABLE(tvos)`; Apple TV relies on the unclean-exit marker instead).
 ///
-/// MetricKit payloads contain call-stack trees and signpost data, which can carry paths or
-/// other app context. This subscriber deliberately records only bounded aggregate metadata.
+/// One compact `metrickit_payload` event per payload, built by the shared Kotlin (`MetricKitEvent`) from COUNTS under
+/// a closed key set: crash / hang / CPU / disk-write diagnostics, and the app-exit counters split foreground vs
+/// background (watchdog, memory limit, memory pressure, ...). Nothing else from the payload is read: no call-stack tree,
+/// no termination reason or exception text, no app-version string, no signposts. A payload that holds only normal exits
+/// sends nothing (routine successes are not events). The user's reports switch is applied by the shared port.
 @available(iOS 14.0, *)
 final class MetricKitReliabilityReporter: NSObject, MXMetricManagerSubscriber {
     static let shared = MetricKitReliabilityReporter()
@@ -28,79 +32,89 @@ final class MetricKitReliabilityReporter: NSObject, MXMetricManagerSubscriber {
 
     func didReceive(_ payloads: [MXDiagnosticPayload]) {
         for payload in payloads {
-            let windowHours = Int(
-                max(0, min(168, payload.timeStampEnd.timeIntervalSince(payload.timeStampBegin) / 3_600)).rounded()
+            let counts = MetricKitCounts.diagnostics(
+                crash: payload.crashDiagnostics?.count ?? 0,
+                hang: payload.hangDiagnostics?.count ?? 0,
+                cpu: payload.cpuExceptionDiagnostics?.count ?? 0,
+                diskWrite: payload.diskWriteExceptionDiagnostics?.count ?? 0
             )
-
-            captureCrashes(payload.crashDiagnostics, windowHours: windowHours)
-            capture(payload.hangDiagnostics, category: "hang", windowHours: windowHours)
-            capture(payload.cpuExceptionDiagnostics, category: "cpu_exception", windowHours: windowHours)
-            capture(payload.diskWriteExceptionDiagnostics, category: "disk_write_exception", windowHours: windowHours)
+            send(source: "diagnostics", counts: counts, begin: payload.timeStampBegin, end: payload.timeStampEnd)
         }
     }
 
-    private func captureCrashes(_ diagnostics: [MXCrashDiagnostic]?, windowHours: Int) {
-        guard let diagnostics, !diagnostics.isEmpty else { return }
-
-        // terminationReason is the privacy-safe discriminator MetricKit gives us for abnormal
-        // exits, including memory-pressure/jetsam-style terminations that never execute an
-        // exception handler. Keep it bounded and enum-like; never upload the diagnostic body.
-        let grouped = Dictionary(grouping: diagnostics) { diagnostic in
-            CrashKey(
-                appVersion: diagnostic.applicationVersion,
-                terminationReason: safeLabel(diagnostic.terminationReason)
+    func didReceive(_ payloads: [MXMetricPayload]) {
+        for payload in payloads {
+            guard let exits = payload.applicationExitMetrics else { continue }
+            let fg = exits.foregroundExitData
+            let bg = exits.backgroundExitData
+            let counts = MetricKitCounts.exits(
+                fg: .init(
+                    normal: fg.cumulativeNormalAppExitCount, memoryLimit: fg.cumulativeMemoryResourceLimitExitCount,
+                    badAccess: fg.cumulativeBadAccessExitCount, abnormal: fg.cumulativeAbnormalExitCount,
+                    illegal: fg.cumulativeIllegalInstructionExitCount, watchdog: fg.cumulativeAppWatchdogExitCount
+                ),
+                bg: .init(
+                    normal: bg.cumulativeNormalAppExitCount, memoryLimit: bg.cumulativeMemoryResourceLimitExitCount,
+                    cpuLimit: bg.cumulativeCPUResourceLimitExitCount, memoryPressure: bg.cumulativeMemoryPressureExitCount,
+                    badAccess: bg.cumulativeBadAccessExitCount, abnormal: bg.cumulativeAbnormalExitCount,
+                    illegal: bg.cumulativeIllegalInstructionExitCount, watchdog: bg.cumulativeAppWatchdogExitCount,
+                    suspendedLocked: bg.cumulativeSuspendedWithLockedFileExitCount,
+                    taskTimeout: bg.cumulativeBackgroundTaskAssertionTimeoutExitCount
+                )
             )
-        }
-        for (key, crashes) in grouped {
-            PostHogSDK.shared.capture(
-                "ios_metric_diagnostic",
-                properties: [
-                    "diagnostic_type": "crash",
-                    "diagnostic_count": crashes.count,
-                    "diagnostic_app_version": key.appVersion,
-                    "termination_reason": key.terminationReason,
-                    "payload_window_hours": windowHours,
-                    "diagnostic_source": "metrickit"
-                ]
-            )
+            send(source: "metrics", counts: counts, begin: payload.timeStampBegin, end: payload.timeStampEnd)
         }
     }
 
-    private func capture<Diagnostic: MXDiagnostic>(
-        _ diagnostics: [Diagnostic]?,
-        category: String,
-        windowHours: Int
-    ) {
-        guard let diagnostics, !diagnostics.isEmpty else { return }
+    private func send(source: String, counts: [String: Int], begin: Date, end: Date) {
+        let hours = Int(max(0, min(168, end.timeIntervalSince(begin) / 3_600)).rounded())
+        AppleTelemetryBridge.shared.recordMetricKit(
+            source: source,
+            counts: counts.mapValues { KotlinInt(int: Int32(clamping: $0)) },
+            windowHours: Int32(hours)
+        )
+    }
+}
 
-        // A delivered payload may span an app update, so preserve the affected build while
-        // aggregating. No diagnostic body, stack, URL, signpost, or user data is inspected.
-        let countsByVersion = Dictionary(grouping: diagnostics, by: { $0.applicationVersion })
-            .mapValues(\.count)
-
-        for (appVersion, count) in countsByVersion {
-            PostHogSDK.shared.capture(
-                "ios_metric_diagnostic",
-                properties: [
-                    "diagnostic_type": category,
-                    "diagnostic_count": count,
-                    "diagnostic_app_version": appVersion,
-                    "payload_window_hours": windowHours,
-                    "diagnostic_source": "metrickit"
-                ]
-            )
+/// The closed key set of the shared Kotlin `MetricKitEvent.COUNT_KEYS`, filled from plain integers (so it tests
+/// without MetricKit objects). A key the Kotlin side does not know is dropped there.
+enum MetricKitCounts {
+    struct Foreground {
+        var normal = 0, memoryLimit = 0, badAccess = 0, abnormal = 0, illegal = 0, watchdog = 0
+        init(normal: UInt = 0, memoryLimit: UInt = 0, badAccess: UInt = 0, abnormal: UInt = 0, illegal: UInt = 0, watchdog: UInt = 0) {
+            self.normal = Int(clamping: normal); self.memoryLimit = Int(clamping: memoryLimit)
+            self.badAccess = Int(clamping: badAccess); self.abnormal = Int(clamping: abnormal)
+            self.illegal = Int(clamping: illegal); self.watchdog = Int(clamping: watchdog)
         }
     }
 
-    private struct CrashKey: Hashable {
-        let appVersion: String
-        let terminationReason: String
+    struct Background {
+        var normal = 0, memoryLimit = 0, cpuLimit = 0, memoryPressure = 0, badAccess = 0, abnormal = 0
+        var illegal = 0, watchdog = 0, suspendedLocked = 0, taskTimeout = 0
+        init(
+            normal: UInt = 0, memoryLimit: UInt = 0, cpuLimit: UInt = 0, memoryPressure: UInt = 0, badAccess: UInt = 0,
+            abnormal: UInt = 0, illegal: UInt = 0, watchdog: UInt = 0, suspendedLocked: UInt = 0, taskTimeout: UInt = 0
+        ) {
+            self.normal = Int(clamping: normal); self.memoryLimit = Int(clamping: memoryLimit)
+            self.cpuLimit = Int(clamping: cpuLimit); self.memoryPressure = Int(clamping: memoryPressure)
+            self.badAccess = Int(clamping: badAccess); self.abnormal = Int(clamping: abnormal)
+            self.illegal = Int(clamping: illegal); self.watchdog = Int(clamping: watchdog)
+            self.suspendedLocked = Int(clamping: suspendedLocked); self.taskTimeout = Int(clamping: taskTimeout)
+        }
     }
 
-    private func safeLabel(_ value: String?) -> String {
-        let raw = value?.lowercased() ?? "unknown"
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
-        let normalized = raw.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
-        return String(normalized).prefix(64).description
+    static func diagnostics(crash: Int, hang: Int, cpu: Int, diskWrite: Int) -> [String: Int] {
+        ["crash": crash, "hang": hang, "cpu": cpu, "disk_write": diskWrite]
+    }
+
+    static func exits(fg: Foreground, bg: Background) -> [String: Int] {
+        [
+            "fg_normal": fg.normal, "fg_memory_limit": fg.memoryLimit, "fg_bad_access": fg.badAccess,
+            "fg_abnormal": fg.abnormal, "fg_illegal": fg.illegal, "fg_watchdog": fg.watchdog,
+            "bg_normal": bg.normal, "bg_memory_limit": bg.memoryLimit, "bg_cpu_limit": bg.cpuLimit,
+            "bg_memory_pressure": bg.memoryPressure, "bg_bad_access": bg.badAccess, "bg_abnormal": bg.abnormal,
+            "bg_illegal": bg.illegal, "bg_watchdog": bg.watchdog, "bg_suspended_locked": bg.suspendedLocked,
+            "bg_task_timeout": bg.taskTimeout,
+        ]
     }
 }

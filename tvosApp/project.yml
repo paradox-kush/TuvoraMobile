@@ -36,6 +36,12 @@ targets:
         buildPhase: resources
       # PostHog setup + event scrubbing, one file for both Apple apps.
       - ../iosApp/iosApp/TuvoraTelemetry.swift
+      # Playback telemetry, one set of files for both Apple apps: unclean-exit marker + lifecycle glue,
+      # Apple memory numbers, QA log mirror. (MetricKit is iPhone-only: unavailable on tvOS.)
+      - ../iosApp/iosApp/UncleanExitMarker.swift
+      - ../iosApp/iosApp/AppleRunLifecycle.swift
+      - ../iosApp/iosApp/AppleMemoryProbe.swift
+      - ../iosApp/iosApp/TuvoraQaLog.swift
     dependencies:
       - package: MPVKit
         product: MPVKit
@@ -126,7 +132,11 @@ targets:
   TuvoraTVTests:
     type: bundle.unit-test
     platform: tvOS
-    sources: [TuvoraTVTests]
+    sources:
+      - TuvoraTVTests
+      # Same pure-logic tests as the iPhone target (the files under test are shared); they import the right module per OS.
+      - ../iosApp/iosAppTests/UncleanExitMarkerTests.swift
+      - ../iosApp/iosAppTests/AppleTelemetryHelpersTests.swift
     dependencies: [{ target: TuvoraTV }]
     settings:
       base:

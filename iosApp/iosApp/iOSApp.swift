@@ -44,6 +44,10 @@ struct iOSApp: App {
         // PostHog: crash autocapture, event scrubbing and the diagnostics consent switch
         // (TuvoraTelemetry.swift, shared with the Apple TV app).
         TuvoraTelemetry.start()
+        // Playback telemetry (Apple lane): the QA mirror sink (only with -TUVORA_QA 1) and the memory probe are
+        // registered BEFORE the Kotlin service starts: its host reads the mirror switch once, at creation.
+        TuvoraQaLog.installIfRequested()
+        AppleTelemetryBridge.shared.registerMemoryProbe(probe: AppleMemoryProbeImpl())
         // Telemetry v2: the Kotlin service and its crash hook come up first, before any other shared code runs.
         IosTelemetry.shared.start()
         // Lets shared Kotlin code capture without linking a PostHog SDK into the framework.
@@ -67,6 +71,8 @@ struct iOSApp: App {
             PostHogSDK.shared.flush()
         }
         IosTelemetry.shared.onSdkReady()
+        // Unclean-exit marker, memory-warning counter, playback breadcrumbs. After onSdkReady: it may report the previous run.
+        AppleRunLifecycle.shared.start()
         Task.detached(priority: .utility) {
             // Off Main; the Kotlin side has its own deadline and never throws.
             try? await IosTelemetry.shared.sendPendingCrash()

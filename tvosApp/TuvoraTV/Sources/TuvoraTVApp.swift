@@ -33,6 +33,10 @@ struct TuvoraTVApp: App {
         #endif
         // PostHog with crash autocapture, the iPhone app's scrubbing and its consent switch.
         TuvoraTelemetry.start()
+        // Playback telemetry (Apple lane): QA mirror sink (only with -TUVORA_QA 1) and memory probe, registered BEFORE
+        // the Kotlin service starts (its host reads the mirror switch once, at creation).
+        TuvoraQaLog.installIfRequested()
+        AppleTelemetryBridge.shared.registerMemoryProbe(probe: AppleMemoryProbeImpl())
         // Telemetry v2: the Kotlin service and its crash hook come up before any other shared code runs.
         TvTelemetry.shared.start()
         // Lets shared Kotlin capture without linking PostHog; only the telemetry service calls these.
@@ -50,6 +54,8 @@ struct TuvoraTVApp: App {
         // The HDR / Dolby Vision half of the hardware profile (the model and RAM come from the shared Kotlin).
         TvTelemetryBootstrap.registerSuperProperties()
         IosTelemetry.shared.onSdkReady()
+        // Unclean-exit marker (MetricKit has no tvOS equivalent), memory-warning counter, playback breadcrumbs.
+        AppleRunLifecycle.shared.start()
         Task.detached(priority: .utility) { try? await IosTelemetry.shared.sendPendingCrash() }
         MemoryPressureObserver.shared.start()
         TvAppGraph.shared.start()
