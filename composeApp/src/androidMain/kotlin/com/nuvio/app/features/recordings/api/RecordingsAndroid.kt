@@ -8,7 +8,6 @@ import android.os.Bundle
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import androidx.core.content.ContextCompat
 import com.nuvio.app.features.livetv.LiveTvData
 import com.nuvio.app.features.livetv.pause.LiveCaptureEnv
 import com.nuvio.app.features.player.PlayerPlaybackNetworking
@@ -19,6 +18,8 @@ import com.nuvio.app.features.recordings.internal.AndroidRecordingSaver
 import com.nuvio.app.features.recordings.internal.ExactAlarmSettingsLaunch
 import com.nuvio.app.features.recordings.internal.RecordingNotifications
 import com.nuvio.app.features.recordings.internal.RecordingService
+import com.nuvio.app.features.recordings.internal.RecordingServiceLaunch
+import com.nuvio.app.features.recordings.internal.RecordingStartOrigin
 import com.nuvio.app.features.recordings.internal.RecordingsRepository
 import java.io.File
 import java.lang.ref.WeakReference
@@ -95,7 +96,7 @@ object RecordingsAndroid {
             port.start(now)
             for (id in port.overdueIds(now)) {
                 try {
-                    ContextCompat.startForegroundService(app, RecordingService.fireIntent(app, id))
+                    RecordingServiceLaunch.start(app, RecordingService.fireIntent(app, id), RecordingStartOrigin.VISIBLE_APP)
                 } catch (e: IllegalStateException) {
                     RecordingNotifications.couldNotStart(app)
                     break

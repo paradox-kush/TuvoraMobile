@@ -293,7 +293,7 @@ private fun PlatformPlayerSurfaceInner(
         } else {
             base
         }
-        mutableStateOf(gated)
+        mutableStateOf(gated.orExoPlayerWhereLibmpvCannotLoad())
     }
 
     // Every engine failure lands in the flight recorder as closed codes (surface/engine/category/phase), so a
@@ -341,7 +341,8 @@ private fun PlatformPlayerSurfaceInner(
                 // A single-use link is spent by the first open: libmpv would be handed the dead URL, so it fails here.
                 if (message != null && !linkAuthFailure &&
                     requestedEngine == AndroidPlaybackEngine.Auto &&
-                    LiveLinkReconnectPolicy.allowsEngineFailover(linkReconnectMode)
+                    LiveLinkReconnectPolicy.allowsEngineFailover(linkReconnectMode) &&
+                    LibmpvAvailabilityPolicy.usable(wanted = true) { LibmpvNativeProbe.loadable }
                 ) {
                     Log.w(TAG, "ExoPlayer failed; falling back to libmpv: $message")
                     initialPositionRequestKey?.let { key ->
@@ -406,6 +407,14 @@ private enum class ResolvedAndroidPlaybackEngine {
     ExoPlayer,
     Libmpv,
 }
+
+/** B287: a device whose libmpv will not load plays on ExoPlayer instead of crashing in mpv's constructor. */
+private fun ResolvedAndroidPlaybackEngine.orExoPlayerWhereLibmpvCannotLoad(): ResolvedAndroidPlaybackEngine =
+    if (LibmpvAvailabilityPolicy.usable(wanted = this == ResolvedAndroidPlaybackEngine.Libmpv) { LibmpvNativeProbe.loadable }) {
+        this
+    } else {
+        ResolvedAndroidPlaybackEngine.ExoPlayer
+    }
 
 private fun AndroidPlaybackEngine.initialAndroidEngine(): ResolvedAndroidPlaybackEngine =
     when (this) {
