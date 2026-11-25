@@ -804,7 +804,6 @@
     <string name="settings_meta_trailers_description">Rând cu trailere și scurtături de redare.</string>
     <string name="settings_notifications_disabled_in_app">Notificările sunt în prezent dezactivate în Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Alerte de lansare episoade</string>
-    <string name="settings_notifications_episode_release_alerts_description">Programează notificări locale atunci când un nou episod dintr-un serial salvat devine disponibil.</string>
     <string name="settings_notifications_permission_disabled">Notificările de sistem sunt dezactivate pentru Tuvora. Activează-le pentru a primi alerte și notificări de test.</string>
     <string name="settings_notifications_scheduled_count">%1$d alerte de lansare sunt programate în prezent pe acest dispozitiv.</string>
     <string name="settings_notifications_section_alerts">ALERTE</string>
@@ -1404,7 +1403,6 @@
     <string name="library_remove_message">Elimini %1$s din biblioteca ta?</string>
     <string name="library_remove_title">Elimini din bibliotecă?</string>
     <string name="media_movie">Film</string>
-    <string name="notifications_channel_episode_releases_description">Alerte când apare un nou episod dintr-un serial salvat.</string>
     <string name="notifications_test_preview_body">Previzualizare alertă lansare episod.</string>
     <string name="notifications_test_send_failed">Nu s-a putut trimite notificarea de test.</string>
     <string name="notifications_test_sent_for">Notificarea de test a fost trimisă pentru %1$s.</string>
@@ -1593,10 +1591,6 @@
     <string name="media_movies">Filme</string>
     <string name="media_series">Seriale</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s este disponibil acum</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s este disponibil acum</string>
-    <string name="notifications_episode_release_body_generic">Un nou episod este disponibil acum</string>
-    <string name="notifications_episode_release_body_title">%1$s este disponibil acum</string>
     <string name="notifications_channel_episode_releases_name">Lansări de episoade</string>
     <string name="parental_alcohol">Alcool/Droguri</string>
     <string name="parental_frightening">Înfricoșător</string>

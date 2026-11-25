@@ -5,10 +5,6 @@
     <string name="media_movies">திரைப்படங்கள்</string>
     <string name="media_series">தொடர்கள்</string>
     <string name="media_tv">தொலைக்காட்சி</string>
-    <string name="notifications_episode_release_body_code">%1$s இப்போது வெளியாகியுள்ளது</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s இப்போது வெளியாகியுள்ளது</string>
-    <string name="notifications_episode_release_body_generic">புதிய எபிசோடு வெளியாகியுள்ளது</string>
-    <string name="notifications_episode_release_body_title">%1$s இப்போது வெளியாகியுள்ளது</string>
     <string name="notifications_channel_episode_releases_name">எபிசோடு வெளியீடுகள்</string>
     <string name="parental_alcohol">மது/போதைப்பொருட்கள்</string>
     <string name="parental_frightening">பயமுறுத்தும் காட்சிகள்</string>

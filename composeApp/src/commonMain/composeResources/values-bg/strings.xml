@@ -1018,7 +1018,6 @@
     <string name="settings_meta_trailers_description">Ред с трейлъри и преки пътища за възпроизвеждане.</string>
     <string name="settings_notifications_disabled_in_app">Известията в момента са деактивирани в Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Известия за излизане на епизоди</string>
-    <string name="settings_notifications_episode_release_alerts_description">Планирай локални известия, когато е наличен нов епизод от запазен сериал.</string>
     <string name="settings_notifications_permission_disabled">Системните известия за Tuvora са деактивирани. Активирайте ги, за да получавате известия и тестови уведомления.</string>
     <string name="settings_notifications_scheduled_count">%1$d известия за излизане са планирани в момента на това устройство.</string>
     <string name="settings_notifications_section_alerts">ИЗВЕСТИЯ</string>
@@ -1774,7 +1773,6 @@
     <string name="library_remove_message">Премахни %1$s от вашата библиотека?</string>
     <string name="library_remove_title">Премахване от библиотеката?</string>
     <string name="media_movie">Филм</string>
-    <string name="notifications_channel_episode_releases_description">Известия, когато излезе нов епизод от запазен сериал.</string>
     <string name="notifications_test_preview_body">Преглед на известие за излизане на епизод.</string>
     <string name="notifications_test_send_failed">Тестовото известие не можа да се изпрати.</string>
     <string name="notifications_test_sent_for">Тестовото известие е изпратено за %1$s.</string>
@@ -1990,10 +1988,6 @@
     <string name="media_movies">Филми</string>
     <string name="media_series">Сериали</string>
     <string name="media_tv">ТВ</string>
-    <string name="notifications_episode_release_body_code">%1$s вече е наличен</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s вече е наличен</string>
-    <string name="notifications_episode_release_body_generic">Нов епизод вече е наличен</string>
-    <string name="notifications_episode_release_body_title">%1$s вече е наличен</string>
     <string name="notifications_channel_episode_releases_name">Излизания на епизоди</string>
     <string name="parental_alcohol">Алкохол/Наркотици</string>
     <string name="parental_frightening">Страшно</string>

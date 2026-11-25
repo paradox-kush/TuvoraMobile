@@ -1011,7 +1011,6 @@
     <string name="settings_meta_trailers_description">Thanh trailer và phím tắt phát lại</string>
     <string name="settings_notifications_disabled_in_app">Thông báo hiện đang bị tắt trên Tuvora</string>
     <string name="settings_notifications_episode_release_alerts">Thông báo tập mới</string>
-    <string name="settings_notifications_episode_release_alerts_description">Gửi thông báo cục bộ khi có một tập mới của chương trình đã lưu.</string>
     <string name="settings_notifications_permission_disabled">Thông báo cho Tuvora hiện đang bị tắt. Hãy bật thông báo để nhận các cảnh báo và gửi thông báo thử nghiệm</string>
     <string name="settings_notifications_scheduled_count">%1$d thông báo phát hành đang được lên lịch trên thiết bị này</string>
     <string name="settings_notifications_section_alerts">THÔNG BÁO</string>
@@ -1816,7 +1815,6 @@
     <string name="library_remove_message">Xóa %1$s khỏi thư viện?</string>
     <string name="library_remove_title">Xóa khỏi thư viện?</string>
     <string name="media_movie">Phim</string>
-    <string name="notifications_channel_episode_releases_description">Thông báo khi một tập mới của chương trình đã lưu được phát hành.</string>
     <string name="notifications_test_preview_body">Xem trước thông báo phát hành tập mới.</string>
     <string name="notifications_test_send_failed">Không thể gửi thông báo kiểm tra</string>
     <string name="notifications_test_sent_for">Đã gửi thông báo kiểm tra cho %1$s</string>
@@ -2040,10 +2038,6 @@
     <string name="media_movies">Phim</string>
     <string name="media_series">Loạt phim</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s đã phát hành</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s đã phát hành</string>
-    <string name="notifications_episode_release_body_generic">Tập mới đã phát hành</string>
-    <string name="notifications_episode_release_body_title">%1$s đã phát hành</string>
     <string name="notifications_channel_episode_releases_name">Tập mới phát hành</string>
     <string name="parental_alcohol">Rượu bia/Chất kích thích</string>
     <string name="parental_frightening">Cảnh đáng sợ</string>

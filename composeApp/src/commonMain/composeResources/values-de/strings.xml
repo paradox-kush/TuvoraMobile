@@ -583,7 +583,7 @@
     <string name="settings_meta_trailers_description">Trailer-Reihe und Wiedergabe-Verknüpfungen.</string>
     <string name="settings_notifications_disabled_in_app">Benachrichtigungen sind in Tuvora derzeit deaktiviert.</string>
     <string name="settings_notifications_episode_release_alerts">Episode-Release-Benachrichtigungen</string>
-    <string name="settings_notifications_episode_release_alerts_description">Lokale Benachrichtigungen planen, wenn eine neue Episode für eine gespeicherte Serie verfügbar wird.</string>
+    <string name="settings_notifications_episode_release_alerts_description">Wir sagen dir Bescheid, wenn eine neue Episode erschienen ist. Ob deine Quellen sie schon haben, klärst du mit ihnen.</string>
     <string name="settings_notifications_permission_disabled">System-Benachrichtigungen sind für Tuvora deaktiviert. Aktiviere sie, um Benachrichtigungen und Tests zu erhalten.</string>
     <string name="settings_notifications_scheduled_count">%1$d Release-Benachrichtigungen sind derzeit auf diesem Gerät geplant.</string>
     <string name="settings_notifications_section_alerts">BENACHRICHTIGUNGEN</string>
@@ -1080,7 +1080,7 @@
     <string name="library_remove_message">%1$s aus deiner Bibliothek entfernen?</string>
     <string name="library_remove_title">Aus Bibliothek entfernen?</string>
     <string name="media_movie">Film</string>
-    <string name="notifications_channel_episode_releases_description">Benachrichtigungen, wenn eine neue Episode einer gespeicherten Serie veröffentlicht wird.</string>
+    <string name="notifications_channel_episode_releases_description">Benachrichtigungen, wenn eine Serie, der du folgst, eine neue Episode veröffentlicht.</string>
     <string name="notifications_test_preview_body">Vorschau einer Episoden-Release-Benachrichtigung.</string>
     <string name="notifications_test_send_failed">Test-Benachrichtigung konnte nicht gesendet werden.</string>
     <string name="notifications_test_sent_for">Test-Benachrichtigung für %1$s gesendet.</string>
@@ -1196,10 +1196,10 @@
     <string name="media_movies">Filme</string>
     <string name="media_series">Serien</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s ist jetzt verfügbar</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s ist jetzt verfügbar</string>
-    <string name="notifications_episode_release_body_generic">Eine neue Episode ist jetzt verfügbar</string>
-    <string name="notifications_episode_release_body_title">%1$s ist jetzt verfügbar</string>
+    <string name="notifications_episode_release_body_code">%1$s ist heute erschienen</string>
+    <string name="notifications_episode_release_body_code_title">%1$s • %2$s ist heute erschienen</string>
+    <string name="notifications_episode_release_body_generic">Eine neue Episode ist heute erschienen</string>
+    <string name="notifications_episode_release_body_title">%1$s ist heute erschienen</string>
     <string name="notifications_channel_episode_releases_name">Episoden-Veröffentlichungen</string>
     <string name="person_role_creator">Creator</string>
     <string name="person_role_director">Regisseur</string>

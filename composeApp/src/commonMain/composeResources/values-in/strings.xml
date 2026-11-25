@@ -707,7 +707,6 @@
     <string name="settings_meta_trailers_description">Baris trailer dan pintasan pemutaran.</string>
     <string name="settings_notifications_disabled_in_app">Notifikasi saat ini dinonaktifkan di Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Peringatan rilis episode</string>
-    <string name="settings_notifications_episode_release_alerts_description">Jadwalkan notifikasi lokal ketika episode baru untuk serial yang disimpan tersedia.</string>
     <string name="settings_notifications_permission_disabled">Notifikasi sistem dinonaktifkan untuk Tuvora. Aktifkan untuk menerima peringatan dan uji notifikasi.</string>
     <string name="settings_notifications_scheduled_count">%1$d peringatan rilis saat ini dijadwalkan di perangkat ini.</string>
     <string name="settings_notifications_section_alerts">PERINGATAN</string>
@@ -1264,7 +1263,6 @@
     <string name="library_remove_message">Hapus %1$s dari pustaka Anda?</string>
     <string name="library_remove_title">Hapus dari Pustaka?</string>
     <string name="media_movie">Film</string>
-    <string name="notifications_channel_episode_releases_description">Peringatan saat episode baru dari serial yang disimpan dirilis.</string>
     <string name="notifications_test_preview_body">Pratinjau peringatan rilis episode.</string>
     <string name="notifications_test_send_failed">Gagal mengirim notifikasi uji coba.</string>
     <string name="notifications_test_sent_for">Notifikasi uji coba terkirim untuk %1$s.</string>
@@ -1411,10 +1409,6 @@
     <string name="media_movies">Film</string>
     <string name="media_series">Serial</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s sudah tersedia</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s sudah tersedia</string>
-    <string name="notifications_episode_release_body_generic">Episode baru sudah tersedia</string>
-    <string name="notifications_episode_release_body_title">%1$s sudah tersedia</string>
     <string name="notifications_channel_episode_releases_name">Rilis Episode</string>
     <string name="parental_alcohol">Alkohol/Obat Terlarang</string>
     <string name="parental_frightening">Menyeramkan</string>

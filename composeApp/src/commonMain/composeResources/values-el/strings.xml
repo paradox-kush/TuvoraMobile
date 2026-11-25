@@ -600,7 +600,6 @@
     <string name="settings_meta_trailers_description">Ράγα τρέιλερ και συντομεύσεις αναπαραγωγής.</string>
     <string name="settings_notifications_disabled_in_app">Οι ειδοποιήσεις είναι απενεργοποιημένες αυτή τη στιγμή στο Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Ειδοποιήσεις κυκλοφορίας επεισοδίων</string>
-    <string name="settings_notifications_episode_release_alerts_description">Προγραμματισμός τοπικών ειδοποιήσεων όταν ένα νέο επεισόδιο αποθηκευμένης σειράς γίνει διαθέσιμο.</string>
     <string name="settings_notifications_permission_disabled">Οι ειδοποιήσεις συστήματος είναι απενεργοποιημένες για το Tuvora. Ενεργοποιήστε τες για να λαμβάνετε ειδοποιήσεις και δοκιμαστικές ειδοποιήσεις.</string>
     <string name="settings_notifications_scheduled_count">%1$d ειδοποιήσεις κυκλοφορίας είναι προγραμματισμένες αυτήν τη στιγμή σε αυτήν τη συσκευή.</string>
     <string name="settings_notifications_section_alerts">ΕΙΔΟΠΟΙΗΣΕΙΣ</string>
@@ -1322,7 +1321,6 @@
     <string name="library_remove_message">Αφαίρεση %1$s από τη βιβλιοθήκη σας;</string>
     <string name="library_remove_title">Αφαίρεση από βιβλιοθήκη;</string>
     <string name="media_movie">Ταινία</string>
-    <string name="notifications_channel_episode_releases_description">Ειδοποιήσεις όταν κυκλοφορεί νέο επεισόδιο αποθηκευμένης σειράς.</string>
     <string name="notifications_test_preview_body">Προεπισκόπηση ειδοποίησης κυκλοφορίας επεισοδίου.</string>
     <string name="notifications_test_send_failed">Αποτυχία αποστολής δοκιμαστικής ειδοποίησης.</string>
     <string name="notifications_test_sent_for">Η δοκιμαστική ειδοποίηση στάλθηκε για %1$s.</string>
@@ -1461,10 +1459,6 @@
     <string name="media_movies">Ταινίες</string>
     <string name="media_series">Σειρές</string>
     <string name="media_tv">Τηλεόραση</string>
-    <string name="notifications_episode_release_body_code">Το %1$s είναι τώρα διαθέσιμο</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s είναι τώρα διαθέσιμο</string>
-    <string name="notifications_episode_release_body_generic">Ένα νέο επεισόδιο είναι τώρα διαθέσιμο</string>
-    <string name="notifications_episode_release_body_title">Το %1$s είναι τώρα διαθέσιμο</string>
     <string name="notifications_channel_episode_releases_name">Κυκλοφορίες επεισοδίων</string>
     <string name="person_role_creator">Δημιουργός</string>
     <string name="person_role_director">Σκηνοθέτης</string>

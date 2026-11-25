@@ -88,7 +88,6 @@
     <string name="library_remove_message">உங்கள் நூலகத்திலிருந்து %1$s-ஐ அகற்றவா?</string>
     <string name="library_remove_title">நூலகத்திலிருந்து அகற்றவா?</string>
     <string name="media_movie">திரைப்படம்</string>
-    <string name="notifications_channel_episode_releases_description">சேமித்த தொடரின் புதிய எபிசோடு வெளியிடப்படும்போது அறிவிக்கும்.</string>
     <string name="notifications_test_preview_body">எபிசோடு வெளியீட்டு அறிவிப்பு முன்னோட்டம்.</string>
     <string name="notifications_test_send_failed">சோதனை அறிவிப்பை அனுப்ப முடியவில்லை.</string>
     <string name="notifications_test_sent_for">%1$s-க்கான சோதனை அறிவிப்பு அனுப்பப்பட்டது.</string>

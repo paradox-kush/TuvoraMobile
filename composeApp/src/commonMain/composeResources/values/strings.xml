@@ -1046,7 +1046,7 @@
     <string name="settings_meta_trailers_description">Trailer rail and playback shortcuts.</string>
     <string name="settings_notifications_disabled_in_app">Notifications are currently disabled in Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Episode release alerts</string>
-    <string name="settings_notifications_episode_release_alerts_description">Schedule local notifications when a new episode for a saved show becomes available.</string>
+    <string name="settings_notifications_episode_release_alerts_description">We'll tell you when a new episode has aired. Whether your sources have it yet is between you and them.</string>
     <string name="settings_notifications_permission_disabled">System notifications are disabled for Tuvora. Enable them to receive alerts and test notifications.</string>
     <string name="settings_notifications_scheduled_count">%1$d release alerts are currently scheduled on this device.</string>
     <string name="settings_notifications_section_alerts">ALERTS</string>
@@ -1855,7 +1855,7 @@
     <string name="library_remove_message">Remove %1$s from your library?</string>
     <string name="library_remove_title">Remove from Library?</string>
     <string name="media_movie">Movie</string>
-    <string name="notifications_channel_episode_releases_description">Alerts when a saved show's new episode is released.</string>
+    <string name="notifications_channel_episode_releases_description">Alerts when a show you follow airs a new episode.</string>
     <string name="notifications_test_preview_body">Preview episode release alert.</string>
     <string name="notifications_test_send_failed">Failed to send a test notification.</string>
     <string name="notifications_test_sent_for">Test notification sent for %1$s.</string>
@@ -2099,10 +2099,10 @@
     <string name="media_movies">Movies</string>
     <string name="media_series">Series</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s is out now</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s is out now</string>
-    <string name="notifications_episode_release_body_generic">A new episode is out now</string>
-    <string name="notifications_episode_release_body_title">%1$s is out now</string>
+    <string name="notifications_episode_release_body_code">%1$s aired today</string>
+    <string name="notifications_episode_release_body_code_title">%1$s • %2$s aired today</string>
+    <string name="notifications_episode_release_body_generic">A new episode aired today</string>
+    <string name="notifications_episode_release_body_title">%1$s aired today</string>
     <string name="notifications_channel_episode_releases_name">Episode Releases</string>
     <string name="parental_alcohol">Alcohol/Drugs</string>
     <string name="parental_frightening">Frightening</string>
@@ -3041,17 +3041,24 @@
     <string name="calendar_alert_chip_on">Alert me · On</string>
     <string name="calendar_alert_chip_off">Alert me · Off</string>
     <string name="calendar_alert_change_in_settings">Change in Settings</string>
-    <string name="notifications_alert_title_batch">%1$d new episodes from shows you watch</string>
-    <string name="notifications_alert_body_same_show">%1$d new episodes are out now</string>
-    <string name="notifications_alert_body_list">%1$s are out now</string>
-    <string name="notifications_alert_body_list_more">%1$s and %2$d more are out now</string>
-    <string name="notifications_alert_less_often">Sending these less often. Change in Settings</string>
+    <string name="notifications_alert_title_batch">%1$d new episodes aired</string>
+    <string name="notifications_alert_body_same_show">%1$d new episodes aired today</string>
+    <string name="notifications_alert_body_list">%1$s aired today</string>
+    <string name="notifications_alert_body_list_more">%1$s and %2$d more aired today</string>
+    <string name="notifications_alert_less_often">You skipped the last few, so we're sending fewer. Fair enough. Change in Settings</string>
 
-    <string name="notifications_away_title_one">A show you watch has new episodes</string>
-    <string name="notifications_away_title_many">%1$d shows you watch have new episodes</string>
+    <string name="notifications_away_title_one">While you were out: a show you watch aired a new episode</string>
+    <string name="notifications_away_title_many">While you were out: %1$d of your shows aired new episodes</string>
     <string name="notifications_away_names_two">%1$s and %2$s</string>
-    <string name="notifications_away_body_names">%1$s. Turn this off in Settings › Notifications.</string>
-    <string name="notifications_away_body_count">Open Tuvora to see them. Turn this off in Settings › Notifications.</string>
+    <string name="notifications_away_body_names">%1$s. That's the only nudge you get. Turn it off in Settings › Notifications.</string>
+    <string name="notifications_away_body_count">Open Tuvora to see them. That's the only nudge you get. Turn it off in Settings › Notifications.</string>
+    <!-- alert-gaps -->
+    <string name="notifications_private_show_name">A show you follow</string>
+    <string name="settings_notifications_pause_all_title">Pause everything</string>
+    <string name="settings_notifications_pause_all_description">No alerts, no reminders, no exceptions. Your choices below are kept for when you come back.</string>
+    <string name="settings_notifications_private_names_title">Keep show names private</string>
+    <string name="settings_notifications_private_names_description">Notifications say “a show you follow” instead of the name. For when your lock screen has an audience.</string>
+    <!-- /alert-gaps -->
     <string name="settings_alerts_section_away">WHEN YOU’VE BEEN AWAY</string>
     <string name="settings_alerts_away_title">Remind me what’s new</string>
     <string name="settings_alerts_away_description">One notification about your own shows if you haven’t opened Tuvora. Only one, never a series.</string>

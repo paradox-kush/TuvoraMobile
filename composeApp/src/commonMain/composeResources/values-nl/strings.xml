@@ -1003,7 +1003,7 @@
     <string name="settings_meta_trailers_description">Trailerrij en snelkoppelingen voor afspelen.</string>
     <string name="settings_notifications_disabled_in_app">Meldingen zijn momenteel uitgeschakeld in Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Meldingen bij nieuwe afleveringen</string>
-    <string name="settings_notifications_episode_release_alerts_description">Plan lokale meldingen wanneer een nieuwe aflevering van een opgeslagen serie beschikbaar komt.</string>
+    <string name="settings_notifications_episode_release_alerts_description">We laten het weten wanneer een nieuwe aflevering is uitgezonden. Of je bronnen hem al hebben, is tussen jou en hen.</string>
     <string name="settings_notifications_permission_disabled">Systeemmeldingen zijn uitgeschakeld voor Tuvora. Schakel ze in om meldingen en testmeldingen te ontvangen.</string>
     <string name="settings_notifications_scheduled_count">%1$d releasemeldingen staan momenteel gepland op dit apparaat.</string>
     <string name="settings_notifications_section_alerts">MELDINGEN</string>
@@ -1799,7 +1799,7 @@
     <string name="library_remove_message">%1$s verwijderen uit je bibliotheek?</string>
     <string name="library_remove_title">Verwijderen uit bibliotheek?</string>
     <string name="media_movie">Film</string>
-    <string name="notifications_channel_episode_releases_description">Meldingen wanneer een nieuwe aflevering van een opgeslagen serie wordt uitgebracht.</string>
+    <string name="notifications_channel_episode_releases_description">Meldingen wanneer een serie die je volgt een nieuwe aflevering uitzendt.</string>
     <string name="notifications_test_preview_body">Voorbeeld van melding bij nieuwe aflevering.</string>
     <string name="notifications_test_send_failed">Versturen van testmelding mislukt.</string>
     <string name="notifications_test_sent_for">Testmelding verstuurd voor %1$s.</string>
@@ -2023,10 +2023,10 @@
     <string name="media_movies">Films</string>
     <string name="media_series">Series</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s is nu beschikbaar</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s is nu beschikbaar</string>
-    <string name="notifications_episode_release_body_generic">Er is een nieuwe aflevering beschikbaar</string>
-    <string name="notifications_episode_release_body_title">%1$s is nu beschikbaar</string>
+    <string name="notifications_episode_release_body_code">%1$s is vandaag uitgezonden</string>
+    <string name="notifications_episode_release_body_code_title">%1$s • %2$s is vandaag uitgezonden</string>
+    <string name="notifications_episode_release_body_generic">Er is vandaag een nieuwe aflevering uitgezonden</string>
+    <string name="notifications_episode_release_body_title">%1$s is vandaag uitgezonden</string>
     <string name="notifications_channel_episode_releases_name">Nieuwe afleveringen</string>
     <string name="parental_alcohol">Alcohol/drugs</string>
     <string name="parental_frightening">Beangstigend</string>

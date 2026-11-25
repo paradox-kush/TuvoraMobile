@@ -1026,7 +1026,6 @@
     <string name="settings_meta_trailers_description">Előzetesek sora és gyors lejátszási lehetőségek.</string>
     <string name="settings_notifications_disabled_in_app">Az értesítések jelenleg ki vannak kapcsolva a Nuvióban.</string>
     <string name="settings_notifications_episode_release_alerts">Értesítés új epizódokról</string>
-    <string name="settings_notifications_episode_release_alerts_description">Helyi értesítések ütemezése, amikor egy elmentett sorozathoz új epizód válik elérhetővé.</string>
     <string name="settings_notifications_permission_disabled">A rendszerértesítések le vannak tiltva a Tuvora számára. Engedélyezd őket a riasztások és tesztértesítések fogadásához.</string>
     <string name="settings_notifications_scheduled_count">Jelenleg %1$d megjelenési értesítés van ütemezve ezen az eszközön.</string>
     <string name="settings_notifications_section_alerts">ÉRTESÍTÉSEK</string>
@@ -1831,7 +1830,6 @@
     <string name="library_remove_message">Eltávolítod a(z) %1$s címet a könyvtáradból?</string>
     <string name="library_remove_title">Eltávolítás a könyvtárból?</string>
     <string name="media_movie">Film</string>
-    <string name="notifications_channel_episode_releases_description">Értesítés, ha egy mentett sorozat új epizódja megjelenik.</string>
     <string name="notifications_test_preview_body">Új epizódról szóló értesítés előnézete.</string>
     <string name="notifications_test_send_failed">Nem sikerült elküldeni a tesztértesítést.</string>
     <string name="notifications_test_sent_for">Tesztértesítés elküldve a következőhöz: %1$s.</string>
@@ -2062,10 +2060,6 @@
     <string name="media_movies">Filmek</string>
     <string name="media_series">Sorozatok</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">Már megtekinthető: %1$s</string>
-    <string name="notifications_episode_release_body_code_title">Már megtekinthető: %1$s • %2$s</string>
-    <string name="notifications_episode_release_body_generic">Egy új epizód már megtekinthető</string>
-    <string name="notifications_episode_release_body_title">Már megtekinthető: %1$s</string>
     <string name="notifications_channel_episode_releases_name">Új epizódok megjelenése</string>
     <string name="parental_alcohol">Alkohol/drogok</string>
     <string name="parental_frightening">Félelemkeltő elemek</string>

@@ -998,7 +998,6 @@
     <string name="settings_meta_trailers_description">صف الإعلانات واختصارات تشغيلها.</string>
     <string name="settings_notifications_disabled_in_app">الإشعارات معطلة حاليًا في Nuvio.</string>
     <string name="settings_notifications_episode_release_alerts">تنبيهات صدور الحلقات</string>
-    <string name="settings_notifications_episode_release_alerts_description">جدولة إشعارات محلية عند توفر حلقة جديدة من مسلسل محفوظ.</string>
     <string name="settings_notifications_permission_disabled">إشعارات النظام معطلة لـ Nuvio. فعّلها لتلقي التنبيهات والإشعارات التجريبية.</string>
     <string name="settings_notifications_scheduled_count">يوجد حاليًا %1$d تنبيه صدور مجدول على هذا الجهاز.</string>
     <string name="settings_notifications_section_alerts">التنبيهات</string>
@@ -1789,7 +1788,6 @@
     <string name="library_remove_message">إزالة %1$s من مكتبتك؟</string>
     <string name="library_remove_title">إزالة من المكتبة؟</string>
     <string name="media_movie">أفلام</string>
-    <string name="notifications_channel_episode_releases_description">تنبيهات عند صدور حلقة جديدة من مسلسل محفوظ.</string>
     <string name="notifications_test_preview_body">معاينة تنبيه صدور الحلقة.</string>
     <string name="notifications_test_send_failed">فشل إرسال إشعار تجريبي.</string>
     <string name="notifications_test_sent_for">تم إرسال إشعار تجريبي لـ %1$s.</string>
@@ -2012,10 +2010,6 @@
     <string name="media_movies">أفلام</string>
     <string name="media_series">مسلسلات</string>
     <string name="media_tv">مسلسلات</string>
-    <string name="notifications_episode_release_body_code">%1$s متاح الآن</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s متاح الآن</string>
-    <string name="notifications_episode_release_body_generic">حلقة جديدة متاحة الآن</string>
-    <string name="notifications_episode_release_body_title">%1$s متاح الآن</string>
     <string name="notifications_channel_episode_releases_name">إصدارات الحلقات</string>
     <string name="parental_alcohol">كحول/مخدرات</string>
     <string name="parental_frightening">رعب</string>

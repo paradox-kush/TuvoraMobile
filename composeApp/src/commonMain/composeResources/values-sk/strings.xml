@@ -767,7 +767,6 @@
     <string name="settings_meta_trailers_description">Rad trailerov a skratky prehrávania.</string>
     <string name="settings_notifications_disabled_in_app">Oznámenia sú momentálne vypnuté v Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Upozornenia na vydanie epizód</string>
-    <string name="settings_notifications_episode_release_alerts_description">Naplánovať lokálne oznámenia, keď bude dostupná nová epizóda uloženého seriálu.</string>
     <string name="settings_notifications_permission_disabled">Systémové oznámenia sú pre Tuvora vypnuté. Povoľte ich, aby ste dostávali upozornenia a testovacie oznámenia.</string>
     <string name="settings_notifications_scheduled_count">%1$d upozornení na vydanie je momentálne naplánovaných na tomto zariadení.</string>
     <string name="settings_notifications_section_alerts">UPOZORNENIA</string>
@@ -1352,7 +1351,6 @@
     <string name="library_remove_message">Odstrániť %1$s z vašej knižnice?</string>
     <string name="library_remove_title">Odstrániť z knižnice?</string>
     <string name="media_movie">Film</string>
-    <string name="notifications_channel_episode_releases_description">Upozornenia, keď je vydaná nová epizóda uloženého seriálu.</string>
     <string name="notifications_test_preview_body">Náhľad upozornenia na vydanie epizódy.</string>
     <string name="notifications_test_send_failed">Nepodarilo sa odoslať testovacie oznámenie.</string>
     <string name="notifications_test_sent_for">Testovacie oznámenie odoslané pre %1$s.</string>
@@ -1547,10 +1545,6 @@
     <string name="media_movies">Filmy</string>
     <string name="media_series">Seriály</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s je teraz dostupný</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s je teraz dostupný</string>
-    <string name="notifications_episode_release_body_generic">Nová epizóda je teraz dostupná</string>
-    <string name="notifications_episode_release_body_title">%1$s je teraz dostupný</string>
     <string name="notifications_channel_episode_releases_name">Vydania epizód</string>
     <string name="parental_alcohol">Alkohol/Drogy</string>
     <string name="parental_frightening">Strašidelnosť</string>

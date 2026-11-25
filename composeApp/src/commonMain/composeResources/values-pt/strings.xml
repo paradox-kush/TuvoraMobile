@@ -776,7 +776,7 @@
     <string name="settings_meta_trailers_description">Linha de trailers e atalhos de reprodução.</string>
     <string name="settings_notifications_disabled_in_app">As notificações estão atualmente desativadas no Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Alertas de lançamento de episódios</string>
-    <string name="settings_notifications_episode_release_alerts_description">Agenda notificações locais para quando um novo episódio de uma série guardada ficar disponível.</string>
+    <string name="settings_notifications_episode_release_alerts_description">Avisamos quando um novo episódio for para o ar. Se as tuas fontes já o têm, isso é entre ti e elas.</string>
     <string name="settings_notifications_permission_disabled">As notificações do sistema estão desativadas para o Tuvora. Ativa-as para receberes alertas e notificações de teste.</string>
     <string name="settings_notifications_scheduled_count">Existem atualmente %1$d alertas de lançamento agendados neste dispositivo.</string>
     <string name="settings_notifications_section_alerts">ALERTAS</string>
@@ -1366,7 +1366,7 @@
     <string name="library_remove_message">Remover %1$s da tua biblioteca?</string>
     <string name="library_remove_title">Remover da biblioteca?</string>
     <string name="media_movie">Filme</string>
-    <string name="notifications_channel_episode_releases_description">Alerta quando é lançado um novo episódio de uma série guardada.</string>
+    <string name="notifications_channel_episode_releases_description">Alertas quando uma série que segues emite um novo episódio.</string>
     <string name="notifications_test_preview_body">Pré-visualização do alerta de lançamento de episódio.</string>
     <string name="notifications_test_send_failed">Falha ao enviar uma notificação de teste.</string>
     <string name="notifications_test_sent_for">Notificação de teste enviada para %1$s.</string>
@@ -1551,10 +1551,10 @@
     <string name="media_movies">Filmes</string>
     <string name="media_series">Séries</string>
     <string name="media_tv">Televisão</string>
-    <string name="notifications_episode_release_body_code">%1$s já saiu</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s já saiu</string>
-    <string name="notifications_episode_release_body_generic">Um novo episódio já saiu</string>
-    <string name="notifications_episode_release_body_title">%1$s já saiu</string>
+    <string name="notifications_episode_release_body_code">%1$s foi para o ar hoje</string>
+    <string name="notifications_episode_release_body_code_title">%1$s • %2$s foi para o ar hoje</string>
+    <string name="notifications_episode_release_body_generic">Um novo episódio foi para o ar hoje</string>
+    <string name="notifications_episode_release_body_title">%1$s foi para o ar hoje</string>
     <string name="notifications_channel_episode_releases_name">Lançamentos de episódios</string>
     <string name="parental_alcohol">Álcool/Drogas</string>
     <string name="parental_frightening">Assustador</string>

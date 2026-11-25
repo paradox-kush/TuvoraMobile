@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_notifications_episode_release_alerts">எபிசோடு வெளியீட்டு அறிவிப்புகள்</string>
-    <string name="settings_notifications_episode_release_alerts_description">சேமித்த தொடரின் புதிய எபிசோடு கிடைக்கும்போது உள்ளூர் அறிவிப்புகளைத் திட்டமிடவும்.</string>
     <string name="settings_notifications_permission_disabled">Tuvora-விற்கான கணினி அறிவிப்புகள் முடக்கப்பட்டுள்ளன. அறிவிப்புகளையும் சோதனை அறிவிப்புகளையும் பெற அவற்றை இயக்கவும்.</string>
     <string name="settings_notifications_scheduled_count">இந்தச் சாதனத்தில் தற்போது %1$d வெளியீட்டு அறிவிப்புகள் திட்டமிடப்பட்டுள்ளன.</string>
     <string name="settings_notifications_section_alerts">அறிவிப்புகள்</string>
