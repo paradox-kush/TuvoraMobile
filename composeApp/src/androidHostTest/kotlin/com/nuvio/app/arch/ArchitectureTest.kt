@@ -176,4 +176,40 @@ class ArchitectureTest {
                 violations.joinToString("\n"),
         )
     }
+
+    /**
+     * One door for OS notifications. Every notification Tuvora schedules is planned by `NotificationGatePolicy.plan`
+     * (quiet hours, one a day, nothing on a day the app was opened, the viewer's cap, "Pause everything"), so only
+     * `features/notifications` may call `EpisodeReleaseNotificationPlatform.schedule*`. A second caller would be a
+     * notification the budget cannot see. User-started ongoing work (recording, download, now playing) uses its own
+     * channels and is exempt by not going through this platform object. Main source sets only; tests may drive it.
+     * No baseline: nothing outside the feature calls it.
+     */
+    @Test
+    fun `the architecture rule catches a scheduling call (self-check)`() {
+        val schedules = Regex("""\bEpisodeReleaseNotificationPlatform\s*\.\s*schedule\w*|\bEpisodeReleaseNotificationPlatform\s*::\s*schedule\w*""")
+        assertTrue(schedules.containsMatchIn("EpisodeReleaseNotificationPlatform.scheduleEpisodeReleaseNotifications(requests)"))
+        assertTrue(schedules.containsMatchIn("EpisodeReleaseNotificationPlatform\n  .scheduleEpisodeReleaseNotifications(x)"))
+        assertTrue(schedules.containsMatchIn("val f = EpisodeReleaseNotificationPlatform::scheduleEpisodeReleaseNotifications"))
+        assertTrue(!schedules.containsMatchIn("EpisodeReleaseNotificationPlatform.notificationsAuthorized()"))
+    }
+
+    @Test
+    fun `only features-notifications calls EpisodeReleaseNotificationPlatform schedule (alert gate)`() {
+        val schedules = Regex("""\bEpisodeReleaseNotificationPlatform\s*\.\s*schedule\w*|\bEpisodeReleaseNotificationPlatform\s*::\s*schedule\w*""")
+        val mainSourceSet = Regex("""/(composeApp|tvosCore)/src/[A-Za-z]*Main/""")
+        val tvosFiles = Konsist.scopeFromDirectory("tvosCore/src").files.map { it.path to it.text }
+        val violations = (files + tvosFiles)
+            .filter { (p, _) -> mainSourceSet.containsMatchIn(p) }
+            .filterNot { (p, _) -> "/features/notifications/" in p }
+            .flatMap { (p, text) ->
+                // Whole text, not line by line: a call may break after the dot.
+                schedules.findAll(stripComments(text)).map { "${p.substringAfter("/composeApp/src/").substringAfter("/tvosCore/src/")}: ${it.value.trim()}" }.toList()
+            }
+        assertTrue(
+            violations.isEmpty(),
+            "OS notifications are scheduled only from features/notifications, through NotificationGatePolicy.plan:\n" +
+                violations.joinToString("\n"),
+        )
+    }
 }
