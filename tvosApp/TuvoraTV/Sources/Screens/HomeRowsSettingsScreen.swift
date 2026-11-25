@@ -8,6 +8,11 @@ struct HomeRowsSettingsScreen: View {
     @State private var name = ""
     @AppStorage(NuvioLayoutPrefs.showHeroKey) private var showHero = true
     @AppStorage(NuvioLayoutPrefs.cwEnabledKey) private var cwEnabled = true
+    // Top Shelf switches: device-local (this TV's shared screen), never synced. Defaults live in TopShelfSwitches.
+    @AppStorage(TopShelfSwitches.continueWatchingKey) private var topShelfContinue = true
+    @AppStorage(TopShelfSwitches.newEpisodesKey) private var topShelfNewEpisodes = true
+    @AppStorage(TopShelfSwitches.recentChannelsKey) private var topShelfChannels = false
+    @State private var resumeFirst = false
 
     /// Home sections as Apple TV renders them (the hero is pinned to the top: on/off only).
     private func sections(_ state: HomeCatalogSettingsUiState) -> [HomeSectionEntry] {
@@ -43,6 +48,26 @@ struct HomeRowsSettingsScreen: View {
                 SettingsToggleRow(title: "Show Live TV on Home", isOn: state.showLiveOnHome) {
                     HomeCatalogSettingsRepository.shared.setShowLiveOnHome(enabled: !state.showLiveOnHome)
                 }
+                Text(LK("settings_cw_order_title", "CONTINUE WATCHING")).font(NuvioType.labelLarge)
+                SettingsActionRow(
+                    title: LK("settings_cw_order", "Order"),
+                    subtitle: LK("settings_cw_order_helper", "Half-watched things first, then next episodes. We guess; you overrule."),
+                    value: resumeFirst ? LK("settings_cw_order_resume", "Pick up where I left off") : LK("settings_cw_order_recent", "Most recent first"),
+                    showChevron: false) {
+                    TvContinueWatchingOrder.shared.select(resumeFirst: !resumeFirst)
+                }
+                Text(LK("settings_top_shelf_title", "TOP SHELF")).font(NuvioType.labelLarge)
+                SettingsToggleRow(
+                    title: LK("settings_top_shelf_cw", "Show Continue Watching in Top Shelf"),
+                    subtitle: LK("settings_top_shelf_cw_helper", "Shown when Tuvora is in the top row of your Apple TV. Off shows the plain Tuvora banner."),
+                    isOn: topShelfContinue) { topShelfContinue.toggle(); TopShelfPublisher.refresh() }
+                SettingsToggleRow(title: LK("settings_top_shelf_new_episodes", "New episodes"), isOn: topShelfNewEpisodes) {
+                    topShelfNewEpisodes.toggle(); TopShelfPublisher.refresh()
+                }
+                SettingsToggleRow(
+                    title: LK("settings_top_shelf_channels", "Recent channels"),
+                    subtitle: LK("settings_top_shelf_channels_helper", "Channel names show on the Top Shelf, which anyone in the room can see."),
+                    isOn: topShelfChannels) { topShelfChannels.toggle(); TopShelfPublisher.refresh() }
                 Text(LK("settings_home_order_title", "HOME ORDER")).font(NuvioType.labelLarge)
                 let entries = sections(state)
                 ForEach(entries, id: \.id) { entry in
@@ -81,6 +106,7 @@ struct HomeRowsSettingsScreen: View {
             } else { ProgressView() }
             SettingsActionRow(title: "Done", showChevron: false) { dialogs.pop() }
         }
+        .task { for await value in TvContinueWatchingOrder.shared.isResumeFirst { resumeFirst = value.boolValue } }
         .task {
             TvHome.shared.start(); TvCollections.shared.start()
             for await value in HomeCatalogSettingsRepository.shared.uiState { state = value }
