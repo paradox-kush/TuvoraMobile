@@ -81,7 +81,7 @@ final class MetricKitReliabilityReporter: NSObject, MXMetricManagerSubscriber {
 enum MetricKitCounts {
     struct Foreground {
         var normal = 0, memoryLimit = 0, badAccess = 0, abnormal = 0, illegal = 0, watchdog = 0
-        init(normal: UInt = 0, memoryLimit: UInt = 0, badAccess: UInt = 0, abnormal: UInt = 0, illegal: UInt = 0, watchdog: UInt = 0) {
+        init(normal: Int = 0, memoryLimit: Int = 0, badAccess: Int = 0, abnormal: Int = 0, illegal: Int = 0, watchdog: Int = 0) {
             self.normal = Int(clamping: normal); self.memoryLimit = Int(clamping: memoryLimit)
             self.badAccess = Int(clamping: badAccess); self.abnormal = Int(clamping: abnormal)
             self.illegal = Int(clamping: illegal); self.watchdog = Int(clamping: watchdog)
@@ -92,8 +92,8 @@ enum MetricKitCounts {
         var normal = 0, memoryLimit = 0, cpuLimit = 0, memoryPressure = 0, badAccess = 0, abnormal = 0
         var illegal = 0, watchdog = 0, suspendedLocked = 0, taskTimeout = 0
         init(
-            normal: UInt = 0, memoryLimit: UInt = 0, cpuLimit: UInt = 0, memoryPressure: UInt = 0, badAccess: UInt = 0,
-            abnormal: UInt = 0, illegal: UInt = 0, watchdog: UInt = 0, suspendedLocked: UInt = 0, taskTimeout: UInt = 0
+            normal: Int = 0, memoryLimit: Int = 0, cpuLimit: Int = 0, memoryPressure: Int = 0, badAccess: Int = 0,
+            abnormal: Int = 0, illegal: Int = 0, watchdog: Int = 0, suspendedLocked: Int = 0, taskTimeout: Int = 0
         ) {
             self.normal = Int(clamping: normal); self.memoryLimit = Int(clamping: memoryLimit)
             self.cpuLimit = Int(clamping: cpuLimit); self.memoryPressure = Int(clamping: memoryPressure)
