@@ -513,7 +513,7 @@ private fun PlatformPlayerSurfaceInner(
         var lastReportedError: String? = null
         var endedHeld = false
         // Each failure lands in the flight recorder as closed codes (surface/engine/category/phase), never the text.
-        val failureTrail = PlaybackFailureTrailRecorder(PlaybackFailureTrail.surfaceOf(streamType, isCatchUpPlayback))
+        val failureTrail = PlaybackFailureTrailRecorder(PlaybackFailureTrail.surfaceOf(streamType, isCatchUpPlayback), sourceUrl)
         while (isActive) {
             // -1 means the track carries no picture; see NuvioPlayerBridge.getVideoFrameTicks.
             val videoTicks = bridge.getVideoFrameTicks()

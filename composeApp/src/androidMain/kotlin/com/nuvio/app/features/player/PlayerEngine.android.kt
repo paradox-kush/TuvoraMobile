@@ -299,7 +299,7 @@ private fun PlatformPlayerSurfaceInner(
     // Every engine failure lands in the flight recorder as closed codes (surface/engine/category/phase), so a
     // "won't play" report says why; an ExoPlayer failure that fails over to libmpv is recorded too.
     val failureTrail = remember(playerSourceKey) {
-        PlaybackFailureTrailRecorder(PlaybackFailureTrail.surfaceOf(streamType, isCatchUpPlayback))
+        PlaybackFailureTrailRecorder(PlaybackFailureTrail.surfaceOf(streamType, isCatchUpPlayback), sourceUrl)
     }
 
     when (activeEngine) {
@@ -1290,7 +1290,20 @@ private fun ExoPlayerSurface(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             playerViewRef?.releaseLibassOverlay()
-            exoPlayer.releaseWithAssSupportCompat()
+            // The release runs on Main (ExoPlayer's rule), so its duration is the stall the viewer's UI takes.
+            val exoReleaseStartedAtMs = SystemClock.elapsedRealtime()
+            var exoReleaseError: Throwable? = null
+            try { exoPlayer.releaseWithAssSupportCompat() } catch (t: Throwable) { exoReleaseError = t }
+            runCatching {
+                com.nuvio.app.core.telemetry.api.TelemetryAccess.current().recordPlayback(
+                    com.nuvio.app.core.telemetry.api.PlaybackSignal.Teardown(
+                        com.nuvio.app.core.telemetry.api.PlaybackEngine.MEDIA3,
+                        SystemClock.elapsedRealtime() - exoReleaseStartedAtMs,
+                        failed = exoReleaseError != null,
+                    ),
+                )
+            }
+            exoReleaseError?.let { throw it } // recorded, then the original behaviour: a failing release still surfaces
             if (VodCache.playheadBytesProvider != null) {
                 VodCache.playheadBytesProvider = null
             }
@@ -2270,6 +2283,14 @@ private class NuvioLibmpvView(
                         .onFailure { Log.w(TAG, "Failed to destroy libmpv cleanly", it) }
                 } finally {
                     val waitMs = SystemClock.elapsedRealtime() - releaseStartedAtMs
+                    // Teardown latency for the health counts (clean/slow/failed); thread-safe, never touches Main.
+                    runCatching {
+                        com.nuvio.app.core.telemetry.api.TelemetryAccess.current().recordPlayback(
+                            com.nuvio.app.core.telemetry.api.PlaybackSignal.Teardown(
+                                com.nuvio.app.core.telemetry.api.PlaybackEngine.LIBMPV, waitMs, failed = !destroyed,
+                            ),
+                        )
+                    }
                     if (destroyed) {
                         coreInitialized.set(false)
                         lifecycleLease.complete()

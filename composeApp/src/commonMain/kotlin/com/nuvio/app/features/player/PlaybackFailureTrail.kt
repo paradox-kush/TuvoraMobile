@@ -2,6 +2,7 @@ package com.nuvio.app.features.player
 
 import com.nuvio.app.core.telemetry.api.DiagArea
 import com.nuvio.app.core.telemetry.api.DiagEntry
+import com.nuvio.app.core.telemetry.api.PlaybackFailureProps
 import com.nuvio.app.core.telemetry.api.TelemetryAccess
 
 /**
@@ -31,17 +32,28 @@ object PlaybackFailureTrail {
     /** The engine label as one of a fixed set; anything else is `other`. */
     fun engineCode(engine: String): String = engine.trim().lowercase().takeIf { it in engines } ?: "other"
 
-    fun entry(nowMs: Long, surface: Surface, engine: String, category: String, phase: Phase): DiagEntry =
+    /**
+     * [extras] are the playback-telemetry failure properties (`ext_class`, `res_class`, `http_class`, `attempt_n`; see
+     * `PlaybackFailureProps`): closed classes and a count, never the facts they were derived from.
+     */
+    fun entry(
+        nowMs: Long,
+        surface: Surface,
+        engine: String,
+        category: String,
+        phase: Phase,
+        extras: Map<String, Any> = emptyMap(),
+    ): DiagEntry =
         DiagEntry(
             atMs = nowMs,
             area = DiagArea.PLAYBACK,
             code = CODE,
-            fields = linkedMapOf(
+            fields = linkedMapOf<String, Any>(
                 "surface" to surface.name.lowercase(),
                 "engine" to engineCode(engine),
                 "category" to category,
                 "phase" to phase.name.lowercase(),
-            ),
+            ).also { it.putAll(extras) },
         )
 }
 
@@ -109,13 +121,18 @@ object PlaybackFailureCategoryPolicy {
  */
 class PlaybackFailureTrailRecorder(
     private val surface: PlaybackFailureTrail.Surface,
+    /** Only its extension is read (`ext_class`); never stored or sent. Null leaves `ext_class` out. */
+    private val sourceUrl: String? = null,
     private val nowMs: () -> Long = { com.nuvio.app.features.trakt.TraktPlatformClock.nowEpochMs() },
     private val sink: (DiagEntry) -> Unit = { runCatching { TelemetryAccess.current().record(it) } },
 ) {
     private var started = false
     private var lastReported: String? = null
+    private var attempts = 0
+    private var videoHeight = 0
 
     fun onSnapshot(snapshot: PlayerPlaybackSnapshot) {
+        if (snapshot.videoHeight > 0) videoHeight = snapshot.videoHeight
         // Not positionMs alone: a resume opens at its saved position before any frame shows.
         if (snapshot.videoProgressTicks > 0L || (snapshot.isPlaying && !snapshot.isLoading)) started = true
     }
@@ -128,13 +145,21 @@ class PlaybackFailureTrailRecorder(
         val key = "$engine|$message"
         if (key == lastReported) return
         lastReported = key
+        attempts += 1
+        val category = PlaybackFailureCategoryPolicy.categorize(message)
+        val extras = linkedMapOf<String, Any>()
+        if (sourceUrl != null) extras["ext_class"] = PlaybackFailureProps.extClass(sourceUrl)
+        extras["res_class"] = PlaybackFailureProps.resClass(videoHeight)
+        extras["http_class"] = PlaybackFailureProps.httpClass(category)
+        extras["attempt_n"] = attempts
         sink(
             PlaybackFailureTrail.entry(
                 nowMs = nowMs(),
                 surface = surface,
                 engine = engine,
-                category = PlaybackFailureCategoryPolicy.categorize(message),
+                category = category,
                 phase = if (started) PlaybackFailureTrail.Phase.PLAYING else PlaybackFailureTrail.Phase.OPEN,
+                extras = extras,
             ),
         )
     }

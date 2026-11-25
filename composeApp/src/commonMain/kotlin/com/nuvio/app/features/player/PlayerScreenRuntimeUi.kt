@@ -49,6 +49,12 @@ import com.nuvio.app.isIos
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.TimeSource
+import com.nuvio.app.core.telemetry.api.FallbackTrigger
+import com.nuvio.app.core.telemetry.api.PlaybackEngine
+import com.nuvio.app.core.telemetry.api.PlaybackFailureProps
+import com.nuvio.app.core.telemetry.api.PlaybackKind
+import com.nuvio.app.core.telemetry.api.PlaybackSignal
+import com.nuvio.app.core.telemetry.api.TelemetryAccess
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import nuvio.composeapp.generated.resources.*
@@ -251,6 +257,9 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
         // Reset per source so a reconnect or source switch records a fresh start; the persisted
         // side of the breadcrumb is what says "died while streaming" on the next launch.
         val playbackStartRecorded = remember(playerSurfaceSourceUrl) { mutableStateOf(false) }
+        // Time to first frame runs from the moment this source was asked for (a failover or Retry on the same source
+        // keeps counting: the viewer waited that long). The first-frame signal is the app's own start policy.
+        val ttffMark = remember(playerSurfaceSourceUrl) { TimeSource.Monotonic.markNow() }
         DisposableEffect(playerSurfaceSourceUrl) {
             onDispose {
                 if (isLiveStream) freezeReporter.onLiveSnapshotStopped(playbackSnapshot)
@@ -304,7 +313,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                 ) {
                     VodStartDeadlinePolicy.Action.Wait -> Unit
                     VodStartDeadlinePolicy.Action.FailOver ->
-                        maybeFailoverPlaybackEngine(resolvedAutoEngineState.value)
+                        maybeFailoverPlaybackEngine(resolvedAutoEngineState.value, trigger = FallbackTrigger.TIMEOUT)
                     VodStartDeadlinePolicy.Action.Fail -> {
                         vodStartFailed = true
                         errorMessage = vodStartFailedMessage
@@ -376,6 +385,13 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                         }
                         if (!playbackStartRecorded.value && LivePlaybackStartupPolicy.hasStarted(snapshot)) {
                             playbackStartRecorded.value = true
+                            TelemetryAccess.current().recordPlayback(
+                                PlaybackSignal.Ttff(
+                                    kind = if (isLiveStream) PlaybackKind.LIVE else PlaybackKind.VOD,
+                                    engine = PlaybackEngine.fromLabel(playerController?.getStreamInfo()?.playerEngine),
+                                    ms = ttffMark.elapsedNow().inWholeMilliseconds,
+                                ),
+                            )
                             Breadcrumbs.playbackStarted(
                                 kind = if (isLiveStream) "live" else "vod",
                                 engine = playerController?.getStreamInfo()?.playerEngine?.lowercase() ?: "unknown",
@@ -435,7 +451,12 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                         }
                         // Engine failover is decided here, driven by its own player setting;
                         // the engine's own decoder/MIME retries have already been tried.
-                        if (message != null && maybeFailoverPlaybackEngine(resolvedAutoEngine, singleUseLink)) {
+                        if (message != null && maybeFailoverPlaybackEngine(
+                                resolvedAutoEngine,
+                                singleUseLink,
+                                trigger = FallbackTrigger.fromFailureCategory(PlaybackFailureCategoryPolicy.categorize(message)),
+                            )
+                        ) {
                             return@PlatformPlayerSurface
                         }
                         errorMessage = message

@@ -95,8 +95,14 @@ class PlaybackFailureTrailTest {
         r.onError("[ERROR_CODE_DECODING_FAILED]", engine = "exoplayer")
 
         assertEquals(2, out.size)
-        assertEquals(mapOf("surface" to "live", "engine" to "libmpv", "category" to "http_401", "phase" to "open"), out[0].fields)
-        assertEquals(mapOf("surface" to "live", "engine" to "exoplayer", "category" to "decoder", "phase" to "playing"), out[1].fields)
+        assertEquals(mapOf(
+            "surface" to "live", "engine" to "libmpv", "category" to "http_401", "phase" to "open",
+            "res_class" to "unknown", "http_class" to "401_403", "attempt_n" to 1,
+        ), out[0].fields)
+        assertEquals(mapOf(
+            "surface" to "live", "engine" to "exoplayer", "category" to "decoder", "phase" to "playing",
+            "res_class" to "unknown", "http_class" to "none", "attempt_n" to 2,
+        ), out[1].fields)
         assertEquals(200L, out[1].atMs)
         assertTrue(out.none { e -> e.fields.values.any { "portal" in it.toString() || "pass" in it.toString() } })
     }
@@ -108,5 +114,24 @@ class PlaybackFailureTrailTest {
         r.onSnapshot(PlayerPlaybackSnapshot(isLoading = true, positionMs = 600_000L))
         r.onError("HTTP 403", engine = "exoplayer")
         assertEquals("open", out.single().fields["phase"])
+    }
+
+    @Test
+    fun `failure extras are closed classes and never the url`() {
+        val out = ArrayList<DiagEntry>()
+        val r = PlaybackFailureTrailRecorder(
+            PlaybackFailureTrail.Surface.VOD,
+            sourceUrl = "https://portal.example.com/movie/user/pass/123.mkv?token=abc",
+            nowMs = { 1L },
+            sink = { out += it },
+        )
+        r.onSnapshot(PlayerPlaybackSnapshot(isLoading = false, isPlaying = true, videoHeight = 1080, positionMs = 1_000L))
+        r.onError("HTTP error 456", engine = "libmpv")
+        val f = out.single().fields
+        assertEquals("mkv", f["ext_class"])
+        assertEquals("fhd", f["res_class"])
+        assertEquals("456", f["http_class"])
+        assertEquals(1, f["attempt_n"])
+        assertTrue(f.values.none { "portal" in it.toString() || "token" in it.toString() })
     }
 }

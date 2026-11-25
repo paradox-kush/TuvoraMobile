@@ -291,6 +291,8 @@ fun LiveTvScreen(
     }
     // Reset per channel: an in-place channel switch is a new playback start.
     val playbackStartRecorded = remember(currentContentId) { mutableStateOf(false) }
+    // Time to first frame: from this channel being asked for to the app's own first-frame signal (a count, never an event).
+    val ttffMark = remember(currentContentId) { kotlin.time.TimeSource.Monotonic.markNow() }
 
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     // Recordings: null where this build has none, and every recording affordance below then stays out of the way.
@@ -1337,6 +1339,13 @@ fun LiveTvScreen(
                         if (!isCatchUp && LivePlaybackStartupPolicy.hasStarted(it)) stalkerFallback.onFirstFrame()
                         if (!playbackStartRecorded.value && LivePlaybackStartupPolicy.hasStarted(it)) {
                             playbackStartRecorded.value = true
+                            com.nuvio.app.core.telemetry.api.TelemetryAccess.current().recordPlayback(
+                                com.nuvio.app.core.telemetry.api.PlaybackSignal.Ttff(
+                                    kind = com.nuvio.app.core.telemetry.api.PlaybackKind.LIVE,
+                                    engine = com.nuvio.app.core.telemetry.api.PlaybackEngine.fromLabel(controller?.getStreamInfo()?.playerEngine),
+                                    ms = ttffMark.elapsedNow().inWholeMilliseconds,
+                                ),
+                            )
                             Breadcrumbs.playbackStarted(
                                 kind = "live",
                                 engine = controller?.getStreamInfo()?.playerEngine?.lowercase() ?: "unknown",
