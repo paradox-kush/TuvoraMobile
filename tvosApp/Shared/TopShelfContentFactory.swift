@@ -11,7 +11,7 @@ enum TopShelfContentFactory {
         return TVTopShelfSectionedContent(sections: sections.map(collection))
     }
 
-    private static func collection(_ section: TopShelfFeed.Section) -> TVTopShelfItemCollection {
+    private static func collection(_ section: TopShelfFeed.Section) -> TVTopShelfItemCollection<TVTopShelfSectionedItem> {
         let items: [TVTopShelfSectionedItem] = section.items.map { entry in
             let item = TVTopShelfSectionedItem(identifier: entry.id)
             item.title = entry.subtitle.map { "\(entry.title) · \($0)" } ?? entry.title
