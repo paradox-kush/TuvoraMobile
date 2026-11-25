@@ -3077,4 +3077,10 @@
     <string name="settings_account_sync_backend">Sync backend</string>
     <string name="debug_backend_switch_confirm_title">Switch backend?</string>
     <string name="debug_backend_switch_confirm_message">Switch to %1$s and sign out? You can sign in again on the selected backend.</string>
+    <!-- resume-rank -->
+    <string name="settings_continue_watching_order_resume_first">Pick up where I left off</string>
+    <string name="settings_continue_watching_order_resume_first_desc">Half-watched things first, then next episodes. We guess; you overrule.</string>
+    <string name="settings_continue_watching_order_recent">Most recent first</string>
+    <string name="settings_continue_watching_order_recent_desc">Sort all items by when you last watched them</string>
+    <!-- /resume-rank -->
 </resources>

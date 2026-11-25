@@ -758,6 +758,7 @@ private fun MobileSettingsScreen(
                     splitByType = continueWatchingPreferencesUiState.splitByType,
                     showResumePromptOnLaunch = continueWatchingPreferencesUiState.showResumePromptOnLaunch,
                     sortMode = continueWatchingPreferencesUiState.sortMode,
+                    resumeFirst = continueWatchingPreferencesUiState.isResumeFirst,
                     clickAction = continueWatchingPreferencesUiState.clickAction,
                 )
                 SettingsPage.PosterCustomization -> posterCustomizationSettingsContent(
@@ -1195,6 +1196,7 @@ private fun TabletSettingsScreen(
                         splitByType = continueWatchingPreferencesUiState.splitByType,
                         showResumePromptOnLaunch = continueWatchingPreferencesUiState.showResumePromptOnLaunch,
                         sortMode = continueWatchingPreferencesUiState.sortMode,
+                        resumeFirst = continueWatchingPreferencesUiState.isResumeFirst,
                         clickAction = continueWatchingPreferencesUiState.clickAction,
                     )
                     SettingsPage.PosterCustomization -> posterCustomizationSettingsContent(

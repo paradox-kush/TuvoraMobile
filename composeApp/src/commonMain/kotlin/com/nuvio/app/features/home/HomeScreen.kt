@@ -91,6 +91,7 @@ import com.nuvio.app.features.watchprogress.ContinueWatchingClickAction
 import com.nuvio.app.features.watchprogress.ContinueWatchingEnrichmentCache
 import com.nuvio.app.features.watchprogress.CurrentDateProvider
 import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesRepository
+import com.nuvio.app.features.watchprogress.ThisDevicePlayback
 import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesUiState
 import com.nuvio.app.features.watchprogress.ContinueWatchingItem
 import com.nuvio.app.features.watchprogress.ContinueWatchingSectionStyle
@@ -564,12 +565,18 @@ fun HomeScreen(
         }
     }.collectAsStateWithLifecycle(initialValue = com.nuvio.app.core.poster.CustomPosterUrlRepository.patternForScreen(com.nuvio.app.core.poster.CustomPosterScreen.CONTINUE_WATCHING))
 
+    val devicePlayedIds by remember {
+        ThisDevicePlayback.ensureLoaded()
+        ThisDevicePlayback.playedIds
+    }.collectAsStateWithLifecycle()
     val allContinueWatchingItems = remember(
         visibleContinueWatchingEntries,
         cachedInProgressItems,
         effectivNextUpItems,
         nextUpSuppressedSeriesIds,
-        continueWatchingPreferences.sortMode,
+        continueWatchingPreferences.effectiveSortMode,
+        continueWatchingPreferences.isResumeFirst,
+        devicePlayedIds,
         cloudLibraryUiState,
         cwPosterPattern,
     ) {
@@ -578,9 +585,11 @@ fun HomeScreen(
             cachedInProgressByProgressKey = cachedInProgressItems,
             nextUpItemsBySeries = effectivNextUpItems,
             nextUpSuppressedSeriesIds = nextUpSuppressedSeriesIds,
-            sortMode = continueWatchingPreferences.sortMode,
+            sortMode = continueWatchingPreferences.effectiveSortMode,
             todayIsoDate = CurrentDateProvider.todayIsoDate(),
             cloudLibraryUiState = cloudLibraryUiState,
+            resumeFirst = continueWatchingPreferences.isResumeFirst,
+            devicePlayedIds = devicePlayedIds,
         ).let { items ->
             items.withCustomPosterUrls(cwPosterPattern)
         }
@@ -616,11 +625,11 @@ fun HomeScreen(
     }
     val (continueWatchingItems, upcomingItems) = remember(
         shuffledContinueWatchingItems,
-        continueWatchingPreferences.sortMode,
+        continueWatchingPreferences.effectiveSortMode,
     ) {
         splitUpcomingItems(
             items = shuffledContinueWatchingItems,
-            mode = continueWatchingPreferences.sortMode,
+            mode = continueWatchingPreferences.effectiveSortMode,
         )
     }
     val hasContinueWatchingRows = continueWatchingItems.isNotEmpty() || upcomingItems.isNotEmpty()
@@ -1810,6 +1819,9 @@ internal fun buildHomeContinueWatchingItems(
     sortMode: ContinueWatchingSortMode = ContinueWatchingSortMode.DEFAULT,
     todayIsoDate: String = "",
     cloudLibraryUiState: CloudLibraryUiState? = null,
+    resumeFirst: Boolean = false,
+    devicePlayedIds: Set<String> = emptySet(),
+    nowEpochMs: Long = WatchProgressClock.nowEpochMs(),
 ): List<ContinueWatchingItem> {
     val suppressedSeriesIds = nextUpSuppressedSeriesIds
         ?: visibleEntries
@@ -1860,6 +1872,12 @@ internal fun buildHomeContinueWatchingItems(
             seen.add(key)
         }
 
+    // "Pick up where I left off" replaces the recency modes (it is its own stored choice, see
+    // ContinueWatchingPreferencesUiState.resumeFirst); every other order below is unchanged.
+    if (resumeFirst) {
+        return applyResumeFirstSort(deduplicated, devicePlayedIds, nowEpochMs)
+    }
+
     return when (sortMode) {
         ContinueWatchingSortMode.DEFAULT,
         ContinueWatchingSortMode.SPLIT_UPCOMING,
@@ -1908,6 +1926,45 @@ internal fun ContinueWatchingClickAction.opensDetails(
     ContinueWatchingClickAction.DETAILS -> true
     ContinueWatchingClickAction.DETAILS_FOR_UPCOMING -> item.isUpcoming(nowEpochMs)
 }
+
+private fun applyResumeFirstSort(
+    candidates: List<HomeContinueWatchingCandidate>,
+    devicePlayedIds: Set<String>,
+    nowEpochMs: Long,
+): List<ContinueWatchingItem> {
+    val byKey = LinkedHashMap<String, ContinueWatchingItem>()
+    val ranked = candidates.map { candidate ->
+        val item = candidate.item
+        val key = item.parentMetaId.ifBlank { item.videoId }
+        byKey[key] = item
+        item.toResumeCandidate(
+            key = key,
+            lastEngagedAtMs = candidate.lastUpdatedEpochMs,
+            playedOnThisDevice = item.parentMetaId in devicePlayedIds,
+            nowEpochMs = nowEpochMs,
+        )
+    }
+    return ResumeRankPolicy.rank(ranked, nowEpochMs).mapNotNull(byKey::get)
+}
+
+internal fun ContinueWatchingItem.toResumeCandidate(
+    key: String,
+    lastEngagedAtMs: Long,
+    playedOnThisDevice: Boolean,
+    nowEpochMs: Long,
+): ResumeCandidate = ResumeCandidate(
+    key = key,
+    kind = when {
+        isNextUp && isReleaseAlert -> ResumeKind.NewEpisode
+        isNextUp -> ResumeKind.NextUp
+        else -> ResumeKind.Resume
+    },
+    lastEngagedAtMs = lastEngagedAtMs,
+    progressFraction = if (isNextUp) null else (resumeProgressFraction ?: progressFraction),
+    releasedAtMs = parseReleaseDateToEpochMs(released),
+    playedOnThisDevice = playedOnThisDevice,
+    isUnaired = isUpcoming(nowEpochMs),
+)
 
 private fun applyStreamingStyleSort(
     candidates: List<HomeContinueWatchingCandidate>,

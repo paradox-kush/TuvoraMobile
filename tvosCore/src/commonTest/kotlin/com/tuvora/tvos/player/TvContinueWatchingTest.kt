@@ -39,4 +39,30 @@ class TvContinueWatchingTest {
         assertEquals(null, TvContinueWatching.minutesLeft(item("a", "v", 0, pos = 10L)))
         assertEquals(null, TvContinueWatching.minutesLeft(item("a", "v", 0, pos = 60 * 60_000L, dur = 60 * 60_000L)))
     }
+
+    @Test
+    fun `resume first puts a half watched title ahead of a fresher next up`() {
+        val now = 100L * 24 * 3_600_000
+        val hour = 3_600_000L
+        val merged = TvContinueWatching.merge(
+            inProgress = listOf(item("film", "film", now - 12 * hour, pos = 500, dur = 1000)),
+            nextUp = listOf(item("show", "show:1:2", now - 2 * hour, nextUp = true)),
+            resumeFirst = true,
+            nowMs = now,
+        )
+        assertEquals(listOf("film", "show"), merged.map { it.parentMetaId })
+    }
+
+    @Test
+    fun `resume first off keeps newest first`() {
+        val now = 100L * 24 * 3_600_000
+        val hour = 3_600_000L
+        val merged = TvContinueWatching.merge(
+            inProgress = listOf(item("film", "film", now - 12 * hour, pos = 500, dur = 1000)),
+            nextUp = listOf(item("show", "show:1:2", now - 2 * hour, nextUp = true)),
+            resumeFirst = false,
+            nowMs = now,
+        )
+        assertEquals(listOf("show", "film"), merged.map { it.parentMetaId })
+    }
 }

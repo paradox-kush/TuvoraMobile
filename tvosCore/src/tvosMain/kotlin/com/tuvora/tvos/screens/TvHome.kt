@@ -26,7 +26,9 @@ import com.nuvio.app.features.watchprogress.CurrentDateProvider
 import com.nuvio.app.features.watchprogress.WatchProgressClock
 import com.nuvio.app.features.watchprogress.WatchProgressEntry
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
+import com.nuvio.app.features.watchprogress.ThisDevicePlayback
 import com.nuvio.app.features.watchprogress.WatchProgressUiState
+import com.nuvio.app.features.watchprogress.parseReleaseDateToEpochMs
 import com.nuvio.app.features.watchprogress.buildPlaybackVideoId
 import com.nuvio.app.features.watchprogress.nextUpDismissKey
 import kotlinx.coroutines.CoroutineScope
@@ -69,6 +71,7 @@ object TvHome {
 
     private var inProgress: List<TvCwItem> = emptyList()
     private var nextUp: List<TvCwItem> = emptyList()
+    private var resumeFirst = false
 
     fun start() {
         if (started) return
@@ -117,6 +120,7 @@ object TvHome {
 
     private fun rebuild(inputs: CwInputs) {
         val now = WatchProgressClock.nowEpochMs()
+        resumeFirst = inputs.prefs.isResumeFirst
         val state = inputs.progress
         val cutoff = WatchProgressRepository.activeProviderContinueWatchingCutoffEpochMs(inputs.daysCap, now)
         val ownsHistory = WatchProgressRepository.activeProviderOwnsCompletedHistoryProjection()
@@ -170,7 +174,14 @@ object TvHome {
     }
 
     private fun publish() {
-        _continueWatching.value = TvContinueWatching.merge(inProgress, nextUp)
+        ThisDevicePlayback.ensureLoaded()
+        _continueWatching.value = TvContinueWatching.merge(
+            inProgress = inProgress,
+            nextUp = nextUp,
+            resumeFirst = resumeFirst,
+            devicePlayedIds = ThisDevicePlayback.playedIds.value,
+            nowMs = WatchProgressClock.nowEpochMs(),
+        )
     }
 
     private fun refreshNextUp(
@@ -239,7 +250,7 @@ object TvHome {
         episodeTitle = video.title, seasonNumber = video.season, episodeNumber = video.episode,
         artwork = video.thumbnail ?: meta.background ?: meta.poster, logo = meta.logo, background = meta.background ?: meta.poster,
         positionMs = 0, durationMs = 0, lastUpdatedEpochMs = lastUpdatedEpochMs, isNextUp = true,
-        poster = meta.poster,
+        poster = meta.poster, releasedAtMs = parseReleaseDateToEpochMs(video.released),
     )
 
     private fun MetaDetails.videoFor(season: Int?, episode: Int?, videoId: String): MetaVideo? {

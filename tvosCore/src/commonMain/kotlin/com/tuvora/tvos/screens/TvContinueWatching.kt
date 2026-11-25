@@ -1,5 +1,9 @@
 package com.tuvora.tvos.screens
 
+import com.nuvio.app.features.home.ResumeCandidate
+import com.nuvio.app.features.home.ResumeKind
+import com.nuvio.app.features.home.ResumeRankPolicy
+
 /** One Continue Watching card, as NuvioTV's ContinueWatchingSection draws it. */
 data class TvCwItem(
     val parentMetaId: String,
@@ -18,6 +22,8 @@ data class TvCwItem(
     val isNextUp: Boolean,
     /** The title's portrait poster, for NuvioTV's POSTER Continue Watching style. */
     val poster: String? = null,
+    /** A Next Up episode's air date (epoch ms), when the add-on gave one; lets resume-first order unaired ones last. */
+    val releasedAtMs: Long? = null,
 ) {
     val progress: Float get() = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
 }
@@ -30,12 +36,37 @@ object TvContinueWatching {
     /** Room for every Next Up lookup (TvContinueWatchingSources.NEXT_UP_LOOKUPS) plus recent in-progress titles. */
     const val MAX_ITEMS = 40
 
-    fun merge(inProgress: List<TvCwItem>, nextUp: List<TvCwItem>): List<TvCwItem> {
+    /**
+     * With [resumeFirst] ("Pick up where I left off", the phone's Order setting) the row is ordered by
+     * [ResumeRankPolicy]; otherwise newest first exactly as before. [devicePlayedIds] are the parentMetaIds
+     * played on this device; [nowMs] is the caller's clock (the policy itself has none).
+     */
+    fun merge(
+        inProgress: List<TvCwItem>,
+        nextUp: List<TvCwItem>,
+        resumeFirst: Boolean = false,
+        devicePlayedIds: Set<String> = emptySet(),
+        nowMs: Long = 0L,
+    ): List<TvCwItem> {
         val inProgressSeries = inProgress.map { it.parentMetaId }.toSet()
-        return (inProgress + nextUp.filter { it.parentMetaId !in inProgressSeries })
+        val combined = (inProgress + nextUp.filter { it.parentMetaId !in inProgressSeries })
             .distinctBy { it.parentMetaId to it.videoId }
-            .sortedByDescending { it.lastUpdatedEpochMs }
-            .take(MAX_ITEMS)
+        if (!resumeFirst) return combined.sortedByDescending { it.lastUpdatedEpochMs }.take(MAX_ITEMS)
+
+        val byKey = LinkedHashMap<String, TvCwItem>()
+        val candidates = combined.map { item ->
+            val key = "${item.parentMetaId}|${item.videoId}"
+            byKey[key] = item
+            ResumeCandidate(
+                key = key,
+                kind = if (item.isNextUp) ResumeKind.NextUp else ResumeKind.Resume,
+                lastEngagedAtMs = item.lastUpdatedEpochMs,
+                progressFraction = if (item.isNextUp || item.durationMs <= 0) null else item.progress,
+                releasedAtMs = item.releasedAtMs,
+                playedOnThisDevice = item.parentMetaId in devicePlayedIds,
+            )
+        }
+        return ResumeRankPolicy.rank(candidates, nowMs).mapNotNull(byKey::get).take(MAX_ITEMS)
     }
 
     /** The top-right badge: "Next Up", or time left like NuvioTV ("8m left", "1h 49m left"). */
