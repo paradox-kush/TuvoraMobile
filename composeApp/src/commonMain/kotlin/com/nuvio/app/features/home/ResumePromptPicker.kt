@@ -1,6 +1,8 @@
 package com.nuvio.app.features.home
 
 import com.nuvio.app.features.watchprogress.ContinueWatchingItem
+import com.nuvio.app.features.watchprogress.WatchProgressClock
+import com.nuvio.app.features.watchprogress.parseReleaseDateToEpochMs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,3 +39,8 @@ object ContinueWatchingRowSnapshot {
         _items.value = null
     }
 }
+
+/** A next-up episode that has not aired yet. Lives here, not in HomeScreen.kt, so Apple TV's shared code (which excludes Compose files) can compile the picker. */
+internal fun ContinueWatchingItem.isUpcoming(nowEpochMs: Long = WatchProgressClock.nowEpochMs()): Boolean =
+    isNextUp && parseReleaseDateToEpochMs(released)
+        ?.let { releaseEpochMs -> releaseEpochMs > nowEpochMs } == true
