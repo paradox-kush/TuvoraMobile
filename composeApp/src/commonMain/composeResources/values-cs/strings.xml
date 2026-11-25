@@ -778,7 +778,6 @@
     <string name="settings_meta_trailers_description">Pruh s trailery a zástupci pro přehrávání.</string>
     <string name="settings_notifications_disabled_in_app">Oznámení jsou momentálně v Tuvora zakázána.</string>
     <string name="settings_notifications_episode_release_alerts">Upozornění na vydání epizody</string>
-    <string name="settings_notifications_episode_release_alerts_description">Naplánovat lokální upozornění, když bude k dispozici nová epizoda u uloženého pořadu.</string>
     <string name="settings_notifications_permission_disabled">Systémová oznámení jsou pro Tuvora vypnutá. Povolte je, abyste mohli dostávat upozornění a zkušební oznámení.</string>
     <string name="settings_notifications_scheduled_count">Momentálně je na tomto zařízení naplánováno %1$d upozornění na vydání.</string>
     <string name="settings_notifications_section_alerts">UPOZORNĚNÍ</string>
@@ -1378,7 +1377,6 @@
     <string name="library_remove_message">Odstranit %1$s z vaší knihovny?</string>
     <string name="library_remove_title">Odstranit z knihovny?</string>
     <string name="media_movie">Film</string>
-    <string name="notifications_channel_episode_releases_description">Upozorňuje na vydání nové epizody uloženého pořadu.</string>
     <string name="notifications_test_preview_body">Náhled upozornění na vydání epizody.</string>
     <string name="notifications_test_send_failed">Odeslání zkušebního oznámení selhalo.</string>
     <string name="notifications_test_sent_for">Zkušební oznámení odesláno pro %1$s.</string>
@@ -1575,10 +1573,6 @@
     <string name="media_movies">Filmy</string>
     <string name="media_series">Seriály</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s je nyní venku</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s je nyní venku</string>
-    <string name="notifications_episode_release_body_generic">Nová epizoda je nyní venku</string>
-    <string name="notifications_episode_release_body_title">%1$s je nyní venku</string>
     <string name="notifications_channel_episode_releases_name">Vydání epizod</string>
     <string name="parental_alcohol">Alkohol/Drogy</string>
     <string name="parental_frightening">Děsivé scény</string>

@@ -1003,7 +1003,6 @@
     <string name="settings_meta_trailers_description">予告編レールと再生ショートカット</string>
     <string name="settings_notifications_disabled_in_app">Tuvoraで通知が無効になっています。</string>
     <string name="settings_notifications_episode_release_alerts">エピソード公開アラート</string>
-    <string name="settings_notifications_episode_release_alerts_description">保存済みシリーズの新しいエピソードが公開されたときにローカル通知をスケジュールします。</string>
     <string name="settings_notifications_permission_disabled">Tuvoraのシステム通知が無効になっています。アラートとテスト通知を受け取るには有効にしてください。</string>
     <string name="settings_notifications_scheduled_count">このデバイスで現在 %1$d 件の公開アラートがスケジュールされています。</string>
     <string name="settings_notifications_section_alerts">アラート</string>
@@ -1798,7 +1797,6 @@
     <string name="library_remove_message">%1$s をライブラリから削除しますか？</string>
     <string name="library_remove_title">ライブラリから削除しますか？</string>
     <string name="media_movie">映画</string>
-    <string name="notifications_channel_episode_releases_description">保存済みシリーズの新しいエピソードが公開されたときに通知します。</string>
     <string name="notifications_test_preview_body">エピソード公開アラートのプレビュー。</string>
     <string name="notifications_test_send_failed">テスト通知の送信に失敗しました。</string>
     <string name="notifications_test_sent_for">%1$s のテスト通知を送信しました。</string>
@@ -2022,10 +2020,6 @@
     <string name="media_movies">映画</string>
     <string name="media_series">シリーズ</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s が配信されました</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s が配信されました</string>
-    <string name="notifications_episode_release_body_generic">新しいエピソードが配信されました</string>
-    <string name="notifications_episode_release_body_title">%1$s が配信されました</string>
     <string name="notifications_channel_episode_releases_name">エピソード公開</string>
     <string name="parental_alcohol">アルコール/薬物</string>
     <string name="parental_frightening">恐怖シーン</string>

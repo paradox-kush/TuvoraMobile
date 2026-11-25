@@ -994,7 +994,6 @@
     <string name="settings_meta_trailers_description">Traka s najavama i prečaci za reprodukciju.</string>
     <string name="settings_notifications_disabled_in_app">Obavijesti su trenutačno onemogućene u Nuviju.</string>
     <string name="settings_notifications_episode_release_alerts">Upozorenja o izlasku epizoda</string>
-    <string name="settings_notifications_episode_release_alerts_description">Zakažite lokalne obavijesti kada nova epizoda spremljene serije postane dostupna.</string>
     <string name="settings_notifications_permission_disabled">Sustavne obavijesti su onemogućene za Tuvora. Omogućite ih za primanje upozorenja i probnih obavijesti.</string>
     <string name="settings_notifications_scheduled_count">%1$d upozorenja o izlasku trenutačno je zakazano na ovom uređaju.</string>
     <string name="settings_notifications_section_alerts">UPOZORENJA</string>
@@ -1771,7 +1770,6 @@
     <string name="library_remove_message">Ukloniti %1$s iz vaše medijateke?</string>
     <string name="library_remove_title">Ukloniti iz medijateke?</string>
     <string name="media_movie">Film</string>
-    <string name="notifications_channel_episode_releases_description">Obavještava kada izađe nova epizoda spremljene serije.</string>
     <string name="notifications_test_preview_body">Pretpregled upozorenja o izlasku epizode.</string>
     <string name="notifications_test_send_failed">Slanje probne obavijesti nije uspjelo.</string>
     <string name="notifications_test_sent_for">Probna obavijest poslana za %1$s.</string>
@@ -1995,10 +1993,6 @@
     <string name="media_movies">Filmovi</string>
     <string name="media_series">Serije</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s je sada dostupna</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s je sada dostupna</string>
-    <string name="notifications_episode_release_body_generic">Nova epizoda je sada dostupna</string>
-    <string name="notifications_episode_release_body_title">%1$s je sada dostupna</string>
     <string name="notifications_channel_episode_releases_name">Izlasci epizoda</string>
     <string name="parental_alcohol">Alkohol/Droge</string>
     <string name="parental_frightening">Zastrašujuće</string>

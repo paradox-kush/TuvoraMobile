@@ -999,7 +999,6 @@
     <string name="settings_meta_trailers_description">预告片栏与播放快捷入口。</string>
     <string name="settings_notifications_disabled_in_app">Tuvora 内通知当前已关闭。</string>
     <string name="settings_notifications_episode_release_alerts">剧集更新提醒</string>
-    <string name="settings_notifications_episode_release_alerts_description">已保存的剧集有新一集上线时，安排本地通知提醒。</string>
     <string name="settings_notifications_permission_disabled">Tuvora 的系统通知已关闭。请开启以接收提醒和测试通知。</string>
     <string name="settings_notifications_scheduled_count">此设备上当前已安排 %1$d 条更新提醒。</string>
     <string name="settings_notifications_section_alerts">提醒</string>
@@ -1786,7 +1785,6 @@
     <string name="library_remove_message">将 %1$s 从媒体库中移除？</string>
     <string name="library_remove_title">从媒体库移除？</string>
     <string name="media_movie">电影</string>
-    <string name="notifications_channel_episode_releases_description">已保存的剧集有新一集上线时提醒。</string>
     <string name="notifications_test_preview_body">预览剧集更新提醒。</string>
     <string name="notifications_test_send_failed">发送测试通知失败。</string>
     <string name="notifications_test_sent_for">已向 %1$s 发送测试通知。</string>
@@ -2003,10 +2001,6 @@
     <string name="media_movies">电影</string>
     <string name="media_series">剧集</string>
     <string name="media_tv">电视</string>
-    <string name="notifications_episode_release_body_code">%1$s 已上线</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s 已上线</string>
-    <string name="notifications_episode_release_body_generic">有新一集已上线</string>
-    <string name="notifications_episode_release_body_title">%1$s 已上线</string>
     <string name="notifications_channel_episode_releases_name">剧集更新</string>
     <string name="parental_alcohol">酒精/药物</string>
     <string name="parental_frightening">惊悚</string>

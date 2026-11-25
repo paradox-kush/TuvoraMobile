@@ -739,7 +739,6 @@
     <string name="settings_meta_trailers_description">Wiersz zwiastunów i skróty odtwarzania.</string>
     <string name="settings_notifications_disabled_in_app">Powiadomienia są obecnie wyłączone w Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Alerty o premierach odcinków</string>
-    <string name="settings_notifications_episode_release_alerts_description">Zaplanuj lokalne powiadomienia, gdy nowy odcinek zapisanego serialu stanie się dostępny.</string>
     <string name="settings_notifications_permission_disabled">Powiadomienia systemowe są wyłączone dla Tuvora. Włącz je, aby otrzymywać alerty i powiadomienia testowe.</string>
     <string name="settings_notifications_scheduled_count">%1$d alertów o premierach jest obecnie zaplanowanych na tym urządzeniu.</string>
     <string name="settings_notifications_section_alerts">ALERTY</string>
@@ -1324,7 +1323,6 @@
     <string name="library_source_cloud">Chmura</string>
     <string name="library_source_saved">Zapisane</string>
     <string name="media_movie">Film</string>
-    <string name="notifications_channel_episode_releases_description">Alerty o premierach nowych odcinków zapisanych seriali.</string>
     <string name="notifications_test_preview_body">Podgląd alertu o premierze odcinka.</string>
     <string name="notifications_test_send_failed">Nie udało się wysłać powiadomienia testowego.</string>
     <string name="notifications_test_sent_for">Wysłano powiadomienie testowe dla %1$s.</string>
@@ -1440,10 +1438,6 @@
     <string name="media_movies">Filmy</string>
     <string name="media_series">Seriale</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s jest już dostępny</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s jest już dostępny</string>
-    <string name="notifications_episode_release_body_generic">Nowy odcinek jest już dostępny</string>
-    <string name="notifications_episode_release_body_title">%1$s jest już dostępny</string>
     <string name="notifications_channel_episode_releases_name">Premiery odcinków</string>
     <string name="parental_alcohol">Alkohol/Narkotyki</string>
     <string name="parental_frightening">Przerażające</string>

@@ -983,7 +983,6 @@
     <string name="settings_meta_trailers_description">ট্রেলার রেল এবং প্লেব্যাক শর্টকাট।</string>
     <string name="settings_notifications_disabled_in_app">Tuvora-তে বর্তমানে নোটিফিকেশন নিষ্ক্রিয় করা হয়েছে।</string>
     <string name="settings_notifications_episode_release_alerts">পর্ব প্রকাশের অ্যালার্ট</string>
-    <string name="settings_notifications_episode_release_alerts_description">সংরক্ষিত শোয়ের জন্য একটি নতুন পর্ব উপলব্ধ হলে স্থানীয় বিজ্ঞপ্তিগুলো নির্ধারণ করুন।</string>
     <string name="settings_notifications_permission_disabled">Tuvora-এর জন্য সিস্টেম নোটিফিকেশন নিষ্ক্রিয় করা হয়েছে। অ্যালার্ট এবং পরীক্ষার নোটিফিকেশন পেতে সেগুলো চালু করুন।</string>
     <string name="settings_notifications_scheduled_count">এই ডিভাইসে বর্তমানে %1$dটি রিলিজ অ্যালার্ট নির্ধারিত আছে।</string>
     <string name="settings_notifications_section_alerts">অ্যালার্ট</string>
@@ -1717,7 +1716,6 @@
     <string name="library_remove_message">আপনার লাইব্রেরি থেকে %1$s সরাবেন?</string>
     <string name="library_remove_title">লাইব্রেরি থেকে সরাবেন?</string>
     <string name="media_movie">মুভি</string>
-    <string name="notifications_channel_episode_releases_description">সংরক্ষিত শো-এর নতুন পর্ব রিলিজ হলে অ্যালার্ট দেয়।</string>
     <string name="notifications_test_preview_body">পর্ব রিলিজ অ্যালার্ট প্রিভিউ করুন।</string>
     <string name="notifications_test_send_failed">টেস্ট বিজ্ঞপ্তি পাঠাতে ব্যর্থ।</string>
     <string name="notifications_test_sent_for">%1$s-এর জন্য টেস্ট বিজ্ঞপ্তি পাঠানো হয়েছে।</string>
@@ -1933,10 +1931,6 @@
     <string name="media_movies">সিনেমা</string>
     <string name="media_series">সিরিজ</string>
     <string name="media_tv">টিভি</string>
-    <string name="notifications_episode_release_body_code">%1$s এখন রিলিজ হয়েছে</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s এখন রিলিজ হয়েছে</string>
-    <string name="notifications_episode_release_body_generic">একটি নতুন পর্ব রিলিজ হয়েছে</string>
-    <string name="notifications_episode_release_body_title">%1$s এখন রিলিজ হয়েছে</string>
     <string name="notifications_channel_episode_releases_name">পর্ব রিলিজ</string>
     <string name="parental_alcohol">অ্যালকোহল/ড্রাগস</string>
     <string name="parental_frightening">ভীতিকর</string>

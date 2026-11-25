@@ -1008,7 +1008,6 @@ Therefore, duplicate the values-he directory as values-iw. Keep both directories
     <string name="settings_meta_trailers_description">שורת טריילרים וקיצורי הפעלה.</string>
     <string name="settings_notifications_disabled_in_app">ההתראות כבויות כרגע ב-Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">התראות על שחרור פרקים</string>
-    <string name="settings_notifications_episode_release_alerts_description">תזמון התראות מקומיות כשפרק חדש של סדרה שנשמרה הופך לזמין.</string>
     <string name="settings_notifications_permission_disabled">התראות המערכת כבויות עבור Tuvora. יש להפעיל אותן כדי לקבל התראות והתראות בדיקה.</string>
     <string name="settings_notifications_scheduled_count">%1$d התראות שחרור מתוזמנות כעת במכשיר זה.</string>
     <string name="settings_notifications_section_alerts">התראות</string>
@@ -1813,7 +1812,6 @@ Therefore, duplicate the values-he directory as values-iw. Keep both directories
     <string name="library_remove_message">להסיר את %1$s מהספרייה שלך?</string>
     <string name="library_remove_title">להסיר מהספרייה?</string>
     <string name="media_movie">סרט</string>
-    <string name="notifications_channel_episode_releases_description">התראות כשיוצא פרק חדש של סדרה שנשמרה.</string>
     <string name="notifications_test_preview_body">תצוגה מקדימה של התראת שחרור פרק.</string>
     <string name="notifications_test_send_failed">שליחת התראת הבדיקה נכשלה.</string>
     <string name="notifications_test_sent_for">התראת בדיקה נשלחה עבור %1$s.</string>
@@ -2037,10 +2035,6 @@ Therefore, duplicate the values-he directory as values-iw. Keep both directories
     <string name="media_movies">סרטים</string>
     <string name="media_series">סדרות</string>
     <string name="media_tv">טלוויזיה</string>
-    <string name="notifications_episode_release_body_code">%1$s זמין עכשיו</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s זמין עכשיו</string>
-    <string name="notifications_episode_release_body_generic">פרק חדש זמין עכשיו</string>
-    <string name="notifications_episode_release_body_title">%1$s זמין עכשיו</string>
     <string name="notifications_channel_episode_releases_name">שחרורי פרקים</string>
     <string name="parental_alcohol">אלכוהול וסמים</string>
     <string name="parental_frightening">תוכן מפחיד</string>

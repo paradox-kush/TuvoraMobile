@@ -1011,7 +1011,6 @@
     <string name="settings_meta_trailers_description">Рядок трейлерів і швидкий запуск відтворення.</string>
     <string name="settings_notifications_disabled_in_app">Сповіщення зараз вимкнено в Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Сповіщення про вихід серій</string>
-    <string name="settings_notifications_episode_release_alerts_description">Планувати локальні сповіщення, коли виходить нова серія збереженого серіалу.</string>
     <string name="settings_notifications_permission_disabled">Системні сповіщення для Tuvora вимкнено. Увімкніть їх, щоб отримувати нагадування та тестові сповіщення.</string>
     <string name="settings_notifications_scheduled_count">На цьому пристрої зараз заплановано сповіщень про вихід: %1$d.</string>
     <string name="settings_notifications_section_alerts">СПОВІЩЕННЯ</string>
@@ -1818,7 +1817,6 @@
     <string name="library_remove_message">Вилучити %1$s із вашої медіатеки?</string>
     <string name="library_remove_title">Вилучити з медіатеки?</string>
     <string name="media_movie">Фільм</string>
-    <string name="notifications_channel_episode_releases_description">Сповіщення про вихід нової серії збереженого серіалу.</string>
     <string name="notifications_test_preview_body">Попередній перегляд сповіщення про нову серію.</string>
     <string name="notifications_test_send_failed">Не вдалося надіслати тестове сповіщення.</string>
     <string name="notifications_test_sent_for">Тестове сповіщення надіслано для %1$s.</string>
@@ -2044,10 +2042,6 @@
     <string name="media_movies">Фільми</string>
     <string name="media_series">Серіали</string>
     <string name="media_tv">ТБ</string>
-    <string name="notifications_episode_release_body_code">%1$s уже вийшла</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s уже вийшла</string>
-    <string name="notifications_episode_release_body_generic">Нова серія вже вийшла</string>
-    <string name="notifications_episode_release_body_title">%1$s уже вийшла</string>
     <string name="notifications_channel_episode_releases_name">Вихід нових серій</string>
     <string name="parental_alcohol">Алкоголь / наркотики</string>
     <string name="parental_frightening">Лякаючі сцени</string>

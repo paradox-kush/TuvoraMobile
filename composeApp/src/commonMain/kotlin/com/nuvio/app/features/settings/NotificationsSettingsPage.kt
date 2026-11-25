@@ -77,7 +77,11 @@ import nuvio.composeapp.generated.resources.settings_alerts_undo
 import nuvio.composeapp.generated.resources.settings_notifications_disabled_in_app
 import nuvio.composeapp.generated.resources.settings_notifications_episode_release_alerts
 import nuvio.composeapp.generated.resources.settings_notifications_episode_release_alerts_description
+import nuvio.composeapp.generated.resources.settings_notifications_pause_all_description
+import nuvio.composeapp.generated.resources.settings_notifications_pause_all_title
 import nuvio.composeapp.generated.resources.settings_notifications_permission_disabled
+import nuvio.composeapp.generated.resources.settings_notifications_private_names_description
+import nuvio.composeapp.generated.resources.settings_notifications_private_names_title
 import nuvio.composeapp.generated.resources.settings_notifications_scheduled_count
 import nuvio.composeapp.generated.resources.settings_notifications_section_alerts
 import nuvio.composeapp.generated.resources.settings_notifications_section_test
@@ -104,6 +108,8 @@ internal class NotificationsSettingsActions(
     val setAwayReminder: (AwayReminder) -> Unit,
     val undoSendingLessOften: () -> Unit,
     val setAskAtEndOfEpisode: (Boolean) -> Unit,
+    val setAllPaused: (Boolean) -> Unit,
+    val setPrivateNames: (Boolean) -> Unit,
     val setShowAlert: (contentType: String, contentId: String, title: String, on: Boolean) -> Unit,
     val sendTest: () -> Unit,
 ) {
@@ -120,6 +126,8 @@ internal class NotificationsSettingsActions(
             setAwayReminder = EpisodeReleaseNotificationsRepository::setAwayReminder,
             undoSendingLessOften = EpisodeReleaseNotificationsRepository::undoSendingLessOften,
             setAskAtEndOfEpisode = { ask -> EpisodeReleaseNotificationsRepository.setDontAskAgain(!ask) },
+            setAllPaused = EpisodeReleaseNotificationsRepository::setAllPaused,
+            setPrivateNames = EpisodeReleaseNotificationsRepository::setPrivateNames,
             setShowAlert = { type, id, title, on -> EpisodeReleaseNotificationsRepository.setShowAlert(type, id, title, on) },
             sendTest = EpisodeReleaseNotificationsRepository::sendTestNotification,
         )
@@ -137,6 +145,15 @@ internal fun LazyListScope.notificationsSettingsContent(
             isTablet = isTablet,
         ) {
             SettingsGroup(isTablet = isTablet) {
+                // The one global off: it beats every choice below, and keeps them.
+                SettingsSwitchRow(
+                    title = stringResource(Res.string.settings_notifications_pause_all_title),
+                    description = stringResource(Res.string.settings_notifications_pause_all_description),
+                    checked = uiState.preferences.allPaused,
+                    isTablet = isTablet,
+                    onCheckedChange = actions.setAllPaused,
+                )
+                SettingsGroupDivider(isTablet = isTablet)
                 if (uiState.permissionDenied) {
                     PermissionDeniedPanel(isTablet = isTablet, onOpenSettings = actions.openSystemSettings)
                 } else {
@@ -158,6 +175,14 @@ internal fun LazyListScope.notificationsSettingsContent(
                     checked = !uiState.preferences.dontAskAgain,
                     isTablet = isTablet,
                     onCheckedChange = actions.setAskAtEndOfEpisode,
+                )
+                SettingsGroupDivider(isTablet = isTablet)
+                SettingsSwitchRow(
+                    title = stringResource(Res.string.settings_notifications_private_names_title),
+                    description = stringResource(Res.string.settings_notifications_private_names_description),
+                    checked = uiState.preferences.privateNames,
+                    isTablet = isTablet,
+                    onCheckedChange = actions.setPrivateNames,
                 )
             }
         }

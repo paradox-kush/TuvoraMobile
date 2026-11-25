@@ -945,7 +945,6 @@
     <string name="settings_meta_trailers_description">Полка трейлеров и быстрый запуск воспроизведения.</string>
     <string name="settings_notifications_disabled_in_app">Уведомления в настоящее время отключены в Tuvora.</string>
     <string name="settings_notifications_episode_release_alerts">Оповещения о выходе эпизода</string>
-    <string name="settings_notifications_episode_release_alerts_description">Запланируйте локальные уведомления, когда станет доступен новый выпуск сохраненного шоу.</string>
     <string name="settings_notifications_permission_disabled">Системные уведомления отключены для Tuvora. Разрешите им получать оповещения и тестовые уведомления.</string>
     <string name="settings_notifications_scheduled_count">На этом устройстве в настоящее время запланированы оповещения о выпуске %1$d.</string>
     <string name="settings_notifications_section_alerts">ПРЕДУПРЕЖДЕНИЯ</string>
@@ -1636,7 +1635,6 @@
     <string name="library_remove_message">Удалить %1$s из своей библиотеки?</string>
     <string name="library_remove_title">Удалить из библиотеки?</string>
     <string name="media_movie">Фильм</string>
-    <string name="notifications_channel_episode_releases_description">Оповещения о выходе нового эпизода сохраненного шоу.</string>
     <string name="notifications_test_preview_body">Оповещение о выпуске предварительного просмотра эпизода.</string>
     <string name="notifications_test_send_failed">Не удалось отправить тестовое уведомление.</string>
     <string name="notifications_test_sent_for">Уведомление о тестировании отправлено для %1$s.</string>
@@ -1852,10 +1850,6 @@
     <string name="media_movies">Фильмы</string>
     <string name="media_series">Сериалы</string>
     <string name="media_tv">ТВ</string>
-    <string name="notifications_episode_release_body_code">%1$s уже вышел</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s уже доступен</string>
-    <string name="notifications_episode_release_body_generic">Новая серия уже вышла</string>
-    <string name="notifications_episode_release_body_title">%1$s уже вышел</string>
     <string name="notifications_channel_episode_releases_name">Релизы эпизодов</string>
     <string name="parental_alcohol">Алкоголь и наркотики</string>
     <string name="parental_frightening">Пугающие сцены</string>

@@ -31,6 +31,11 @@ internal class SessionHealth(private var windowStartMs: Long, private val maxKey
 
     /** Folds a counted routine event into keys such as `iptv_load_hub_categories_loaded` or `playback_started_exo`. */
     fun countEvent(event: String, props: Map<String, Any>) {
+        if (event in TelemetrySendPolicy.alertCounterEvents) {
+            // A planning pass reports how many in `n`; it is a number, never a name.
+            count(event, (props["n"] as? Int)?.coerceIn(1, 50) ?: 1)
+            return
+        }
         val parts = buildList {
             add(event)
             when (event) {

@@ -868,7 +868,6 @@
     <string name="settings_meta_trailers_description">Fragman alanı ve oynatma kısayolları.</string>
     <string name="settings_notifications_disabled_in_app">Tuvora'da bildirimler şu anda kapalı.</string>
     <string name="settings_notifications_episode_release_alerts">Yeni bölüm bildirimleri</string>
-    <string name="settings_notifications_episode_release_alerts_description">Kaydettiğin bir dizinin yeni bölümü yayınlandığında yerel bildirim planla.</string>
     <string name="settings_notifications_permission_disabled">Tuvora için sistem bildirimleri kapalı. Uyarıları ve test bildirimlerini almak için aç.</string>
     <string name="settings_notifications_scheduled_count">Bu cihazda şu anda %1$d yayın bildirimi planlı.</string>
     <string name="settings_notifications_section_alerts">UYARILAR</string>
@@ -1562,7 +1561,6 @@
     <string name="library_remove_message">%1$s kitaplığından kaldırılsın mı?</string>
     <string name="library_remove_title">Kitaplıktan kaldırılsın mı?</string>
     <string name="media_movie">Film</string>
-    <string name="notifications_channel_episode_releases_description">Kaydedilen bir dizinin yeni bölümü çıktığında uyarır.</string>
     <string name="notifications_test_preview_body">Yeni bölüm bildirimi önizlemesi.</string>
     <string name="notifications_test_send_failed">Test bildirimi gönderilemedi.</string>
     <string name="notifications_test_sent_for">%1$s için test bildirimi gönderildi.</string>
@@ -1776,10 +1774,6 @@
     <string name="media_movies">Filmler</string>
     <string name="media_series">Diziler</string>
     <string name="media_tv">TV</string>
-    <string name="notifications_episode_release_body_code">%1$s şimdi yayında</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s şimdi yayında</string>
-    <string name="notifications_episode_release_body_generic">Yeni bölüm şimdi yayında</string>
-    <string name="notifications_episode_release_body_title">%1$s şimdi yayında</string>
     <string name="notifications_channel_episode_releases_name">Yeni bölüm bildirimleri</string>
     <string name="parental_alcohol">Alkol/Madde Kullanımı</string>
     <string name="parental_frightening">Korkutucu</string>

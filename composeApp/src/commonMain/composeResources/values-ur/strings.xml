@@ -983,7 +983,6 @@
     <string name="settings_meta_trailers_description">ٹریلرز کی قطار اور پلے بیک شارٹ کٹس۔</string>
     <string name="settings_notifications_disabled_in_app">Tuvora میں نوٹیفکیشنز اس وقت غیر فعال ہیں۔</string>
     <string name="settings_notifications_episode_release_alerts">قسط جاری ہونے کی اطلاعات</string>
-    <string name="settings_notifications_episode_release_alerts_description">محفوظ کی گئی سیریز کی نئی قسط دستیاب ہونے پر مقامی نوٹیفکیشنز شیڈول کریں۔</string>
     <string name="settings_notifications_permission_disabled">Tuvora کے لیے سسٹم نوٹیفکیشنز غیر فعال ہیں۔ الرٹس اور ٹیسٹ نوٹیفکیشنز وصول کرنے کے لیے انہیں فعال کریں۔</string>
     <string name="settings_notifications_scheduled_count">اس ڈیوائس پر اس وقت %1$d ریلیز الرٹس شیڈول ہیں۔</string>
     <string name="settings_notifications_section_alerts">الرٹس</string>
@@ -1716,7 +1715,6 @@
     <string name="library_remove_message">%1$s کو اپنی لائبریری سے ہٹائیں؟</string>
     <string name="library_remove_title">لائبریری سے ہٹائیں؟</string>
     <string name="media_movie">فلم</string>
-    <string name="notifications_channel_episode_releases_description">محفوظ کی گئی سیریز کی نئی قسط جاری ہونے پر اطلاع دیں۔</string>
     <string name="notifications_test_preview_body">قسط جاری ہونے کی اطلاع کا پری ویو۔</string>
     <string name="notifications_test_send_failed">ٹیسٹ نوٹیفکیشن نہیں بھیجا جا سکا۔</string>
     <string name="notifications_test_sent_for">%1$s کے لیے ٹیسٹ نوٹیفکیشن بھیج دیا گیا۔</string>
@@ -1926,10 +1924,6 @@
     <string name="media_movies">فلمیں</string>
     <string name="media_series">سیریز</string>
     <string name="media_tv">ٹی وی</string>
-    <string name="notifications_episode_release_body_code">%1$s اب دستیاب ہے</string>
-    <string name="notifications_episode_release_body_code_title">%1$s • %2$s اب دستیاب ہے</string>
-    <string name="notifications_episode_release_body_generic">نئی قسط اب دستیاب ہے</string>
-    <string name="notifications_episode_release_body_title">%1$s اب دستیاب ہے</string>
     <string name="notifications_channel_episode_releases_name">نئی اقساط</string>
     <string name="parental_alcohol">شراب/منشیات</string>
     <string name="parental_frightening">خوفناک مواد</string>
