@@ -66,7 +66,7 @@ internal class EpisodeAlertPromptController(
             state = EpisodeReleaseNotificationsRepository.uiState,
             shouldOffer = EpisodeReleaseNotificationsRepository::shouldOfferEndOfEpisodePrompt,
             markPrompted = EpisodeReleaseNotificationsRepository::markPrompted,
-            accept = { type, id, title -> EpisodeReleaseNotificationsRepository.requestShowAlert(type, id, title) },
+            accept = { type, id, title -> EpisodeReleaseNotificationsRepository.requestShowAlert(type, id, title, AlertTelemetry.PermissionEntry.Prompt) },
             openSystemSettings = EpisodeReleaseNotificationsRepository::openSystemNotificationSettings,
         )
     }

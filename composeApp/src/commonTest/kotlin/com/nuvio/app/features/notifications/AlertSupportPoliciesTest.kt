@@ -153,6 +153,8 @@ class AlertSupportPoliciesTest {
         override suspend fun listBodyWithMore(labels: List<String>, more: Int) =
             labels.joinToString(", ") + " and $more more are out now"
         override suspend fun lessOftenLine() = "Sending these less often. Change in Settings"
+        override suspend fun privateShowName() = "A show you follow"
+        override suspend fun genericBody() = "A new episode aired today"
     }
 
     private fun candidate(show: String, episode: String, label: String = "$show $episode", body: String = "$episode is out now") =

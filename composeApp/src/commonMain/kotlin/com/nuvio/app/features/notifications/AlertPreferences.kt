@@ -44,6 +44,10 @@ data class AlertPreferences(
     val dontAskAgain: Boolean = false,
     /** The away reminder the viewer picked, or null for "never chose": then the default applies (see [AwayReminderPolicy.effective]). */
     val awayReminder: AwayReminder? = null,
+    /** "Pause everything": no alerts and no reminders. Every other choice is kept for when it is switched off. */
+    val allPaused: Boolean = false,
+    /** "Keep show names private": notifications say "a show you follow" instead of the name. */
+    val privateNames: Boolean = false,
 ) {
     /** The send times in effect: the set time, the learned habit, or 09:00 while the habit is still being learned. */
     internal fun timesFor(habit: WatchHabitPolicy.Habit): AlertTimes = when (timingMode) {
@@ -66,6 +70,9 @@ internal data class StoredAlertPreferences(
     val dontAskAgain: Boolean = false,
     /** [AwayReminder.days], or null when the viewer never chose (an invalid stored value reads the same). */
     val awayReminderDays: Int? = null,
+    /** Absent in payloads written before these choices existed: they decode as off. */
+    val allPaused: Boolean = false,
+    val privateNames: Boolean = false,
 ) {
     fun toModel(): AlertPreferences = AlertPreferences(
         timingMode = AlertTimingMode.fromWire(timingMode) ?: AlertTimingMode.Learned,
@@ -78,6 +85,8 @@ internal data class StoredAlertPreferences(
         cap = AlertCap.entries.firstOrNull { it.name == cap } ?: AlertCap.PerDay,
         dontAskAgain = dontAskAgain,
         awayReminder = AwayReminder.fromDays(awayReminderDays),
+        allPaused = allPaused,
+        privateNames = privateNames,
     )
 
     companion object {
@@ -90,6 +99,8 @@ internal data class StoredAlertPreferences(
             cap = model.cap.name,
             dontAskAgain = model.dontAskAgain,
             awayReminderDays = model.awayReminder?.days,
+            allPaused = model.allPaused,
+            privateNames = model.privateNames,
         )
     }
 }
@@ -116,6 +127,8 @@ internal object AlertPreferencesSyncCodec {
             "quiet_hours_end_minute" to JsonPrimitive(preferences.quietHours.endMinute),
             "cap" to JsonPrimitive(preferences.cap.name),
             "dont_ask_again" to JsonPrimitive(preferences.dontAskAgain),
+            "all_paused" to JsonPrimitive(preferences.allPaused),
+            "private_names" to JsonPrimitive(preferences.privateNames),
         ),
     )
 
@@ -136,6 +149,8 @@ internal object AlertPreferencesSyncCodec {
             ),
             cap = cap ?: current.cap,
             dontAskAgain = flag("dont_ask_again") ?: current.dontAskAgain,
+            allPaused = flag("all_paused") ?: current.allPaused,
+            privateNames = flag("private_names") ?: current.privateNames,
             awayReminder = AwayReminder.fromDays(
                 (remote["away_reminder_days"] as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull,
             ) ?: current.awayReminder,

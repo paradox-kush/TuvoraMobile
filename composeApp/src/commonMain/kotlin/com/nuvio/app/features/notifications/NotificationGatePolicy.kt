@@ -71,6 +71,13 @@ internal data class AlertCandidate(
     val bodyText: String = "",
     val deepLinkUrl: String = "",
     val backdropUrl: String? = null,
+    /** The kind of notification this would become. Only candidates of an enabled type are planned. */
+    val type: AlertType = AlertType.Episode,
+    /**
+     * The wording for "Keep show names private": the episode code alone, never the title (an episode title can give the
+     * show away). Blank falls back to the generic line.
+     */
+    val privateBodyText: String = "",
 )
 
 internal data class GateInput(
@@ -89,7 +96,23 @@ internal data class GateInput(
     /** True once the one-time "Sending these less often" line has been shown for the current back-off. */
     val backOffNoticeShown: Boolean,
     val horizonDays: Int = GateDefaults.HorizonDays,
+    /** Kinds that may be planned. A candidate of any other kind contributes nothing. */
+    val enabledTypes: Set<AlertType> = AlertType.All,
+    /** "Pause everything": plan nothing at all. The caller also clears what is already scheduled. */
+    val allPaused: Boolean = false,
 )
+
+/** What the gate did, as counts for `session_health`. No titles, ids or times. */
+internal data class GateStats(
+    /** Alert days dropped because the app was already opened that day. */
+    val skippedOpenedToday: Int = 0,
+    /** Alerts moved to the end of quiet hours. */
+    val delayedQuiet: Int = 0,
+    /** Alert days held back by the viewer's cap (counted once, not per day held). */
+    val capped: Int = 0,
+)
+
+internal data class GatePlan(val alerts: List<PlannedAlert>, val stats: GateStats)
 
 internal data class PlannedAlert(
     val fireAt: Instant,
@@ -133,13 +156,20 @@ internal object GateDefaults {
  * first valid local time after the gap, and quiet hours ending at 08:00 mean 08:00 on the clock that day.
  */
 internal object NotificationGatePolicy {
-    fun plan(input: GateInput): List<PlannedAlert> {
-        if (input.candidates.isEmpty()) return emptyList()
+    fun plan(input: GateInput): List<PlannedAlert> = planWithStats(input).alerts
+
+    fun planWithStats(input: GateInput): GatePlan {
+        if (input.allPaused || input.enabledTypes.isEmpty()) return GatePlan(emptyList(), GateStats())
+        val candidates = input.candidates.filter { it.type in input.enabledTypes }
+        if (candidates.isEmpty()) return GatePlan(emptyList(), GateStats())
+        var skippedOpened = 0
+        var delayedQuiet = 0
+        var capped = 0
         val today = input.now.toLocalDateTime(input.zone).date
         val earliest = input.now.epochSeconds + GateDefaults.MinLeadSeconds
         val backOff = BackOff.effective(input.cap, input.ignoredStreak)
         val cap = backOff.cap
-        val byRelease = input.candidates
+        val byRelease = candidates
             .filter { it.releaseDate >= today }
             .groupBy { it.releaseDate }
 
@@ -147,6 +177,7 @@ internal object NotificationGatePolicy {
         var held: List<AlertCandidate> = emptyList()
         for (offset in 0..input.horizonDays) {
             val releaseDate = today.plus(DatePeriod(days = offset))
+            val wasHeld = held.isNotEmpty()
             val group = held + byRelease[releaseDate].orEmpty()
             held = emptyList()
             if (group.isEmpty()) continue
@@ -155,7 +186,12 @@ internal object NotificationGatePolicy {
             val fireInstant = fireLocal.toInstant(input.zone)
             val fireDate = fireLocal.date
             if (fireInstant.epochSeconds < earliest) continue
-            if (fireDate in input.openedDates) continue
+            if (fireDate in input.openedDates) {
+                skippedOpened++
+                continue
+            }
+            val wantedMinute = input.times.minuteFor(releaseDate)
+            val movedByQuiet = fireLocal != releaseDate.atTime(wantedMinute / 60, wantedMinute % 60)
 
             val sameDay = kept.indexOfFirst { it.fireDate == fireDate }
             if (sameDay >= 0) {
@@ -164,19 +200,22 @@ internal object NotificationGatePolicy {
                     fireAt = minOf(existing.fireAt, fireInstant),
                     candidates = existing.candidates + group,
                 )
+                if (movedByQuiet) delayedQuiet++
                 continue
             }
             if (alertsInWindow(fireDate, cap, input.sentDates, kept) >= cap.maxAlerts) {
+                if (!wasHeld) capped++
                 held = group
                 continue
             }
             kept += PlannedAlert(fireAt = fireInstant, fireDate = fireDate, candidates = group, sendingLessNotice = false)
+            if (movedByQuiet) delayedQuiet++
         }
 
         if (backOff.tightened && !input.backOffNoticeShown && kept.isNotEmpty()) {
             kept[0] = kept[0].copy(sendingLessNotice = true)
         }
-        return kept
+        return GatePlan(kept, GateStats(skippedOpenedToday = skippedOpened, delayedQuiet = delayedQuiet, capped = capped))
     }
 
     /** The local moment an alert for [releaseDate] would go out, after quiet hours. */
@@ -205,6 +244,13 @@ internal object BackOff {
     const val TierTwoIgnored = 6
 
     data class Effective(val cap: AlertCap, val tightened: Boolean)
+
+    /** 0 none, 1 after [TierOneIgnored], 2 after [TierTwoIgnored]: the closed value `alert_aftermath` reports. */
+    fun tierOf(ignoredStreak: Int): Int = when {
+        ignoredStreak >= TierTwoIgnored -> 2
+        ignoredStreak >= TierOneIgnored -> 1
+        else -> 0
+    }
 
     fun effective(userCap: AlertCap, ignoredStreak: Int): Effective {
         val tier = when {

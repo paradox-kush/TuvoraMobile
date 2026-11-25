@@ -119,6 +119,12 @@ internal interface AlertTemplates {
     suspend fun listBody(labels: List<String>): String
     suspend fun listBodyWithMore(labels: List<String>, more: Int): String
     suspend fun lessOftenLine(): String
+
+    /** "A show you follow": stands in for a show's name when names are private. */
+    suspend fun privateShowName(): String
+
+    /** "A new episode aired today": the body when nothing more specific may be said. */
+    suspend fun genericBody(): String
 }
 
 internal data class AlertContent(val title: String, val body: String)
@@ -126,9 +132,21 @@ internal data class AlertContent(val title: String, val body: String)
 internal object AlertContentBuilder {
     const val MaxListed = 3
 
-    suspend fun build(alert: PlannedAlert, templates: AlertTemplates): AlertContent {
+    /**
+     * [privateNames] ("Keep show names private"): no show name and no episode title appears anywhere in the text; a
+     * show is "a show you follow", an episode is its code, a batch is a count.
+     */
+    suspend fun build(alert: PlannedAlert, templates: AlertTemplates, privateNames: Boolean = false): AlertContent {
         val episodes = alert.candidates.distinctBy { it.episodeKey }
         val base = when {
+            privateNames -> when {
+                episodes.size == 1 -> AlertContent(
+                    templates.privateShowName(),
+                    episodes.single().privateBodyText.ifBlank { templates.genericBody() },
+                )
+                alert.showCount == 1 -> AlertContent(templates.privateShowName(), templates.sameShowBody(episodes.size))
+                else -> AlertContent(templates.batchTitle(episodes.size), templates.sameShowBody(episodes.size))
+            }
             episodes.size == 1 -> AlertContent(episodes.single().showTitle, episodes.single().bodyText)
             alert.showCount == 1 -> AlertContent(episodes.first().showTitle, templates.sameShowBody(episodes.size))
             else -> {
@@ -149,6 +167,9 @@ internal object AlertContentBuilder {
     }
 }
 
+/** What an app open resolved, for the one `alert_aftermath` event. Counts only. */
+internal data class AftermathSummary(val delivered: Int, val acted: Int, val backoffTier: Int)
+
 /**
  * What changes when the app is opened: alerts that were due since the last open are counted as acted on (the app was
  * opened within a day of one) or ignored, the opened day is recorded for the gate, and the delivered alerts' days go
@@ -161,6 +182,24 @@ internal object AlertContentBuilder {
 internal object AlertAftermath {
     const val KeepSentDays = 14
     const val KeepOpenedDays = 3
+
+    /**
+     * The counts for `alert_aftermath` from the same inputs [onAppOpened] resolves: how many alerts came due, how many
+     * of them the viewer acted on (opened Tuvora within [BackOff.ActedWithinMs]), and the back-off tier in force after.
+     * Null when no alert was resolved: nothing is reported for an open that had nothing to say.
+     */
+    fun summarize(
+        before: StoredAlertRuntime,
+        after: StoredAlertRuntime,
+        now: Instant,
+        alertsCouldHaveFired: Boolean,
+    ): AftermathSummary? {
+        val nowMs = now.toEpochMilliseconds()
+        val delivered = if (alertsCouldHaveFired) before.scheduled.filter { it.fireAtMs <= nowMs } else emptyList()
+        if (delivered.isEmpty()) return null
+        val acted = delivered.count { nowMs - it.fireAtMs <= BackOff.ActedWithinMs }
+        return AftermathSummary(delivered.size, acted, BackOff.tierOf(after.ignoredStreak))
+    }
 
     fun onAppOpened(
         runtime: StoredAlertRuntime,

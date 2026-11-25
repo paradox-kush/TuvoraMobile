@@ -146,9 +146,10 @@ internal object AwayReminderContentBuilder {
     /** Names are shown for this many shows or fewer; more are only counted. */
     const val MaxNamed = 2
 
-    suspend fun build(plan: PlannedAwayReminder, templates: AwayTemplates): AlertContent {
+    /** [privateNames]: shows are only counted, never named. */
+    suspend fun build(plan: PlannedAwayReminder, templates: AwayTemplates, privateNames: Boolean = false): AlertContent {
         val title = if (plan.showCount == 1) templates.titleOne() else templates.titleMany(plan.showCount)
-        val body = if (plan.showCount <= MaxNamed) {
+        val body = if (plan.showCount <= MaxNamed && !privateNames) {
             templates.bodyNames(plan.showTitles.first(), plan.showTitles.getOrNull(1))
         } else {
             templates.bodyCount()
