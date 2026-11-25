@@ -861,7 +861,7 @@ object XtreamHubRepository {
      *  - Xtream w/ built catalog: local index window; stream URLs rebuilt from creds.
      *  - Xtream first-run (no index yet): the old full network fetch, once, kept to one window.
      *  - M3U + the Stalker live lineup: paged reads over IptvContentDb.
-     *  - Stalker VOD/series: the portal's bounded page (70) — the protocol's own window.
+     *  - Stalker VOD/series: ONE portal page per window (B294), advanced by raw offset as the row scrolls.
      */
     private suspend fun fetchWindow(
         account: XtreamAccount,
@@ -952,18 +952,18 @@ object XtreamHubRepository {
                     }
                     return RawWindow(rawLiveWindow(entityIds, page.map { it.toMetaPreview(accountId) }), rows.size > PAGE_SIZE, rows.take(PAGE_SIZE).size)
                 }
-                if (offset > 0) return RawWindow(emptyList(), false, 0)
-                val client = IptvClient.forAccount(account)
-                return (when (section) {
-                    XtreamHubSection.MOVIES -> client.vodMovies(account, categoryId).getOrThrow().let { rows ->
-                        XtreamItemRegistry.registerAll(rows.map { XtreamItemRegistry.resolvedMovie(accountId, it) })
-                        rows.map { it.toMetaPreview(accountId) }
+                // B294: ONE portal page per window (the row asks for the next as it scrolls) - the old
+                // 70-row read paged five times behind the session's two request slots and timed out.
+                return when (section) {
+                    XtreamHubSection.MOVIES -> com.nuvio.app.features.iptv.stalker.StalkerClient.vodMoviesWindow(account, categoryId, offset).let { window ->
+                        XtreamItemRegistry.registerAll(window.items.map { XtreamItemRegistry.resolvedMovie(accountId, it) })
+                        RawWindow(window.items.map { it.toMetaPreview(accountId) }, window.hasMore, window.consumed)
                     }
-                    else -> client.series(account, categoryId).getOrThrow().let { rows ->
-                        XtreamItemRegistry.registerAll(rows.map { XtreamItemRegistry.resolvedSeries(accountId, it) })
-                        rows.map { it.toMetaPreview(accountId) }
+                    else -> com.nuvio.app.features.iptv.stalker.StalkerClient.seriesWindow(account, categoryId, offset).let { window ->
+                        XtreamItemRegistry.registerAll(window.items.map { XtreamItemRegistry.resolvedSeries(accountId, it) })
+                        RawWindow(window.items.map { it.toMetaPreview(accountId) }, window.hasMore, window.consumed)
                     }
-                }).let { RawWindow(it, false, it.size) }
+                }
             }
             else -> {
                 // M3U: ensure the catalog, then a paged indexed read.
