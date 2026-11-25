@@ -42,7 +42,9 @@ import kotlin.time.TimeSource
  */
 internal fun <T> mergePagedWindow(existing: List<T>, more: List<T>, hasMore: Boolean, id: (T) -> String): Pair<List<T>, Boolean> {
     val seen = existing.mapTo(HashSet(existing.size), id)
-    val fresh = more.filter { id(it) !in seen }
+    // B282: `add` (not `in`) so a provider page that lists one stream twice adds it once — a repeat
+    // INSIDE the window is a duplicate LazyGrid key, which crashes Compose.
+    val fresh = more.filter { seen.add(id(it)) }
     return (existing + fresh) to (hasMore && fresh.isNotEmpty())
 }
 

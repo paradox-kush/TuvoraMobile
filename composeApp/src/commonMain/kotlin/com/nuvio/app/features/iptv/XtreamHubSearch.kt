@@ -107,7 +107,7 @@ internal class XtreamHubSearchController(
                 isEmpty = { it.isEmpty() },
                 report = mapOf("section" to type),
             ) { search(account, type, query) }
-            mutableState.value = HubSearchUiState(query = raw, load = outcome.status, items = outcome.valueOrNull().orEmpty())
+            mutableState.value = HubSearchUiState(query = raw, load = outcome.status, items = outcome.valueOrNull().orEmpty().distinctBy { it.id })  // B282: ids are LazyGrid keys
         }
     }
 }

@@ -69,4 +69,31 @@ class PagedWindowMergeTest {
         assertEquals(listOf("a", "b"), items.map { it.id })
         assertTrue(hasMore)
     }
+
+    // B282: a provider page that lists the same stream twice put two grid items under one LazyGrid
+    // key, and Compose crashed ("Key already used" / an item measured twice) seconds after the IPTV
+    // tab opened. The first load deduped (08-21 fix); the load-more merge only checked ids already
+    // on screen, so a repeat INSIDE the new window got through.
+    @Test
+    fun `a window repeating an id inside itself adds it once`() {
+        val (items, hasMore) = mergePagedWindow(
+            listOf(Row("a")),
+            listOf(Row("b"), Row("c"), Row("b")),
+            hasMore = true,
+        ) { it.id }
+        assertEquals(listOf("a", "b", "c"), items.map { it.id })
+        assertTrue(hasMore)
+    }
+
+    @Test
+    fun `merged ids are always unique so they are safe as LazyGrid keys`() {
+        val pages = listOf(
+            listOf(Row("a"), Row("a")) to true,
+            listOf(Row("b"), Row("a"), Row("b"), Row("c")) to true,
+            emptyList<Row>() to false,
+        )
+        val ids = simulateEndlessScroll(pages).map { it.id }
+        assertEquals(ids.distinct(), ids)
+        assertEquals(listOf("a", "b", "c"), ids)
+    }
 }
