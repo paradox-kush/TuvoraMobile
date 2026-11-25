@@ -121,7 +121,7 @@ class LivePlaybackFreezeReporterTest {
         reporter.onLivePlaybackStopped(nowMs = 30_000L, positionMs = 30_000L, bufferedPositionMs = 32_000L)
 
         assertEquals(
-            listOf(com.nuvio.app.core.telemetry.api.PlaybackSignal.Stall(
+            listOf<com.nuvio.app.core.telemetry.api.PlaybackSignal>(com.nuvio.app.core.telemetry.api.PlaybackSignal.Stall(
                 com.nuvio.app.core.telemetry.api.PlaybackKind.LIVE,
                 com.nuvio.app.core.telemetry.api.StallOutcome.ABANDONED,
                 10_000L,
