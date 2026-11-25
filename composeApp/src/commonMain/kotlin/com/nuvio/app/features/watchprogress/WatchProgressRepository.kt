@@ -1449,6 +1449,8 @@ object WatchProgressRepository {
             lastSourceUrl = session.lastSourceUrl,
             isCompleted = isCompleted,
         ).normalizedCompletion()
+        // Device-local "played here" memory for Continue Watching ranking; never synced.
+        ThisDevicePlayback.record(effectiveParentMetaId)
 
         if (targetProfileId != currentProfileId || ProfileRepository.activeProfileId != targetProfileId) {
             val resolvedEntry = resolveStoredProfileProgressIdentity(
