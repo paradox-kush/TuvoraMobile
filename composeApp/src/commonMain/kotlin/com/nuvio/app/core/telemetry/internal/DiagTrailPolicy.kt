@@ -24,6 +24,9 @@ internal object DiagTrailPolicy {
         "from", "to", "bucket", "error_type", "error_class", "code", "container", "category",
         "issue", "fault", "attempt", "count", "total", "programmes", "channels", "channels_covered", "duration_ms", "position_ms",
         "java_mb", "java_max_mb", "native_mb", "pss_mb", "ram_free_mb", "ram_total_mb", "trim_level",
+        "avail_mb", "threads", "fds",
+        // Playback failure context (closed classes, see PlaybackFailureProps).
+        "ext_class", "content_type_class", "source_type", "res_class", "http_class", "attempt_n",
     )
 
     private val codeValue = Regex("""^[a-z0-9][a-z0-9_.:\-]{0,47}$""")

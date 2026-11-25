@@ -54,5 +54,9 @@ internal class FakeTelemetryHost(
     override fun flush() { flushes++ }
     override fun registerSuperProperties(props: Map<String, Any>) { superProps += props }
     override fun hardwareProfile(): Map<String, Any> = mapOf("hw_ram_total_mb" to 3000)
-    override fun memorySample(): Map<String, Long> = mapOf("java_mb" to 120L, "pss_mb" to 410L)
+    var memory: Map<String, Long> = mapOf("java_mb" to 120L, "pss_mb" to 410L)
+    override fun memorySample(): Map<String, Long> = memory
+    override var qaMirrorEnabled: Boolean = false
+    val qaLines = ArrayList<String>()
+    override fun qaMirrorLine(line: String) { qaLines += line }
 }

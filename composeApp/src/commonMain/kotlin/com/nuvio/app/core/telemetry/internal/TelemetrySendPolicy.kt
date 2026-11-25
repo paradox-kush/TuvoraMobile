@@ -22,7 +22,7 @@ internal object TelemetrySendPolicy {
     private const val SELF_EXIT_REASON = "self_exit"
 
     private val individualExitReasons = setOf(
-        "crash", "native_crash", "anr", "initialization_failure", "user_requested_crash",
+        "crash", "native_crash", "anr", "initialization_failure", "user_requested_crash", "unclean_exit_suspected",
     )
 
     /** Alert choices and outcomes: a handful per person, never an error, never a trail. Declared before its use below. */

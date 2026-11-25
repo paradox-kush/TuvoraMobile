@@ -1,5 +1,6 @@
 package com.nuvio.app.core.telemetry.internal
 
+import com.nuvio.app.core.telemetry.api.PlaybackTelemetryKeys
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
@@ -11,7 +12,7 @@ import kotlinx.atomicfu.locks.synchronized
  * Counts are never dropped on a lifecycle change. A summary is [snapshot]ted, sent, and only a SUCCESSFUL send
  * [commit]s it (subtracting exactly what was sent, so increments that landed meanwhile survive).
  */
-internal class SessionHealth(private var windowStartMs: Long, private val maxKeys: Int = 80) {
+internal class SessionHealth(private var windowStartMs: Long, private val maxKeys: Int = 120) {
     private val lock = SynchronizedObject()
     private val counts = LinkedHashMap<String, Int>()
     private var peakJavaMb = 0L
@@ -26,6 +27,18 @@ internal class SessionHealth(private var windowStartMs: Long, private val maxKey
         synchronized(lock) {
             if (safe !in counts && counts.size >= maxKeys) return
             counts[safe] = (counts[safe] ?: 0) + by
+        }
+    }
+
+    /**
+     * Counts a playback key (`ttff:live:media3:lt2000`). Colons are kept, so it cannot go through [count]'s filter; only a
+     * key built from the closed vocabularies ([PlaybackTelemetryKeys.isValidKey]) is accepted, anything else is dropped.
+     */
+    fun countPlaybackKey(key: String) {
+        if (!PlaybackTelemetryKeys.isValidKey(key)) return
+        synchronized(lock) {
+            if (key !in counts && counts.size >= maxKeys) return
+            counts[key] = (counts[key] ?: 0) + 1
         }
     }
 

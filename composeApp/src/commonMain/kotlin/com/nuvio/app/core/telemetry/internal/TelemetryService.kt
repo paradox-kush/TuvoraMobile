@@ -9,6 +9,10 @@ import com.nuvio.app.core.telemetry.api.ReportSurface
 import com.nuvio.app.core.telemetry.api.TelemetryPort
 import com.nuvio.app.core.telemetry.api.FirstRunNote
 import com.nuvio.app.core.telemetry.api.FirstRunStep
+import com.nuvio.app.core.telemetry.api.PlaybackSignal
+import com.nuvio.app.core.telemetry.api.PlaybackTelemetryBuckets
+import com.nuvio.app.core.telemetry.api.PlaybackTelemetryKeys
+import com.nuvio.app.core.telemetry.api.QaMirror
 import kotlinx.atomicfu.atomic
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
@@ -65,6 +69,11 @@ internal class TelemetryService(
     private val forcePersist = atomic(false)
     private val previousTrail: String? = host.store.read(RING_FILE)?.takeIf { it.length <= DiagTrailPolicy.MAX_BYTES * 2 }
 
+    // The PREVIOUS run's last memory sample, read once: an `app_exit` (reported one launch late) carries it.
+    private val previousMemory: MemoryRecord? = MemoryContext.decode(runCatching { host.store.read(MemoryContext.FILE) }.getOrNull())
+    private val lastMemoryRecordedAtMs = atomic(0L)
+    private val qaEnabled: Boolean = runCatching { host.qaMirrorEnabled }.getOrDefault(false)
+
     init {
         scope.launch { for (ignored in persistRequests) persistNow() }
     }
@@ -90,7 +99,7 @@ internal class TelemetryService(
         scope.launch {
             val hw = runCatching { host.hardwareProfile() }.getOrDefault(emptyMap())
             hardware.value = hw
-            if (hw.isNotEmpty()) runCatching { host.registerSuperProperties(hw) }
+            if (hw.isNotEmpty()) runCatching { host.registerSuperProperties(hw + ramClassOf(hw)) }
         }
     }
 
@@ -163,7 +172,15 @@ internal class TelemetryService(
 
     /** Re-register after any SDK reset (a reset clears super properties). */
     fun reRegisterSuperProperties() {
-        runCatching { host.registerSuperProperties(hardware.value + buildProperties() + (SUPPORT_CODE_PROPERTY to supportCode)) }
+        runCatching {
+            host.registerSuperProperties(hardware.value + ramClassOf(hardware.value) + buildProperties() + (SUPPORT_CODE_PROPERTY to supportCode))
+        }
+    }
+
+    /** `ram_class` rides every event with the hardware profile (failure diagnostics included), from the OS-reported total. */
+    private fun ramClassOf(hw: Map<String, Any>): Map<String, Any> {
+        val totalMb = (hw["hw_ram_total_mb"] as? Number)?.toLong() ?: return emptyMap()
+        return mapOf("ram_class" to PlaybackTelemetryBuckets.ramClass(totalMb))
     }
 
     private fun buildProperties(): Map<String, Any> = TelemetryBuildProperties.of(
@@ -191,7 +208,8 @@ internal class TelemetryService(
             SendDecision.COUNT -> { health.countEvent(event, props); persistRingIfDue(force = false) }
             SendDecision.SEND -> {
                 val error = TelemetrySendPolicy.attachesTrail(event, props)
-                sendEvent(event, props, withTrail = error)
+                val out = if (event == APP_EXIT_EVENT) props + MemoryContext.exitContext(props, previousMemory) else props
+                sendEvent(event, out, withTrail = error)
                 persistRingIfDue(force = error)
             }
         }
@@ -201,6 +219,33 @@ internal class TelemetryService(
         recorder.record(DiagEntry(host.nowMs(), areaOf(event), codeOf(event), props.filterKeys { it in DiagTrailPolicy.ALLOWED_FIELDS }))
         health.count("error_${codeOf(event)}")
         sendEvent(event, props, withTrail = true)
+        persistRingIfDue(force = true)
+    }
+
+    override fun recordPlayback(signal: PlaybackSignal) {
+        // QA mirror first: local only, exact values, independent of the reports switch (it never leaves the device).
+        if (qaEnabled) {
+            val (ev, fields) = QaMirror.fieldsFor(signal)
+            QaMirror.mirror(true, host::qaMirrorLine, ev, fields)
+        }
+        // Counts only. With the switch off nothing is hoarded and nothing is sent.
+        if (!consentEnabled()) return
+        for (key in PlaybackTelemetryKeys.forSignal(signal)) health.countPlaybackKey(key)
+    }
+
+    override fun recordUncleanExit(wasPlaying: Boolean, kind: String?, engine: String?) {
+        if (!consentEnabled()) return
+        val props = LinkedHashMap<String, Any>()
+        props["reason"] = UNCLEAN_EXIT_REASON
+        props["was_playing"] = wasPlaying
+        if (wasPlaying) {
+            kind?.let { props["playback_kind"] = it.lowercase().take(24) }
+            engine?.let { props["playback_engine"] = it.lowercase().take(24) }
+        }
+        val sent = props + MemoryContext.exitContext(props, previousMemory)
+        // Closed values only: the validator drops the whole event rather than send an open string.
+        if (PlaybackTelemetryPrivacy.violations(sent).isNotEmpty()) return
+        sendEvent(APP_EXIT_EVENT, sent, withTrail = true)
         persistRingIfDue(force = true)
     }
 
@@ -315,9 +360,21 @@ internal class TelemetryService(
     internal fun sampleMemoryOnce() {
         val sample = runCatching { host.memorySample() }.getOrDefault(emptyMap())
         if (sample.isEmpty()) return
+        val now = host.nowMs()
         lastMemory.value = sample
         health.noteMemory(sample["java_mb"], sample["pss_mb"])
-        recorder.record(DiagEntry(host.nowMs(), DiagArea.MEMORY, "sample", sample))
+        // The ring keeps one memory entry a minute even while the sampler runs every 10 s.
+        val lastRecorded = lastMemoryRecordedAtMs.value
+        if (now - lastRecorded >= MEMORY_RING_INTERVAL_MS && lastMemoryRecordedAtMs.compareAndSet(lastRecorded, now)) {
+            recorder.record(DiagEntry(now, DiagArea.MEMORY, "sample", sample))
+        }
+        if (qaEnabled) QaMirror.mirror(true, host::qaMirrorLine, "mem", sample.filterKeys { it in MemoryContext.PROPERTY_KEYS })
+        // Persisted so a kill (low memory, native crash) still leaves the last numbers for the next launch's `app_exit`.
+        if (consentEnabled()) {
+            runCatching { host.store.writeAtomic(MemoryContext.FILE, MemoryContext.encode(MemoryRecord(now, sample))) }
+        } else {
+            runCatching { host.store.delete(MemoryContext.FILE) }
+        }
     }
 
     override fun previousSessionTrail(): String? = previousTrail
@@ -471,7 +528,11 @@ internal class TelemetryService(
         const val ERROR_TRAIL_ENTRIES = 40
         const val REPORT_TRAIL_ENTRIES = 80
         const val RING_PERSIST_ENTRIES = 80
-        const val MEMORY_SAMPLE_INTERVAL_MS = 60_000L
+        /** At most every 10 s, and only while a playback scope is open (the sampler runs nowhere else). */
+        const val MEMORY_SAMPLE_INTERVAL_MS = 10_000L
+        const val MEMORY_RING_INTERVAL_MS = 60_000L
+        const val APP_EXIT_EVENT = "app_exit"
+        const val UNCLEAN_EXIT_REASON = "unclean_exit_suspected"
         const val SEND_PENDING_DEADLINE_MS = 10_000L
         const val DELIVERY_CONFIRM_MS = 90_000L
         private const val MEMORY_RESERVE_BYTES = 32 * 1024

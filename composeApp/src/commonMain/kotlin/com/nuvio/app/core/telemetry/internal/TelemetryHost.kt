@@ -51,6 +51,18 @@ internal interface TelemetryHost {
     /** Hardware facts. May be slow (codec probes): call off Main. */
     fun hardwareProfile(): Map<String, Any>
 
-    /** Current memory in MB: `java_mb`, `java_max_mb`, `native_mb`, `pss_mb`, `ram_free_mb` as available. */
+    /**
+     * Current memory facts: `java_mb`, `java_max_mb`, `native_mb`, `pss_mb`, `ram_free_mb`, `avail_mb`, `threads`, `fds`
+     * as the OS honestly offers them (a platform without a mechanism leaves the key out; nothing is emulated).
+     * Called off Main.
+     */
     fun memorySample(): Map<String, Long>
+
+    /**
+     * QA mirror (`debug.tuvora.qa` = 1, read ONCE when the host starts): when true, every playback signal and memory
+     * sample is also written as one local log line through [qaMirrorLine]. Never the network. Hosts with no local
+     * log the QA lab can read (iOS, tvOS) keep the default: off.
+     */
+    val qaMirrorEnabled: Boolean get() = false
+    fun qaMirrorLine(line: String) {}
 }

@@ -5,6 +5,8 @@ import android.app.Application
 import android.content.Context
 import android.os.Build
 import android.os.Debug
+import android.util.Log
+import com.nuvio.app.core.telemetry.api.QaMirror
 import com.nuvio.app.core.build.AppVersionConfig
 import com.nuvio.app.features.settings.SentrySettingsRepository
 import com.posthog.PostHog
@@ -102,8 +104,20 @@ internal class AndroidTelemetryHost(private val app: Application) : TelemetryHos
             put("java_max_mb", rt.maxMemory() / mb)
             put("native_mb", Debug.getNativeHeapAllocatedSize() / mb)
             runCatching { Debug.MemoryInfo().also { Debug.getMemoryInfo(it) }.totalPss / 1024L }.getOrNull()?.let { put("pss_mb", it) }
-            if (info.availMem > 0) put("ram_free_mb", info.availMem / mb)
+            if (info.availMem > 0) {
+                put("ram_free_mb", info.availMem / mb)
+                put("avail_mb", info.availMem / mb)
+            }
+            AndroidProcFacts.readThreads()?.let { put("threads", it) }
+            AndroidProcFacts.readFdCount()?.let { put("fds", it) }
         }
+    }
+
+    /** `debug.tuvora.qa` = 1, read once when the host is created (Application.onCreate), never again. */
+    override val qaMirrorEnabled: Boolean = QaMirror.isEnabledValue(AndroidProcFacts.readQaProperty())
+
+    override fun qaMirrorLine(line: String) {
+        Log.i(QaMirror.TAG, line)
     }
 
     private companion object { const val KEY_SUPPORT_CODE = "support_code" }
