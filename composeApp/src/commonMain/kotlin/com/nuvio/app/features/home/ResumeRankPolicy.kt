@@ -40,12 +40,12 @@ object ResumeRankPolicy {
     const val HOUR_MS: Long = 60L * 60L * 1000L
     const val DAY_MS: Long = 24L * HOUR_MS
 
-    const val RESUME_BOOST_MS: Long = 24L * HOUR_MS
+    const val RESUME_BOOST_MS: Long = 36L * HOUR_MS
     const val NEXT_UP_BOOST_MS: Long = 12L * HOUR_MS
     const val NEW_EPISODE_BOOST_MS: Long = 12L * HOUR_MS
     const val THIS_DEVICE_BOOST_MS: Long = 6L * HOUR_MS
     const val ALMOST_DONE_PENALTY_MS: Long = 24L * HOUR_MS
-    const val BARELY_STARTED_PENALTY_MS: Long = 48L * HOUR_MS
+    const val BARELY_STARTED_PENALTY_MS: Long = 96L * HOUR_MS
 
     const val NEXT_UP_RECENT_WINDOW_MS: Long = 7L * DAY_MS
     const val NEW_EPISODE_WINDOW_MS: Long = 7L * DAY_MS

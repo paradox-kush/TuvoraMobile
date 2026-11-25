@@ -21,12 +21,11 @@ class ResumeRankPolicyTest {
     private fun rank(vararg c: ResumeCandidate) = ResumeRankPolicy.rank(c.toList(), now)
 
     @Test
-    fun `half watched film from yesterday evening outranks a next up engaged two hours ago`() {
-        // Yesterday evening = 12h ago: +24h resume boost beats the +12h next-up boost over a 10h recency gap.
-        // (At exactly 24h ago the SPEC table scores the next-up higher; see lane report.)
+    fun `half watched film from yesterday outranks a next up engaged two hours ago`() {
+        // 24h ago + 36h resume boost (+12h) beats 2h ago + 12h next-up boost (+10h).
         assertEquals(
             listOf("film", "next"),
-            rank(nextUp("next", 2 * hour), resume("film", 12 * hour, 0.5f)),
+            rank(nextUp("next", 2 * hour), resume("film", day, 0.5f)),
         )
     }
 
@@ -41,12 +40,11 @@ class ResumeRankPolicyTest {
     }
 
     @Test
-    fun `a 2 percent item from five days ago sinks below a week old 50 percent item`() {
-        // The SPEC example said three days; by its own table a 3-day barely-started item (-5d) still beats a
-        // 7-day half-watched one (-6d), so the pinned case is five days (-7d vs -6d).
+    fun `a 2 percent item from three days ago sinks below a week old 50 percent item`() {
+        // 3d ago - 96h penalty (-7d) sinks below 7d ago + 36h resume boost (-5.5d).
         assertEquals(
             listOf("half", "barely"),
-            rank(resume("barely", 5 * day, 0.02f), resume("half", 7 * day, 0.5f)),
+            rank(resume("barely", 3 * day, 0.02f), resume("half", 7 * day, 0.5f)),
         )
     }
 
