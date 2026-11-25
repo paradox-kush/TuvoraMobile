@@ -336,22 +336,20 @@ class LivePlaybackFreezeReporter(
     ) {
         val activeProfile = profile ?: return
         val kind = freezeKind ?: return
-        // Counted before the event's own rate cap: the cap protects event volume, a count is one integer. A freeze the
-        // viewer simply walked away from (neither recovered nor gave up) has no outcome and is not counted.
+        // Counted before the event's own rate cap: the cap protects event volume, a count is one integer. A freeze still
+        // open when the viewer leaves or zaps away (neither recovered nor gave up) is `abandoned`, the most frustrating case.
         val stallOutcome = when {
             recovered -> com.nuvio.app.core.telemetry.api.StallOutcome.RECOVERED
             gaveUp -> com.nuvio.app.core.telemetry.api.StallOutcome.GAVE_UP
-            else -> null
+            else -> com.nuvio.app.core.telemetry.api.StallOutcome.ABANDONED
         }
-        if (stallOutcome != null) {
-            recordPlayback(
-                com.nuvio.app.core.telemetry.api.PlaybackSignal.Stall(
-                    com.nuvio.app.core.telemetry.api.PlaybackKind.LIVE,
-                    stallOutcome,
-                    (nowMs - freezeStartedAtMs).coerceAtLeast(0L),
-                ),
-            )
-        }
+        recordPlayback(
+            com.nuvio.app.core.telemetry.api.PlaybackSignal.Stall(
+                com.nuvio.app.core.telemetry.api.PlaybackKind.LIVE,
+                stallOutcome,
+                (nowMs - freezeStartedAtMs).coerceAtLeast(0L),
+            ),
+        )
         if (!allowEmit(nowMs)) return
 
         val properties = buildMap<String, Any> {

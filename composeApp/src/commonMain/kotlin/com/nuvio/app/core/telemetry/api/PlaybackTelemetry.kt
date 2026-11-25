@@ -45,7 +45,8 @@ enum class FallbackTrigger { MANIFEST_INVALID, DEMUX_FAILED, DECODER_FAILED, REN
     }
 }
 
-enum class StallOutcome { RECOVERED, GAVE_UP;
+/** `abandoned` = the viewer left (Back / zapped / stopped) while the picture was still frozen. */
+enum class StallOutcome { RECOVERED, GAVE_UP, ABANDONED;
     val label: String get() = name.lowercase()
 }
 

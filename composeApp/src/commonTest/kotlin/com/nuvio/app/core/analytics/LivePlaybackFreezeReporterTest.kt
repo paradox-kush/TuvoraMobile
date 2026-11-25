@@ -12,9 +12,11 @@ import kotlin.test.assertTrue
 class LivePlaybackFreezeReporterTest {
 
     private val events = mutableListOf<Pair<String, Map<String, Any>>>()
-    private val reporter = LivePlaybackFreezeReporter { name, properties ->
-        events += name to properties
-    }
+    private val signals = mutableListOf<com.nuvio.app.core.telemetry.api.PlaybackSignal>()
+    private val reporter = LivePlaybackFreezeReporter(
+        capture = { name, properties -> events += name to properties },
+        recordPlayback = { signals += it },
+    )
 
     private fun profile(engine: String = "libmpv") = LivePlaybackFreezeReporter.Profile(
         engine = engine,
@@ -108,6 +110,60 @@ class LivePlaybackFreezeReporterTest {
         val properties = events.single().second
         assertEquals(10_000L, properties["frozen_ms"], "frozen_ms must count from the video stall start")
         assertEquals(false, properties["recovered"])
+    }
+
+    @Test
+    fun `a freeze still open when the viewer leaves counts as an abandoned stall`() {
+        playHealthyThenStallVideo(videoStallAtMs = 20_000L)
+        sample(nowMs = 26_500L, ticks = 700L)
+        assertTrue(reporter.isFreezeOpen)
+
+        reporter.onLivePlaybackStopped(nowMs = 30_000L, positionMs = 30_000L, bufferedPositionMs = 32_000L)
+
+        assertEquals(
+            listOf(com.nuvio.app.core.telemetry.api.PlaybackSignal.Stall(
+                com.nuvio.app.core.telemetry.api.PlaybackKind.LIVE,
+                com.nuvio.app.core.telemetry.api.StallOutcome.ABANDONED,
+                10_000L,
+            )),
+            signals,
+            "one abandoned stall, counted from the video stall start",
+        )
+    }
+
+    @Test
+    fun `leaving a healthy channel counts no stall`() {
+        playHealthyThenStallVideo(videoStallAtMs = 20_000L)
+        reporter.onLivePlaybackStopped(nowMs = 21_000L, positionMs = 21_000L, bufferedPositionMs = 26_000L)
+        assertEquals(emptyList(), signals, "no freeze was open, so nothing is counted")
+    }
+
+    @Test
+    fun `a recovered freeze counts recovered and a later leave adds nothing`() {
+        playHealthyThenStallVideo(videoStallAtMs = 20_000L)
+        sample(nowMs = 24_000L, ticks = 700L)
+        sample(nowMs = 27_500L, ticks = 730L)
+        reporter.onLivePlaybackStopped(nowMs = 40_000L, positionMs = 40_000L, bufferedPositionMs = 45_000L)
+
+        assertEquals(
+            listOf(com.nuvio.app.core.telemetry.api.StallOutcome.RECOVERED),
+            signals.map { (it as com.nuvio.app.core.telemetry.api.PlaybackSignal.Stall).outcome },
+            "recovered once, never also abandoned",
+        )
+    }
+
+    @Test
+    fun `a freeze that gave up is not counted again as abandoned on leave`() {
+        playHealthyThenStallVideo(videoStallAtMs = 20_000L)
+        sample(nowMs = 26_500L, ticks = 700L)
+        reporter.onRecoveryGaveUp(nowMs = 28_000L)
+        reporter.onLivePlaybackStopped(nowMs = 30_000L, positionMs = 30_000L, bufferedPositionMs = 32_000L)
+
+        assertEquals(
+            listOf(com.nuvio.app.core.telemetry.api.StallOutcome.GAVE_UP),
+            signals.map { (it as com.nuvio.app.core.telemetry.api.PlaybackSignal.Stall).outcome },
+            "gave_up wins; the later leave is the same incident",
+        )
     }
 
     @Test

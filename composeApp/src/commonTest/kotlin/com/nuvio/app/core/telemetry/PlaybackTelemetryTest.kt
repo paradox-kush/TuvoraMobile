@@ -107,6 +107,7 @@ class PlaybackTelemetryKeysTest {
             PlaybackTelemetryKeys.fallback(PlaybackEngine.MEDIA3, PlaybackEngine.LIBMPV, FallbackTrigger.DECODER_FAILED),
         )
         assertEquals("stall:live:gave_up", PlaybackTelemetryKeys.stall(PlaybackKind.LIVE, StallOutcome.GAVE_UP))
+        assertEquals("stall:live:abandoned", PlaybackTelemetryKeys.stall(PlaybackKind.LIVE, StallOutcome.ABANDONED))
         assertEquals("stall_ms:live:lt15000", PlaybackTelemetryKeys.stallMs(PlaybackKind.LIVE, 9_000L))
         assertEquals("teardown:libmpv:slow", PlaybackTelemetryKeys.teardown(PlaybackEngine.LIBMPV, TeardownOutcome.SLOW))
     }
@@ -117,6 +118,18 @@ class PlaybackTelemetryKeysTest {
             listOf("stall:live:recovered", "stall_ms:live:lt5000"),
             PlaybackTelemetryKeys.forSignal(PlaybackSignal.Stall(PlaybackKind.LIVE, StallOutcome.RECOVERED, 3_000L)),
         )
+    }
+
+    @Test
+    fun `the abandoned stall outcome is a valid closed key with its duration bucket`() {
+        assertEquals(
+            listOf("stall:live:abandoned", "stall_ms:live:ge45000"),
+            PlaybackTelemetryKeys.forSignal(PlaybackSignal.Stall(PlaybackKind.LIVE, StallOutcome.ABANDONED, 60_000L)),
+        )
+        assertTrue(PlaybackTelemetryKeys.isValidKey("stall:vod:abandoned"))
+        assertFalse(PlaybackTelemetryKeys.isValidKey("stall:live:left"))
+        assertTrue(PlaybackTelemetryPrivacy.violations(mapOf("n_stall:live:abandoned" to 1)).isEmpty())
+        assertEquals(1, PlaybackTelemetryPrivacy.violations(mapOf("n_stall:live:left" to 1)).size)
     }
 
     @Test
