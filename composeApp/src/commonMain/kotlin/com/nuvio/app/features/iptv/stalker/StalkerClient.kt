@@ -414,22 +414,51 @@ object StalkerClient : IptvClient {
      * request slots outlasted the row's deadline. [offset] is a RAW row offset; the next window starts at
      * `offset + consumed`. A failed request THROWS - never an empty window.
      */
-    internal suspend fun vodMoviesWindow(acc: XtreamAccount, categoryId: String?, offset: Int): StalkerRowWindow<XtreamMovie> {
-        val page = orderedWindow(acc, "vod", categoryId, offset)
-        // Genuine Ministra lists its series among the vod rows (is_series): those are Series, never Movies.
-        val items = page.rows.filterNot(StalkerSeriesDialect::isSeriesRow)
-        writeThroughVod(acc, items)
-        return StalkerRowWindow(items.map { movieOf(acc, it) }.filter { it.streamId > 0 }, page.hasMore, page.rows.size)
-    }
+    internal suspend fun vodMoviesWindow(acc: XtreamAccount, categoryId: String?, offset: Int): StalkerRowWindow<XtreamMovie> =
+        shownWindow(acc, "vod", categoryId, offset) { rows ->
+            // Genuine Ministra lists its series among the vod rows (is_series): those are Series, never Movies.
+            rows.filterNot(StalkerSeriesDialect::isSeriesRow)
+        }.let { (shown, hasMore, consumed) ->
+            writeThroughVod(acc, shown)
+            StalkerRowWindow(shown.map { movieOf(acc, it) }.filter { it.streamId > 0 }, hasMore, consumed)
+        }
 
     /** B294: the Series counterpart of [vodMoviesWindow] - one `get_ordered_list` page, split by dialect like [seriesRows]. */
     internal suspend fun seriesWindow(acc: XtreamAccount, categoryId: String?, offset: Int): StalkerRowWindow<XtreamSeriesItem> {
         val ministra = seriesDialect(acc) == StalkerSeriesDialect.Dialect.MINISTRA
-        val page = orderedWindow(acc, if (ministra) "vod" else "series", categoryId, offset)
-        val items = if (ministra) page.rows.filter(StalkerSeriesDialect::isSeriesRow) else page.rows
-        writeThroughSeries(acc, items)
-        return StalkerRowWindow(items.map { seriesOf(acc, it) }.filter { it.seriesId > 0 }, page.hasMore, page.rows.size)
+        val (shown, hasMore, consumed) = shownWindow(acc, if (ministra) "vod" else "series", categoryId, offset) { rows ->
+            if (ministra) rows.filter(StalkerSeriesDialect::isSeriesRow) else rows
+        }
+        writeThroughSeries(acc, shown)
+        return StalkerRowWindow(shown.map { seriesOf(acc, it) }.filter { it.seriesId > 0 }, hasMore, consumed)
     }
+
+    private data class ShownWindow(val shown: List<JsonObject>, val hasMore: Boolean, val consumed: Int)
+
+    /**
+     * One portal page per window - except when [keep] filters the whole page away (a Ministra portal shares
+     * `vod` rows between Movies and Series) while the category goes on: then read on, up to
+     * [MAX_EMPTY_WINDOW_PAGES] more pages, so a row never comes back empty (loadMore fires only from a
+     * non-empty row). `consumed` sums the RAW rows of every page read. A failed page throws.
+     */
+    private suspend fun shownWindow(
+        acc: XtreamAccount, type: String, categoryId: String?, offset: Int,
+        keep: (List<JsonObject>) -> List<JsonObject>,
+    ): ShownWindow {
+        var consumed = 0
+        var extraPages = 0
+        while (true) {
+            val page = orderedWindow(acc, type, categoryId, offset + consumed)
+            consumed += page.rows.size
+            val shown = keep(page.rows)
+            if (shown.isNotEmpty() || !page.hasMore || page.rows.isEmpty() || extraPages >= MAX_EMPTY_WINDOW_PAGES) {
+                return ShownWindow(shown, page.hasMore, consumed)
+            }
+            extraPages++
+        }
+    }
+
+    private const val MAX_EMPTY_WINDOW_PAGES = 4
 
     private class OrderedWindow(val rows: List<JsonObject>, val hasMore: Boolean)
 

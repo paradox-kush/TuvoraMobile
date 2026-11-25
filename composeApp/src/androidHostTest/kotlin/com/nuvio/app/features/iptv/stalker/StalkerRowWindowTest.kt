@@ -18,6 +18,7 @@ class StalkerRowWindowTest {
     private val requests = mutableListOf<String>()
     private val orderedPages = mutableListOf<Int>()
     private var failPage: Int? = null
+    private var ministra = false
     private var orderedReply: ((type: String, page: Int) -> String)? = null
 
     private fun rows(page: Int) = (1..14).joinToString(",") { """{"id":"${page * 100 + it}","name":"T$page-$it","cmd":"c"}""" }
@@ -29,7 +30,7 @@ class StalkerRowWindowTest {
         when (action) {
             "handshake" -> """{"js":{"token":"T"}}"""
             "get_profile" -> """{"js":{}}"""
-            "get_categories" -> """{"js":[{"id":"*","title":"All"},{"id":"7","title":"Drama"}]}"""
+            "get_categories" -> if (ministra && type == "series") """{"js":[]}""" else """{"js":[{"id":"*","title":"All"},{"id":"7","title":"Drama"}]}"""
             "get_ordered_list" -> {
                 val p = Regex("[&?]p=([0-9]+)").find(url)?.groupValues?.get(1)?.toInt() ?: 1
                 orderedPages += p
@@ -160,5 +161,56 @@ class StalkerRowWindowTest {
         failPage = 1
         val failure = runCatching { StalkerClient.vodMoviesWindow(account("rw-movie-fail"), "7", 0) }.exceptionOrNull()
         assertTrue(failure != null, "a failure is never an empty window")
+    }
+
+    private fun row(id: Int, series: Boolean) =
+        """{"id":"$id","name":"R$id","cmd":"c"${if (series) ""","is_series":"1"""" else ""}}"""
+
+    /** A Ministra portal whose pages are [pages] (1-based) of 14 rows each, `series` or movie per page. */
+    private fun ministraPortal(seriesPages: Set<Int>, total: Int = 200) {
+        ministra = true
+        orderedReply = { _, p ->
+            val data = (1..14).joinToString(",") { row(p * 100 + it, p in seriesPages) }
+            """{"js":{"total_items":$total,"max_page_items":14,"data":[$data]}}"""
+        }
+    }
+
+    @Test
+    fun `a ministra movie window that shows nothing reads the next page`() = runBlocking {
+        ministraPortal(seriesPages = setOf(1))
+        val window = StalkerClient.vodMoviesWindow(account("rw-min-movie"), "7", 0)
+        assertEquals(listOf(1, 2), orderedPages)
+        assertEquals(14, window.items.size)
+        assertEquals(201, window.items.first().streamId, "page two movies")
+        assertEquals(28, window.consumed, "raw rows of both pages")
+        assertTrue(window.hasMore)
+    }
+
+    @Test
+    fun `a ministra series window that shows nothing reads the next page`() = runBlocking {
+        ministraPortal(seriesPages = setOf(2))
+        val window = StalkerClient.seriesWindow(account("rw-min-series"), "7", 0)
+        assertEquals(listOf(1, 2), orderedPages.filter { it > 0 }.distinct())
+        assertEquals(14, window.items.size)
+        assertEquals(201, window.items.first().seriesId)
+        assertEquals(28, window.consumed)
+        assertTrue(window.hasMore)
+    }
+
+    @Test
+    fun `a window that keeps showing nothing stops after five pages`() = runBlocking {
+        ministraPortal(seriesPages = (1..20).toSet())
+        val window = StalkerClient.vodMoviesWindow(account("rw-min-cap"), "7", 0)
+        assertEquals(listOf(1, 2, 3, 4, 5), orderedPages)
+        assertEquals(0, window.items.size)
+        assertEquals(70, window.consumed)
+        assertTrue(window.hasMore, "the portal says there is more")
+    }
+
+    @Test
+    fun `an xc window stays one request`() = runBlocking {
+        val window = StalkerClient.seriesWindow(account("rw-xc-one"), "7", 0)
+        assertEquals(listOf(1), orderedPages)
+        assertEquals(14, window.consumed)
     }
 }
