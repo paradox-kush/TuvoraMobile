@@ -255,7 +255,15 @@ data class ContinueWatchingPreferencesUiState(
     /** F04: separate Movies and Series rows instead of one Continue Watching row (off by default). */
     val splitByType: Boolean = false,
     val clickAction: ContinueWatchingClickAction = ContinueWatchingClickAction.STREAM,
-)
+    /** "Pick up where I left off" (null = never chosen, which behaves as off). Stored beside, not inside, [sortMode]. */
+    val resumeFirst: Boolean? = null,
+) {
+    val isResumeFirst: Boolean get() = resumeFirst == true
+
+    /** The recency mode to apply when [isResumeFirst] is off; resume-first replaces the mode, never stacks. */
+    val effectiveSortMode: ContinueWatchingSortMode
+        get() = if (isResumeFirst) ContinueWatchingSortMode.DEFAULT else sortMode
+}
 
 internal fun nextUpDismissKey(
     contentId: String,

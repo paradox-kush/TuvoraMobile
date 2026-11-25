@@ -52,6 +52,7 @@ import com.nuvio.app.features.tmdb.TmdbSettingsRepository
 import com.nuvio.app.features.trakt.TraktAuthRepository
 import com.nuvio.app.features.trakt.TraktConfig
 import com.nuvio.app.features.watched.WatchedRepository
+import com.nuvio.app.features.watchprogress.ContinueWatchingPreferencesRepository
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -77,6 +78,9 @@ fun registerLogicFeatureContributions() {
     TelemetryStartup.registerPort()
     // First-run funnel: decides new vs existing install ONCE, here, before anything else creates user state.
     TelemetryStartup.startFirstRunFunnel(FirstRunExistingInstallProbe::hasUserState)
+    // Continue Watching order: "Pick up where I left off" is the default for NEW installs only. The probe is
+    // asked once, at the first preferences load (after the platform storages are initialised), never here.
+    ContinueWatchingPreferencesRepository.registerInstallProbe(FirstRunExistingInstallProbe::hasUserState)
     // S10: app-wide memory port (AppMemory + BudgetRegistry) — image loaders, player buffer
     // sizing, and the platform startup probes size their budgets through this.
     MemoryPortAccess.register(MemoryPortImpl)

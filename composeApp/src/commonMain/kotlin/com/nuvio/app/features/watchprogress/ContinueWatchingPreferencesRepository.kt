@@ -31,18 +31,60 @@ private data class StoredContinueWatchingPreferences(
     val splitByType: Boolean = false,
     @SerialName("click_action")
     val clickAction: ContinueWatchingClickAction = ContinueWatchingClickAction.STREAM,
+    // "Pick up where I left off". A NEW key, not a new ContinueWatchingSortMode value: this blob is synced
+    // verbatim and older clients decode sort_mode strictly (an unknown enum value there throws away the whole
+    // payload and resets every Continue Watching preference). Old clients ignore this key. null = no choice
+    // recorded (existing users: recency order); see ContinueWatchingOrderDefaultPolicy.
+    @SerialName("resume_first_order")
+    val resumeFirst: Boolean? = null,
 )
 
+private val continueWatchingPreferencesJson = Json {
+    ignoreUnknownKeys = true
+    encodeDefaults = true
+    // A value from a future version (an enum entry this build does not know) falls back to the field's
+    // default instead of discarding the whole payload.
+    coerceInputValues = true
+}
+
+/** Decodes the persisted/synced payload; null when it is not usable. Pure so it is testable. */
+internal fun decodeContinueWatchingPreferences(payload: String): ContinueWatchingPreferencesUiState? {
+    val stored = runCatching {
+        continueWatchingPreferencesJson.decodeFromString<StoredContinueWatchingPreferences>(payload)
+    }.getOrNull() ?: return null
+    return ContinueWatchingPreferencesUiState(
+        isVisible = stored.isVisible,
+        style = stored.style,
+        upNextFromFurthestEpisode = stored.upNextFromFurthestEpisode,
+        useEpisodeThumbnails = stored.useEpisodeThumbnails,
+        showUnairedNextUp = stored.showUnairedNextUp,
+        blurNextUp = stored.blurNextUp,
+        dismissedNextUpKeys = stored.dismissedNextUpKeys.map { it.trim().substringBefore("|") }
+            .filter(String::isNotBlank).toSet(),
+        showResumePromptOnLaunch = stored.showResumePromptOnLaunch,
+        sortMode = stored.sortMode,
+        splitByType = stored.splitByType,
+        clickAction = stored.clickAction,
+        resumeFirst = stored.resumeFirst,
+    )
+}
+
 object ContinueWatchingPreferencesRepository {
-    private val json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    }
+    private val json = continueWatchingPreferencesJson
 
     private val _uiState = MutableStateFlow(ContinueWatchingPreferencesUiState())
     val uiState: StateFlow<ContinueWatchingPreferencesUiState> = _uiState.asStateFlow()
 
     private var hasLoaded = false
+
+    // One-shot "is this a brand-new install?" probe, registered by the composition root. Asked at the first
+    // load from disk (every platform's storage is initialised by then) and then dropped, so a later profile
+    // switch or sync pull never re-decides.
+    private var installProbe: (() -> Boolean)? = null
+
+    fun registerInstallProbe(installHasUserState: () -> Boolean) {
+        installProbe = installHasUserState
+    }
 
     fun ensureLoaded() {
         if (hasLoaded) return
@@ -87,30 +129,30 @@ object ContinueWatchingPreferencesRepository {
         val payload = ContinueWatchingPreferencesStorage.loadPayload().orEmpty().trim()
         if (payload.isEmpty()) {
             _uiState.value = ContinueWatchingPreferencesUiState()
+            resolveInitialOrderOnce()
             return
         }
 
-        val stored = runCatching {
-            json.decodeFromString<StoredContinueWatchingPreferences>(payload)
-        }.getOrNull()
+        _uiState.value = decodeContinueWatchingPreferences(payload) ?: ContinueWatchingPreferencesUiState()
+        resolveInitialOrderOnce()
+    }
 
-        _uiState.value = if (stored != null) {
-            ContinueWatchingPreferencesUiState(
-                isVisible = stored.isVisible,
-                style = stored.style,
-                upNextFromFurthestEpisode = stored.upNextFromFurthestEpisode,
-                useEpisodeThumbnails = stored.useEpisodeThumbnails,
-                showUnairedNextUp = stored.showUnairedNextUp,
-                blurNextUp = stored.blurNextUp,
-                dismissedNextUpKeys = normalizeDismissedNextUpKeys(stored.dismissedNextUpKeys),
-                showResumePromptOnLaunch = stored.showResumePromptOnLaunch,
-                sortMode = stored.sortMode,
-                splitByType = stored.splitByType,
-                clickAction = stored.clickAction,
-            )
-        } else {
-            ContinueWatchingPreferencesUiState()
-        }
+    /**
+     * First-run only: records "Pick up where I left off" as the order for a NEW install. [ContinueWatchingOrderDefaultPolicy]
+     * decides from what is on disk: anyone with a stored choice, a synced payload or existing user state is
+     * left exactly as they were.
+     */
+    private fun resolveInitialOrderOnce() {
+        val probe = installProbe ?: return
+        installProbe = null
+        val payload = ContinueWatchingPreferencesStorage.loadPayload().orEmpty().trim()
+        val initial = ContinueWatchingOrderDefaultPolicy.initialResumeFirst(
+            storedResumeFirst = _uiState.value.resumeFirst,
+            hasStoredPayload = payload.isNotEmpty(),
+            installHasUserState = { runCatching(probe).getOrDefault(true) },
+        ) ?: return
+        _uiState.value = _uiState.value.copy(resumeFirst = initial)
+        persist()
     }
 
     fun setVisible(isVisible: Boolean) {
@@ -174,10 +216,19 @@ object ContinueWatchingPreferencesRepository {
         persist()
     }
 
+    /** Picking any recency-based order is an explicit choice: it also ends "Pick up where I left off". */
     fun setSortMode(mode: ContinueWatchingSortMode) {
         ensureLoaded()
-        if (_uiState.value.sortMode == mode) return
-        _uiState.value = _uiState.value.copy(sortMode = mode)
+        if (_uiState.value.sortMode == mode && _uiState.value.resumeFirst == false) return
+        _uiState.value = _uiState.value.copy(sortMode = mode, resumeFirst = false)
+        persist()
+    }
+
+    /** Explicit choice of "Pick up where I left off". [sortMode] is left untouched for older clients. */
+    fun setResumeFirst() {
+        ensureLoaded()
+        if (_uiState.value.resumeFirst == true) return
+        _uiState.value = _uiState.value.copy(resumeFirst = true)
         persist()
     }
 
@@ -221,6 +272,7 @@ object ContinueWatchingPreferencesRepository {
                     sortMode = _uiState.value.sortMode,
                     splitByType = _uiState.value.splitByType,
                     clickAction = _uiState.value.clickAction,
+                    resumeFirst = _uiState.value.resumeFirst,
                 ),
             ),
         )
