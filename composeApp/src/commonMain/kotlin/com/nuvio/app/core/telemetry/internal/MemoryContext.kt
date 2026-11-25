@@ -35,7 +35,7 @@ internal object MemoryContext {
     fun asProperties(sample: Map<String, Long>): Map<String, Long> =
         sample.filterKeys { it in PROPERTY_KEYS }.mapKeys { "mem_${it.key}" }
 
-    val PROPERTY_KEYS: Set<String> = setOf("pss_mb", "java_mb", "native_mb", "avail_mb", "threads", "fds", "ram_free_mb", "java_max_mb")
+    val PROPERTY_KEYS: Set<String> = setOf("pss_mb", "java_mb", "native_mb", "avail_mb", "threads", "fds", "ram_free_mb", "java_max_mb", "footprint_mb")
 
     /**
      * What an `app_exit` (always reported one launch late) gains: the previous run's last memory sample, when that sample

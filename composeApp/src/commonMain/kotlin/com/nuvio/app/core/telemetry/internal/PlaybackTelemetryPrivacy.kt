@@ -31,11 +31,12 @@ internal object PlaybackTelemetryPrivacy {
         "playback_kind" to kinds + "other",
         "playback_engine" to engines + setOf("exoplayer", "libmpv", "other"),
         "reason" to setOf("unclean_exit_suspected"),
+        "metrickit_source" to MetricKitEvent.SOURCES,
     )
 
     /** Numbers only: counts, megabytes, flags. */
     private val numericProps = setOf("attempt_n", "prev_tiles")
-    private val numericPrefixes = listOf("mem_")
+    private val numericPrefixes = listOf("mem_", "mk_")
     private val booleanProps = setOf("prev_playing", "was_playing")
 
     /** Empty when the payload is clean. Each entry names the offending property. */

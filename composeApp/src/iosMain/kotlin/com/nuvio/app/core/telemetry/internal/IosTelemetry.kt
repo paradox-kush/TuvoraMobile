@@ -109,10 +109,20 @@ internal class IosTelemetryHost : TelemetryHost {
         )
     }
 
-    // Kotlin/Native has no cinterop for os_proc_available_memory / task_vm_info here (see AppMemory), so the
-    // sample is the physical total; the Swift side feeds pressure events into AppMemory instead.
-    override fun memorySample(): Map<String, Long> =
-        mapOf("ram_total_mb" to (NSProcessInfo.processInfo.physicalMemory / (1024UL * 1024UL)).toLong())
+    // Kotlin/Native has no cinterop for os_proc_available_memory / task_vm_info, so the Swift side registers an
+    // AppleMemoryProbe. What Apple gives is sent under its own names (`footprint_mb`, `avail_mb`); there is no PSS,
+    // no Java heap, no fd count here and nothing stands in for them.
+    override fun memorySample(): Map<String, Long> = buildMap {
+        put("ram_total_mb", (NSProcessInfo.processInfo.physicalMemory / (1024UL * 1024UL)).toLong())
+        AppleTelemetryBridge.memoryProbe?.let { probe ->
+            runCatching { probe.footprintMb() }.getOrNull()?.takeIf { it >= 0L }?.let { put("footprint_mb", it) }
+            runCatching { probe.availableMb() }.getOrNull()?.takeIf { it >= 0L }?.let { put("avail_mb", it) }
+        }
+    }
+
+    // QA mirror: the Swift side registers a line sink (os_log) only when the TUVORA_QA launch argument/env is present.
+    override val qaMirrorEnabled: Boolean = AppleTelemetryBridge.qaSink != null
+    override fun qaMirrorLine(line: String) { AppleTelemetryBridge.qaSink?.invoke(line) }
 
     private fun modelIdentifier(): String = memScoped {
         val info = alloc<utsname>()

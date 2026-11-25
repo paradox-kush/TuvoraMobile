@@ -30,5 +30,5 @@ internal class RecordingTelemetryPort(private val onEmit: (String, Map<String, A
     override fun previousSessionTrail(): String? = null
     val playbackSignals = ArrayList<com.nuvio.app.core.telemetry.api.PlaybackSignal>()
     override fun recordPlayback(signal: com.nuvio.app.core.telemetry.api.PlaybackSignal) { playbackSignals += signal }
-    override fun recordUncleanExit(wasPlaying: Boolean, kind: String?, engine: String?) {}
+    override fun recordUncleanExit(wasPlaying: Boolean, kind: String?, engine: String?, memWarnings: Int) {}
 }

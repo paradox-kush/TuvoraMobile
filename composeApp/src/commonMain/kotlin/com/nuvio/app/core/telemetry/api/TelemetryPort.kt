@@ -84,9 +84,10 @@ interface TelemetryPort {
      * Apple lane hook: the host detected, on THIS launch, that the PREVIOUS run ended without a clean exit (tvOS has no
      * ApplicationExitInfo; MetricKit or an unclean-exit flag decides). Sends one `app_exit` with
      * `reason = unclean_exit_suspected`, `was_playing` / `playback_kind` / `playback_engine` from the previous run's
-     * breadcrumb and the previous run's last memory sample (`mem_*`). Consent-gated like every send.
+     * breadcrumb and the previous run's last memory sample (`mem_*`); [memWarnings] (> 0) is the OS memory-warning count of
+     * that run (`mem_warnings`). Consent-gated like every send.
      */
-    fun recordUncleanExit(wasPlaying: Boolean, kind: String? = null, engine: String? = null)
+    fun recordUncleanExit(wasPlaying: Boolean, kind: String? = null, engine: String? = null, memWarnings: Int = 0)
 }
 
 /** Short code-only record. [fields] pass the allow-list in `DiagTrailPolicy`; anything else is dropped. */
@@ -150,7 +151,7 @@ private object NoopTelemetryPort : TelemetryPort {
     override fun onPlaybackScopeClosed() {}
     override fun previousSessionTrail(): String? = null
     override fun recordPlayback(signal: PlaybackSignal) {}
-    override fun recordUncleanExit(wasPlaying: Boolean, kind: String?, engine: String?) {}
+    override fun recordUncleanExit(wasPlaying: Boolean, kind: String?, engine: String?, memWarnings: Int) {}
 }
 
 /** Maps a failure code to the report category when a screen already knows what failed (no picker on error screens). */

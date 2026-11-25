@@ -233,7 +233,7 @@ internal class TelemetryService(
         for (key in PlaybackTelemetryKeys.forSignal(signal)) health.countPlaybackKey(key)
     }
 
-    override fun recordUncleanExit(wasPlaying: Boolean, kind: String?, engine: String?) {
+    override fun recordUncleanExit(wasPlaying: Boolean, kind: String?, engine: String?, memWarnings: Int) {
         if (!consentEnabled()) return
         val props = LinkedHashMap<String, Any>()
         props["reason"] = UNCLEAN_EXIT_REASON
@@ -242,6 +242,7 @@ internal class TelemetryService(
             kind?.let { props["playback_kind"] = it.lowercase().take(24) }
             engine?.let { props["playback_engine"] = it.lowercase().take(24) }
         }
+        if (memWarnings > 0) props["mem_warnings"] = memWarnings.coerceAtMost(MAX_MEM_WARNINGS)
         val sent = props + MemoryContext.exitContext(props, previousMemory)
         // Closed values only: the validator drops the whole event rather than send an open string.
         if (PlaybackTelemetryPrivacy.violations(sent).isNotEmpty()) return
@@ -533,6 +534,7 @@ internal class TelemetryService(
         const val MEMORY_RING_INTERVAL_MS = 60_000L
         const val APP_EXIT_EVENT = "app_exit"
         const val UNCLEAN_EXIT_REASON = "unclean_exit_suspected"
+        private const val MAX_MEM_WARNINGS = 1000
         const val SEND_PENDING_DEADLINE_MS = 10_000L
         const val DELIVERY_CONFIRM_MS = 90_000L
         private const val MEMORY_RESERVE_BYTES = 32 * 1024

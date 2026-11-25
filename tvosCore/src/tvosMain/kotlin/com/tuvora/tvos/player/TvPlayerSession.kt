@@ -515,6 +515,7 @@ class TvPlayerSession(
         vodRetry.cancel()
         if (closed) return
         closed = true
+        com.nuvio.app.core.telemetry.internal.ApplePlaybackBreadcrumbs.tvSessionClosed()
         livePause?.dispose()
         detach()
         ServerPlayback.stop(serverPlaybackUrl)
@@ -944,6 +945,8 @@ class TvPlayerSession(
             return null
         }
         bridge = created
+        // Unclean-exit marker + memory sampler: a player session with an open engine counts as "playing".
+        com.nuvio.app.core.telemetry.internal.ApplePlaybackBreadcrumbs.tvSessionOpened(isLive, if (lane == PlaybackLane.AvPlayer) "avplayer" else "libmpv")
         loadStartedAtMs = clock.elapsedNow().inWholeMilliseconds
         PlayerSettingsRepository.ensureLoaded()
         val settings = PlayerSettingsRepository.uiState.value

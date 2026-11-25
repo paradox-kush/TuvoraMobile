@@ -60,6 +60,9 @@ sealed interface PlaybackSignal {
     data class Fallback(val from: PlaybackEngine, val to: PlaybackEngine, val trigger: FallbackTrigger) : PlaybackSignal
     data class Stall(val kind: PlaybackKind, val outcome: StallOutcome, val ms: Long) : PlaybackSignal
     data class Teardown(val engine: PlaybackEngine, val ms: Long, val failed: Boolean = false) : PlaybackSignal
+
+    /** The OS told the app it is short of memory (Apple: `didReceiveMemoryWarning`). Counted by where the app was, never an event. */
+    data class MemoryWarning(val foreground: Boolean) : PlaybackSignal
 }
 
 /** Bucket boundaries. Names are the contract's; the lower bound of each bucket is inclusive. */
@@ -111,6 +114,9 @@ object PlaybackTelemetryKeys {
     const val STALL = "stall"
     const val STALL_MS = "stall_ms"
     const val TEARDOWN = "teardown"
+    const val MEMWARN = "memwarn"
+
+    fun memwarn(foreground: Boolean): String = "$MEMWARN:${if (foreground) "foreground" else "background"}"
 
     fun ttff(kind: PlaybackKind, engine: PlaybackEngine, ms: Long): String =
         "$TTFF:${kind.label}:${engine.label}:${PlaybackTelemetryBuckets.ttff(ms)}"
@@ -131,6 +137,7 @@ object PlaybackTelemetryKeys {
         is PlaybackSignal.Stall -> listOf(stall(signal.kind, signal.outcome), stallMs(signal.kind, signal.ms))
         is PlaybackSignal.Teardown ->
             listOf(teardown(signal.engine, PlaybackTelemetryBuckets.teardown(signal.ms, signal.failed)))
+        is PlaybackSignal.MemoryWarning -> listOf(memwarn(signal.foreground))
     }
 
     private val kinds = PlaybackKind.entries.map { it.label }.toSet()
@@ -148,6 +155,7 @@ object PlaybackTelemetryKeys {
             STALL -> p.size == 3 && p[1] in kinds && p[2] in stallOutcomes
             STALL_MS -> p.size == 3 && p[1] in kinds && p[2] in PlaybackTelemetryBuckets.STALL
             TEARDOWN -> p.size == 3 && p[1] in engines && p[2] in teardownOutcomes
+            MEMWARN -> p.size == 2 && p[1] in setOf("foreground", "background")
             else -> false
         }
     }
@@ -272,5 +280,6 @@ object QaMirror {
             "outcome" to PlaybackTelemetryBuckets.teardown(signal.ms, signal.failed).label,
             "ms" to signal.ms,
         )
+        is PlaybackSignal.MemoryWarning -> "memwarn" to linkedMapOf("where" to if (signal.foreground) "foreground" else "background")
     }
 }
