@@ -18,7 +18,7 @@ object TvTopShelfPolicy {
     fun continueWatching(items: List<TvCwItem>): List<TvCwItem> = items.take(CONTINUE_MAX)
 
     /** Newest air date first; items with no air date are never "new episodes". */
-    fun newEpisodes(items: List<TvCwItem>, nowMs: Long): List<TvCwItem> =
+    fun recentlyAiredEpisodes(items: List<TvCwItem>, nowMs: Long): List<TvCwItem> =
         items.filter { item ->
             val airs = item.releasedAtMs
             item.isNextUp && airs != null && airs >= nowMs - WINDOW_MS && airs <= nowMs + WINDOW_MS

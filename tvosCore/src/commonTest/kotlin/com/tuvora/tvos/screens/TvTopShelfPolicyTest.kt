@@ -27,13 +27,13 @@ class TvTopShelfPolicyTest {
             item("recent", nextUp = true, airs = now - 2 * day),
             item("yesterday", nextUp = true, airs = now - day),
         )
-        assertEquals(listOf("yesterday", "recent"), TvTopShelfPolicy.newEpisodes(items, now).map { it.parentMetaId }, "older than 14 days dropped")
+        assertEquals(listOf("yesterday", "recent"), TvTopShelfPolicy.recentlyAiredEpisodes(items, now).map { it.parentMetaId }, "older than 14 days dropped")
     }
 
     @Test
     fun `new episodes writes unaired next ups so the extension can show them at air time`() {
         val items = listOf(item("tonight", nextUp = true, airs = now + 3 * 60 * 60 * 1000))
-        assertEquals(listOf("tonight"), TvTopShelfPolicy.newEpisodes(items, now).map { it.parentMetaId }, "unaired is written")
+        assertEquals(listOf("tonight"), TvTopShelfPolicy.recentlyAiredEpisodes(items, now).map { it.parentMetaId }, "unaired is written")
     }
 
     @Test
@@ -43,13 +43,13 @@ class TvTopShelfPolicyTest {
             item("resume", nextUp = false, airs = now - day),
             item("undated", nextUp = true, airs = null),
         )
-        assertEquals(emptyList(), TvTopShelfPolicy.newEpisodes(items, now).map { it.parentMetaId }, "none qualify")
+        assertEquals(emptyList(), TvTopShelfPolicy.recentlyAiredEpisodes(items, now).map { it.parentMetaId }, "none qualify")
     }
 
     @Test
     fun `new episodes caps at six`() {
         val items = (1..10).map { item("s$it", nextUp = true, airs = now - it * 1000L) }
-        assertEquals(6, TvTopShelfPolicy.newEpisodes(items, now).size, "capped")
+        assertEquals(6, TvTopShelfPolicy.recentlyAiredEpisodes(items, now).size, "capped")
     }
 
     @Test

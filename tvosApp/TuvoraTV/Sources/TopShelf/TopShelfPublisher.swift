@@ -70,7 +70,7 @@ enum TopShelfPublisher {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         return TopShelfSelection(
             continueWatching: TvTopShelfPolicy.shared.continueWatching(items: continueWatching).map { item(from: $0, kind: TopShelfFeed.Kind.continueWatching) },
-            newEpisodes: TvTopShelfPolicy.shared.newEpisodes(items: continueWatching, nowMs: nowMs).map { item(from: $0, kind: TopShelfFeed.Kind.newEpisode) },
+            newEpisodes: TvTopShelfPolicy.shared.recentlyAiredEpisodes(items: continueWatching, nowMs: nowMs).map { item(from: $0, kind: TopShelfFeed.Kind.newEpisode) },
             recentChannels: channels.map { channel in
                 let link = LiveDeepLink(id: channel.contentId, name: channel.name, logo: channel.logo).url.absoluteString
                 return TopShelfFeed.Item(id: "channel|" + channel.contentId, title: channel.name, imageURL: channel.logo, deepLink: link, kind: TopShelfFeed.Kind.channel)
